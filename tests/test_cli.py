@@ -186,7 +186,7 @@ class HelpContractTests(_CliTestCase):
 
     def test_subcommand_help_is_formatted_for_every_command(self) -> None:
         expected_flags = {
-            "doctor": (),
+            "doctor": ("--json",),
             "mailboxes": (),
             "search": (
                 "--subject",
@@ -219,7 +219,7 @@ class HelpContractTests(_CliTestCase):
 
     def test_subcommand_help_has_specific_examples(self) -> None:
         examples = {
-            "doctor": "mailquery doctor --log-level debug",
+            "doctor": "mailquery doctor --json",
             "mailboxes": "mailquery mailboxes",
             "search": 'mailquery search --text "*factura*" --since 1mo',
             "new": "mailquery new --peek",
@@ -713,7 +713,7 @@ class LoggingConfigTests(_CliTestCase):
 
 class DoctorTests(_CliTestCase):
     def _doctor(self, **kwargs) -> dict:
-        exit_code, stdout, stderr = self.run_cli(["doctor"], **kwargs)
+        exit_code, stdout, stderr = self.run_cli(["doctor", "--json"], **kwargs)
         self.assertEqual(exit_code, 0, "doctor must always exit 0")
         self.assertEqual(stderr, "")
         payload = self.json_object(stdout)
@@ -722,6 +722,35 @@ class DoctorTests(_CliTestCase):
         self.assertIn("generated_at", payload)
         self.assertIsInstance(payload["checks"], list)
         return payload
+
+    def test_doctor_default_output_is_human_readable(self) -> None:
+        exit_code, stdout, stderr = self.run_cli(["doctor"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr, "")
+        self.assertFalse(
+            stdout.lstrip().startswith("{"), "default doctor output must be text"
+        )
+        self.assertIn("mailquery doctor - environment and read-only preflight", stdout)
+        self.assertIn("Checks:", stdout)
+        self.assertIn("[ok]", stdout)
+        self.assertIn("Result: 10/10 checks passed", stdout)
+        self.assertIn("Notes:", stdout)
+        self.assertIn("mailquery doctor --json", stdout)
+        self.assertNotIn('"checks"', stdout)
+        for line in stdout.splitlines():
+            self.assertLessEqual(len(line), 100, f"doctor line too long: {line!r}")
+
+    def test_doctor_human_report_shows_failures(self) -> None:
+        exit_code, stdout, stderr = self.run_cli(
+            ["doctor"], mail_root=self.fx.root / "missing-mail"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("[FAIL]", stdout)
+        self.assertIn("Result: ", stdout)
+        self.assertIn("failed)", stdout)
+        self.assertIn("E_STORE_NOT_FOUND", stdout)
+        self.assertNotIn('"checks"', stdout)
 
     def test_doctor_reports_all_required_checks(self) -> None:
         payload = self._doctor()
