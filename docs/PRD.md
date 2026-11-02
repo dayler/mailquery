@@ -1,7 +1,7 @@
 # PRD — mailquery
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar correos de Apple Mail desde un harness de agentes (DeepSeek u otro similar).
-**Versión del documento:** 0.9 (solo se observan cuentas declaradas).
+**Versión del documento:** 0.10 (ayuda formateada en inglés; solo se observan cuentas declaradas).
 **Fecha:** 2026-11-02.
 **Ubicación del proyecto:** `/Users/dayler/dev/github/mailquery`.
 **Estado:** Aprobado para implementación.
@@ -17,6 +17,7 @@
 | 0.7 | Eliminado el encabezado `[scope]` redundante de los ejemplos: `[scope."<cuenta>"]` crea la tabla padre implícitamente. |
 | 0.8 | Añadidas secciones configurables `[logging]`, `[search]` y `[new]` (incluye log level). |
 | 0.9 | Cambio de alcance: una cuenta solo se observa si está declarada en `[scope.*]`; las cuentas no declaradas quedan excluidas. |
+| 0.10 | Ayuda `-h/--help` rediseñada en inglés, en texto y formateada por secciones (comandos, opciones, ejemplos, configuración, salida y códigos de salida) para la raíz y los cinco subcomandos; sin colores. |
 
 ---
 
@@ -509,24 +510,48 @@ Cada error debe incluir un `hint` accionable (p. ej. "añade --since 7d", "conce
 
 ### 12.7 Ayuda (`-h` / `--help`)
 
-Ejemplo de salida de texto (no JSON; es la única excepción a la regla de formato):
+La ayuda es texto para humanos (no JSON; es la única excepción a la regla de
+formato), está en inglés y se organiza por secciones y ejemplos. Aplica a
+`mailquery --help` y a `mailquery <comando> --help` de los cinco comandos, sin
+colores para que la salida sea estable en pipes y tests.
+
+Ejemplo de salida (raíz; ancho de 100 columnas):
 
 ```text
-usage: mailquery [-h] [--log-level {error,warning,info,debug}] {doctor,mailboxes,search,new,show} ...
+usage: mailquery [-h] [--log-level LEVEL] <command> ...
 
-Herramienta de solo lectura para leer y buscar correos de Apple Mail.
+Read-only CLI to read and search Apple Mail.
 
-comandos:
-  doctor        Diagnóstico del entorno y de la garantía de solo lectura
-  mailboxes     Lista cuentas, carpetas, contadores y carpetas incluidas
-  search        Busca mensajes por asunto, contenido, remitente, fecha o estado
-  new           Mensajes recibidos desde la última ejecución (cursor)
-  show          Detalle de un mensaje por uid
+Commands:
+  doctor             diagnose the environment and verify the read-only guarantee
+  mailboxes          list accounts, folders, counters and included folders
+  search             search messages by subject, body, sender, date or state
+  new                messages received since the last run (cursor)
+  show               show one message by uid
 
-opciones:
-  -h, --help     Muestra esta ayuda y termina
-  --log-level    Nivel de log (default: info)
+Global options:
+  -h, --help         show this help message and exit
+  --log-level LEVEL  minimum log level: error, warning, info or debug (overrides [logging].level;
+                     default: info)
+
+Examples:
+  mailquery doctor                     environment and read-only preflight
+  mailquery mailboxes                  accounts, folders and included flags
+  mailquery search --since 1w --unread
+  mailquery search --text "*factura*" --since 1mo
+  mailquery new --peek
+  mailquery show 83143
+
+Configuration: ~/.mailquery/config.toml (optional; see README.md)
+Output: one JSON object on stdout for every command (this help is the only
+        non-JSON output); logs go to ~/.mailquery/logs/mailquery.log
+Exit codes: 0 ok | 2 usage or config error | 3 environment error
+            | 4 rejected query | 5 busy or transient error
 ```
+
+Cada subcomando añade sus secciones `Options`, `Examples` y `Notes` (por
+ejemplo, `mailquery search --help` documenta comodines, fechas relativas y el
+acotamiento obligatorio de `--text`).
 
 ---
 
