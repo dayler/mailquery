@@ -26,3 +26,62 @@ jobs:
         # tests/test_readonly.py is blocking: it fails if any store file
         # changes or if the tool writes outside ~/.mailquery.
         run: python3 -m unittest discover -s tests -t . -v
+
+  install-scripts:
+    name: install scripts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            kind: sh
+          - os: macos-latest
+            kind: sh
+          - os: windows-latest
+            kind: ps1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate and dry-run scripts/install.sh
+        if: matrix.kind == 'sh'
+        shell: bash
+        run: |
+          sh -n scripts/install.sh
+          sh scripts/install.sh --help
+          sh scripts/install.sh --print-config > /dev/null
+          sh scripts/install.sh --dry-run --no-config
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck --severity=error scripts/install.sh
+          fi
+
+      - name: Install shellcheck
+        if: matrix.kind == 'sh'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install shellcheck
+          else
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+
+      - name: Check shellcheck
+        if: matrix.kind == 'sh'
+        shell: bash
+        run: shellcheck --severity=error scripts/install.sh
+
+      - name: Validate and dry-run scripts/install.ps1
+        if: matrix.kind == 'ps1'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "scripts/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          ./scripts/install.ps1 -DryRun -NoConfig
+          ./scripts/install.ps1 -PrintConfig > $null
+
