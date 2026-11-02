@@ -1731,13 +1731,13 @@ def _truncated_warning(remaining: int) -> str:
 def _search_hint(truncated: bool) -> str | None:
     if not truncated:
         return None
-    return f"refina los filtros o sube --limit (máx. {SEARCH_MAX_LIMIT})"
+    return f"refine the filters or raise --limit (max {SEARCH_MAX_LIMIT})"
 
 
 def _new_hint(truncated: bool) -> str | None:
     if not truncated:
         return None
-    return f"sube --limit (máx. {NEW_MAX_LIMIT}) o procesa el correo en varias corridas"
+    return f"raise --limit (max {NEW_MAX_LIMIT}) or process the mail across several runs"
 
 
 def _has_warning(warnings: Sequence[str], *codes: str) -> bool:
