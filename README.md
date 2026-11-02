@@ -250,11 +250,15 @@ del venv). Tras actualizar o reinstalar, vuelve a ejecutar `mailquery doctor`.
 
 ### Dónde queda instalado
 
+En **macOS** (ruta que muestra `pipx list`):
+
 ```text
-~/.local/pipx/venvs/mailquery/     # entorno virtual aislado de la app
-~/.local/bin/mailquery             # lanzador (shim) que apunta a ese venv
-~/.mailquery/                      # datos de la app: config, state, logs, tmp
+~/Library/Application Support/pipx/venvs/mailquery/   # entorno virtual aislado
+~/.local/bin/mailquery                                # lanzador (shim) en el PATH
+~/.mailquery/                                         # datos: config, state, logs, tmp
 ```
+
+En Linux la ruta equivalente es `~/.local/pipx/venvs/mailquery/`.
 
 `pipx` mantiene cada app en su venv y solo enlaza el comando: desinstalar no
 deja residuos en el `site-packages` global.
@@ -262,7 +266,9 @@ deja residuos en el `site-packages` global.
 ### Varios Python con pyenv
 
 - `pipx` instala cada app con **un intérprete concreto**; `pipx list` muestra
-  cuál usa cada una.
+  cuál usa cada una (por ejemplo, `installed using Python 3.15.2`).
+- Un `pipx` instalado con **Homebrew** usa por defecto el Python de Homebrew,
+  **no** el de pyenv. Si quieres el de pyenv, fíjalo explícitamente.
 - Fíjalo al instalar: `pipx install --python python3.14 .`; cámbialo después
   con `pipx reinstall --python python3.14 mailquery`.
 - Requisito del proyecto: **Python ≥ 3.11** (`pyproject.toml` lo declara).
