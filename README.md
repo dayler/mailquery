@@ -628,6 +628,13 @@ Con `--json` emite el payload JSON para automatización (mismos `checks[]`).
 Chequeos: `python`, `home`, `store`, `envelope_index`, `schema`,
 `readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
 
+El chequeo `config` valida el TOML (sintaxis, claves y rangos) **y** la
+resolubilidad semántica de cada bloque `[scope."<cuenta>"]` y de su
+`mailbox_list` contra el store y `Accounts4.sqlite`; distingue config ausente de
+config presente sin bloques `[scope]`, y reporta `E_CONFIG_ACCOUNT_UNKNOWN`,
+`E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE` o `E_MAILBOX_NOT_FOUND`
+con su `hint`.
+
 ```bash
 mailquery doctor          # informe humano
 mailquery doctor --json   # payload JSON (automatización)
@@ -647,7 +654,7 @@ Checks:
   [ok]   schema             all required tables present
   [ok]   readonly_strategy  live_ro: Envelope Index opened read-only (mode=ro, query_only=ON)
   [ok]   accounts_db        3 account label(s) available
-  [ok]   config             no config.toml or no [scope.*] blocks; no accounts declared
+  [ok]   config             config.toml exists but declares no [scope.*] blocks; no accounts declared
   [ok]   state              no cursor yet (the first `new` run baselines)
   [ok]   lock               available: ~/.mailquery/locks/mailquery.lock
 
