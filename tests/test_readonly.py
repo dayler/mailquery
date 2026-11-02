@@ -153,7 +153,7 @@ class ReadOnlyStoreTest(unittest.TestCase):
     def test_all_commands_leave_the_store_untouched(self) -> None:
         """Run every command end to end and verify the store never changes."""
         scenarios = [
-            (("doctor",), "doctor"),
+            (("doctor", "--json"), "doctor"),
             (("mailboxes",), "mailboxes"),
             (("search",), "search"),
             (("search", "--subject", "Invoice"), "search"),
@@ -186,10 +186,26 @@ class ReadOnlyStoreTest(unittest.TestCase):
         self.assertEqual(payloads["new"][1]["count"], 0)
         self.assertEqual(payloads["new"][2]["count"], 0)
 
+    def test_doctor_human_report_does_not_touch_the_store(self) -> None:
+        """The default human-readable doctor report is read-only too."""
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = cli.main(
+                ["doctor"],
+                home=self.fx.home,
+                mail_root=self.fx.mail_root,
+                accounts_db=self.fx.accounts_db,
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn("Checks:", stdout.getvalue())
+        self.assert_store_unchanged()
+
     def test_store_snapshot_sees_no_new_files_after_whole_suite(self) -> None:
         """Belt-and-braces: final snapshot after the full command sweep."""
         for argv in (
-            ("doctor",),
+            ("doctor", "--json"),
             ("mailboxes",),
             ("search",),
             ("new",),
