@@ -9,6 +9,7 @@ five commands and renders either success or a JSON error object (PRD 12).
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import logging
 import os
 import shutil
@@ -31,6 +32,7 @@ from mailquery.config import (
     app_home,
     ensure_app_home,
     load_config,
+    resolve_scope,
 )
 from mailquery.errors import MailqueryError
 from mailquery.logging_setup import get_logger, setup_logging
@@ -799,14 +801,12 @@ def _collect_doctor_checks(
             True,
             f"{strategy}: Envelope Index opened read-only (mode=ro, query_only=ON)",
         )
-        try:
-            store.close()
-        except Exception:  # noqa: BLE001 - best effort
-            pass
 
     # accounts_db ------------------------------------------------------------
+    labels_obj: AccountLabels | None = None
     try:
         labels = AccountLabels(accounts_db, tmp_dir=home_path / "tmp")
+        labels_obj = labels
         if labels.available:
             count = len(labels.all())
             record("accounts_db", True, f"{count} account label(s) available")
@@ -822,18 +822,54 @@ def _collect_doctor_checks(
     # config -----------------------------------------------------------------
     try:
         config = load_config(home_path)
-        if config.has_scopes:
-            declared = ", ".join(entry.key for entry in config.scopes)
-            record("config", True, f"{len(config.scopes)} account block(s): {declared}")
+        config_path = home_path / "config.toml"
+        if not config.has_scopes:
+            if config_path.is_file():
+                detail = (
+                    "config.toml exists but declares no [scope.*] blocks; no accounts "
+                    "declared (commands return W_NO_ACCOUNTS)"
+                )
+            else:
+                detail = (
+                    "no config.toml (optional); no accounts declared "
+                    "(commands return W_NO_ACCOUNTS)"
+                )
+            record("config", True, detail)
         else:
-            record(
-                "config",
-                True,
-                "no config.toml or no [scope.*] blocks; no accounts declared "
-                "(commands return W_NO_ACCOUNTS)",
-            )
+            problems: list[str] = []
+            if store is None:
+                reason = (
+                    _detail(store_open_error)
+                    if store_open_error
+                    else "Mail store is not available"
+                )
+                problems.append(f"cannot resolve account blocks: {reason}")
+            elif labels_obj is None:
+                problems.append(
+                    "cannot resolve account blocks: account labels are unavailable"
+                )
+            else:
+                for entry in config.scopes:
+                    try:
+                        resolve_scope(replace(config, scopes=(entry,)), store, labels_obj)
+                    except MailqueryError as exc:
+                        hint = f" (hint: {exc.hint})" if exc.hint else ""
+                        problems.append(f"{entry.key}: {exc.code}: {exc.message}{hint}")
+                    except Exception as exc:  # noqa: BLE001 - diagnostics only
+                        problems.append(f"{entry.key}: {_detail(exc)}")
+            if problems:
+                record("config", False, "; ".join(problems))
+            else:
+                declared = ", ".join(entry.key for entry in config.scopes)
+                record("config", True, f"{len(config.scopes)} account block(s): {declared}")
     except Exception as exc:  # noqa: BLE001 - diagnostics only
         record("config", False, _detail(exc))
+
+    if store is not None:
+        try:
+            store.close()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
 
     # state ------------------------------------------------------------------
     try:

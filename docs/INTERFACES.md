@@ -264,7 +264,11 @@ siempre exit 0 si puede diagnosticar. Con `--json`, payload máquina:
 ```
 
 Chequeos mínimos: `python`, `home`, `store`, `envelope_index`, `schema`,
-`readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
+`readonly_strategy`, `accounts_db`, `config`, `state`, `lock`. El chequeo
+`config` valida el TOML y **la resolución de cada bloque `[scope]` y su
+`mailbox_list`** contra el store y las etiquetas de cuenta (por entrada, con el
+`code`/`hint` de cada error); distingue config ausente de config presente sin
+`[scope]`.
 
 ### Error
 ```json
