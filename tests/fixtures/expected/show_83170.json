@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "command": "show",
+  "message": {
+    "uid": 83170,
+    "message_id": "<missing-83170@fixture.example>",
+    "subject": "Missing body",
+    "from": {
+      "name": "Ghost",
+      "address": "ghost@fixture.example"
+    },
+    "to": [
+      {
+        "name": "Fixture User",
+        "address": "me@fixture.example"
+      }
+    ],
+    "cc": [],
+    "date_sent": "<ISO>",
+    "date_received": "<ISO>",
+    "mailbox": {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
+    },
+    "is_read": true,
+    "is_flagged": false,
+    "has_attachments": false,
+    "size_bytes": 4096,
+    "headers": {
+      "From": "Ghost <ghost@fixture.example>",
+      "To": "Fixture User <me@fixture.example>",
+      "Cc": "",
+      "Subject": "Missing body",
+      "Date": "<ISO>",
+      "Message-ID": "<missing-83170@fixture.example>"
+    },
+    "body_text": "",
+    "body_truncated": false,
+    "attachments": [],
+    "partial": false,
+    "readable": false,
+    "source": {
+      "emlx_path": null,
+      "partial": false
+    }
+  },
+  "warnings": [
+    "W_EMLX_MISSING: no .emlx file for uid 83170"
+  ]
+}
