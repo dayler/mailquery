@@ -1,7 +1,7 @@
 # PRD — mailquery
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar correos de Apple Mail desde un harness de agentes (DeepSeek u otro similar).
-**Versión del documento:** 0.11 (informe humano de `doctor`; ayuda formateada en inglés; solo se observan cuentas declaradas).
+**Versión del documento:** 0.12 (doctor valida la resolución de `config.toml`; informe humano; ayuda en inglés; solo se observan cuentas declaradas).
 **Fecha:** 2026-11-02.
 **Ubicación del proyecto:** `/Users/dayler/dev/github/mailquery`.
 **Estado:** Aprobado para implementación.
@@ -19,6 +19,7 @@
 | 0.9 | Cambio de alcance: una cuenta solo se observa si está declarada en `[scope.*]`; las cuentas no declaradas quedan excluidas. |
 | 0.10 | Ayuda `-h/--help` rediseñada en inglés, en texto y formateada por secciones (comandos, opciones, ejemplos, configuración, salida y códigos de salida) para la raíz y los cinco subcomandos; sin colores. |
 | 0.11 | `doctor` muestra por defecto un informe de texto human-readable (mismo estilo que `--help`), conservando `doctor --json` para automatización; la ayuda del CLI y las salidas de runtime siguen en inglés. |
+| 0.12 | El chequeo `config` de `doctor` valida además la **resolución real** de cada bloque `[scope]` y su `mailbox_list` (cuenta, etiqueta/email/UUID y carpetas) contra el store y `Accounts4.sqlite`, reportando `code`/`hint`; distingue config ausente de config presente sin `[scope]`. |
 
 ---
 
@@ -160,7 +161,7 @@ Prioridades: **M** = imprescindible (v1), **S** = deseable.
 | RF-22 | Lock de ejecución para evitar corridas concurrentes; si está ocupado, salir con código 5. | S |
 | RF-23 | Cursor atómico: escritura `tmp` + `fsync` + `rename`; nunca dejar el estado corrupto. | M |
 | RF-24 | Errores también en JSON (`ok: false`, `code`, `message`, `hint`) con el código de salida correspondiente. | M |
-| RF-25 | `mailquery doctor` muestra por defecto un informe de texto human-readable con los chequeos y el detalle de cualquier fallo (resolubilidad de etiquetas de cuenta y cuentas declaradas incluidas); `--json` conserva el payload máquina con la lista de chequeos. | M |
+| RF-25 | `mailquery doctor` muestra por defecto un informe de texto human-readable con los chequeos y el detalle de cualquier fallo, e incluye la **resolución real** de cada bloque `[scope]` y su `mailbox_list` (cuentas declaradas, etiquetas/email/UUID y carpetas existentes) además de la resolubilidad de etiquetas de cuenta; `--json` conserva el payload máquina con la lista de chequeos. | M |
 
 ---
 
