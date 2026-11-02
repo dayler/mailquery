@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -81,11 +82,13 @@ Exit codes: 0 ok | 2 usage or config error | 3 environment error
 _DOCTOR_EPILOG = """\
 Examples:
   mailquery doctor
+  mailquery doctor --json
   mailquery doctor --log-level debug
 
 Notes:
-  Always exits 0 when the diagnosis can run; failures are reported as
-  individual checks (checks[].ok = false) in the JSON payload.
+  Prints a human-readable report by default; --json emits the machine-readable
+  payload. Always exits 0 when the diagnosis can run; failures are reported as
+  checks with ok = false, plus a Result line with the failed count.
 """
 
 _MAILBOXES_EPILOG = """\
@@ -216,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnosis.set_defaults(command="doctor")
     _style_parser(diagnosis, root=False)
+    diagnosis.add_argument(
+        "--json",
+        action="store_true",
+        help="print the machine-readable JSON payload instead of the human report",
+    )
 
     mailboxes_parser = subparsers.add_parser(
         "mailboxes",
@@ -367,7 +375,13 @@ def main(
         return _report_error(error, command)
 
     if command == "doctor":
-        return _run_doctor(home_path, mail_root, accounts_db, args.log_level)
+        return _run_doctor(
+            home_path,
+            mail_root,
+            accounts_db,
+            args.log_level,
+            json_output=bool(getattr(args, "json", False)),
+        )
     return _run_command(args, home_path, mail_root, accounts_db)
 
 
@@ -609,6 +623,8 @@ def _run_doctor(
     mail_root: Path | None,
     accounts_db: Path | None,
     log_level: str | None,
+    *,
+    json_output: bool = False,
 ) -> int:
     level, retention = _doctor_log_settings(home_path, log_level)
     logger = _best_effort_logger(home_path, level, retention)
@@ -616,15 +632,18 @@ def _run_doctor(
         checks = _collect_doctor_checks(home_path, mail_root, accounts_db)
     except Exception as exc:  # noqa: BLE001 - doctor never raises
         checks = [{"name": "doctor", "ok": False, "detail": _detail(exc)}]
-    write_json(
-        {
-            "ok": True,
-            "command": "doctor",
-            "generated_at": now_iso(),
-            "checks": checks,
-            "warnings": [],
-        }
-    )
+    payload = {
+        "ok": True,
+        "command": "doctor",
+        "generated_at": now_iso(),
+        "checks": checks,
+        "warnings": [],
+    }
+    if json_output:
+        write_json(payload)
+    else:
+        sys.stdout.write(_render_doctor_report(payload) + "\n")
+        sys.stdout.flush()
     if logger is not None:
         passed = sum(1 for check in checks if check.get("ok"))
         logger.info(
@@ -633,6 +652,52 @@ def _run_doctor(
             len(checks),
         )
     return 0
+
+
+def _render_doctor_report(payload: dict) -> str:
+    """Render the doctor payload as a human-readable report in help style."""
+    checks = [check for check in payload.get("checks") or [] if isinstance(check, dict)]
+    warnings = [str(warning) for warning in payload.get("warnings") or []]
+    width = _help_width()
+    name_width = min(20, max((len(str(check.get("name", ""))) for check in checks), default=0))
+
+    lines = [
+        "mailquery doctor - environment and read-only preflight",
+        f"Generated at: {payload.get('generated_at', now_iso())}",
+        "",
+        "Checks:",
+    ]
+    passed = 0
+    for check in checks:
+        ok = bool(check.get("ok"))
+        passed += 1 if ok else 0
+        status = "[ok]  " if ok else "[FAIL]"
+        name = str(check.get("name", ""))
+        detail = str(check.get("detail", "")).replace("\n", " ").strip()
+        prefix = f"  {status} {name.ljust(name_width)}  "
+        wrapped = textwrap.wrap(detail, width=max(20, width - len(prefix))) or [""]
+        lines.append(prefix + wrapped[0])
+        for extra in wrapped[1:]:
+            lines.append(" " * len(prefix) + extra)
+
+    total = len(checks)
+    failed = total - passed
+    result = f"{passed}/{total} checks passed"
+    if failed:
+        result += f" ({failed} failed)"
+    lines.extend(["", f"Result: {result}"])
+    if warnings:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"  - {warning}" for warning in warnings)
+    lines.extend(
+        [
+            "",
+            "Notes:",
+            "  This report is read-only: it never modifies Apple Mail or ~/.mailquery.",
+            "  Use `mailquery doctor --json` for the machine-readable payload.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _collect_doctor_checks(

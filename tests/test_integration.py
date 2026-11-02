@@ -311,7 +311,7 @@ class IntegrationBase(unittest.TestCase):
 
 class DoctorTest(IntegrationBase):
     def test_doctor_reports_all_documented_checks(self) -> None:
-        payload = self.run_ok("doctor")
+        payload = self.run_ok("doctor", "--json")
         self.assertEqual(payload["command"], "doctor")
         checks = payload["checks"]
         self.assertIsInstance(checks, list)
@@ -338,6 +338,27 @@ class DoctorTest(IntegrationBase):
         for name in names:
             self.assertTrue(by_name[name]["ok"], f"healthy fixture check failed: {by_name[name]}")
         self.assert_golden("doctor.json", payload)
+
+    def test_doctor_default_output_is_human_readable(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = cli.main(
+                ["doctor"],
+                home=self.fx.home,
+                mail_root=self.fx.mail_root,
+                accounts_db=self.fx.accounts_db,
+            )
+        text = stdout.getvalue()
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertFalse(text.lstrip().startswith("{"), "doctor must print text by default")
+        self.assertIn("mailquery doctor - environment and read-only preflight", text)
+        self.assertIn("Checks:", text)
+        self.assertIn("[ok]", text)
+        self.assertIn("Result: 10/10 checks passed", text)
+        self.assertIn("mailquery doctor --json", text)
+        self.assertNotIn('"checks"', text)
 
 
 class MailboxesTest(IntegrationBase):
@@ -742,6 +763,7 @@ class ErrorContractTest(IntegrationBase):
             # doctor still diagnoses and exits 0 (PRD decision 8).
             code, payload, _stderr = self.run_cli(
                 "doctor",
+                "--json",
                 home=empty_home,
                 mail_root=empty_root,
                 accounts_db=missing_accounts,
@@ -759,7 +781,7 @@ class ErrorContractTest(IntegrationBase):
         # search/show/mailboxes/doctor are unaffected by a damaged state file.
         self.run_ok("search")
         self.run_ok("show", "2714")
-        code, payload, _stderr = self.run_cli("doctor")
+        code, payload, _stderr = self.run_cli("doctor", "--json")
         self.assertEqual(code, 0)
         assert payload is not None
         checks = {check["name"]: check for check in payload["checks"]}
@@ -806,7 +828,7 @@ class ErrorContractTest(IntegrationBase):
         with tcc_denied():
             self.run_error("mailboxes", expected_exit=3, expected_code="E_PERMISSION")
             # doctor never fails: it reports the denied store and exits 0.
-            code, payload, _stderr = self.run_cli("doctor")
+            code, payload, _stderr = self.run_cli("doctor", "--json")
         self.assertEqual(code, 0)
         assert payload is not None
         checks = {check["name"]: check for check in payload["checks"]}
@@ -819,7 +841,7 @@ class ErrorContractTest(IntegrationBase):
 
         drop_required_table(self.fx.envelope_index, "message_global_data")
         self.run_error("mailboxes", expected_exit=3, expected_code="E_SCHEMA_UNSUPPORTED")
-        code, payload, _stderr = self.run_cli("doctor")
+        code, payload, _stderr = self.run_cli("doctor", "--json")
         self.assertEqual(code, 0)
         assert payload is not None
         checks = {check["name"]: check for check in payload["checks"]}
