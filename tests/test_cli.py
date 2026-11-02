@@ -825,6 +825,22 @@ class DoctorTests(_CliTestCase):
         self.assertIn("RuntimeError", by_name["store"]["detail"])
         self.assertFalse(by_name["schema"]["ok"])
 
+    def test_doctor_envelope_index_preserves_detection_error(self) -> None:
+        error = MailqueryError(
+            "E_PERMISSION",
+            "cannot read ~/Library/Mail/PersistenceInfo.plist: permission denied",
+            "grant Full Disk Access to the application running mailquery",
+        )
+        with (
+            mock.patch.object(cli_mod, "detect_version", side_effect=error),
+            mock.patch.object(cli_mod, "open_store", side_effect=error),
+        ):
+            payload = self._doctor()
+        by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertFalse(by_name["envelope_index"]["ok"])
+        self.assertIn("E_PERMISSION", by_name["envelope_index"]["detail"])
+        self.assertNotIn("E_STORE_NOT_FOUND", by_name["envelope_index"]["detail"])
+
     def test_doctor_reports_invalid_config_but_exits_zero(self) -> None:
         write_config(self.fx.home, "unknown_key = 1\n")
         payload = self._doctor()
