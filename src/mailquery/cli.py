@@ -831,14 +831,27 @@ def _collect_doctor_checks(
         config_path = home_path / "config.toml"
         if not config.has_scopes:
             if config_path.is_file():
-                detail = (
-                    "config.toml exists but declares no [scope.*] blocks; no accounts "
-                    "declared (commands return W_NO_ACCOUNTS)"
-                )
+                prefix = "config.toml exists but declares no [scope.*] blocks"
+            else:
+                prefix = "no config.toml (optional)"
+            if labels_obj is not None and labels_obj.available:
+                labels = labels_obj.all()
+                if labels:
+                    available = ", ".join(label.label for label in labels)
+                    detail = (
+                        f"{prefix}; 0 account block(s) declared; available: {available} "
+                        "(declare one in config.toml to observe it; commands return "
+                        "W_NO_ACCOUNTS)"
+                    )
+                else:
+                    detail = (
+                        f"{prefix}; 0 account block(s) declared; no visible accounts "
+                        "found (commands return W_NO_ACCOUNTS)"
+                    )
             else:
                 detail = (
-                    "no config.toml (optional); no accounts declared "
-                    "(commands return W_NO_ACCOUNTS)"
+                    f"{prefix}; 0 account block(s) declared; available accounts: unknown "
+                    "(Accounts4.sqlite unavailable)"
                 )
             record("config", True, detail)
         else:
