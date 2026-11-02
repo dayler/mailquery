@@ -268,7 +268,8 @@ Chequeos mínimos: `python`, `home`, `store`, `envelope_index`, `schema`,
 `config` valida el TOML y **la resolución de cada bloque `[scope]` y su
 `mailbox_list`** contra el store y las etiquetas de cuenta (por entrada, con el
 `code`/`hint` de cada error); distingue config ausente de config presente sin
-`[scope]`.
+`[scope]` y, cuando no hay cuentas declaradas, lista las disponibles con el
+formato `0 account block(s) declared; available: <label>, ...` sin activarlas.
 
 ### Error
 ```json
