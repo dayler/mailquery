@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling / local state
+.obsidian/
+.DS_Store
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated at test runtime (synthetic Apple Mail store fixtures)
+tests/fixtures/generated/
+
+# This project's runtime home is never part of the repository
+.mailquery/

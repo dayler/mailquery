@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mailquery"
+version = "1.0.0"
+description = "Read-only CLI to read and search Apple Mail from an agent harness"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Ariel Dayler Salzar Hinojosa" }]
+keywords = ["apple-mail", "cli", "read-only", "sqlite", "emlx"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Communications :: Email",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.scripts]
+mailquery = "mailquery.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dayler/mailquery"
+Repository = "https://github.com/dayler/mailquery"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
