@@ -738,15 +738,21 @@ def _collect_doctor_checks(
 
     # store ------------------------------------------------------------------
     version = None
+    version_error: Exception | None = None
     try:
         version = detect_version(mail_root)
         record("store", True, f"{version.version} at {version.mail_root}")
     except Exception as exc:  # noqa: BLE001 - diagnostics only
+        version_error = exc
         record("store", False, _detail(exc))
 
     # envelope_index ---------------------------------------------------------
     try:
         if version is None:
+            # Preserve the real cause (e.g. E_PERMISSION) instead of reporting
+            # a misleading E_STORE_NOT_FOUND when detection was denied.
+            if version_error is not None:
+                raise version_error
             raise MailqueryError(
                 "E_STORE_NOT_FOUND",
                 "Mail store not detected",
