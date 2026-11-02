@@ -197,8 +197,9 @@ en el alcance (≥ 1); límites y `truncated`/`hint` según PRD 12.2/12.3.
 accounts_db=None) -> int`. Los 3 kwargs son **solo para tests** (no son flags ni
 variables de entorno del contrato). `-h/--help` en texto y exit 0; `--log-level`
 global; JSON de error en `stdout` + resumen humano en `stderr`; exit codes
-según `errors.CODE_EXIT`; lock automático; `doctor` devuelve exit 0 con
-`checks[]` aunque algún chequeo falle (decisión del usuario).
+según `errors.CODE_EXIT`; lock automático; `doctor` devuelve exit 0 y muestra
+un **informe de texto human-readable** por defecto (`--json` para el payload
+máquina) aunque algún chequeo falle (decisión del usuario).
 
 ## 4. Contrato JSON
 
@@ -254,9 +255,14 @@ Igual que `search` más:
 ```
 
 ### `doctor`
+Por defecto: **informe de texto human-readable** en `stdout` (mismo estilo que
+`--help`: cabecera, `Checks:` alineado, `Result:` y `Notes:`, sin colores),
+siempre exit 0 si puede diagnosticar. Con `--json`, payload máquina:
+
 ```json
 {"checks": [{"name": "store", "ok": true, "detail": "V10 ..."}]}
 ```
+
 Chequeos mínimos: `python`, `home`, `store`, `envelope_index`, `schema`,
 `readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
 
@@ -302,7 +308,8 @@ Sin `generated_at` (contrato de error del PRD 12.5).
    --subject` o carpetas extra (`--include-mailbox` o `mailbox_list` que añada
    algo distinto de INBOX). `--text` sobre solo INBOX del alcance ⇒
    `E_UNBOUNDED_SCAN`; más de `max_scan` candidatos ⇒ `E_SCAN_TOO_LARGE`.
-8. **`doctor`**: siempre exit 0 si puede diagnosticar; el detalle va en
+8. **`doctor`**: siempre exit 0 si puede diagnosticar; por defecto muestra un
+   informe de texto human-readable (estilo `--help`) y con `--json` el detalle
    `checks[].ok/detail`.
 
 ## 6. Fixtures sintéticos (`tests/fixtures/make_fixtures.py`)
