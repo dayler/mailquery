@@ -230,6 +230,42 @@ pipx install --editable .        # equivalente a `pipx install -e .`
 Los cambios en `src/mailquery/` se aplican sin reinstalar. Es el modo cómodo
 para trabajar en el código, pero no lo uses para una instalación “de uso”.
 
+#### Scripts de despliegue (automatizan pipx + config inicial)
+
+El repositorio incluye instaladores que hacen todo el despliegue en un paso y,
+si `~/.mailquery/config.toml` no existe, lo siembran desde
+[`docs/config.example.toml`](docs/config.example.toml). **La aplicación nunca
+crea ni modifica la configuración**: solo el instalador la crea, y solo si falta.
+
+```bash
+scripts/install.sh                    # instala pipx si falta, instala/reinstala mailquery
+                                      # y crea ~/.mailquery/config.toml (0600) si no existe
+scripts/install.sh --dry-run          # muestra el plan sin ejecutar ni escribir nada
+scripts/install.sh --print-config     # imprime la plantilla y termina
+scripts/install.sh --no-config        # no crea la configuración inicial
+scripts/install.sh --force-config     # sobrescribe config.toml (antes guarda backup .bak-<fecha>)
+scripts/install.sh --python python3.14
+scripts/install.sh --from-git         # instala desde https://github.com/dayler/mailquery.git
+scripts/install.sh --uninstall        # pipx uninstall mailquery
+scripts/install.sh --uninstall --purge  # además borra ~/.mailquery
+```
+
+En Windows, los mismos pasos con PowerShell (o doble clic en `install.bat`):
+
+```powershell
+.\scripts\install.ps1 -DryRun
+.\scripts\install.ps1
+.\scripts\install.ps1 -NoConfig
+.\scripts\install.ps1 -ForceConfig
+.\scripts\install.ps1 -Uninstall -Purge
+```
+
+> **Aviso multi-plataforma:** `mailquery` solo opera en macOS con Apple Mail.
+> En Windows/Linux los instaladores preparan pipx y el paquete (útil para
+> desarrollo/CI), pero los comandos de datos no aplican: en Windows ni siquiera
+> arranca `mailquery` (la app usa `fcntl` y el store de Mail de macOS), así que
+> el instalador omite la verificación del comando.
+
 ### Ciclo de vida: actualizar, reinstalar y desinstalar
 
 ```bash
@@ -247,6 +283,8 @@ rm -rf ~/.mailquery
 
 `pipx uninstall` **no** toca `~/.mailquery` (config, estado y logs viven fuera
 del venv). Tras actualizar o reinstalar, vuelve a ejecutar `mailquery doctor`.
+Con los scripts de despliegue, el ciclo completo es
+`scripts/install.sh` (actualiza/reinstala) y `scripts/install.sh --uninstall [--purge]`.
 
 ### Dónde queda instalado
 
@@ -375,6 +413,12 @@ reportan.
 
 Reglas generales:
 
+- Hay una **plantilla comentada** en
+  [`docs/config.example.toml`](docs/config.example.toml); los instaladores
+  (`scripts/install.sh`, `scripts/install.ps1`) la copian a
+  `~/.mailquery/config.toml` **solo si el archivo no existe**. La plantilla no
+  declara ninguna cuenta, así que el comportamiento por defecto sigue siendo
+  `W_NO_ACCOUNTS` hasta que edites el archivo.
 - Solo se admiten las claves documentadas en este README/PRD; cualquier clave o
   sección desconocida produce `E_CONFIG_INVALID` (exit 2), para que un *typo*
   no pase desapercibido.
@@ -1015,6 +1059,9 @@ python3 -m unittest tests.test_store -v           # un módulo
   se considera verde si ese test falla.
 - La validación de contenido se hace contra los fixtures; no se necesita FDA
   para los tests, pero sí para una corrida real.
+- Los instaladores tienen sus propias pruebas (`tests.test_install_scripts`:
+  sintaxis de `sh`, `--help`, `--dry-run`, plantilla de config y reglas de no
+  sobrescritura).
 
 ---
 
@@ -1044,6 +1091,16 @@ rm -rf ~/.mailquery
 el entorno y los permisos. El detalle completo del despliegue (instalar pipx,
 fijar el intérprete, `--editable`, problemas típicos) está en
 [Despliegue e instalación](#despliegue-e-instalación).
+
+Alternativa con los instaladores del repo:
+
+```bash
+scripts/install.sh                        # actualiza/reinstala y conserva la config
+scripts/install.sh --uninstall            # desinstala el comando
+scripts/install.sh --uninstall --purge    # además borra ~/.mailquery
+# Windows:
+#   .\scripts\install.ps1 -Uninstall -Purge
+```
 
 ---
 
