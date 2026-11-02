@@ -779,6 +779,20 @@ class DoctorTests(_CliTestCase):
         self.assertTrue(config["ok"])
         self.assertIn("exists but declares no [scope.*] blocks", config["detail"])
 
+    def test_doctor_lists_available_accounts_when_none_declared(self) -> None:
+        payload = self._doctor()
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertTrue(config["ok"])
+        self.assertIn("0 account block(s) declared", config["detail"])
+        self.assertIn("available: iCloud (fixture@icloud.com)", config["detail"])
+        self.assertIn("Gmail (fixture@gmail.com)", config["detail"])
+
+        write_config(self.fx.home, '# template\n[scope."No Such Account"]\n')
+        payload = self._doctor()
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertFalse(config["ok"])
+        self.assertIn("E_CONFIG_ACCOUNT_UNKNOWN", config["detail"])
+
     def test_doctor_reports_all_required_checks(self) -> None:
         payload = self._doctor()
         names = [check["name"] for check in payload["checks"]]

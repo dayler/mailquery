@@ -633,7 +633,9 @@ resolubilidad semántica de cada bloque `[scope."<cuenta>"]` y de su
 `mailbox_list` contra el store y `Accounts4.sqlite`; distingue config ausente de
 config presente sin bloques `[scope]`, y reporta `E_CONFIG_ACCOUNT_UNKNOWN`,
 `E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE` o `E_MAILBOX_NOT_FOUND`
-con su `hint`.
+con su `hint`. Cuando no hay cuentas declaradas, el mismo check lista las
+disponibles como `0 account block(s) declared; available: iCloud (…), Gmail
+(…), …` sin activarlas.
 
 ```bash
 mailquery doctor          # informe humano
@@ -654,7 +656,9 @@ Checks:
   [ok]   schema             all required tables present
   [ok]   readonly_strategy  live_ro: Envelope Index opened read-only (mode=ro, query_only=ON)
   [ok]   accounts_db        3 account label(s) available
-  [ok]   config             config.toml exists but declares no [scope.*] blocks; no accounts declared
+  [ok]   config             config.toml exists but declares no [scope.*] blocks;
+                            0 account block(s) declared; available: iCloud (…),
+                            Gmail (…), On My Device
   [ok]   state              no cursor yet (the first `new` run baselines)
   [ok]   lock               available: ~/.mailquery/locks/mailquery.lock
 

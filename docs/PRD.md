@@ -1,7 +1,7 @@
 # PRD — mailquery
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar correos de Apple Mail desde un harness de agentes (DeepSeek u otro similar).
-**Versión del documento:** 0.12 (doctor valida la resolución de `config.toml`; informe humano; ayuda en inglés; solo se observan cuentas declaradas).
+**Versión del documento:** 0.13 (doctor valida `config.toml` y lista cuentas disponibles; informe humano; ayuda en inglés).
 **Fecha:** 2026-11-02.
 **Ubicación del proyecto:** `/Users/dayler/dev/github/mailquery`.
 **Estado:** Aprobado para implementación.
@@ -20,6 +20,7 @@
 | 0.10 | Ayuda `-h/--help` rediseñada en inglés, en texto y formateada por secciones (comandos, opciones, ejemplos, configuración, salida y códigos de salida) para la raíz y los cinco subcomandos; sin colores. |
 | 0.11 | `doctor` muestra por defecto un informe de texto human-readable (mismo estilo que `--help`), conservando `doctor --json` para automatización; la ayuda del CLI y las salidas de runtime siguen en inglés. |
 | 0.12 | El chequeo `config` de `doctor` valida además la **resolución real** de cada bloque `[scope]` y su `mailbox_list` (cuenta, etiqueta/email/UUID y carpetas) contra el store y `Accounts4.sqlite`, reportando `code`/`hint`; distingue config ausente de config presente sin `[scope]`. |
+| 0.13 | Cuando no hay cuentas declaradas, el chequeo `config` de `doctor` lista las cuentas disponibles (`0 account block(s) declared; available: …`) sin activarlas, manteniendo `ok=true` y el warning `W_NO_ACCOUNTS` en los comandos de datos. |
 
 ---
 
