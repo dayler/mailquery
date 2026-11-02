@@ -593,6 +593,12 @@ etiquetas/emails no se resuelven: solo funciona el UUID y `doctor` lo advierte
 Forma de invocación: `mailquery <comando> [opciones]` (o
 `python3 -m mailquery ...` en modo desarrollo).
 
+La ayuda (`mailquery --help` y `mailquery <comando> --help`) está **en inglés**,
+en texto, sin colores y organizada por secciones (`Commands`, `Global options`/
+`Options`, `Examples`, `Notes`, `Configuration`, `Output`, `Exit codes`) con
+ejemplos por comando. Es la única salida que no es JSON; el resto de comandos
+devuelve siempre un objeto JSON.
+
 | Comando | Descripción | Salida |
 |---------|-------------|--------|
 | `doctor` | Diagnóstico del entorno y de la garantía read-only. | JSON con `checks[]` |
@@ -605,7 +611,7 @@ Forma de invocación: `mailquery <comando> [opciones]` (o
 
 | Opción | Descripción |
 |--------|-------------|
-| `-h`, `--help` | Muestra uso, comandos, opciones y banderas; termina con código 0. Disponible también por comando (`mailquery search --help`). Es la **única excepción** a la regla de salida JSON: la ayuda es texto para humanos. |
+| `-h`, `--help` | Muestra la ayuda formateada (uso, comandos, opciones, ejemplos y códigos de salida); termina con código 0. Disponible también por comando (`mailquery search --help`). Es la **única excepción** a la regla de salida JSON: la ayuda es texto para humanos. |
 | `--log-level {error,warning,info,debug}` | Nivel de log; sobreescribe `[logging].level` (default `info`). |
 
 **No existen** `--format`, `--config`, `--home`, `--quiet`, `--verbose`,

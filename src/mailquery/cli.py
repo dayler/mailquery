@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
 import stat
 import sys
 import time
@@ -61,12 +62,116 @@ DOCTOR_CHECK_NAMES = (
 _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
 
+_ROOT_EPILOG = """\
+Examples:
+  mailquery doctor                     environment and read-only preflight
+  mailquery mailboxes                  accounts, folders and included flags
+  mailquery search --since 1w --unread
+  mailquery search --text "*factura*" --since 1mo
+  mailquery new --peek
+  mailquery show 83143
+
+Configuration: ~/.mailquery/config.toml (optional; see README.md)
+Output: one JSON object on stdout for every command (this help is the only
+        non-JSON output); logs go to ~/.mailquery/logs/mailquery.log
+Exit codes: 0 ok | 2 usage or config error | 3 environment error
+            | 4 rejected query | 5 busy or transient error
+"""
+
+_DOCTOR_EPILOG = """\
+Examples:
+  mailquery doctor
+  mailquery doctor --log-level debug
+
+Notes:
+  Always exits 0 when the diagnosis can run; failures are reported as
+  individual checks (checks[].ok = false) in the JSON payload.
+"""
+
+_MAILBOXES_EPILOG = """\
+Examples:
+  mailquery mailboxes
+
+Notes:
+  A folder is included when its account is declared in ~/.mailquery/config.toml
+  and the folder is INBOX or listed in mailbox_list. Counters are recalculated
+  from the Envelope Index because Mail's own counters are not reliable.
+"""
+
+_SEARCH_EPILOG = """\
+Matching:
+  Patterns are case-insensitive; * matches any sequence and ? one character;
+  without wildcards the value is matched as a substring. A value without
+  wildcards is split on spaces into AND terms; a value with wildcards stays a
+  single pattern.
+
+Examples:
+  mailquery search --since 1w
+  mailquery search --since 2w --unread
+  mailquery search --from "*@bank.com*" --since 2mo
+  mailquery search --text "*factura*" --since 1mo --has-attachments
+
+Notes:
+  --text requires a narrowing filter (date, sender, subject or an extra folder)
+  and refuses to scan more than [search].max_scan candidates.
+"""
+
+_NEW_EPILOG = """\
+Examples:
+  mailquery new
+  mailquery new --peek
+  mailquery new --limit 200
+
+Notes:
+  The first run is a baseline: it emits nothing, sets the cursor to the newest
+  scoped message and reports W_FIRST_RUN. --peek never advances the cursor.
+"""
+
+_SHOW_EPILOG = """\
+Examples:
+  mailquery show 83143
+
+Notes:
+  The body is truncated to 20,000 characters; headers and attachment names are
+  included, and .partial.emlx messages are flagged with partial: true.
+"""
+
+
+class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Readable, width-aware help that preserves description/epilog lines."""
+
+    def __init__(self, prog: str) -> None:
+        super().__init__(prog, width=_help_width(), max_help_position=30)
+
+    def _format_action(self, action: argparse.Action) -> str:
+        # Do not render the bare "<command>" placeholder line for the subparsers
+        # action: the "Commands:" section lists the real commands only.
+        if isinstance(action, argparse._SubParsersAction):
+            return "".join(self._format_action(sub) for sub in action._get_subactions())
+        return super()._format_action(action)
+
+
+def _help_width() -> int:
+    """Return a stable help width between 80 and 100 columns."""
+    try:
+        columns = shutil.get_terminal_size(fallback=(100, 24)).columns
+    except OSError:  # pragma: no cover - exotic environments
+        columns = 100
+    return max(80, min(columns, 100))
+
+
+def _style_parser(parser: argparse.ArgumentParser, *, root: bool) -> None:
+    """Give argparse groups human-friendly titles."""
+    parser._optionals.title = "Global options" if root else "Options"  # noqa: SLF001
+    parser._positionals.title = "Commands" if root else "Arguments"  # noqa: SLF001
+
 
 class _ArgumentParser(argparse.ArgumentParser):
     """Parser that turns usage failures into the JSON error contract.
 
-    ``-h``/``--help`` keeps the default behavior (plain text, exit code 0);
-    anything else raises :class:`MailqueryError` with ``E_USAGE`` (exit 2).
+    ``-h``/``--help`` prints the formatted plain-text help (exit code 0); any
+    other usage failure raises :class:`MailqueryError` with ``E_USAGE``
+    (exit 2).
     """
 
     def error(self, message: str) -> None:  # type: ignore[override]
@@ -82,107 +187,127 @@ def build_parser() -> argparse.ArgumentParser:
     parser = _ArgumentParser(
         prog="mailquery",
         description="Read-only CLI to read and search Apple Mail.",
+        epilog=_ROOT_EPILOG,
+        formatter_class=_HelpFormatter,
         allow_abbrev=False,
     )
+    _style_parser(parser, root=True)
     parser.add_argument(
         "--log-level",
+        metavar="LEVEL",
         choices=LOG_LEVELS,
         default=None,
-        help="minimum log level (overrides [logging].level; default: info)",
+        help="minimum log level: error, warning, info or debug "
+        "(overrides [logging].level; default: info)",
     )
 
     subparsers = parser.add_subparsers(
         dest="command",
-        metavar="{doctor,mailboxes,search,new,show}",
+        metavar="<command>",
         required=True,
     )
 
     diagnosis = subparsers.add_parser(
         "doctor",
-        help="diagnose the environment and the read-only guarantee",
+        help="diagnose the environment and verify the read-only guarantee",
         description="Diagnose the environment and verify the read-only guarantee.",
+        epilog=_DOCTOR_EPILOG,
+        formatter_class=_HelpFormatter,
     )
     diagnosis.set_defaults(command="doctor")
+    _style_parser(diagnosis, root=False)
 
-    subparsers.add_parser(
+    mailboxes_parser = subparsers.add_parser(
         "mailboxes",
         help="list accounts, folders, counters and included folders",
-        description="List accounts, folders, counters and whether they are included.",
-    ).set_defaults(command="mailboxes")
+        description="List accounts, folders, counters and whether they are included "
+        "in the configured scope.",
+        epilog=_MAILBOXES_EPILOG,
+        formatter_class=_HelpFormatter,
+    )
+    mailboxes_parser.set_defaults(command="mailboxes")
+    _style_parser(mailboxes_parser, root=False)
 
     search_parser = subparsers.add_parser(
         "search",
-        help="search messages by subject, content, sender, date or state",
-        description="Search messages by subject, body, addresses, date or state.",
+        help="search messages by subject, body, sender, date or state",
+        description="Search messages by subject, body, sender, recipient, date or state.",
+        epilog=_SEARCH_EPILOG,
+        formatter_class=_HelpFormatter,
     )
     search_parser.set_defaults(command="search")
+    _style_parser(search_parser, root=False)
     search_parser.add_argument(
         "--subject",
         action="append",
         metavar="PATTERN",
-        help="subject: substring or wildcards (* and ?); repeatable (AND)",
+        help="subject filter: substring or wildcards * and ?; repeatable (AND)",
     )
     search_parser.add_argument(
         "--text",
         action="append",
         metavar="PATTERN",
-        help="body text: substring or wildcards; repeatable (AND)",
+        help="body text filter: substring or wildcards; repeatable (AND)",
     )
     search_parser.add_argument(
         "--from",
         dest="from_",
         action="append",
         metavar="PATTERN",
-        help="sender name or address: substring or wildcards; repeatable (AND)",
+        help="sender name or address filter: substring or wildcards; repeatable (AND)",
     )
     search_parser.add_argument(
         "--to",
         action="append",
         metavar="PATTERN",
-        help="recipient name or address: substring or wildcards; repeatable (AND)",
+        help="recipient name or address filter: substring or wildcards; repeatable (AND)",
     )
     search_parser.add_argument(
         "--cc",
         action="append",
         metavar="PATTERN",
-        help="cc name or address: substring or wildcards; repeatable (AND)",
+        help="cc name or address filter: substring or wildcards; repeatable (AND)",
     )
     search_parser.add_argument(
         "--since",
         metavar="TIME",
-        help="received after this time (inclusive): ISO 8601, 7d, 2w, 1mo, today...",
+        help="received at or after TIME (inclusive): ISO 8601, 7d, 2w, 1mo, today...",
     )
     search_parser.add_argument(
         "--until",
         metavar="TIME",
-        help="received before this time (exclusive): ISO 8601, 7d, 2w, 1mo, today...",
+        help="received before TIME (exclusive): ISO 8601, 7d, 2w, 1mo, today...",
     )
     search_parser.add_argument("--unread", action="store_true", help="only unread messages")
     search_parser.add_argument("--flagged", action="store_true", help="only flagged messages")
     search_parser.add_argument(
         "--has-attachments",
         action="store_true",
-        help="only messages with attachments",
+        help="only messages that have attachments",
     )
     search_parser.add_argument(
         "--include-mailbox",
         action="append",
         metavar="LIST",
-        help="extra folder(s): name, path or URL; repeatable or comma-separated",
+        help="extra folder to include in this run (name, path or URL); "
+        "repeatable or comma-separated",
     )
     search_parser.add_argument(
         "--limit",
         type=int,
         metavar="N",
-        help=f"maximum results (default: [search].default_limit; max {MAX_SEARCH_LIMIT})",
+        help=f"maximum number of results (default: [search].default_limit; max {MAX_SEARCH_LIMIT})",
     )
 
     new_parser = subparsers.add_parser(
         "new",
         help="messages received since the last run (cursor)",
-        description="Messages received since the last run, using the configured scope.",
+        description="List messages received since the last run, using the stored cursor.",
+        epilog=_NEW_EPILOG,
+        formatter_class=_HelpFormatter,
     )
     new_parser.set_defaults(command="new")
+    _style_parser(new_parser, root=False)
     new_parser.add_argument(
         "--peek",
         action="store_true",
@@ -192,16 +317,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         metavar="N",
-        help=f"maximum messages in this run (default: [new].default_limit; max {MAX_NEW_LIMIT})",
+        help=f"maximum number of messages in this run "
+        f"(default: [new].default_limit; max {MAX_NEW_LIMIT})",
     )
 
     show_parser = subparsers.add_parser(
         "show",
         help="show one message by uid",
         description="Show the full detail of one message by uid.",
+        epilog=_SHOW_EPILOG,
+        formatter_class=_HelpFormatter,
     )
     show_parser.set_defaults(command="show")
-    show_parser.add_argument("uid", type=int, help="message uid (see `mailquery search`)")
+    _style_parser(show_parser, root=False)
+    show_parser.add_argument("uid", metavar="UID", type=int, help="message uid (see `mailquery search`)")
 
     return parser
 

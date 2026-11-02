@@ -151,40 +151,84 @@ class _CliTestCase(unittest.TestCase):
 
 
 class HelpContractTests(_CliTestCase):
-    def test_global_help_is_text_and_exits_zero(self) -> None:
+    HELP_MAX_WIDTH = 100
+
+    def assert_human_readable(self, stdout: str) -> None:
+        self.assertFalse(stdout.lstrip().startswith("{"), "help must be plain text")
+        self.assertNotIn("\x1b[", stdout, "help must not use ANSI colors")
+        for line in stdout.splitlines():
+            self.assertLessEqual(
+                len(line), self.HELP_MAX_WIDTH, f"help line is too long: {line!r}"
+            )
+
+    def test_global_help_is_formatted_text_and_exits_zero(self) -> None:
         unused_home = self.fx.root / "unused-home"
         code, stdout, stderr = self.run_cli(["--help"], home=unused_home)
         self.assertEqual(code, 0)
         self.assertIn("usage: mailquery", stdout)
-        self.assertIn("doctor", stdout)
-        self.assertIn("mailboxes", stdout)
-        self.assertIn("search", stdout)
-        self.assertIn("new", stdout)
-        self.assertIn("show", stdout)
-        self.assertIn("--log-level {error,warning,info,debug}", stdout)
-        self.assertFalse(stdout.lstrip().startswith("{"), "help must be plain text")
+        for section in (
+            "Commands:",
+            "Global options:",
+            "Examples:",
+            "Configuration:",
+            "Output:",
+            "Exit codes:",
+        ):
+            self.assertIn(section, stdout)
+        for command in ("doctor", "mailboxes", "search", "new", "show"):
+            self.assertIn(command, stdout)
+        self.assertIn("--log-level LEVEL", stdout)
+        self.assertIn("mailquery search --since 1w", stdout)
+        self.assertIn("mailquery show 83143", stdout)
+        self.assert_human_readable(stdout)
         self.assertEqual(stderr, "")
         self.assertFalse(unused_home.exists(), "--help must not touch the filesystem")
 
-    def test_subcommand_help_exits_zero(self) -> None:
-        code, stdout, _ = self.run_cli(["search", "--help"])
-        self.assertEqual(code, 0)
-        self.assertIn("usage: mailquery search", stdout)
-        for flag in ("--subject", "--text", "--from", "--to", "--cc", "--since", "--until"):
-            self.assertIn(flag, stdout)
-        self.assertIn("--unread", stdout)
-        self.assertIn("--flagged", stdout)
-        self.assertIn("--has-attachments", stdout)
-        self.assertIn("--include-mailbox", stdout)
-        self.assertIn("--limit", stdout)
+    def test_subcommand_help_is_formatted_for_every_command(self) -> None:
+        expected_flags = {
+            "doctor": (),
+            "mailboxes": (),
+            "search": (
+                "--subject",
+                "--text",
+                "--from",
+                "--to",
+                "--cc",
+                "--since",
+                "--until",
+                "--unread",
+                "--flagged",
+                "--has-attachments",
+                "--include-mailbox",
+                "--limit",
+            ),
+            "new": ("--peek", "--limit"),
+            "show": ("uid",),
+        }
+        for command, flags in expected_flags.items():
+            with self.subTest(command=command):
+                code, stdout, stderr = self.run_cli([command, "--help"])
+                self.assertEqual(code, 0)
+                self.assertIn(f"usage: mailquery {command}", stdout)
+                self.assertIn("Options:", stdout)
+                self.assertIn("Examples:", stdout)
+                for flag in flags:
+                    self.assertIn(flag, stdout)
+                self.assert_human_readable(stdout)
+                self.assertEqual(stderr, "")
 
-        code, stdout, _ = self.run_cli(["new", "--help"])
-        self.assertEqual(code, 0)
-        self.assertIn("--peek", stdout)
-
-        code, stdout, _ = self.run_cli(["show", "--help"])
-        self.assertEqual(code, 0)
-        self.assertIn("uid", stdout)
+    def test_subcommand_help_has_specific_examples(self) -> None:
+        examples = {
+            "doctor": "mailquery doctor --log-level debug",
+            "mailboxes": "mailquery mailboxes",
+            "search": 'mailquery search --text "*factura*" --since 1mo',
+            "new": "mailquery new --peek",
+            "show": "mailquery show 83143",
+        }
+        for command, example in examples.items():
+            with self.subTest(command=command):
+                _, stdout, _ = self.run_cli([command, "--help"])
+                self.assertIn(example, stdout)
 
     def test_help_has_no_undeclared_flags(self) -> None:
         _, stdout, _ = self.run_cli(["--help"])
