@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "command": "doctor",
+  "checks": [
+    {
+      "name": "python",
+      "ok": true,
+      "detail": "<PYTHON>"
+    },
+    {
+      "name": "home",
+      "ok": true,
+      "detail": "<ROOT>/home (mode 0700)"
+    },
+    {
+      "name": "store",
+      "ok": true,
+      "detail": "V10 at <ROOT>/Mail"
+    },
+    {
+      "name": "envelope_index",
+      "ok": true,
+      "detail": "<ROOT>/Mail/V10/MailData/Envelope Index"
+    },
+    {
+      "name": "schema",
+      "ok": true,
+      "detail": "all required tables present"
+    },
+    {
+      "name": "readonly_strategy",
+      "ok": true,
+      "detail": "copy_ro: Envelope Index opened read-only (mode=ro, query_only=ON)"
+    },
+    {
+      "name": "accounts_db",
+      "ok": true,
+      "detail": "3 account label(s) available"
+    },
+    {
+      "name": "config",
+      "ok": true,
+      "detail": "3 account block(s): iCloud (fixture@icloud.com), Gmail (fixture@gmail.com), On My Device"
+    },
+    {
+      "name": "state",
+      "ok": true,
+      "detail": "no cursor yet (the first `new` run baselines)"
+    },
+    {
+      "name": "lock",
+      "ok": true,
+      "detail": "available: <ROOT>/home/locks/mailquery.lock"
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "command": "new",
+  "count": 0,
+  "truncated": false,
+  "hint": null,
+  "messages": [],
+  "scan": {
+    "mode": "metadata",
+    "candidates": 2,
+    "messages_read": 0
+  },
+  "cursor": {
+    "previous": null,
+    "current": {
+      "last_date_received": "<EPOCH>",
+      "last_uid": 83170,
+      "lookback_seconds": 600
+    }
+  },
+  "warnings": [
+    "W_FIRST_RUN: first run baseline established; no messages were emitted"
+  ]
+}

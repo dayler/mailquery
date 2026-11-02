@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "command": "show",
+  "message": {
+    "uid": 83180,
+    "message_id": "<corrupt-83180@fixture.example>",
+    "subject": "Corrupt body",
+    "from": {
+      "name": "Broken",
+      "address": "broken@fixture.example"
+    },
+    "to": [
+      {
+        "name": "Fixture User",
+        "address": "me@fixture.example"
+      }
+    ],
+    "cc": [],
+    "date_sent": "<ISO>",
+    "date_received": "<ISO>",
+    "mailbox": {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "Archivo",
+      "path": "Archivo",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/Archivo"
+    },
+    "is_read": true,
+    "is_flagged": false,
+    "has_attachments": false,
+    "size_bytes": 4096,
+    "headers": {
+      "From": "Broken <broken@fixture.example>",
+      "To": "Fixture User <me@fixture.example>",
+      "Cc": "",
+      "Subject": "Corrupt body",
+      "Date": "<ISO>",
+      "Message-ID": "<corrupt-83180@fixture.example>"
+    },
+    "body_text": "",
+    "body_truncated": false,
+    "attachments": [],
+    "partial": false,
+    "readable": false,
+    "source": {
+      "emlx_path": "<ROOT>/Mail/V10/AAAAAAAA-0000-4000-8000-000000000001/Archivo.mbox/11111111-2222-4333-8444-555555555555/Data/3/8/Messages/83180.emlx",
+      "partial": false
+    }
+  },
+  "warnings": [
+    "W_EMLX_CORRUPT: malformed .emlx length line; recovered the MIME block best effort"
+  ]
+}
