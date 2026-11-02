@@ -752,6 +752,33 @@ class DoctorTests(_CliTestCase):
         self.assertIn("E_STORE_NOT_FOUND", stdout)
         self.assertNotIn('"checks"', stdout)
 
+    def test_doctor_validates_account_resolution(self) -> None:
+        write_config(self.fx.home, '[scope."No Such Account"]\n')
+        payload = self._doctor()
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertFalse(config["ok"])
+        self.assertIn("E_CONFIG_ACCOUNT_UNKNOWN", config["detail"])
+
+    def test_doctor_validates_mailbox_resolution(self) -> None:
+        content = f'[scope."{ICLOUD_LABEL}"]\nmailbox_list = ["No Such Folder"]\n'
+        write_config(self.fx.home, content)
+        payload = self._doctor()
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertFalse(config["ok"])
+        self.assertIn("E_MAILBOX_NOT_FOUND", config["detail"])
+
+    def test_doctor_distinguishes_missing_and_empty_config(self) -> None:
+        payload = self._doctor()
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertTrue(config["ok"])
+        self.assertIn("no config.toml (optional)", config["detail"])
+
+        write_config(self.fx.home, "# template only\n")
+        payload = self._doctor()
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertTrue(config["ok"])
+        self.assertIn("exists but declares no [scope.*] blocks", config["detail"])
+
     def test_doctor_reports_all_required_checks(self) -> None:
         payload = self._doctor()
         names = [check["name"] for check in payload["checks"]]
