@@ -144,7 +144,7 @@ class InstallShTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             combined = result.stdout + result.stderr
             self.assertIn("dry-run", combined.lower())
-            self.assertIn("Plan de despliegue", combined)
+            self.assertIn("Deployment plan", combined)
             self.assertIn("config", combined)
             self.assertFalse((home / ".mailquery").exists(), "dry-run must not create the app home")
 
@@ -154,7 +154,7 @@ class InstallShTest(unittest.TestCase):
             home.mkdir()
             result = _run_sh("--dry-run", "--no-config", home=home)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("omitida (--no-config)", result.stdout + result.stderr)
+            self.assertIn("skipped (--no-config)", result.stdout + result.stderr)
 
     def test_dry_run_uninstall_and_purge(self) -> None:
         result = _run_sh("--dry-run", "--uninstall", "--purge")
@@ -165,17 +165,17 @@ class InstallShTest(unittest.TestCase):
     def test_unknown_option_is_usage_error(self) -> None:
         result = _run_sh("--unknown-option")
         self.assertEqual(result.returncode, 2)
-        self.assertIn("opción desconocida", result.stderr)
+        self.assertIn("unknown option", result.stderr)
 
     def test_purge_requires_uninstall(self) -> None:
         result = _run_sh("--purge")
         self.assertEqual(result.returncode, 2)
-        self.assertIn("--purge requiere --uninstall", result.stderr)
+        self.assertIn("--purge requires --uninstall", result.stderr)
 
     def test_force_config_rejects_no_config(self) -> None:
         result = _run_sh("--force-config", "--no-config")
         self.assertEqual(result.returncode, 2)
-        self.assertIn("no se combina", result.stderr)
+        self.assertIn("cannot be combined", result.stderr)
 
     def test_dry_run_never_overwrites_existing_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -186,7 +186,7 @@ class InstallShTest(unittest.TestCase):
             existing.write_text("# user config\n", encoding="utf-8")
             result = _run_sh("--dry-run", home=home)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("ya existe", result.stdout + result.stderr)
+            self.assertIn("already exists", result.stdout + result.stderr)
             self.assertEqual(existing.read_text(encoding="utf-8"), "# user config\n")
 
 
@@ -226,7 +226,7 @@ class InstallPs1Test(unittest.TestCase):
             timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Plan de despliegue", result.stdout + result.stderr)
+        self.assertIn("Deployment plan", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs
