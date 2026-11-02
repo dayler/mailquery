@@ -1,0 +1,118 @@
+{
+  "ok": true,
+  "command": "mailboxes",
+  "accounts": [
+    {
+      "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+      "label": "iCloud (fixture@icloud.com)",
+      "email": "fixture@icloud.com",
+      "declared": true
+    },
+    {
+      "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
+      "label": "Gmail (fixture@gmail.com)",
+      "email": "fixture@gmail.com",
+      "declared": true
+    },
+    {
+      "uuid": "CCCCCCCC-0000-4000-8000-000000000003",
+      "label": "On My Device",
+      "email": null,
+      "declared": true
+    }
+  ],
+  "mailboxes": [
+    {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX",
+      "total": 8,
+      "unread": 3,
+      "included": true
+    },
+    {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "Facturas",
+      "path": "Facturas",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/Facturas",
+      "total": 1,
+      "unread": 0,
+      "included": true
+    },
+    {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "Archivo",
+      "path": "Archivo",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/Archivo",
+      "total": 1,
+      "unread": 0,
+      "included": true
+    },
+    {
+      "account": {
+        "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
+        "label": "Gmail (fixture@gmail.com)",
+        "email": "fixture@gmail.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/INBOX",
+      "total": 2,
+      "unread": 1,
+      "included": true
+    },
+    {
+      "account": {
+        "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
+        "label": "Gmail (fixture@gmail.com)",
+        "email": "fixture@gmail.com"
+      },
+      "name": "All Mail",
+      "path": "[Gmail]/All Mail",
+      "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/%5BGmail%5D/All%20Mail",
+      "total": 3,
+      "unread": 1,
+      "included": false
+    },
+    {
+      "account": {
+        "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
+        "label": "Gmail (fixture@gmail.com)",
+        "email": "fixture@gmail.com"
+      },
+      "name": "Important",
+      "path": "[Gmail]/Important",
+      "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/%5BGmail%5D/Important",
+      "total": 0,
+      "unread": 0,
+      "included": false
+    },
+    {
+      "account": {
+        "uuid": "CCCCCCCC-0000-4000-8000-000000000003",
+        "label": "On My Device",
+        "email": null
+      },
+      "name": "Recovered Messages",
+      "path": "Recovered Messages",
+      "url": "local://CCCCCCCC-0000-4000-8000-000000000003/Recovered%20Messages",
+      "total": 0,
+      "unread": 0,
+      "included": false
+    }
+  ],
+  "warnings": []
+}

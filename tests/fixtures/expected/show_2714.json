@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "command": "show",
+  "message": {
+    "uid": 2714,
+    "message_id": "<invoice-2714@fixture.example>",
+    "subject": "Invoice 2026-10",
+    "from": {
+      "name": "Billing Team",
+      "address": "billing@fixture.example"
+    },
+    "to": [
+      {
+        "name": "Fixture User",
+        "address": "me@fixture.example"
+      }
+    ],
+    "cc": [
+      {
+        "name": "Finance",
+        "address": "finance@fixture.example"
+      }
+    ],
+    "date_sent": "<ISO>",
+    "date_received": "<ISO>",
+    "mailbox": {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
+    },
+    "is_read": false,
+    "is_flagged": false,
+    "has_attachments": true,
+    "size_bytes": 123456,
+    "headers": {
+      "From": "Billing Team <billing@fixture.example>",
+      "To": "Fixture User <me@fixture.example>",
+      "Cc": "Finance <finance@fixture.example>",
+      "Subject": "Invoice 2026-10",
+      "Date": "<EMAIL_DATE>",
+      "Message-ID": "<invoice-2714@fixture.example>"
+    },
+    "body_text": "Please find the invoice attached.",
+    "body_truncated": false,
+    "attachments": [
+      {
+        "name": "invoice-2026-10.pdf"
+      }
+    ],
+    "partial": false,
+    "readable": true,
+    "source": {
+      "emlx_path": "<ROOT>/Mail/V10/AAAAAAAA-0000-4000-8000-000000000001/INBOX.mbox/11111111-2222-4333-8444-555555555555/Data/2/Messages/2714.emlx",
+      "partial": false
+    }
+  },
+  "warnings": []
+}
