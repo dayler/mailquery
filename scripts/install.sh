@@ -1,14 +1,14 @@
 #!/bin/sh
 # ============================================================================
-# mailquery deployment helper — macOS / Linux
+# mailquery deployment helper - macOS / Linux
 #
-# Instala (o reinstala) el comando `mailquery` con pipx y, si
-# `~/.mailquery/config.toml` no existe, lo crea a partir de
-# `docs/config.example.toml`. La aplicación nunca crea ni modifica su
-# configuración: solo este instalador la siembra, y solo si falta.
+# Installs (or reinstalls) the `mailquery` command with pipx and, when
+# `~/.mailquery/config.toml` does not exist, creates it from
+# `docs/config.example.toml`. The application never creates or modifies its
+# configuration: only this installer seeds it, and only when missing.
 #
-# Requisitos: macOS o Linux, Python >= 3.11 y pipx (el script lo instala si
-# falta con Homebrew o `python3 -m pip --user`).
+# Requirements: macOS or Linux, Python >= 3.11 and pipx (this script installs
+# pipx when missing, via Homebrew or `python3 -m pip --user`).
 # ============================================================================
 set -eu
 umask 077
@@ -18,7 +18,7 @@ REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)
 TEMPLATE_FILE="$REPO_ROOT/docs/config.example.toml"
 GIT_SPEC="git+https://github.com/dayler/mailquery.git"
 
-HOME_DIR=${HOME:?HOME no está definido}
+HOME_DIR=${HOME:?HOME is not set}
 CONFIG_DIR="$HOME_DIR/.mailquery"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 
@@ -37,23 +37,24 @@ usage() {
     cat <<'EOF'
 Usage: scripts/install.sh [options]
 
-Instala o reinstala el comando mailquery con pipx y, si no existe, crea
-~/.mailquery/config.toml a partir de docs/config.example.toml. La aplicación
-nunca crea ni modifica su configuración: solo este instalador la siembra.
+Install or reinstall the mailquery command with pipx and, when it does not
+exist yet, create ~/.mailquery/config.toml from docs/config.example.toml.
+The application never creates or modifies its configuration: only this
+installer seeds it.
 
 Options:
-  -h, --help        Muestra esta ayuda y termina.
-  --dry-run         Imprime el plan sin ejecutar ni escribir nada.
-  --print-config    Imprime la plantilla de configuración y termina.
-  --no-config       No crea ~/.mailquery/config.toml.
-  --force-config    Sobrescribe config.toml (antes guarda un backup).
-  --python PATH     Intérprete de Python para pipx (p. ej. python3.14).
-  --from-git        Instala desde https://github.com/dayler/mailquery.git.
-  --uninstall       Desinstala mailquery con pipx.
-  --purge           Con --uninstall, borra también ~/.mailquery.
-  -v, --verbose     Muestra los comandos ejecutados.
+  -h, --help        Show this help and exit.
+  --dry-run         Print the plan without executing or writing anything.
+  --print-config    Print the configuration template and exit.
+  --no-config       Do not create ~/.mailquery/config.toml.
+  --force-config    Overwrite config.toml (a timestamped backup is kept first).
+  --python PATH     Python interpreter for pipx (e.g. python3.14).
+  --from-git        Install from https://github.com/dayler/mailquery.git.
+  --uninstall       Uninstall mailquery with pipx.
+  --purge           With --uninstall, also remove ~/.mailquery.
+  -v, --verbose     Show the executed commands.
 
-Exit codes: 0 éxito, 1 fallo, 2 error de uso.
+Exit codes: 0 success, 1 failure, 2 usage error.
 EOF
 }
 
@@ -120,7 +121,7 @@ while [ "$#" -gt 0 ]; do
             ;;
         --python)
             if [ "$#" -lt 2 ]; then
-                log "error: --python requiere un valor"
+                log "error: --python requires a value"
                 exit 2
             fi
             PYTHON=$2
@@ -130,7 +131,7 @@ while [ "$#" -gt 0 ]; do
             PYTHON=${1#--python=}
             ;;
         *)
-            log "error: opción desconocida: $1"
+            log "error: unknown option: $1"
             usage >&2
             exit 2
             ;;
@@ -139,52 +140,52 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$PURGE" -eq 1 ] && [ "$UNINSTALL" -eq 0 ]; then
-    log "error: --purge requiere --uninstall"
+    log "error: --purge requires --uninstall"
     exit 2
 fi
 if [ "$FORCE_CONFIG" -eq 1 ] && [ "$NO_CONFIG" -eq 1 ]; then
-    log "error: --force-config no se combina con --no-config"
+    log "error: --force-config cannot be combined with --no-config"
     exit 2
 fi
 
 if [ "$PRINT_CONFIG" -eq 1 ]; then
     if [ ! -f "$TEMPLATE_FILE" ]; then
-        fail "no existe la plantilla: $TEMPLATE_FILE"
+        fail "template not found: $TEMPLATE_FILE"
     fi
     cat "$TEMPLATE_FILE"
     exit 0
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-    log "Plan de despliegue (dry-run; no se ejecuta nada):"
+    log "Deployment plan (dry-run; nothing will be executed):"
     if [ "$UNINSTALL" -eq 1 ]; then
-        log "  1. pipx uninstall mailquery (si está instalado)"
+        log "  1. pipx uninstall mailquery (when installed)"
         if [ "$PURGE" -eq 1 ]; then
             log "  2. rm -rf $CONFIG_DIR"
         fi
         exit 0
     fi
     if [ "$FROM_GIT" -eq 1 ]; then
-        log "  1. comprobar pipx (instalarlo si falta) y pipx ensurepath"
-        log "  2. pipx install/reinstall con $GIT_SPEC"
+        log "  1. check pipx (install it when missing) and run pipx ensurepath"
+        log "  2. pipx install/reinstall from $GIT_SPEC"
     else
-        log "  1. comprobar pipx (instalarlo si falta) y pipx ensurepath"
-        log "  2. pipx install/reinstall desde $REPO_ROOT"
+        log "  1. check pipx (install it when missing) and run pipx ensurepath"
+        log "  2. pipx install/reinstall from $REPO_ROOT"
     fi
     if [ -n "$PYTHON" ]; then
-        log "     intérprete: $PYTHON"
+        log "     interpreter: $PYTHON"
     fi
-    log "  3. verificar 'mailquery' en PATH y ejecutar 'mailquery doctor' (solo macOS)"
+    log "  3. verify 'mailquery' is in PATH and run 'mailquery doctor' (macOS only)"
     if [ "$NO_CONFIG" -eq 1 ]; then
-        log "  4. config: omitida (--no-config)"
+        log "  4. config: skipped (--no-config)"
     elif [ -e "$CONFIG_FILE" ] && [ "$FORCE_CONFIG" -eq 0 ]; then
-        log "  4. config: ya existe $CONFIG_FILE (no se sobrescribe)"
+        log "  4. config: $CONFIG_FILE already exists (it will not be overwritten)"
     elif [ -e "$CONFIG_FILE" ]; then
-        log "  4. config: backup de $CONFIG_FILE y copia de la plantilla"
+        log "  4. config: back up $CONFIG_FILE and copy the template"
     else
-        log "  4. config: crear $CONFIG_FILE desde la plantilla (0600)"
+        log "  4. config: create $CONFIG_FILE from the template (0600)"
     fi
-    log "  5. imprimir los siguientes pasos"
+    log "  5. print next steps"
     exit 0
 fi
 
@@ -193,10 +194,10 @@ case "$OS" in
     Darwin)
         ;;
     Linux)
-        log "aviso: mailquery solo opera en macOS con Apple Mail; en Linux la instalación sirve para desarrollo/CI."
+        log "warning: mailquery only runs on macOS with Apple Mail; on Linux the install is for development/CI."
         ;;
     *)
-        log "aviso: sistema '$OS' no soportado por la app (solo macOS); la instalación puede no ser útil."
+        log "warning: system '$OS' is not supported by the app (macOS only); the install may not be useful."
         ;;
 esac
 
@@ -204,24 +205,24 @@ if [ "$UNINSTALL" -eq 1 ]; then
     if command -v pipx >/dev/null 2>&1 && pipx list 2>/dev/null | grep -q "package mailquery "; then
         run pipx uninstall mailquery
     else
-        log "mailquery no está instalado con pipx; nada que desinstalar."
+        log "mailquery is not installed with pipx; nothing to uninstall."
     fi
     if [ "$PURGE" -eq 1 ]; then
         run rm -rf "$CONFIG_DIR"
-        log "borrado $CONFIG_DIR (--purge)"
+        log "removed $CONFIG_DIR (--purge)"
     fi
-    log "Desinstalación completada."
+    log "Uninstall complete."
     exit 0
 fi
 
 if ! command -v pipx >/dev/null 2>&1; then
-    log "pipx no encontrado; instalándolo..."
+    log "pipx not found; installing it..."
     if [ "$OS" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
         run brew install pipx
     else
         PYTHON_BIN=${PYTHON:-python3}
         if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-            fail "no encontré '$PYTHON_BIN'; instala Python >= 3.11 o usa --python"
+            fail "could not find '$PYTHON_BIN'; install Python >= 3.11 or use --python"
         fi
         run "$PYTHON_BIN" -m pip install --user pipx
     fi
@@ -229,11 +230,11 @@ fi
 
 if command -v pipx >/dev/null 2>&1; then
     if ! run pipx ensurepath >/dev/null 2>&1; then
-        log "aviso: 'pipx ensurepath' no pudo actualizar el PATH; revisa tu shell manualmente"
+        log "warning: 'pipx ensurepath' could not update PATH; check your shell manually"
     fi
 else
     if ! run pipx_cmd ensurepath >/dev/null 2>&1; then
-        log "aviso: 'pipx ensurepath' no pudo actualizar el PATH; revisa tu shell manualmente"
+        log "warning: 'pipx ensurepath' could not update PATH; check your shell manually"
     fi
 fi
 
@@ -258,52 +259,52 @@ else
 fi
 
 if ! command -v mailquery >/dev/null 2>&1; then
-    fail "mailquery no está en PATH; abre una terminal nueva (pipx ensurepath) y reejecuta"
+    fail "mailquery is not in PATH; open a new terminal (pipx ensurepath) and retry"
 fi
 verbose "mailquery: $(command -v mailquery)"
 
 if [ "$OS" = "Darwin" ]; then
     run mailquery --help >/dev/null
 else
-    log "aviso: se omite 'mailquery --help' (la app depende de macOS/Apple Mail)"
+    log "warning: skipping 'mailquery --help' (the app requires macOS/Apple Mail)"
 fi
 
 if [ "$NO_CONFIG" -eq 1 ]; then
-    log "config: omitida (--no-config)"
+    log "config: skipped (--no-config)"
 else
     if [ ! -f "$TEMPLATE_FILE" ]; then
-        fail "no existe la plantilla: $TEMPLATE_FILE"
+        fail "template not found: $TEMPLATE_FILE"
     fi
     if [ -e "$CONFIG_FILE" ] && [ "$FORCE_CONFIG" -eq 0 ]; then
-        log "config: ya existe $CONFIG_FILE (no se sobrescribe; usa --force-config)"
+        log "config: $CONFIG_FILE already exists (not overwritten; use --force-config)"
     else
         if [ -e "$CONFIG_FILE" ]; then
             BACKUP_FILE="$CONFIG_FILE.bak-$(date +%Y%m%d%H%M%S)"
             run cp -p "$CONFIG_FILE" "$BACKUP_FILE"
-            log "config: backup en $BACKUP_FILE"
+            log "config: backup at $BACKUP_FILE"
         fi
         run mkdir -p "$CONFIG_DIR"
         run cp "$TEMPLATE_FILE" "$CONFIG_FILE"
         run chmod 600 "$CONFIG_FILE"
         CONFIG_CREATED=1
-        log "config: creada $CONFIG_FILE desde la plantilla (edítala para declarar cuentas)"
+        log "config: created $CONFIG_FILE from the template (edit it to declare accounts)"
     fi
 fi
 
 if [ "$OS" = "Darwin" ]; then
-    log "ejecutando 'mailquery doctor' (preflight)..."
+    log "running 'mailquery doctor' (preflight)..."
     if ! mailquery doctor >/dev/null 2>&1; then
-        log "aviso: 'mailquery doctor' reportó problemas; ejecútalo sin redirección para ver el detalle"
+        log "warning: 'mailquery doctor' reported problems; run it without redirection to see the details"
     fi
 else
-    log "aviso: 'mailquery doctor' se omite fuera de macOS"
+    log "warning: 'mailquery doctor' is skipped outside macOS"
 fi
 
 log ""
-log "Despliegue completado."
+log "Deployment complete."
 if [ "$CONFIG_CREATED" -eq 1 ]; then
-    log "  - Se creó ~/.mailquery/config.toml (todavía sin cuentas declaradas)."
+    log "  - Created ~/.mailquery/config.toml (no accounts declared yet)."
 fi
-log "  - Edita ~/.mailquery/config.toml y declara al menos una cuenta."
-log "  - Verifica: mailquery doctor && mailquery mailboxes"
-log "  - Consulta:  mailquery search --since 1w"
+log "  - Edit ~/.mailquery/config.toml and declare at least one account."
+log "  - Verify: mailquery doctor && mailquery mailboxes"
+log "  - Query:  mailquery search --since 1w"
