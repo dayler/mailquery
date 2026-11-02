@@ -654,7 +654,8 @@ Checks:
 Result: 10/10 checks passed
 
 Notes:
-  This report is read-only: it never modifies Apple Mail or ~/.mailquery.
+  This report is read-only with respect to Apple Mail.
+  mailquery writes only its own logs and temporaries under ~/.mailquery.
   Use `mailquery doctor --json` for the machine-readable payload.
 ```
 
