@@ -596,12 +596,13 @@ Forma de invocación: `mailquery <comando> [opciones]` (o
 La ayuda (`mailquery --help` y `mailquery <comando> --help`) está **en inglés**,
 en texto, sin colores y organizada por secciones (`Commands`, `Global options`/
 `Options`, `Examples`, `Notes`, `Configuration`, `Output`, `Exit codes`) con
-ejemplos por comando. Es la única salida que no es JSON; el resto de comandos
-devuelve siempre un objeto JSON.
+ejemplos por comando. Es texto (no JSON), igual que el informe humano por
+defecto de `doctor`; el resto de la salida de comandos es siempre un objeto JSON
+(y `doctor --json` también).
 
 | Comando | Descripción | Salida |
 |---------|-------------|--------|
-| `doctor` | Diagnóstico del entorno y de la garantía read-only. | JSON con `checks[]` |
+| `doctor` | Diagnóstico del entorno y de la garantía read-only. | Informe de texto (JSON con `--json`) |
 | `mailboxes` | Cuentas, carpetas, contadores y si están incluidas. | JSON con `accounts[]`, `mailboxes[]` |
 | `search` | Búsqueda por metadatos y/o contenido. | JSON con `messages[]` |
 | `new` | Mensajes recibidos desde la última ejecución (cursor). | JSON con `messages[]`, `cursor` |
@@ -619,37 +620,42 @@ devuelve siempre un objeto JSON.
 
 ### `mailquery doctor`
 
-Preflight del entorno y de la garantía de solo lectura. Devuelve un JSON con
-`checks[]` y **siempre exit 0** si puede diagnosticar (el detalle de cada
-chequeo va en `checks[].ok/detail`). Chequeos previstos: `python`, `home`,
-`store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`,
-`config`, `state`, `lock`.
+Preflight del entorno y de la garantía de solo lectura. Por defecto imprime un
+**informe de texto human-readable** (mismo lenguaje visual que `--help`:
+secciones, alineación, sin colores) y **siempre exit 0** si puede diagnosticar.
+Con `--json` emite el payload JSON para automatización (mismos `checks[]`).
+
+Chequeos: `python`, `home`, `store`, `envelope_index`, `schema`,
+`readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
 
 ```bash
-mailquery doctor
+mailquery doctor          # informe humano
+mailquery doctor --json   # payload JSON (automatización)
 ```
 
-Ejemplo ilustrativo de salida (el `detail` depende de tu entorno):
+Ejemplo ilustrativo del informe (el detalle depende de tu entorno):
 
-```json
-{
-  "ok": true,
-  "command": "doctor",
-  "generated_at": "2026-11-02T12:00:00-04:00",
-  "checks": [
-    {"name": "python", "ok": true, "detail": "3.12"},
-    {"name": "home", "ok": true, "detail": "~/.mailquery"},
-    {"name": "store", "ok": true, "detail": "V10"},
-    {"name": "envelope_index", "ok": true, "detail": "disponible"},
-    {"name": "schema", "ok": true, "detail": "columnas obligatorias presentes"},
-    {"name": "readonly_strategy", "ok": true, "detail": "live_ro"},
-    {"name": "accounts_db", "ok": true, "detail": "etiquetas disponibles"},
-    {"name": "config", "ok": true, "detail": "1 cuenta declarada"},
-    {"name": "state", "ok": true, "detail": "sin baseline"},
-    {"name": "lock", "ok": true, "detail": "disponible"}
-  ],
-  "warnings": []
-}
+```text
+mailquery doctor - environment and read-only preflight
+Generated at: 2026-11-02T12:00:00-04:00
+
+Checks:
+  [ok]   python             3.12
+  [ok]   home               ~/.mailquery (mode 0700)
+  [ok]   store              V10 at /Users/.../Library/Mail
+  [ok]   envelope_index     /Users/.../Library/Mail/V10/MailData/Envelope Index
+  [ok]   schema             all required tables present
+  [ok]   readonly_strategy  live_ro: Envelope Index opened read-only (mode=ro, query_only=ON)
+  [ok]   accounts_db        3 account label(s) available
+  [ok]   config             no config.toml or no [scope.*] blocks; no accounts declared
+  [ok]   state              no cursor yet (the first `new` run baselines)
+  [ok]   lock               available: ~/.mailquery/locks/mailquery.lock
+
+Result: 10/10 checks passed
+
+Notes:
+  This report is read-only: it never modifies Apple Mail or ~/.mailquery.
+  Use `mailquery doctor --json` for the machine-readable payload.
 ```
 
 Úsalo como *preflight* obligatorio, sobre todo después de instalar, actualizar
@@ -911,8 +917,9 @@ conocida).
 
 Un **único objeto JSON compacto por ejecución** en `stdout`. No existe
 `--format`. `stdout` es solo el JSON de datos; los logs van a archivo y los
-resúmenes humanos de error a `stderr`. La excepción documentada es
-`-h`/`--help`, que es texto.
+resúmenes humanos de error a `stderr`. Las excepciones documentadas son
+`-h`/`--help` (texto) y el **informe humano por defecto de `doctor`** (texto);
+`doctor --json` sí devuelve el objeto JSON.
 
 ### Estructura de éxito (base)
 
@@ -932,7 +939,7 @@ resúmenes humanos de error a `stderr`. La excepción documentada es
 | `scan` | `{"mode", "candidates", "messages_read", "duration_ms"}`. |
 | `cursor` | Solo en `new`: `{"previous": {...}|null, "current": {...}|null}`. |
 | `accounts` / `mailboxes` | Solo en `mailboxes`. |
-| `checks` | Solo en `doctor`: `[{"name", "ok", "detail"}]`. |
+| `checks` | Solo en `doctor --json`: `[{"name", "ok", "detail"}]`. |
 
 Códigos de warning previstos: `W_NO_ACCOUNTS`, `W_FIRST_RUN`,
 `W_ACCOUNT_LABELS_UNAVAILABLE`, `W_EMLX_MISSING`, `W_EMLX_CORRUPT`,
