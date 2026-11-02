@@ -23,7 +23,7 @@ otro similar) la invoque **bajo demanda** y consuma su salida.
 1. [Qué es y qué garantiza](#qué-es-y-qué-garantiza)
 2. [Cómo funciona (resumen)](#cómo-funciona-resumen)
 3. [Requisitos](#requisitos)
-4. [Instalación](#instalación)
+4. [Despliegue e instalación](#despliegue-e-instalación)
 5. [Primera ejecución y home `~/.mailquery`](#primera-ejecución-y-home-mailquery)
 6. [Configuración: `config.toml`](#configuración-configtoml)
 7. [Referencia de comandos](#referencia-de-comandos)
@@ -133,7 +133,7 @@ Rendimiento de referencia en un store vivo de ~66.000 mensajes: `new` y
 |-----------|---------|
 | **Sistema** | macOS con Apple Mail. Stores `V9`, `V10` y `V11`; `V10` es la versión validada por el equipo de referencia. |
 | **Python** | Python ≥ 3.11 (el intérprete que use `pipx`). Se usa `tomllib` de la biblioteca estándar. |
-| **pipx** | Para instalar el comando `mailquery` en un entorno aislado (`brew install pipx && pipx ensurepath`). |
+| **pipx** | Para instalar el comando `mailquery` en un entorno aislado. Pasos completos en [Despliegue e instalación](#despliegue-e-instalación). |
 | **Permisos** | **Acceso total al disco (Full Disk Access, FDA)** para la app que ejecuta la CLI (el harness, o la terminal desde la que pruebas). Sin FDA, la lectura del store y de la base de cuentas falla con `E_PERMISSION`. |
 | **Dependencias** | Ninguna de runtime: solo la biblioteca estándar. |
 
@@ -142,38 +142,195 @@ Notas:
 - **No hace falta que Mail.app esté abierto**: si está cerrado y falta el
   archivo `-shm`, `mailquery` trabaja sobre una copia temporal en
   `~/.mailquery/tmp/`.
-- El intérprete debe ser el mismo que usa `pipx`; comprueba con
-  `python3 --version` antes de instalar.
+- `pipx` usa un intérprete concreto (el de Homebrew o el de tu `python3`); el
+  proyecto exige **Python ≥ 3.11**. Ver
+  [Varios Python con pyenv](#varios-python-con-pyenv).
 
 ---
 
-## Instalación
+## Despliegue e instalación
 
-### Instalación con `pipx` (recomendada)
+`mailquery` se empaqueta como *console script* de Python (`pyproject.toml`):
+un único comando `mailquery` que ejecuta el paquete dentro de un entorno
+virtual. El método recomendado es **`pipx`**.
 
-Desde la **raíz del repositorio**:
+### Instalar pipx
+
+#### Opción A — Homebrew (recomendada en macOS)
 
 ```bash
-# 1. pipx (si no lo tienes)
-python3 -m pip install --user pipx
-pipx ensurepath
-
-# 2. instalar el comando desde el repo
-pipx install .
-
-# 3. comprobar que el comando responde
-mailquery --help
-mailquery doctor
+brew install pipx
+pipx ensurepath      # añade ~/.local/bin al PATH (solo hace falta una vez)
+exec zsh             # o abre una terminal nueva
+pipx --version
 ```
 
-`pyproject.toml` declara el *console script* `mailquery` y no declara
-dependencias de runtime. Si en el futuro se añade una librería, va en
-`[project].dependencies` y se instala con el mismo `pipx install .`.
+Homebrew instala `pipx` con su propio Python, **independiente de pyenv**: si
+cambias la versión global de pyenv, `pipx` sigue funcionando.
 
-Después de instalar, declara al menos una cuenta en
-`~/.mailquery/config.toml` (ver [Configuración](#configuración-configtoml)).
-Sin cuentas declaradas, `new`/`search` devuelven `count: 0` con el warning
-`W_NO_ACCOUNTS`.
+#### Opción B — sin Homebrew (con el Python actual)
+
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath      # puede que ya esté: comprueba el PATH
+exec zsh                        # o abre una terminal nueva
+pipx --version
+```
+
+Con este entorno, `python3` es Python 3.14.6 de pyenv y `~/.local/bin` ya está
+en el `PATH`, así que el binario queda disponible directamente. Ten en cuenta
+que `pipx` queda atado a ese intérprete: si cambias `pyenv global`,
+reinstálalo o invócalo como `python3 -m pipx`.
+
+#### Verificar la instalación de pipx
+
+```bash
+command -v pipx          # debe imprimir /opt/homebrew/bin/pipx o ~/.local/bin/pipx
+pipx --version
+echo "$PATH" | tr ':' '\n' | grep -F "$HOME/.local/bin"
+```
+
+### Instalar mailquery con pipx
+
+Desde la **raíz del repositorio** (donde está `pyproject.toml`):
+
+```bash
+cd /Users/dayler/dev/github/mailquery
+pipx install .                          # venv aislado + comando `mailquery`
+# opcional: fijar el intérprete si tienes varios Python
+pipx install --python python3.14 .
+
+# comprobar el despliegue
+pipx list                               # muestra mailquery y su Python
+mailquery --help
+mailquery doctor                        # preflight: crea ~/.mailquery y valida FDA
+```
+
+`pipx install .` copia el paquete al venv de la app (no es *editable*): si
+cambias el código del repo, reinstala con `pipx reinstall mailquery`.
+
+Tras instalar, **declara al menos una cuenta** en `~/.mailquery/config.toml`
+(ver [Configuración](#configuración-configtoml)); sin cuentas declaradas,
+`new`/`search` devuelven `count: 0` con el warning `W_NO_ACCOUNTS`.
+
+#### Instalación desde Git (sin clonar)
+
+```bash
+pipx install git+https://github.com/dayler/mailquery.git
+# o una revisión concreta
+pipx install git+https://github.com/dayler/mailquery.git@v1.0.0
+```
+
+#### Instalación en modo editable (desarrollo)
+
+```bash
+pipx install --editable .        # equivalente a `pipx install -e .`
+```
+
+Los cambios en `src/mailquery/` se aplican sin reinstalar. Es el modo cómodo
+para trabajar en el código, pero no lo uses para una instalación “de uso”.
+
+#### Scripts de despliegue (automatizan pipx + config inicial)
+
+El repositorio incluye instaladores que hacen todo el despliegue en un paso y,
+si `~/.mailquery/config.toml` no existe, lo siembran desde
+[`docs/config.example.toml`](docs/config.example.toml). **La aplicación nunca
+crea ni modifica la configuración**: solo el instalador la crea, y solo si falta.
+
+```bash
+scripts/install.sh                    # instala pipx si falta, instala/reinstala mailquery
+                                      # y crea ~/.mailquery/config.toml (0600) si no existe
+scripts/install.sh --dry-run          # muestra el plan sin ejecutar ni escribir nada
+scripts/install.sh --print-config     # imprime la plantilla y termina
+scripts/install.sh --no-config        # no crea la configuración inicial
+scripts/install.sh --force-config     # sobrescribe config.toml (antes guarda backup .bak-<fecha>)
+scripts/install.sh --python python3.14
+scripts/install.sh --from-git         # instala desde https://github.com/dayler/mailquery.git
+scripts/install.sh --uninstall        # pipx uninstall mailquery
+scripts/install.sh --uninstall --purge  # además borra ~/.mailquery
+```
+
+En Windows, los mismos pasos con PowerShell (o doble clic en `install.bat`):
+
+```powershell
+.\scripts\install.ps1 -DryRun
+.\scripts\install.ps1
+.\scripts\install.ps1 -NoConfig
+.\scripts\install.ps1 -ForceConfig
+.\scripts\install.ps1 -Uninstall -Purge
+```
+
+> **Aviso multi-plataforma:** `mailquery` solo opera en macOS con Apple Mail.
+> En Windows/Linux los instaladores preparan pipx y el paquete (útil para
+> desarrollo/CI), pero los comandos de datos no aplican: en Windows ni siquiera
+> arranca `mailquery` (la app usa `fcntl` y el store de Mail de macOS), así que
+> el instalador omite la verificación del comando.
+
+### Ciclo de vida: actualizar, reinstalar y desinstalar
+
+```bash
+pipx list                                   # apps instaladas y su Python
+cd /Users/dayler/dev/github/mailquery
+git pull
+pipx reinstall mailquery                    # recreate el venv desde el código actual
+pipx reinstall --python python3.14 mailquery  # cambiar el intérprete
+pipx upgrade-all                            # actualizar todas las apps
+pipx uninstall mailquery                    # quita el comando y su venv
+
+# opcional: borrar también estado, logs y configuración de la app
+rm -rf ~/.mailquery
+```
+
+`pipx uninstall` **no** toca `~/.mailquery` (config, estado y logs viven fuera
+del venv). Tras actualizar o reinstalar, vuelve a ejecutar `mailquery doctor`.
+Con los scripts de despliegue, el ciclo completo es
+`scripts/install.sh` (actualiza/reinstala) y `scripts/install.sh --uninstall [--purge]`.
+
+### Dónde queda instalado
+
+En **macOS** (ruta que muestra `pipx list`):
+
+```text
+~/Library/Application Support/pipx/venvs/mailquery/   # entorno virtual aislado
+~/.local/bin/mailquery                                # lanzador (shim) en el PATH
+~/.mailquery/                                         # datos: config, state, logs, tmp
+```
+
+En Linux la ruta equivalente es `~/.local/pipx/venvs/mailquery/`.
+
+`pipx` mantiene cada app en su venv y solo enlaza el comando: desinstalar no
+deja residuos en el `site-packages` global.
+
+### Varios Python con pyenv
+
+- `pipx` instala cada app con **un intérprete concreto**; `pipx list` muestra
+  cuál usa cada una (por ejemplo, `installed using Python 3.15.2`).
+- Un `pipx` instalado con **Homebrew** usa por defecto el Python de Homebrew,
+  **no** el de pyenv. Si quieres el de pyenv, fíjalo explícitamente.
+- Fíjalo al instalar: `pipx install --python python3.14 .`; cámbialo después
+  con `pipx reinstall --python python3.14 mailquery`.
+- Requisito del proyecto: **Python ≥ 3.11** (`pyproject.toml` lo declara).
+- Si cambias de versión global en pyenv y `mailquery` deja de arrancar,
+  reinstala la app con el intérprete nuevo.
+
+### Permisos (FDA) después de instalar
+
+- El permiso de **Acceso total al disco** se concede a la **app que lanza** la
+  CLI (harness, Terminal, iTerm, VS Code…), **no** al venv de pipx.
+- `mailquery doctor` es el *preflight* obligatorio: si los chequeos `store` o
+  `accounts_db` fallan, revisa FDA antes de tocar la configuración.
+
+### Problemas típicos del despliegue
+
+| Síntoma | Causa | Solución |
+|---------|-------|----------|
+| `pipx: command not found` | `~/.local/bin` no está en el `PATH` de la sesión actual. | `pipx ensurepath` y abre una terminal nueva (`exec zsh`). |
+| `mailquery: command not found` | El shim de pipx no está en el `PATH`. | `pipx ensurepath`; comprueba `command -v mailquery` y `pipx list`. |
+| `pipx install .` dice que no encuentra `pyproject.toml` | No se ejecutó desde la raíz del repo. | `cd /Users/dayler/dev/github/mailquery` y repite. |
+| `mailquery` usa otro Python o falla con `ModuleNotFoundError` | La app quedó instalada con un intérprete inesperado. | Mira `pipx list` y ejecuta `pipx reinstall --python python3.14 mailquery`. |
+| Los cambios del repo no aparecen en el comando | `pipx` copió el paquete al venv. | `pipx reinstall mailquery` (o instala con `--editable`). |
+| `E_PERMISSION` al ejecutar | Falta FDA para la app que lanza el proceso. | Concede FDA y valida con `mailquery doctor`. |
+| Tras cambiar `pyenv global` deja de funcionar | El venv apunta a un intérprete que ya no es el de pyenv. | Reinstala con el intérprete actual o usa pipx de Homebrew. |
 
 ### Modo desarrollo (sin instalar)
 
@@ -256,6 +413,12 @@ reportan.
 
 Reglas generales:
 
+- Hay una **plantilla comentada** en
+  [`docs/config.example.toml`](docs/config.example.toml); los instaladores
+  (`scripts/install.sh`, `scripts/install.ps1`) la copian a
+  `~/.mailquery/config.toml` **solo si el archivo no existe**. La plantilla no
+  declara ninguna cuenta, así que el comportamiento por defecto sigue siendo
+  `W_NO_ACCOUNTS` hasta que edites el archivo.
 - Solo se admiten las claves documentadas en este README/PRD; cualquier clave o
   sección desconocida produce `E_CONFIG_INVALID` (exit 2), para que un *typo*
   no pase desapercibido.
@@ -896,6 +1059,9 @@ python3 -m unittest tests.test_store -v           # un módulo
   se considera verde si ese test falla.
 - La validación de contenido se hace contra los fixtures; no se necesita FDA
   para los tests, pero sí para una corrida real.
+- Los instaladores tienen sus propias pruebas (`tests.test_install_scripts`:
+  sintaxis de `sh`, `--help`, `--dry-run`, plantilla de config y reglas de no
+  sobrescritura).
 
 ---
 
@@ -903,8 +1069,15 @@ python3 -m unittest tests.test_store -v           # un módulo
 
 ```bash
 # Actualizar el código y reinstalar el comando
+cd /Users/dayler/dev/github/mailquery
 git pull
 pipx reinstall mailquery
+
+# Ver el estado del despliegue
+pipx list
+
+# Actualizar todas las apps instaladas con pipx
+pipx upgrade-all
 
 # Desinstalar
 pipx uninstall mailquery
@@ -915,7 +1088,19 @@ rm -rf ~/.mailquery
 
 `pipx uninstall` elimina el comando y su entorno aislado, pero **no** toca
 `~/.mailquery`. Después de actualizar, ejecuta `mailquery doctor` para validar
-el entorno y los permisos.
+el entorno y los permisos. El detalle completo del despliegue (instalar pipx,
+fijar el intérprete, `--editable`, problemas típicos) está en
+[Despliegue e instalación](#despliegue-e-instalación).
+
+Alternativa con los instaladores del repo:
+
+```bash
+scripts/install.sh                        # actualiza/reinstala y conserva la config
+scripts/install.sh --uninstall            # desinstala el comando
+scripts/install.sh --uninstall --purge    # además borra ~/.mailquery
+# Windows:
+#   .\scripts\install.ps1 -Uninstall -Purge
+```
 
 ---
 
