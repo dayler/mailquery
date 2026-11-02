@@ -184,8 +184,10 @@ min/h/d, 1 min–1 día (para `[new].lookback`).
 `run_show(store, labels, uid)`,
 `run_mailboxes(store, config, labels)`.
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
-añade `cli`). Semántica de fechas: `--since` incluye, `--until` excluye; orden
-total `(date_received DESC, ROWID DESC)`; dedupe por `global_message_id` con
+añade `cli`). Semántica de fechas: `--since` incluye, `--until` excluye.
+Orden total: `search` = `(date_received DESC, ROWID DESC)`; `new` = ASCENDENTE
+`(date_received ASC, uid ASC)` para que "el cursor avanza hasta el último
+emitido" sea el más reciente (PRD 12.3). Dedupe por `global_message_id` con
 prioridad INBOX > carpeta normal > buzón agregado; `duplicate_count` = copias
 en el alcance (≥ 1); límites y `truncated`/`hint` según PRD 12.2/12.3.
 `--text` obliga a acotamiento (ver §6) y máximo de candidatos (`[search].max_scan`).
@@ -207,14 +209,18 @@ según `errors.CODE_EXIT`; lock automático; `doctor` devuelve exit 0 con
 Los warnings son strings `"W_CODIGO: detalle"`. Códigos previstos:
 `W_NO_ACCOUNTS`, `W_FIRST_RUN`, `W_ACCOUNT_LABELS_UNAVAILABLE`,
 `W_EMLX_MISSING`, `W_EMLX_CORRUPT`, `W_EMLX_UNREADABLE`, `W_HTML_NO_TEXT`,
-`W_BODY_TRUNCATED`, `W_ATTACHMENTS_UNAVAILABLE`.
+`W_BODY_TRUNCATED`, `W_ATTACHMENTS_UNAVAILABLE`, `W_RESULTS_TRUNCATED`.
 
 ### `search`
 ```json
-{"count": 1, "truncated": false,
+{"count": 1, "truncated": false, "hint": null,
  "messages": [<message>],
  "scan": {"mode": "metadata", "candidates": 1, "messages_read": 1, "duration_ms": 211}}
 ```
+`hint` (RF-15) es `null`/ausente cuando `truncated=false`; cuando
+`truncated=true` es un string accionable, p. ej. `"refina los filtros o sube
+--limit (máx. 200)"`, y además se emite
+`W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`.
 
 ### `new`
 Igual que `search` más:
@@ -281,7 +287,14 @@ Sin `generated_at` (contrato de error del PRD 12.5).
 3. Validación solo con fixtures sintéticos (nunca el store real).
 4. Licencia MIT, titular `Ariel Dayler Salzar Hinojosa`, año 2026.
 5. **Primera corrida de `new`** (sin `state.json`): baseline sin emisión; fija
-   el cursor en el mensaje más reciente del alcance y emite `W_FIRST_RUN`.
+   el cursor en el mensaje más reciente del alcance, siembra el anillo
+   `emitted_uids` con los uids del alcance dentro de la ventana
+   `[cursor_date - lookback, cursor_date]` (para que la siguiente corrida no
+   los re-emita) y emite `W_FIRST_RUN`. Con cursor existente: candidatos
+   `date_received >= cursor.last_date_received - lookback` menos el anillo,
+   orden `(date_received, uid)`, límite de la corrida, cursor avanza hasta el
+   último emitido y los uids emitidos entran al anillo; `--peek` no avanza el
+   cursor ni escribe estado.
 6. **Términos de filtro**: si el valor **no** tiene comodines, se parte por
    espacios y cada término es AND; si tiene `*`/`?`, el valor entero es un
    patrón único (permite frases). Repetir un flag también es AND.
