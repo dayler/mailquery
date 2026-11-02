@@ -25,6 +25,21 @@ LEVELS: dict[str, int] = {
 
 _current_run_id: str = "-"
 
+# A NullHandler keeps library-style usage (and the test suite) from leaking
+# warnings to ``stderr`` through logging's last-resort handler. The CLI replaces
+# it with the rotating file handler via ``setup_logging``.
+logging.getLogger("mailquery").addHandler(logging.NullHandler())
+
+
+def _close_handlers(logger: logging.Logger) -> None:
+    """Remove and close every handler so repeated runs do not leak fds."""
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except (OSError, ValueError):  # pragma: no cover - best effort cleanup
+            pass
+
 
 def setup_logging(home: Path, level: str = "info", retention_days: int = 7) -> str:
     """Configure the ``mailquery`` logger and return the run id.
@@ -41,7 +56,7 @@ def setup_logging(home: Path, level: str = "info", retention_days: int = 7) -> s
     log_path = log_dir / "mailquery.log"
 
     logger = logging.getLogger("mailquery")
-    logger.handlers.clear()
+    _close_handlers(logger)
     logger.setLevel(LEVELS.get(level, logging.INFO))
     logger.propagate = False
 
