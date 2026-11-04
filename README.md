@@ -72,6 +72,62 @@ En Windows, el borrado opcional es `Remove-Item -Recurse -Force $HOME\.mailquery
 `~/.mailquery`. Para ejecutar sin instalar, ver
 [`docs/INTERFACES.md` §8](docs/INTERFACES.md).
 
+## Ejecutar los tests
+
+Los tests se ejecutan **desde el clon del repositorio** con un Python ≥ 3.11;
+`tests/` no forma parte del paquete que instala `pipx`. Se pueden correr antes
+o después de instalar: la suite importa el código de `src/` y **no usa** la
+copia instalada ni toca el `~/.mailquery` real (cada test usa un `HOME`
+temporal). Solo `unittest` de la biblioteca estándar; no hace falta `pytest`.
+
+**Windows** (PowerShell, desde la raíz del repo):
+
+```powershell
+python -m pip install --user pywin32                      # una vez, como en la CI
+python -B -m unittest discover -s tests -t . -v           # suite completa
+python -B -m unittest discover -s tests -t . -k ol_02_05  # un caso por ID
+python -B -m unittest tests.test_outlook -v               # un módulo
+```
+
+**macOS** (Terminal, desde la raíz del repo; el `python3` del sistema es
+anterior a 3.11, se usa el de Homebrew con `brew install python`):
+
+```bash
+python3 -B -m unittest discover -s tests -t . -v           # suite completa
+python3 -B -m unittest discover -s tests -t . -k st_03_01  # un caso por ID
+python3 -B -m unittest tests.test_store -v                 # un módulo
+```
+
+**Linux** (solo desarrollo y CI; mismos comandos que macOS con `python3` ≥ 3.11):
+
+```bash
+python3 -B -m unittest discover -s tests -t . -v
+```
+
+Resultado esperado: `OK`, con saltos (`skipped=N`) solo donde la prueba no
+aplica al equipo:
+
+| Prueba | Se salta cuando |
+|--------|-----------------|
+| `tests/test_smoke.py` (SMOKE-INSTALL, SMOKE-NEW) | Linux; Windows sin Outlook clásico abierto; macOS sin `~/Library/Mail`; `pipx` no está en el `PATH` |
+| `InstallShTest` | no hay `sh` en el `PATH` (habitual en PowerShell) |
+| `InstallPs1Test` | no hay PowerShell (`pwsh`) |
+| `UT-INS-01`, `OL-05.02` | el SO no es Windows |
+
+Las pruebas SMOKE son las únicas que leen el cliente de correo real, siempre en
+solo lectura: instalan `mailquery` con `pipx` en directorios temporales (no
+tocan tu instalación), ejecutan los comandos y comprueban que los no leídos no
+cambian y que se cumplen los tiempos de §19 del PRD. Tardan unos minutos. En
+macOS, la app de terminal que las ejecuta necesita **Acceso total al disco**.
+Para correr solo las SMOKE:
+
+```bash
+python -B -m unittest tests.test_smoke -v    # python3 en macOS
+```
+
+Convenciones (nombres por ID de caso, goldens, Outlook falso, CI): ver
+[`docs/INTERFACES.md` §8](docs/INTERFACES.md).
+
 ## Primeros pasos
 
 ```bash
