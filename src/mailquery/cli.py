@@ -12,13 +12,10 @@ import argparse
 from dataclasses import replace
 import logging
 import os
-import platform
-import shutil
 import stat
 import sys
 import textwrap
 import time
-import traceback
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -170,6 +167,8 @@ class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
 def _help_width() -> int:
     """Return a stable help width between 80 and 100 columns."""
     try:
+        import shutil  # lazy: pulls bz2/lzma/zstd, only needed for help width
+
         columns = shutil.get_terminal_size(fallback=(100, 24)).columns
     except OSError:  # pragma: no cover - exotic environments
         columns = 100
@@ -200,6 +199,8 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 def _version_line() -> str:
     """Return the ``--version`` line (RF-31, PRD 12.9) without touching any backend."""
+    import platform  # lazy: pulls _wmi on Windows, only needed for --version
+
     if sys.platform == "win32":
         backend = "outlook"
         system = f"Windows {platform.version()} {platform.machine()}"
@@ -1130,6 +1131,8 @@ def _log_error(logger: Any, command: str, error: MailqueryError) -> None:
     if error.code == "E_INTERNAL" and error.__traceback__ is not None:
         # PRD 14: an E_INTERNAL (a COM failure included) also logs its traceback.
         # Only the frames and the exception type: the message is already sanitized above.
+        import traceback  # lazy: only needed when logging an E_INTERNAL
+
         frames = "".join(traceback.format_tb(error.__traceback__)).rstrip("\n")
         kind = f"{type(error).__module__}.{type(error).__qualname__}"
         logger.error(

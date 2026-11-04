@@ -412,17 +412,24 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
 # --------------------------------------------------------------------------- #
 
 
-def listed_mailboxes(backend: "MailBackend") -> list["MailboxRow"]:
+def listed_mailboxes(
+    backend: "MailBackend", account_uuids: Sequence[str] | None = None
+) -> list["MailboxRow"]:
     """The backend's folders when only their identity matters (scope, display, hints).
 
     A backend whose ``total``/``unread`` cost a table scan per folder (Outlook)
     offers ``mailboxes_without_counters()``: the same rows without counting.
     Only the ``mailboxes`` command needs the counters (PRD 19, annex B.9);
-    other backends answer with ``mailboxes()``.
+    other backends answer with ``mailboxes()``. ``account_uuids`` tells that
+    only the folders of those accounts are used: the hook may then list (and
+    read) only those (Outlook walks one store's folder tree per account); other
+    backends return every folder, as without it.
     """
     without_counters = getattr(backend, "mailboxes_without_counters", None)
     if callable(without_counters):
-        return list(without_counters())
+        if account_uuids is None:
+            return list(without_counters())
+        return list(without_counters(list(account_uuids)))
     return list(backend.mailboxes())
 
 
@@ -446,7 +453,6 @@ def resolve_scope(
 
     accounts = list(backend.accounts())
     labels_available = bool(backend.labels_available)
-    backend_mailboxes = listed_mailboxes(backend)
 
     declared_order: list[str] = []
     declared_refs: dict[str, list[str]] = {}
@@ -467,6 +473,8 @@ def resolve_scope(
                 merged_refs.append(ref)
 
     by_uuid = {account["uuid"]: account for account in accounts}
+    # Only the declared accounts' folders are used (PRD 19: Outlook reads no other store).
+    backend_mailboxes = listed_mailboxes(backend, declared_order) if declared_order else []
     resolved: list[ResolvedScope] = []
     for account_uuid in declared_order:
         account_mailboxes = [
