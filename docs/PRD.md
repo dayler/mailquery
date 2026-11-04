@@ -24,7 +24,7 @@
 | **1.0** | **Cambio de alcance: soporte de Windows + Outlook clásico sin perder macOS + Apple Mail.** El PRD pasa a ser el núcleo común (CLI, contrato JSON, configuración, cursor, errores, invariante I-1 generalizado) y lo específico de cada cliente se traslada a anexos por backend. Nuevos: interfaz de backend (ADR-10), Outlook vía COM (ADR-11), `uid` string en Windows (ADR-12), sin lanzar Outlook y exit 6 `E_OUTLOOK_NOT_RUNNING` (ADR-13), `pywin32` solo en Windows (ADR-14), stores locales de cuentas + PST (ADR-15). Flag global `-v`/`--version` (RF-31, §12.9). Correcciones de paridad que **cambian macOS** (§22.2): `show` limitado a las cuentas declaradas, la primera corrida de `new` emite la ventana de lookback, `[new].lookback` aplica de inmediato, `W_EMLX_UNREADABLE` pasa a `W_BODY_UNREADABLE`, `mailboxes` añade `excluded_stores`, la salida es siempre UTF-8 y JSON formateado, y los logs rotan por tamaño (`max_size_mb` sustituye a `retention_days`). |
 | **1.1** | Sin ampliar el alcance: completa la lista de todos los cambios de macOS que el PRD exige, resuelve las contradicciones y ambigüedades de tres revisiones independientes y elimina redundancias (cada regla tiene una sola sección dueña). |
 | **1.2** | Sin cambiar el producto, ajusta el documento al estándar de un PRD, con la arquitectura como excepción porque no hay TRD: retira la planificación, la implementación y la estrategia de pruebas. |
-| **1.3** | Sin cambiar el producto: un solo documento. Integra lo que es PRD de los anexos por backend y elimina el resto (implementación, escenarios y casos de prueba, mediciones); quedan como anexos (§24) el resumen del spike de Outlook, los hechos verificados en macOS, los ejemplos de invocación y el glosario. Elimina la tabla de decisiones cerradas (cada decisión vive en su ADR o en su sección) y los escenarios de los criterios de aceptación. |
+| **1.3** | Sin cambiar el producto: un solo documento. Integra lo que es PRD de los anexos por backend y elimina el resto (implementación, escenarios y casos de prueba, mediciones); quedan como anexos (§24) el resumen del spike de Outlook, los hechos verificados en macOS, las alternativas evaluadas, el registro de decisiones, los ejemplos de invocación y el glosario. Elimina los escenarios de los criterios de aceptación. |
 
 ---
 
@@ -60,7 +60,7 @@ Las alternativas genéricas son frágiles o inseguras:
 - IMAP / Microsoft Graph / EWS: duplicarían credenciales, red y superficie de escritura.
 - Un índice propio de mensajes: duplicaría correo privado y añadiría sincronización, invalidación y desincronización.
 
-Las alternativas descartadas para cada cliente están en ADR-01 y ADR-11.
+Las alternativas descartadas para cada cliente están en ADR-01 y ADR-11 (detalle en el Anexo C).
 
 ---
 
@@ -1280,7 +1280,61 @@ parseo de un `.emlx` medio en ~3,7 ms. Un escaneo de contenido sin acotar
 costaría ~4 minutos: por eso RF-17 exige filtros y un máximo de candidatos
 (`[search].max_scan`, §15.1). Los presupuestos p95 están en §19.
 
-### Anexo C — Ejemplos de invocación
+### Anexo C — Alternativas evaluadas por cliente
+
+**Apple Mail (macOS)** — decisión: ADR-01.
+
+| Vía | Veredicto | Motivo |
+|-----|-----------|--------|
+| Leer el store en disco (`Envelope Index` + `.emlx`) | **Elegida** | Solo lectura estructural; sin credenciales ni red. |
+| AppleScript | Descartada | El diccionario de Mail expone el estado de lectura como propiedad escribible: no hay garantía estructural de no mutar; exige Mail abierto y permiso de Automation. |
+| IMAP | Descartada | Duplicaría credenciales, red y superficie de escritura (§2). |
+| Spotlight | Descartada | `mdfind` no indexa el store (Anexo B). |
+
+Herramientas existentes (p. ej. Fruitmail) confirman el camino técnico. `mailquery` se diferencia en que **no usa AppleScript en ningún caso** y **no ofrece ninguna operación de escritura**.
+
+**Outlook clásico (Windows)** — decisión: ADR-11, ADR-13 y ADR-14.
+
+| Vía | Veredicto | Motivo |
+|-----|-----------|--------|
+| **Outlook Object Model (OOM) vía COM** | **Elegida** | Única API local y soportada de lectura; funciona con stores en caché sin red. |
+| Parsear `.ost`/`.pst` directamente | Descartada | Formato propietario; el `.ost` está bloqueado en exclusiva mientras Outlook corre. |
+| Microsoft Graph / EWS | Descartada | Red, OAuth y credenciales; rompe I-1. |
+| MAPI de terceros / Windows Search | Descartada | Dependencias nativas o índice parcial; no aportan frente al OOM. |
+
+### Anexo D — Registro de decisiones
+
+| Pregunta original | Decisión |
+|-------------------|----------|
+| ¿Nombres visibles de cuenta? | Etiqueta legible resuelta en solo lectura; UUID como fallback (§15.2). |
+| ¿Búsqueda de contenido sin filtros? | No (§22.1). |
+| ¿Salida markdown? | No: solo JSON (ADR-04). |
+| ¿Retención de logs? | Rotación por tamaño en lugar de diaria (§14; 2026-11-03). |
+| ¿Frecuencia de tareas? | La decide el harness (ADR-05). |
+| ¿Adjuntos? | Solo nombres y `has_attachments`, sin tamaño ni MIME (RF-04). |
+| ¿Múltiples `V*` (macOS)? | La versión que usa Mail, sin override (§15.6). |
+| ¿Base de datos propia? | No (ADR-02). |
+| ¿Cómo se instala? | Con `pipx` en ambas plataformas (ADR-08). |
+| ¿Encabezado `[scope]` explícito? | No hace falta (§15.1). |
+| ¿Cómo se "observa" una cuenta? | Solo si está declarada (ADR-06, §15). |
+| ¿Qué pasa si no hay cuentas declaradas? | No se observa ninguna (§15.3). |
+| ¿Config ampliada? | Secciones `[logging]`, `[search]` y `[new]` (§15.1). |
+| **¿Un PRD nuevo para Windows?** (2026-11-03) | No: un único PRD para ambas plataformas (ADR-10). |
+| **¿Anexos por backend?** (2026-11-04) | No: un solo documento; los anexos (§24) son material de apoyo. |
+| **¿Cómo se identifica un mensaje de Outlook?** (2026-11-03) | `uid` string (ADR-12). |
+| **¿Qué pasa si Outlook está cerrado?** (2026-11-03) | Error con exit 6, sin lanzarlo (ADR-13). |
+| **¿Qué dependencia COM?** (2026-11-03) | `pywin32` (ADR-14). |
+| **¿Qué stores de Outlook?** (2026-11-03) | Locales de las cuentas del perfil + PST (ADR-15). |
+| **¿Nuevo Outlook (`olk`)?** (2026-11-03) | Fuera de alcance (§3.3). |
+| **¿Cómo se consulta la versión?** (2026-11-03) | Opción global `-v`/`--version` (RF-31, §12.9). |
+| **Revisión de la v1.0: datos y búsqueda** (2026-11-03) | Mensaje sin identificador global, acotamiento de `--to`/`--cc` en Windows, S/MIME, `W_BODY_UNREADABLE` y UTF-8 (RF-07, RF-17, RF-05, §12.10, RF-32). |
+| **Revisión de la v1.0: `show` y `new`** (2026-11-03) | `show` solo en cuentas declaradas; primera corrida y lookback de `new`; re-emisiones aceptadas (§12.4, §12.3, §18). |
+| **Revisión de la v1.0: Outlook** (2026-11-03) | Timeout, alcance y exclusión de stores, `INBOX`, carpetas ocultas, contadores, detección del cliente, caché de `pywin32`, `home` y `object_model_guard` (RF-33, §15.7, §11.3, §12.6, §9.3, §12.8, §12.8). |
+| **Revisión del implementador** (2026-11-03) | Timeout dentro de `doctor`, `show` de un store excluido y cambios de macOS completos (§12.8, §12.4, §11.3, §22.2). |
+| **Tercera revisión independiente** (2026-11-03) | Propiedades de nivel store y `unavailable`, `[scope]` en `show`, warnings en el log, LF, resolución de carpetas y fechas futuras en `new` (§4, §15.7, §12.4, §14, RF-32, §15.3, §12.3). |
+| **Revisión final** (2026-11-03) | Direcciones, marcado, adjuntos ocultos y `account.uuid` en Outlook (§11.3). |
+
+### Anexo E — Ejemplos de invocación
 
 ```bash
 # Ayuda y diagnóstico (search/new necesitan al menos una cuenta declarada en ~/.mailquery/config.toml)
@@ -1312,7 +1366,7 @@ mailquery show 83143                  # macOS
 mailquery show 00000000A1B2C3D4…      # Windows
 ```
 
-### Anexo D — Glosario
+### Anexo F — Glosario
 
 - **Backend:** implementación de la interfaz de backend (§9.2) para un cliente de correo concreto (Apple Mail u Outlook clásico).
 - **Cursor:** marca de agua `(fecha de recepción, uid)` que da a `new` su semántica de procesamiento único.
