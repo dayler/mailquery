@@ -1,6 +1,6 @@
 # Backend Apple Mail (macOS) — anexo del PRD
 
-**Documento padre:** [`docs/PRD.md`](../PRD.md) v1.1, que manda sobre este anexo.
+**Documento padre:** [`docs/PRD.md`](../PRD.md) v1.2, que manda sobre este anexo.
 **Plataforma:** macOS con Apple Mail.
 **Estado:** implementado y validado (contenido trasladado desde el PRD v0.13).
 
@@ -9,8 +9,7 @@ invariante I-1, cómo se localiza y lee el store, las reglas del modelo de datos
 de origen y los permisos de macOS. Lo común a todas las plataformas (CLI,
 contrato JSON, configuración, cursor, errores) vive en el PRD.
 
-> **Regla de compatibilidad:** la versión 2.0.0 cambia en este backend
-> exactamente lo listado en PRD §23.3.
+> **Regla de compatibilidad:** PRD RNF-11.
 
 ---
 
@@ -19,15 +18,14 @@ contrato JSON, configuración, cursor, errores) vive en el PRD.
 - AppleScript: el diccionario de Mail expone el estado de lectura como
   propiedad escribible; no hay garantía estructural de no mutar, y exige Mail
   abierto y permiso de Automation.
-- IMAP: duplicaría credenciales, red y superficie de escritura.
-- Spotlight: `mdfind` no indexa el store (0 resultados verificado).
+- IMAP: PRD §2.
+- Spotlight: `mdfind` no indexa el store (§A.11).
 
 Herramientas existentes (p. ej. Fruitmail) confirman el camino técnico.
 `mailquery` se diferencia en que **no usa AppleScript en ningún caso** y **no
 ofrece ninguna operación de escritura**.
 
-**Decisión (ADR-01):** leer el **almacén en disco**: `Envelope Index`
-(metadatos) + `.emlx` (cuerpo). Read-only estructural; sin credenciales ni red.
+**Decisión:** ADR-01 (PRD §8).
 
 ---
 
@@ -41,7 +39,7 @@ Concreción del invariante general (PRD §4):
 
 Además del store de Mail, la única otra base que se abre es
 `~/Library/Accounts/Accounts4.sqlite` (solo lectura, para etiquetas de cuenta);
-nunca se escribe en ella ni se leen credenciales.
+nunca se escribe en ella (lectura de cuentas: PRD §4).
 
 Garantía **estructural** (la impone el sistema, no solo el código):
 
@@ -50,11 +48,9 @@ Garantía **estructural** (la impone el sistema, no solo el código):
 2. Si Mail está cerrado, no se abre la base viva: se copia a
    `~/.mailquery/tmp/` y se lee la copia (evita que SQLite cree archivos dentro
    del store) (§A.4).
-3. Toda escritura del proyecto se confina a `~/.mailquery`.
-4. `mailquery doctor` reporta la estrategia de conexión (`live_ro`/`copy_ro`).
 
 Leer un `.emlx` no toca el estado de Mail: el flag de lectura vive en el
-`Envelope Index` y `mailquery` nunca lo modifica. Verificación: §A.10.
+`Envelope Index` y `mailquery` nunca lo modifica. Criterio de aceptación: §A.10.
 
 ---
 
@@ -62,10 +58,8 @@ Leer un `.emlx` no toca el estado de Mail: el flag de lectura vive en el
 
 - La versión del store (`V9`/`V10`/`V11`) se toma de la que usa Mail
   (`PersistenceInfo.plist`), validando el esquema.
-- La ruta de cada `.emlx` se calcula por fórmula O(1) a partir de la URL de la
-  carpeta y el uid, sin escanear (validada en el equipo de referencia:
-  66.028/66.028 = 100 %). Si la fórmula falla hay un fallback recursivo; si el
-  archivo no existe, `body.available=false` + `W_EMLX_MISSING`.
+- La ruta de cada `.emlx` se obtiene a partir de la carpeta y el uid, sin
+  escanear el store (§A.11); si el archivo no existe, `body.available=false` + `W_EMLX_MISSING`.
 - Los `.emlx` sin fila en el índice (huérfanos) se ignoran.
 - `.partial.emlx` no es un stub: el mensaje está completo salvo los adjuntos
   externalizados; se lee tal cual y se marca `partial=true`. De los adjuntos
@@ -79,12 +73,12 @@ El `Envelope Index` está en WAL. **No es necesario que Mail.app esté abierto**
 
 | Situación | Estrategia |
 |-----------|-----------|
-| Mail abierto (existe el `-shm`) | Abrir la base viva en solo lectura (verificado: sin cambios en el store). Estrategia `live_ro`. |
+| Mail abierto (existe el `-shm`) | Abrir la base viva en solo lectura. Estrategia `live_ro`. |
 | Mail cerrado (no existe el `-shm`) | Copiar la base (y su WAL) a `~/.mailquery/tmp/` y abrir la copia. Estrategia `copy_ro`. |
 | Base bloqueada | Reintentar una vez tras 100 ms; si persiste, `E_DB_BUSY` (exit 5). |
 
 Se prohíbe el modo `immutable` sobre la base viva: ignora el WAL y devolvería
-datos obsoletos (verificado).
+datos obsoletos (§A.11).
 
 ---
 
@@ -104,7 +98,7 @@ de referencia):
   son buscables.
 - No hay cuerpos en la base: el contenido **siempre** se lee del `.emlx`.
 - Fechas en segundos Unix.
-- Las columnas obligatorias se detectan al abrir (nunca `SELECT *`); si falta
+- Las columnas obligatorias se detectan al abrir; si falta
   alguna, `E_SCHEMA_UNSUPPORTED`.
 
 ### A.5.2 Etiquetas de cuenta (`Accounts4.sqlite`, solo lectura)
@@ -119,11 +113,8 @@ Los UUID de cuenta del store de Mail coinciden con los identificadores de
   deshabilitadas y solo funciona el UUID: `doctor` lo advierte con
   `accounts_db` en fallo y los comandos de datos añaden
   `W_ACCOUNT_LABELS_UNAVAILABLE`.
-- Solo se leen identificadores y nombres visibles; **nunca** credenciales,
-  contraseñas ni tokens.
 
-**Decisión (ADR-09):** etiquetas desde `Accounts4.sqlite` en solo lectura; UUID
-como fallback.
+**Decisión:** ADR-09 (PRD §8).
 
 ### A.5.3 Correspondencia con el modelo común
 
@@ -149,15 +140,12 @@ como fallback.
 - El permiso se concede a la **app que lanza el proceso** (harness, Terminal,
   iTerm, VS Code…), **no** al venv de pipx, y se asocia a la identidad del
   binario: tras actualizar el intérprete o la app, verificar con `doctor`.
-- `doctor` es el *preflight* obligatorio; en ejecución headless no hay prompts.
 
 ---
 
 ## A.7 `doctor` en macOS
 
-Chequeos (nombres estables de `checks[].name`): `python`, `home`, `store`,
-`envelope_index`, `schema`, `readonly_strategy`, `accounts_db`, `config`,
-`state`, `lock`.
+Chequeos: PRD §12.8.
 
 | Chequeo | Qué valida |
 |---------|------------|
@@ -167,12 +155,11 @@ Chequeos (nombres estables de `checks[].name`): `python`, `home`, `store`,
 | `readonly_strategy` | `live_ro` o `copy_ro` (§A.4). |
 | `accounts_db` | `Accounts4.sqlite` legible y número de etiquetas disponibles. |
 
-Dependencias (un chequeo cuya dependencia directa falló sale como
-`not evaluated: <dependencia> failed`, PRD §12.8):
+Dependencias (regla: PRD §12.8):
 
 - `store` → `envelope_index`;
 - `envelope_index` → `schema` y `readonly_strategy`;
-- `schema` → resolución de bloques de `config` (la sintaxis se valida siempre).
+- `schema` → resolución de bloques de `config`.
 - `python`, `home`, `accounts_db`, `state` y `lock` no dependen de otro
   chequeo.
 
@@ -183,11 +170,7 @@ Dependencias (un chequeo cuya dependencia directa falló sale como
 | Situación | Comportamiento |
 |-----------|----------------|
 | Store ausente o versión no soportada | `E_STORE_NOT_FOUND` / `E_SCHEMA_UNSUPPORTED`, exit 3, con rutas/versión detectada. |
-| FDA denegado | `E_PERMISSION`, exit 3, con instrucciones. |
-| `Envelope Index` bloqueado | Reintento único; si persiste `E_DB_BUSY`, exit 5. |
 | `.emlx` ausente, corrupto o ilegible, S/MIME o mensaje sin carpeta | Valores de `body` y warning: PRD §12.5. |
-| Etiqueta/email sin base de cuentas disponible | `E_ACCOUNT_LABELS_UNAVAILABLE`, exit 2, con hint para usar el UUID. |
-| Rebuild del índice de Mail | Los uid pueden cambiar; `new` es tolerante (fecha), `show` debe repetir la búsqueda. |
 
 ---
 
@@ -201,12 +184,10 @@ costaría ~4 minutos: por eso RF-17 exige filtros y un máximo de candidatos
 
 ---
 
-## A.10 Verificación de solo lectura
+## A.10 Criterio de aceptación de solo lectura
 
-Test de integración **bloqueante** en CI: compara hashes y `mtime` de cada
-archivo de un store sintético antes y después de ejecutar todos los comandos,
-y verifica que no se crean archivos nuevos en el store. Los goldens JSON de
-este backend fijan su contrato (PRD RNF-11).
+Tras ejecutar todos los comandos sobre un store, ningún archivo del store cambia
+de contenido ni de `mtime` y no aparece ningún archivo nuevo en él.
 
 ---
 
