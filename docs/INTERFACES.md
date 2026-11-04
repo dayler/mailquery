@@ -73,8 +73,10 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 ```
 
 `outlook.py`, `outlook_com.py` y `tests/fakes/` llegan en la fase W3: con ellos
-`get_backend(platform="win32")` da `mailboxes`, `search` (metadatos) y `show`;
-`new`, `--text`/`--to`/`--cc` y `doctor` de Outlook son de la fase W4.
+`get_backend(platform="win32")` da `mailboxes`, `search` (metadatos) y `show`.
+La fase W4 completa Outlook: `new` (uids hex en `state.json`), `--text`,
+`--to`/`--cc` acotados (RF-17), `doctor` (§B.8) y exit 6 de punta a punta; los
+5 comandos tienen todos sus flags en ambos backends.
 
 Reglas globales:
 
@@ -263,6 +265,10 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 | `mailboxes_without_counters()` | `config.listed_mailboxes` | Outlook: carpetas sin leer las tablas de contadores (`total`/`unread` = `None`) |
 | `not_found_hint` (atributo) | `search.run_show` | Outlook: el hint de `message uid … was not found` remite a `excluded_stores` |
 | `unreadable_attachments(row)` | `search.run_show` | Outlook: `(nombres, warning)` de un item ilegible: `[]` y `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` y no es S/MIME (PRD §12.10) |
+| `recipients_open_items` (atributo) | `search.run_search` | Outlook (`True`): `--to`/`--cc` abren cada item, así que se validan como `--text` (acotamiento y `max_scan`), no acotan y se aplican después de contar los candidatos (RF-17) |
+| `items_opened` (propiedad) | `search.run_search`, `search.run_new` | Outlook: items distintos abiertos por la instancia; `scan.messages_read` = la diferencia durante el comando (en Apple Mail sigue siendo los cuerpos leídos) |
+| `load_snippet(row)` | `search.run_search`, `search.run_new` | Outlook: `load_body` sin adjuntos ni cabeceras de transporte (solo los usa `show`; PRD §19) |
+| `bind_doctor_timeout(finish)` | `cli._run_doctor` | Outlook (D-03): al vencer el plazo COM durante `doctor`, el vigilante llama a `finish(backend_checks, detail)` (ver `cli.py`) |
 
 ### `backends/outlook.py`
 `OutlookBackend(*, outlook_app=None, registry=None, security_center=None,
@@ -285,10 +291,41 @@ tests). No abre nada hasta el primer uso; toda llamada COM pasa por
   fechas UTC, prefiltro DASL ensanchado y corte exacto en Python);
   `find_message` identifica el store por los bytes 4..20 del `EntryID`;
   `load_body` nunca descarga (S/MIME y solo cabeceras sin leer contenido).
+  Por comando, cada item se abre una vez mientras siga en caché (los 200
+  primeros abiertos y el último) y los destinatarios de cada uid se leen una
+  vez; `close()` vacía las cachés.
 - `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
+- `check_state_uid(uid) -> None` (estático): regla de `state.json` en Windows
+  (PRD §11.2): string no vacío de hex en mayúsculas; un entero (uid de Apple
+  Mail), minúsculas o `""` lanzan `StateUidError` con los detalles de
+  `E_STATE_CORRUPT` de Outlook. Solo comparte con `parse_uid` la expresión
+  hexadecimal (D-05).
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
   "com_readonly", schema_ok: True}` para el log.
-- `doctor_checks()`: fase W4.
+- `new`: lo resuelve el núcleo (`search.run_new`) con la interfaz común; el
+  estado guarda uids hex validados por `check_state_uid`. Un mensaje movido
+  por el usuario cambia de `EntryID` y se reemite una vez con su uid nuevo
+  (PRD §12.3, §18).
+- `doctor_checks() -> list[dict]`: `pywin32`, `outlook`, `stores`,
+  `readonly_strategy` y `object_model_guard`, devueltos en el orden de PRD
+  §12.8 (`DOCTOR_CHECKS`) y evaluados en el de D-03: primero los que no llaman
+  a Outlook (`pywin32`, `object_model_guard`), después `outlook`,
+  `readonly_strategy` (sin llamadas COM) y `stores` (`DOCTOR_COM_CHECKS`). Un
+  chequeo cuya dependencia directa (`DOCTOR_DEPENDENCIES`, §B.8) falló sale
+  `not evaluated: <dependencia> failed`; un error del chequeo sale en su
+  `detail` con su hint. Nunca lanza Outlook (solo `GetActiveObject`).
+  `object_model_guard` (§B.6) lee las directivas con `outlook_com.oom_policy`
+  y, si ninguna decide, el antivirus (`security_center` inyectado o
+  `outlook_com.WmiSecurityCenter`); si SecurityCenter2 no responde, `not
+  evaluated: SecurityCenter2 unavailable`. `stores` resume
+  `N candidate(s): <etiqueta> [<tipo>], …; M excluded: <etiqueta> at <ruta>
+  [<motivo>], …`.
+- `bind_doctor_timeout(finish)`: gancho de D-03 en `doctor`. El vigilante
+  llama a `finish(backend_checks, detail)` con los chequeos del backend
+  completados según PRD §12.8 (el que estaba en curso con `ok=false` y
+  `outlook_com.DOCTOR_TIMEOUT_DETAIL`, sus dependientes `not evaluated`), o con
+  `None` si no había ningún chequeo del backend en curso (el plazo venció en la
+  resolución de `config`).
 
 ### `backends/outlook_com.py`
 Único módulo que importa `win32com`/`pythoncom`/`pywintypes`, siempre dentro
@@ -310,7 +347,21 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   esperados por `hresult`). `cli` registra todo `E_INTERNAL`, también este,
   con su traceback (PRD §14).
 - Fuera del OOM, de solo lectura: `WinRegistry`, `get_drive_type(root)`
-  (punto de inyección para rutas de red) y `WmiSecurityCenter`.
+  (punto de inyección para rutas de red) y `WmiSecurityCenter(gen_path)`
+  (consulta WMI de `root\SecurityCenter2`; `antivirus_products()` devuelve
+  `[{displayName, productState}]` o lanza `OSError` si no se puede consultar;
+  la misma interfaz que el `security_center` inyectado de los tests).
+- `doctor` (§B.6, §B.8): `DOCTOR_TIMEOUT_DETAIL` (texto literal de PRD §12.8
+  para el chequeo en curso al vencer el plazo); constantes de la política del
+  Object Model Guard (`OOM_POLICY_KEY` en `HKCU`, `AdminSecurityMode`,
+  `PromptOOMAddressInformationAccess`, `PromptOOMAddressBookAccess`,
+  `OOM_DENY`/`OOM_PROMPT`/`OOM_APPROVE` y `OOM_SETTING_NAMES`);
+  `oom_policy(registry) -> (nombre, valor) | None` (la directiva que decide:
+  solo con `AdminSecurityMode = 3`; deniega o pregunta antes que aprueba; un
+  valor ausente o 3 no decide); `active_antivirus(products) -> list[str]`
+  (nombres con el bit `0x1000` de `productState`);
+  `pywin32_gen_path() -> str | None` (`win32com.__gen_path__` si `pywin32` ya
+  está importado; nunca lo importa).
 
 ### `backends/apple_mail.py`
 `AppleMailBackend(store=None, labels=None, *, mail_root=None,
@@ -459,6 +510,21 @@ su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
 `event=error`), el resto de códigos sin traceback (PRD §14); `doctor` devuelve exit 0 y muestra un **informe de texto
 human-readable** por defecto (`--json` para el payload máquina) aunque algún
 chequeo falle (decisión del usuario).
+Internos de `doctor` (no son API pública): `_DoctorRun(home_path)` guarda el
+progreso de una corrida (chequeos comunes terminados, `backend_checks` y la
+config ya leída) y lo comparte con el gancho de timeout; `.ordered()` los
+devuelve en el orden de PRD §12.8 y `.after_timeout(backend, backend_checks,
+detail)` completa el informe sin volver a llamar al cliente de correo.
+`_collect_doctor_checks` evalúa en el orden de D-03 (`python`, `home`,
+sintaxis de `config`, `state`, `lock`, los chequeos del backend y al final la
+resolución de `config`); `_record_config_check` resuelve cada bloque (o
+`not evaluated: <chequeo> failed` si falló su dependencia, `store` en Apple
+Mail y `stores` en Outlook) y añade `W_STORE_EXCLUDED` al `detail` con
+`ok=true` (PRD §15.3). `_bind_doctor_timeout` registra en el backend (si tiene
+`bind_doctor_timeout`) un `finish` que escribe el informe con
+`_emit_doctor_report(checks, json_output, logger, client)` (JSON o texto, más
+la línea `event=end` del log), hace `flush` de `stdout`, `stderr` y el log y
+termina con `os._exit(0)` (D-03).
 
 ## 4. Contrato JSON
 
@@ -538,8 +604,11 @@ siempre exit 0 si puede diagnosticar. Con `--json`, payload máquina:
 
 Chequeos comunes (los añade `cli.py`): `python`, `home`, `config`, `state`,
 `lock`. Los del backend (`MailBackend.doctor_checks()`) en Apple Mail son
-`store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`; los de
-Outlook están en el PRD §12.8. El chequeo
+`store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`; en
+Outlook, `pywin32`, `outlook`, `stores`, `readonly_strategy` y
+`object_model_guard` (PRD §12.8, §B.8; con Outlook cerrado, `outlook` falla
+con `E_OUTLOOK_NOT_RUNNING` y su hint, sus dependientes salen `not evaluated`
+y el exit sigue siendo 0). El chequeo
 `config` valida el TOML y **la resolución de cada bloque `[scope]` y su
 `mailbox_list`** contra el store y las etiquetas de cuenta (por entrada, con el
 `code`/`hint` de cada error); distingue config ausente de config presente sin
@@ -740,10 +809,19 @@ fechas fijas.
 comparar se normalizan los valores variables (`generated_at`,
 `duration_ms`, fechas ISO y epoch, ruta raíz temporal, separadores de ruta).
 `tests/fixtures/expected/outlook/` (`mailboxes`, `search`, `show`,
-`show_header_only`, `show_smime`; TC-02) son las del backend Outlook sobre
-`FakeOutlook.default()`, con la misma normalización y una zona local fija
-(`output.LOCAL_ZONE`, UTC−04:00); la config declara la cuenta Exchange y el
-buzón compartido excluido.
+`show_header_only`, `show_smime`, `new_first_run` y `doctor`; TC-02) son las
+del backend Outlook sobre `FakeOutlook.default()`, con la misma normalización y
+una zona local fija (`output.LOCAL_ZONE`, UTC−04:00); la config declara la
+cuenta Exchange y el buzón compartido excluido. El backend se construye con
+`tmp_root=<home>/tmp` (como hace `cli`) y con el `registry` y el
+`security_center` del fake, así que `doctor` es determinista.
+
+`tests/test_integration.py` también ejecuta, en **ambos backends** (store
+sintético con `DEFAULT_CONFIG` y `FakeOutlook.item_matrix()` con
+`INBOX/Facturas` declarada), cada comando `mailquery` de los bloques de código
+de `docs/recipes/` (TC-04, `<uid>` sustituido según el plan §7.4) y compara el
+conjunto recursivo de claves JSON de `search`, `new`, `show`, `mailboxes`, un
+error y `doctor --json` (TC-05).
 
 ### 8.5 Outlook falso (`tests/fakes/`)
 
@@ -757,8 +835,13 @@ argumentos) y `mutations` (asignaciones y miembros prohibidos; deben quedar en
 0). Fallos: `fail_next`, `reject_next`, `hang_next`/`release`. Escenarios
 (`SCENARIOS`): `default` (perfil de los goldens), `store_matrix`,
 `folder_matrix`, `item_matrix` y variantes sin instancia, sin registrar y con
-versión < 16. `tests/fakes/run_cli.py` ejecuta `cli.main` con el fake en un
-subprocess (tests del vigilante, que termina el proceso con `os._exit`).
+versión < 16 (`not_running` es la base de los tests de exit 6:
+cada comando de datos da `E_OUTLOOK_NOT_RUNNING` y `doctor` sale con exit 0).
+`tests/fakes/run_cli.py` ejecuta `cli.main` con el fake en un subprocess
+(tests del vigilante, que termina el proceso con `os._exit`). El gate de solo
+lectura de Outlook (OL-30, `test_outlook.OutlookReadOnlyGateTests`) barre los
+5 comandos con todos sus flags sobre todos los escenarios y exige miembros ⊆
+lista blanca, 0 asignaciones, 0 mutaciones y ningún código que §B.7 excluye.
 
 Para regenerarlos tras un cambio **intencional** del contrato:
 

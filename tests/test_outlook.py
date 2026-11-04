@@ -542,6 +542,12 @@ class RunCliTests(unittest.TestCase):
 HINT_DEPENDENCY = "pipx reinstall mailquery"
 HINT_UNSUPPORTED = "install classic Outlook (version 16.0 or later); the new Outlook is not supported"
 HINT_NOT_RUNNING = "open classic Outlook with the same user, without elevation, and retry"
+#: `checks[].name` of the Outlook doctor, in the order of PRD 12.8.
+_OUTLOOK_DOCTOR_CHECKS = (
+    "python", "home", "pywin32", "outlook", "stores", "readonly_strategy",
+    "object_model_guard", "config", "state", "lock",
+)
+_DOCTOR_TIMEOUT = "timeout after 30 s: Outlook did not respond (possible security prompt)"
 _DISPATCH_NAMES = frozenset({"Dispatch", "DispatchEx", "EnsureDispatch"})
 
 
@@ -948,7 +954,13 @@ class OutlookComErrorTests(_OutlookCliCase):
 
 
 class OutlookTimeoutTests(unittest.TestCase):
-    def run_hung_search(self) -> tuple[subprocess.CompletedProcess, Path, float]:
+    def run_hung_search(
+        self, *argv: str, prepare=None, hang: str = "first"
+    ) -> tuple[subprocess.CompletedProcess, Path, float]:
+        """``run_cli.py`` hung on the first COM call (or on ``hang``, a ``Kind.Member``).
+
+        ``argv`` defaults to ``search --since 1d``.
+        """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
@@ -956,12 +968,14 @@ class OutlookTimeoutTests(unittest.TestCase):
         env = dict(os.environ)
         env["HOME"] = env["USERPROFILE"] = str(root)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if prepare is not None:
+            prepare(home)
         started = time.monotonic()
         result = subprocess.run(
             [
                 sys.executable, "-B", str(_REPO_ROOT / "tests" / "fakes" / "run_cli.py"),
-                "--home", str(home), "--timeout", "0.2", "--hang", "first",
-                "--hang-timeout", "60", "--", "search", "--since", "1d",
+                "--home", str(home), "--timeout", "0.2", "--hang", hang,
+                "--hang-timeout", "60", "--", *(argv or ("search", "--since", "1d")),
             ],
             capture_output=True,
             env=env,
@@ -984,6 +998,111 @@ class OutlookTimeoutTests(unittest.TestCase):
         self.assertIn("doctor", payload["error"]["hint"])
         self.assertIn("mailquery: E_CLIENT_TIMEOUT: ", result.stderr)
         self.assertIn("mailquery: hint: ", result.stderr)
+
+    def test_ol_04_02_hung_new_is_client_timeout_and_state_is_not_written(self) -> None:
+        """OL-04.02: `new` hung in the first COM call ⇒ E_CLIENT_TIMEOUT, exit 3, full JSON; no state written."""
+        seeded = json.dumps(
+            {
+                "schema": 1,
+                "updated_at": "2026-11-01T10:00:00+00:00",
+                "last_run": {"command": "new", "at": "2026-11-01T10:00:00+00:00"},
+                "cursor": {"last_date_received": 1790000000, "last_uid": "00AB", "lookback_seconds": 600},
+                "emitted_uids": ["00AB"],
+            },
+            indent=2,
+        ) + "\n"
+
+        def without_state(home: Path) -> None:
+            home.mkdir(parents=True)
+            (home / "config.toml").write_text(_scope_toml("ana.perez@example.com"), encoding="utf-8")
+
+        def with_state(home: Path) -> None:
+            without_state(home)
+            (home / "state.json").write_text(seeded, encoding="utf-8")
+
+        for label, prepare in (("first run", without_state), ("saved cursor", with_state)):
+            with self.subTest(case=label):
+                result, home, elapsed = self.run_hung_search("new", prepare=prepare)
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                self.assertLess(elapsed, 45.0)  # the hang (60 s) was not waited for
+                payload = json.loads(result.stdout)
+                self.assertEqual(
+                    result.stdout, json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+                )
+                self.assertEqual(payload["ok"], False)
+                self.assertEqual(payload["command"], "new")
+                self.assertEqual(payload["error"]["code"], "E_CLIENT_TIMEOUT")
+                self.assertIn("doctor", payload["error"]["hint"])
+                self.assertIn("mailquery: E_CLIENT_TIMEOUT: ", result.stderr)
+                state_path = home / "state.json"
+                if prepare is with_state:
+                    self.assertEqual(state_path.read_text(encoding="utf-8"), seeded)
+                else:
+                    self.assertFalse(state_path.exists())
+                self.assertEqual([p.name for p in home.glob(".state-*")], [])
+
+    def run_hung_doctor(self, hang: str, *extra: str) -> tuple[subprocess.CompletedProcess, Path]:
+        """`doctor` (with one declared account) hung on ``hang``; returns the run and the home."""
+
+        def declared(home: Path) -> None:
+            home.mkdir(parents=True)
+            (home / "config.toml").write_text(_scope_toml("ana.perez@example.com"), encoding="utf-8")
+
+        result, home, elapsed = self.run_hung_search("doctor", *extra, prepare=declared, hang=hang)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertLess(elapsed, 45.0)  # the hang (60 s) was not waited for
+        return result, home
+
+    def assert_hung_doctor(self, hang: str, expected: dict[str, tuple[bool, str | None]]) -> None:
+        """JSON and text reports of a hung `doctor`: ``expected`` = {check: (ok, exact detail)}."""
+        result, home = self.run_hung_doctor(hang, "--json")
+        payload = json.loads(result.stdout)
+        self.assertEqual(result.stdout, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["command"], "doctor")
+        self.assertEqual([check["name"] for check in payload["checks"]], list(_OUTLOOK_DOCTOR_CHECKS))
+        by_name = {check["name"]: check for check in payload["checks"]}
+        for name in _OUTLOOK_DOCTOR_CHECKS:
+            ok, detail = expected.get(name, (True, None))
+            with self.subTest(check=name):
+                self.assertIs(by_name[name]["ok"], ok, by_name[name])
+                if detail is not None:
+                    self.assertEqual(by_name[name]["detail"], detail)
+        log = (home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+        self.assertIn("event=end command=doctor exit_code=0", log)
+        # The default text report is completed the same way.
+        text, _home = self.run_hung_doctor(hang)
+        self.assertFalse(text.stdout.lstrip().startswith("{"))
+        flat = " ".join(text.stdout.split())
+        for name, (ok, detail) in expected.items():
+            if detail is not None:
+                self.assertIn(f"[{'ok]' if ok else 'FAIL]'} {name}", flat)
+                self.assertIn(detail, flat)
+        failed = sum(1 for ok, _detail in expected.values() if not ok)
+        passed = len(_OUTLOOK_DOCTOR_CHECKS) - failed
+        self.assertIn(f"Result: {passed}/{len(_OUTLOOK_DOCTOR_CHECKS)} checks passed", flat)
+
+    def test_ol_04_03_doctor_hung_in_outlook_completes_the_report(self) -> None:
+        """OL-04.03: doctor hung in `outlook` ⇒ outlook timeout text; dependents not evaluated; exit 0."""
+        self.assert_hung_doctor(
+            "first",  # the first OOM access is the outlook check's Application.Version
+            {
+                "outlook": (False, _DOCTOR_TIMEOUT),
+                "stores": (False, "not evaluated: outlook failed"),
+                "readonly_strategy": (False, "not evaluated: outlook failed"),
+                "config": (False, "not evaluated: stores failed"),
+            },
+        )
+
+    def test_ol_04_04_doctor_hung_in_stores_completes_the_report(self) -> None:
+        """OL-04.04: doctor hung in `stores` ⇒ stores timeout text; config resolution not evaluated; exit 0."""
+        self.assert_hung_doctor(
+            "NameSpace.Stores",
+            {
+                "stores": (False, _DOCTOR_TIMEOUT),
+                "config": (False, "not evaluated: stores failed"),
+            },
+        )
 
     def test_ol_04_05_python_work_between_calls_does_not_time_out(self) -> None:
         """OL-04.05: Python time between COM calls longer than the deadline ⇒ no timeout."""
@@ -2858,7 +2977,13 @@ class OutlookInternalErrorLogTests(_CommandScenarioCase):
 
 
 class OutlookReadOnlyGateTests(_CommandScenarioCase):
-    """OL-30 (W3 sweep): `mailboxes`, `show` and `search` without --text/--to/--cc."""
+    """OL-30 (full sweep, W4-T04): the 5 commands with all their flags, over every scenario.
+
+    `mailboxes`; `search` with every filter, including `--text`, `--to` and
+    `--cc` (bounded, combined and one unbounded: E_UNBOUNDED_SCAN); `new` with
+    and without `--peek`/`--limit` (first and later runs); `show` of every item
+    and of malformed uids; `doctor` (text report and `--json`).
+    """
 
     _SCOPES = {
         "default": _scope_toml("ana.perez@example.com", "Exchange shared (Soporte)"),
@@ -2879,18 +3004,53 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
         ("--subject", "*a*"),
         ("--include-mailbox", "INBOX", "--limit", "1"),
         ("--since", "2026-01-01", "--limit", "2", "--unread", "--has-attachments"),
+        ("--text", "*o*", "--since", "2026-01-01"),
+        ("--text", "cuerpo", "--include-mailbox", "INBOX"),
+        ("--to", "*example*", "--since", "2026-01-01"),
+        ("--cc", "*example*", "--since", "30d"),
+        ("--to", "ana", "--cc", "copia", "--subject", "*"),
+        (
+            "--text", "*e*", "--to", "*@*", "--cc", "*", "--from", "*example*",
+            "--subject", "*", "--since", "2026-01-01", "--until", "now", "--unread",
+            "--flagged", "--has-attachments", "--include-mailbox", "INBOX", "--limit", "5",
+        ),
+        ("--to", "*example*"),  # unbounded on Windows: E_UNBOUNDED_SCAN (exit 4)
     )
+    _NEWS = (
+        ("--peek",),
+        ("--peek", "--limit", "1"),
+        (),
+        ("--limit", "2"),
+        (),
+    )
+    _DOCTORS = (("--json",), ())
+    #: Exit codes a read-only run may end with, and the error codes of each.
+    _ERRORS = {2: ("E_USAGE", "E_ACCOUNT_NOT_IN_SCOPE"), 4: ("E_UNBOUNDED_SCAN",)}
+
+    def run_report(self, *argv: str) -> tuple[int, dict]:
+        """`doctor` without `--json`: the text report, kept under ``report``."""
+        backend = _backend(self.fake)
+        self.addCleanup(backend.close)
+        code, stdout, stderr = self.run_main(list(argv), backend)
+        self.assertTrue(stdout.startswith("mailquery doctor - "), stdout + stderr)
+        return code, {"report": stdout, "stderr": stderr}
 
     def sweep(self) -> list[tuple[fk.FakeOutlook, list[tuple[tuple[str, ...], int, dict]]]]:
-        """Every W3 command over every fake scenario: ``[(fake, [(argv, exit, payload)])]``."""
+        """Every command over every fake scenario: ``[(fake, [(argv, exit, payload)])]``."""
         results = []
         for name, scope in self._SCOPES.items():
             fake = self.use(fk.SCENARIOS[name](), scope)
+            (self.home / "state.json").unlink(missing_ok=True)  # each scenario starts afresh
             runs: list[tuple[str, ...]] = [("mailboxes",)]
             runs += [("search", *flags) for flags in self._SEARCHES]
+            runs += [("new", *flags) for flags in self._NEWS]
             runs += [("show", spec.entry_id) for spec in fake.items.values()]
             runs += [("show", "00AB"), ("show", "ab12")]
-            outcomes = [(argv, *self.run_any(*argv)) for argv in runs]
+            runs += [("doctor", *flags) for flags in self._DOCTORS]
+            outcomes = [
+                (argv, *(self.run_report(*argv) if argv == ("doctor",) else self.run_any(*argv)))
+                for argv in runs
+            ]
             results.append((fake, outcomes))
         return results
 
@@ -2923,6 +3083,12 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             )
             self.assertEqual({entry.action for entry in fake.call_log}, {"get", "call"})
 
+        # The sweep reaches the content members (--text, --to/--cc, new and show).
+        reached = set().union(*(fake.call_log.members() for fake, _outcomes in self.results()))
+        self.assertTrue(
+            {("Item", "Body"), ("Item", "Recipients"), ("NameSpace", "GetItemFromID")} <= reached
+        )
+
     def test_ol_30_02_no_assignment(self) -> None:
         """OL-30.02: no property is ever assigned."""
         for fake, _outcomes in self.results():
@@ -2938,16 +3104,648 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
     def test_ol_30_04_never_the_codes_annex_b7_excludes(self) -> None:
         """OL-30.04: no error or warning that annex B.7 excludes from this backend; no E_INTERNAL."""
         for _fake, outcomes in self.results():
+            commands = {argv[0] for argv, _code, _payload in outcomes}
+            self.assertEqual(commands, {"mailboxes", "search", "new", "show", "doctor"})
             for argv, code, payload in outcomes:
                 with self.subTest(argv=argv):
-                    self.assertIn(code, (0, 2), payload)
+                    if argv[0] in ("doctor", "mailboxes", "new"):
+                        self.assertEqual(code, 0, payload)
+                    self.assertIn(code, (0, *self._ERRORS), payload)
                     text = json.dumps(payload, ensure_ascii=False)
                     for foreign in _FOREIGN_CODES:
                         self.assertNotIn(foreign, text)
-                    if code == 2:
-                        self.assertIn(
-                            payload["error"]["code"], ("E_USAGE", "E_ACCOUNT_NOT_IN_SCOPE")
-                        )
+                    self.assertNotIn("E_INTERNAL", text)
+                    if code != 0:
+                        self.assertIn(payload["error"]["code"], self._ERRORS[code])
+
+
+# --------------------------------------------------------------------------- #
+# OL-18, OL-25 — `new` on Windows and searchable items (W4-T01)
+# --------------------------------------------------------------------------- #
+
+_FIRST_RUN = (
+    "W_FIRST_RUN: first run: emitted the messages received in the last 10min "
+    "before the newest message"
+)
+_HEX_UID = r"^[0-9A-F]+$"
+
+
+def _epoch(moment: datetime) -> int:
+    return int(moment.timestamp())
+
+
+class _NewCase(_CommandScenarioCase):
+    """`new` through ``cli.main`` over the fake; one fresh backend per run."""
+
+    def new(self, *extra: str) -> dict:
+        return self.run_json("new", *extra)
+
+    def state(self) -> dict:
+        return json.loads((self.home / "state.json").read_text(encoding="utf-8"))
+
+    def seed_cursor(self, moment: datetime) -> None:
+        """A saved cursor at ``moment`` (later runs emit everything received since then)."""
+        payload = {
+            "schema": 1,
+            "cursor": {"last_date_received": _epoch(moment), "last_uid": "00", "lookback_seconds": 600},
+            "emitted_uids": [],
+        }
+        (self.home / "state.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def uids(self, payload: dict) -> list[str]:
+        return [message["uid"] for message in payload["messages"]]
+
+
+class OutlookSearchableItemTests(_NewCase):
+    """OL-18 (annex B.4): which items `search`, `new` and `show` see."""
+
+    def appearances(self, *keys: str) -> dict[str, tuple[bool, bool, int]]:
+        """``key -> (in search, in new, exit code of show)`` over the item matrix."""
+        fake = self.items()
+        self.seed_cursor(datetime(2026, 1, 1, tzinfo=timezone.utc))
+        searched = set(self.uids(self.search()))
+        emitted = set(self.uids(self.new("--limit", "500")))
+        self.assertGreater(len(emitted), 10)
+        out: dict[str, tuple[bool, bool, int]] = {}
+        for key in keys:
+            uid = fake.item(key).entry_id
+            backend = _backend(fake)
+            self.addCleanup(backend.close)
+            code, stdout, stderr = self.run_main(["show", uid], backend)
+            payload = json.loads(stdout)
+            if code == 0:
+                self.assertEqual(payload["message"]["uid"], uid)
+            else:
+                self.assertEqual(payload["error"]["code"], "E_USAGE", stdout + stderr)
+                self.assertIn("was not found", payload["error"]["message"])
+            out[key] = (uid in searched, uid in emitted, code)
+        self.assert_read_only()
+        return out
+
+    def test_ol_18_01_receipt_and_task_are_ignored(self) -> None:
+        """OL-18.01: a delivery receipt and a task ⇒ ignored in `search`, `new` and `show`."""
+        found = self.appearances("delivery_receipt", "task")
+        self.assertEqual(found, {"delivery_receipt": (False, False, 2), "task": (False, False, 2)})
+
+    def test_ol_18_02_imap_deleted_is_ignored(self) -> None:
+        """OL-18.02: an IMAP-deleted item ⇒ ignored in `search`, `new` and `show`."""
+        self.assertEqual(self.appearances("imap_deleted"), {"imap_deleted": (False, False, 2)})
+
+    def test_ol_18_03_meeting_request_and_smime_are_included(self) -> None:
+        """OL-18.03: a meeting request and S/MIME (encrypted and signed) ⇒ included everywhere."""
+        keys = ("meeting_request", "smime_encrypted", "smime_signed")
+        self.assertEqual(self.appearances(*keys), {key: (True, True, 0) for key in keys})
+
+
+class OutlookNewTests(_NewCase):
+    """OL-25 (PRD 11.2, 12.3, 18): `new` with hexadecimal uids."""
+
+    _SCOPE = _scope_toml("ana.perez@example.com")
+    _SHARED = _store_excluded("Exchange shared (Soporte)", None, "shared_mailbox")
+    _NORMAL_DATE = _epoch(datetime(2026, 11, 2, 13, 54, 9, tzinfo=timezone.utc))
+
+    def test_ol_25_01_state_keeps_hex_uids(self) -> None:
+        """OL-25.01: the state stores the hexadecimal uids (string) in the cursor and the ring."""
+        from mailquery.backends.outlook import OutlookBackend
+        from mailquery.state import Cursor, StateStore
+
+        fake = self.use(fk.FakeOutlook.default(), self._SCOPE)
+        uid = fake.item("normal").entry_id
+        peeked = self.new("--peek")
+        self.assertEqual(self.uids(peeked), [uid])
+        self.assertEqual(peeked["cursor"], {"previous": None, "current": None})
+        self.assertFalse((self.home / "state.json").exists())
+
+        payload = self.new()
+        self.assertEqual(self.uids(payload), [uid])
+        self.assertEqual(payload["warnings"], [_FIRST_RUN])
+        cursor = {"last_date_received": self._NORMAL_DATE, "last_uid": uid, "lookback_seconds": 600}
+        self.assertEqual(payload["cursor"], {"previous": None, "current": cursor})
+        state = self.state()
+        self.assertEqual(state["cursor"], cursor)
+        self.assertEqual(state["emitted_uids"], [uid])
+        self.assertIsInstance(state["cursor"]["last_uid"], str)
+        self.assertRegex(state["cursor"]["last_uid"], _HEX_UID)
+        loaded = StateStore(self.home, OutlookBackend.check_state_uid).load()
+        self.assertEqual(loaded.cursor, Cursor(self._NORMAL_DATE, uid, 600))
+        self.assertEqual(loaded.emitted_uids, (uid,))
+        self.assert_read_only()
+
+    def test_ol_25_02_second_run_does_not_re_emit(self) -> None:
+        """OL-25.02: a second run does not re-emit what the first one emitted (ring + cursor)."""
+        fake = self.use(fk.FakeOutlook.default(), self._SCOPE)
+        first = self.new()
+        normal = fake.item("normal").entry_id
+        self.assertEqual(self.uids(first), [normal])
+        # One message arrives inside the lookback window of the saved cursor.
+        later = fake.store("exchange").inbox.add_message(
+            "later",
+            subject="Recordatorio",
+            sender=("Proveedor SA", "facturas@proveedor.example"),
+            received=datetime(2026, 11, 2, 13, 58, 0, tzinfo=timezone.utc),
+        )
+        second = self.new()
+        self.assertEqual(self.uids(second), [later.entry_id])
+        self.assertEqual(second["warnings"], [])
+        self.assertEqual(second["cursor"]["previous"], first["cursor"]["current"])
+        third = self.new()
+        self.assertEqual(third["count"], 0)
+        self.assertEqual(third["cursor"]["previous"], third["cursor"]["current"])
+        self.assertEqual(self.state()["emitted_uids"], [normal, later.entry_id])
+        self.assertEqual(self.state()["cursor"]["last_uid"], later.entry_id)
+
+    def test_ol_25_03_moved_message_is_emitted_with_its_new_uid(self) -> None:
+        """OL-25.03: a message moved inside the window ⇒ exit 0 and emitted once with its new uid (PRD 18)."""
+        fake = fk.FakeOutlook.default()
+        archive = fake.store("exchange").inbox.add_folder("Archivo", key="archivo")
+        self.use(fake, self._SCOPE + 'mailbox_list = ["INBOX/Archivo"]\n')
+        old_uid = fake.item("normal").entry_id
+        self.assertEqual(self.uids(self.new()), [old_uid])
+        new_uid = fake.move_item("normal", archive).entry_id
+        self.assertNotEqual(new_uid, old_uid)
+        moved = self.new()  # run_json asserts exit 0
+        self.assertEqual(self.uids(moved), [new_uid])
+        self.assertEqual(moved["messages"][0]["mailbox"]["path"], "INBOX/Archivo")
+        self.assertEqual(moved["messages"][0]["message_id"], "<factura-2026-10@proveedor.example>")
+        state = self.state()
+        self.assertEqual(state["emitted_uids"], [old_uid, new_uid])
+        self.assertEqual(state["cursor"]["last_date_received"], self._NORMAL_DATE)
+        self.assertEqual(self.new()["count"], 0)
+
+    def test_ol_25_04_declared_excluded_account_warns_before_first_run(self) -> None:
+        """OL-25.04: a declared excluded account ⇒ W_STORE_EXCLUDED before W_FIRST_RUN."""
+        fake = self.use(
+            fk.FakeOutlook.default(), _scope_toml("ana.perez@example.com", "Exchange shared (Soporte)")
+        )
+        payload = self.new()
+        self.assertEqual(self.uids(payload), [fake.item("normal").entry_id])
+        self.assertEqual(payload["warnings"], [self._SHARED, _FIRST_RUN])
+        # Only the excluded account declared: no accounts left, nothing emitted nor saved.
+        (self.home / "state.json").unlink()
+        self.use(fk.FakeOutlook.default(), _scope_toml("Exchange shared (Soporte)"))
+        payload = self.new()
+        self.assertEqual(payload["count"], 0)
+        self.assertEqual(payload["warnings"], [_NO_ACCOUNTS, self._SHARED, _FIRST_RUN])
+        self.assertFalse((self.home / "state.json").exists())
+
+    def test_new_core_with_string_uids_injected_clock_and_limit(self) -> None:
+        """`search.run_new` over Outlook: injected clock (future dates) and --limit with hex uids."""
+        from mailquery.config import load_config
+        from mailquery.search import run_new
+        from mailquery.state import StateStore
+
+        fake = self.use(fk.FakeOutlook.default(), self._SCOPE)
+        inbox = fake.store("exchange").inbox
+        recent = inbox.add_message(
+            "recent", subject="Reciente", sender=("A", "a@example.com"),
+            received=datetime(2026, 11, 2, 13, 58, 0, tzinfo=timezone.utc),
+        )
+        future = inbox.add_message(
+            "future", subject="Futuro", sender=("B", "b@example.com"),
+            received=datetime(2026, 11, 2, 14, 10, 0, tzinfo=timezone.utc),
+        )
+        normal = fake.item("normal").entry_id
+        clock = _epoch(datetime(2026, 11, 2, 14, 0, 0, tzinfo=timezone.utc))
+
+        def run(now: int, **kwargs) -> dict:
+            backend = _backend(fake)
+            self.addCleanup(backend.close)
+            store = StateStore(self.home, backend.check_state_uid)
+            return run_new(backend, load_config(self.home), store, clock=lambda: now, **kwargs)
+
+        first = run(clock, limit=1)  # the future message is not the newest one
+        self.assertEqual(self.uids(first), [recent.entry_id])
+        self.assertTrue(first["truncated"])
+        self.assertEqual(first["cursor"]["current"]["last_uid"], recent.entry_id)
+        # Once its date is no longer future it enters, with what --limit left out.
+        second = run(clock + 3600)
+        self.assertEqual(self.uids(second), [normal, future.entry_id])
+        self.assertEqual(self.state()["emitted_uids"], [recent.entry_id, normal, future.entry_id])
+        self.assertEqual(run(clock + 3600)["count"], 0)
+        self.assert_read_only()
+
+
+# --------------------------------------------------------------------------- #
+# OL-24 — `--text`, `--to` and `--cc` on Windows (W4-T02)
+# --------------------------------------------------------------------------- #
+
+_ANA = ("Ana", "ana@example.com")
+_BEA = ("Bea Ruiz", "bea@example.com")
+_NARROWING = ("--since", "--until", "--from", "--subject", "--include-mailbox")
+
+
+class OutlookContentScanTests(_CommandScenarioCase):
+    """OL-24 (PRD RF-17, 9.5; annex B.4): bounded `--text`, `--to` and `--cc` on Windows."""
+
+    _SCOPE = _scope_toml("ana@example.com")  # INBOX only: no narrowing folder
+
+    def recent(self) -> fk.FakeOutlook:
+        """Six INBOX items received in the last hours (one per body state) and an old one."""
+        fake = fk.FakeOutlook()
+        inbox = fake.add_exchange_account("exchange", "ana@example.com").inbox
+        assert inbox is not None
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+
+        def add(key: str, hours: int, **fields) -> None:
+            fields.setdefault("sender", ("Proveedor", "ventas@proveedor.example"))
+            fields.setdefault("to", [_ANA])
+            inbox.add_message(key, subject=key, received=now - timedelta(hours=hours), **fields)
+
+        add("to_bea", 1, to=[_BEA], body="Adjunto el presupuesto anual.\r\n")
+        add("cc_bea", 2, cc=[_BEA], body="El presupuesto va en copia.\r\n")
+        add("other", 3, body="", html="<p>Sin relación.</p>")
+        add("smime_to_bea", 4, to=[_BEA], message_class="IPM.Note.SMIME",
+            attachments=[fk.AttachmentSpec("smime.p7m")])
+        add("header_only_to_bea", 5, to=[_BEA], download_state=fk.OL_HEADER_ONLY)
+        add("unopenable_to_bea", 6, to=[_BEA], openable=False, body="presupuesto")
+        add("old_to_bea", 24 * 40, to=[_BEA], body="presupuesto antiguo")
+        return self.use(fake, self._SCOPE)
+
+    def opened(self) -> list[str]:
+        """Uid of every ``GetItemFromID`` call, in call order."""
+        return [
+            entry.args[0] for entry in self.fake.call_log
+            if (entry.kind, entry.member, entry.action) == ("NameSpace", "GetItemFromID", "call")
+        ]
+
+    def keys(self, payload: dict) -> list[str]:
+        by_uid = {spec.entry_id: key for key, spec in self.fake.items.items()}
+        return [by_uid[message["uid"]] for message in payload["messages"]]
+
+    def header_reads(self) -> int:
+        return sum(
+            1 for entry in self.fake.call_log
+            if (entry.kind, entry.member) == ("PropertyAccessor", "GetProperty")
+            and entry.args and str(entry.args[0]).upper().endswith("007D001F")
+        )
+
+    def assert_unbounded(self, *argv: str) -> dict:
+        backend = _backend(self.fake)
+        self.addCleanup(backend.close)
+        code, stdout, stderr = self.run_main(["search", *argv], backend)
+        error = self.assert_error((code, stdout, stderr), 4, "E_UNBOUNDED_SCAN")
+        self.assertEqual(stderr.count("E_UNBOUNDED_SCAN"), 1, stderr)
+        for option in _NARROWING:
+            self.assertIn(option, error["hint"])
+        self.assertNotIn("--to", error["hint"])
+        self.assertNotIn("--cc", error["hint"])
+        self.assertEqual(self.opened(), [])
+        return error
+
+    def test_ol_24_01_to_without_narrowing_is_unbounded(self) -> None:
+        """OL-24.01: --to x without a narrowing filter ⇒ E_UNBOUNDED_SCAN naming --to; hint without --to/--cc."""
+        self.recent()
+        error = self.assert_unbounded("--to", "bea")
+        self.assertIn("--to", error["message"])
+        self.assertNotIn("--text", error["message"])
+        error = self.assert_unbounded("--cc", "bea", "--include-mailbox", "INBOX")
+        self.assertIn("--cc", error["message"])
+        self.assertNotIn("--to", error["message"])
+
+    def test_ol_24_02_text_without_narrowing_is_unbounded(self) -> None:
+        """OL-24.02: --text x without a narrowing filter ⇒ E_UNBOUNDED_SCAN; hint without --to/--cc."""
+        self.recent()
+        error = self.assert_unbounded("--text", "presupuesto")
+        self.assertIn("--text", error["message"])
+
+    def test_ol_24_03_text_with_to_is_one_validation_and_one_error(self) -> None:
+        """OL-24.03: --text x --to y ⇒ --to does not narrow; one validation, one error."""
+        self.recent()
+        error = self.assert_unbounded("--text", "presupuesto", "--to", "bea")
+        self.assertIn("--text", error["message"])
+        self.assertIn("--to", error["message"])
+
+    def test_ol_24_04_to_above_max_scan_is_scan_too_large(self) -> None:
+        """OL-24.04: --to x --since 1y with more candidates than max_scan ⇒ E_SCAN_TOO_LARGE."""
+        fake = fk.FakeOutlook()
+        inbox = fake.add_exchange_account("exchange", "ana@example.com").inbox
+        assert inbox is not None
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        for index in range(101):
+            inbox.add_message(
+                f"m{index}", subject=f"m{index}", sender=_ANA, to=[_BEA],
+                received=now - timedelta(days=index + 1),
+            )
+        self.use(fake, self._SCOPE + "[search]\nmax_scan = 100\n")
+        error = self.run_error(4, "E_SCAN_TOO_LARGE", "search", "--to", "bea", "--since", "1y")
+        self.assertIn("--to", error["message"])
+        self.assertIn("101", error["message"])
+        self.assertNotIn("--to", error["hint"])
+        self.assertNotIn("--cc", error["hint"])
+        self.assertEqual(self.opened(), [])
+        # Narrowed by --subject (which does narrow) below max_scan, the same query runs.
+        payload = self.run_json("search", "--to", "bea", "--since", "1y", "--subject", "m1*")
+        self.assertEqual(payload["scan"]["candidates"], 12)  # m1, m10..m19, m100
+
+    def test_ol_24_05_to_runs_in_metadata_mode_counting_opened_items(self) -> None:
+        """OL-24.05: --to x --since 1d ⇒ runs; mode metadata; candidates before --to; messages_read = items opened."""
+        fake = self.recent()
+        payload = self.run_json("search", "--to", "bea", "--since", "1d")
+        self.assertEqual(self.keys(payload), ["to_bea", "smime_to_bea", "header_only_to_bea"])
+        self.assertEqual(payload["scan"]["mode"], "metadata")
+        self.assertEqual(payload["scan"]["candidates"], 6)
+        # Every candidate is opened once; the unopenable one is not counted as opened.
+        recent = [key for key in fake.items if key != "old_to_bea"]
+        self.assertCountEqual(self.opened(), [fake.item(key).entry_id for key in recent])
+        self.assertEqual(payload["scan"]["messages_read"], 5)
+        self.assertEqual(self.header_reads(), 0)
+        self.assert_read_only()
+
+    def test_ol_24_06_bounded_text_matches_bodies(self) -> None:
+        """OL-24.06: bounded --text ⇒ matches in the body; scan.mode text; skipped bodies warn."""
+        fake = self.recent()
+        payload = self.run_json("search", "--text", "presupuesto", "--since", "1d")
+        self.assertEqual(self.keys(payload), ["to_bea", "cc_bea"])
+        self.assertEqual(payload["scan"]["mode"], "text")
+        self.assertEqual(payload["scan"]["candidates"], 6)
+        self.assertIn("presupuesto anual", payload["messages"][0]["snippet"])
+        codes = [warning.split(":")[0] for warning in payload["warnings"]]
+        self.assertEqual(codes, ["W_BODY_UNREADABLE", "W_BODY_NOT_LOCAL", "W_BODY_UNREADABLE"])
+        self.assertIn("S/MIME", payload["warnings"][0])
+        # S/MIME is never opened; each other item at most once; no transport headers.
+        opened = self.opened()
+        self.assertNotIn(fake.item("smime_to_bea").entry_id, opened)
+        self.assertEqual(len(opened), len(set(opened)))
+        self.assertEqual(len(opened), 5)
+        self.assertEqual(payload["scan"]["messages_read"], 4)
+        self.assertEqual(self.header_reads(), 0)
+        self.assertNotIn(("Item", "Attachments"), fake.call_log.members())
+        self.assert_read_only()
+
+    def test_ol_24_07_text_with_to_counts_candidates_before_to(self) -> None:
+        """OL-24.07: --text x --to y --since 1d ⇒ scan.candidates = messages before --to."""
+        fake = self.recent()
+        payload = self.run_json("search", "--text", "presupuesto", "--to", "bea", "--since", "1d")
+        self.assertEqual(self.keys(payload), ["to_bea"])
+        self.assertEqual(payload["scan"]["mode"], "text")
+        self.assertEqual(payload["scan"]["candidates"], 6)
+        opened = self.opened()
+        self.assertEqual(len(opened), len(set(opened)))
+        self.assertEqual(len(opened), 6)
+        self.assertEqual(payload["scan"]["messages_read"], 5)
+        self.assertEqual(self.header_reads(), 0)
+        self.assert_read_only()
+
+
+# --------------------------------------------------------------------------- #
+# OL-26 — doctor on Windows (PRD 12.8, annex B.8, PRD 15.3)
+# --------------------------------------------------------------------------- #
+
+
+class OutlookDoctorTests(_OutlookCommandCase):
+    def doctor(self, fake: fk.FakeOutlook, scope: str | None = None, **overrides) -> dict:
+        """`doctor --json` over ``fake`` (exit 0); returns the checks by name."""
+        self.use(fake, scope if scope is not None else "")
+        if scope is None:
+            (self.home / "config.toml").unlink()
+        backend = _backend(fake, **overrides)
+        self.addCleanup(backend.close)
+        code, stdout, stderr = self.run_main(["doctor", "--json"], backend)
+        self.assertEqual(code, 0, stdout + stderr)
+        payload = json.loads(stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual([check["name"] for check in payload["checks"]], list(_OUTLOOK_DOCTOR_CHECKS))
+        self.assertEqual(fake.mutations.total, 0)
+        self.assertFalse(fake.call_log.members() & {("Connector", name) for name in _DISPATCH_NAMES})
+        return {check["name"]: check for check in payload["checks"]}
+
+    def test_doctor_all_checks_pass_on_the_default_profile(self) -> None:
+        """Annex B.8: every check of the default profile passes; the strategy is com_readonly."""
+        checks = self.doctor(fk.FakeOutlook.default(), _scope_toml("ana.perez@example.com"))
+        for name, check in checks.items():
+            with self.subTest(check=name):
+                self.assertTrue(check["ok"], check)
+        self.assertTrue(checks["readonly_strategy"]["detail"].startswith("com_readonly: "))
+        self.assertIn(fk.DEFAULT_VERSION, checks["outlook"]["detail"])
+        self.assertTrue(
+            checks["config"]["detail"].startswith(
+                "ana.perez@example.com → Exchange (ana.perez@example.com) ("
+            )
+        )
+
+    def test_doctor_stores_lists_candidates_and_excluded_stores(self) -> None:
+        """Annex B.8 / RF-34: `stores` lists candidates (label, type) and excluded (label, path, reason)."""
+        checks = self.doctor(fk.FakeOutlook.store_matrix())
+        detail = checks["stores"]["detail"]
+        self.assertTrue(checks["stores"]["ok"])
+        for label, _email, _local in _MATRIX_CANDIDATES.values():
+            kind = label.split(" ", 1)[0]
+            self.assertIn(f"{label} [{kind}]", detail)
+        self.assertIn(
+            "PST (Archivo 2019) at \\\\nas01\\backup\\archivo2019.pst [network_path]", detail
+        )
+        self.assertIn("Exchange shared (Soporte) [shared_mailbox]", detail)
+
+    def test_ol_26_01_pywin32_failure_leaves_dependents_not_evaluated(self) -> None:
+        """OL-26.01: pywin32 fails ⇒ outlook, stores, readonly_strategy and config resolution not evaluated."""
+        fake = fk.FakeOutlook.default()
+        checks = self.doctor(fake, _scope_toml("ana.perez@example.com"), pywin32=False)
+        self.assertFalse(checks["pywin32"]["ok"])
+        self.assertIn("E_DEPENDENCY_MISSING", checks["pywin32"]["detail"])
+        self.assertEqual(checks["outlook"], {"name": "outlook", "ok": False, "detail": "not evaluated: pywin32 failed"})
+        for name in ("stores", "readonly_strategy"):
+            self.assertEqual(checks[name]["detail"], "not evaluated: outlook failed")
+            self.assertFalse(checks[name]["ok"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: stores failed")
+        self.assertFalse(checks["config"]["ok"])
+        for name in ("python", "home", "object_model_guard", "state", "lock"):
+            self.assertTrue(checks[name]["ok"], checks[name])
+        self.assertEqual(len(fake.call_log), 0)  # Outlook was never contacted
+
+    def test_ol_26_02_outlook_closed_fails_outlook_and_exits_0(self) -> None:
+        """OL-26.02: Outlook closed ⇒ outlook ok=false (never launched), exit 0, text report too."""
+        fake = run_cli.build_fake("not_running")
+        checks = self.doctor(fake)
+        self.assertFalse(checks["outlook"]["ok"])
+        self.assertIn("E_OUTLOOK_NOT_RUNNING", checks["outlook"]["detail"])
+        self.assertIn(HINT_NOT_RUNNING, checks["outlook"]["detail"])
+        for name in ("stores", "readonly_strategy"):
+            self.assertEqual(checks[name]["detail"], "not evaluated: outlook failed")
+        self.assertEqual(
+            [entry.member for entry in fake.call_log], ["GetActiveObject"]
+        )
+        backend = _backend(fake)
+        self.addCleanup(backend.close)
+        code, stdout, _stderr = self.run_main(["doctor"], backend)
+        self.assertEqual(code, 0)
+        self.assertIn("[FAIL] outlook", stdout)
+        self.assertIn("read-only with respect to Outlook", stdout)
+
+    def test_ol_26_03_no_blocks_and_stores_failed_is_config_ok_unknown(self) -> None:
+        """OL-26.03: no blocks and stores failed ⇒ config ok=true, `available accounts: unknown (stores failed)`."""
+        expected = "0 account block(s) declared; available accounts: unknown (stores failed)"
+        broken = fk.FakeOutlook.default()
+        broken.fail_next(fk.E_UNEXPECTED, kind="NameSpace", member="Stores")
+        for label, fake in (("stores error", broken), ("outlook closed", run_cli.build_fake("not_running"))):
+            with self.subTest(case=label):
+                checks = self.doctor(fake)
+                self.assertFalse(checks["stores"]["ok"])
+                self.assertTrue(checks["config"]["ok"], checks["config"])
+                self.assertEqual(checks["config"]["detail"], f"no config.toml (optional); {expected}")
+
+    def test_ol_26_04_declared_excluded_account_warns_in_config_detail(self) -> None:
+        """OL-26.04: declared excluded account ⇒ W_STORE_EXCLUDED in the config detail, still ok=true."""
+        checks = self.doctor(
+            fk.FakeOutlook.store_matrix(), _scope_toml("ana@example.com", "PST (Archivo 2019)")
+        )
+        config = checks["config"]
+        self.assertTrue(config["ok"], config)
+        self.assertIn("ana@example.com → Exchange (ana@example.com) (", config["detail"])
+        self.assertIn(
+            OutlookStoreExcludedWarningTests._UNC, config["detail"]
+        )
+        only_excluded = self.doctor(
+            fk.FakeOutlook.default(), _scope_toml("Exchange shared (Soporte)")
+        )["config"]
+        self.assertTrue(only_excluded["ok"], only_excluded)
+        self.assertEqual(only_excluded["detail"], OutlookStoreExcludedWarningTests._SHARED)
+
+
+class OutlookNotRunningTests(_OutlookCommandCase):
+    """Exit 6 end to end (PRD 12.6, 21.1; annex B.7): Outlook closed, never launched."""
+
+    def test_exit_6_for_every_data_command_while_doctor_still_exits_0(self) -> None:
+        """PRD 12.6: every data command ⇒ E_OUTLOOK_NOT_RUNNING (exit 6); doctor diagnoses it with exit 0."""
+        fake = self.use(run_cli.build_fake("not_running"), _scope_toml("ana.perez@example.com"))
+        uid = fake.item("normal").entry_id
+        commands = (
+            ("mailboxes",),
+            ("search",),
+            ("search", "--from", "*@example.com", "--since", "1w", "--unread"),
+            ("search", "--text", "factura", "--to", "ana", "--cc", "x", "--since", "1d"),
+            ("new",),
+            ("new", "--peek", "--limit", "5"),
+            ("show", uid),
+        )
+        for argv in commands:
+            with self.subTest(argv=argv):
+                error = self.run_error(6, "E_OUTLOOK_NOT_RUNNING", *argv)
+                self.assertEqual(error["hint"], HINT_NOT_RUNNING)
+        # Only GetActiveObject, once per command; nothing written for `new`.
+        self.assertEqual([entry.member for entry in fake.call_log], ["GetActiveObject"] * len(commands))
+        self.assertFalse((self.home / "state.json").exists())
+        log = (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+        self.assertEqual(log.count("code=E_OUTLOOK_NOT_RUNNING"), len(commands))
+        # The uid format is still checked first: a malformed uid is E_USAGE (exit 2).
+        self.run_error(2, "E_USAGE", "show", uid.lower())
+        self.assertEqual(len(fake.call_log), len(commands))
+
+        # doctor: outlook fails with the same error and hint, the rest is diagnosed, exit 0.
+        for argv in (("doctor", "--json"), ("doctor",)):
+            backend = _backend(fake)
+            self.addCleanup(backend.close)
+            code, stdout, stderr = self.run_main(list(argv), backend)
+            with self.subTest(argv=argv):
+                self.assertEqual((code, stderr), (0, ""))
+                if argv == ("doctor",):
+                    self.assertIn("[FAIL] outlook", stdout)
+                    self.assertIn("Result: 6/10 checks passed (4 failed)", stdout)
+                    continue
+                checks = {check["name"]: check for check in json.loads(stdout)["checks"]}
+                self.assertEqual(list(checks), list(_OUTLOOK_DOCTOR_CHECKS))
+                self.assertFalse(checks["outlook"]["ok"])
+                self.assertIn("E_OUTLOOK_NOT_RUNNING", checks["outlook"]["detail"])
+                self.assertIn(HINT_NOT_RUNNING, checks["outlook"]["detail"])
+                expected_failed = {
+                    "outlook": None,
+                    "stores": "not evaluated: outlook failed",
+                    "readonly_strategy": "not evaluated: outlook failed",
+                    "config": "not evaluated: stores failed",
+                }
+                for name, check in checks.items():
+                    self.assertIs(check["ok"], name not in expected_failed, check)
+                    if expected_failed.get(name):
+                        self.assertEqual(check["detail"], expected_failed[name])
+        self.assertEqual(fake.mutations.total, 0)
+        self.assertFalse({entry.member for entry in fake.call_log} - {"GetActiveObject"})
+
+
+# --------------------------------------------------------------------------- #
+# OL-27 — object_model_guard (annex B.6); injected registry and security_center
+# --------------------------------------------------------------------------- #
+
+_POLICY_KEY = r"Software\Policies\Microsoft\Office\16.0\Outlook\Security"
+
+
+class OutlookObjectModelGuardTests(unittest.TestCase):
+    def guard(self, policy: dict[str, int] | None, center: fk.FakeSecurityCenter) -> dict:
+        """The `object_model_guard` check with ``policy`` values under the Outlook policy key."""
+        registry = fk.FakeRegistry.outlook(16)
+        for name, value in (policy or {}).items():
+            registry.set(fk.HKCU, _POLICY_KEY, name, value)
+        fake = fk.FakeOutlook.default()
+        backend = _backend(fake, registry=registry, security_center=center)
+        self.addCleanup(backend.close)
+        checks = {check["name"]: check for check in backend.doctor_checks()}
+        self.assertEqual(
+            list(checks), ["pywin32", "outlook", "stores", "readonly_strategy", "object_model_guard"]
+        )
+        return checks["object_model_guard"]
+
+    @staticmethod
+    def policy(**values: int) -> dict[str, int]:
+        return {"AdminSecurityMode": 3, **values}
+
+    def test_ol_27_01_policy_that_always_prompts_or_denies_fails(self) -> None:
+        """OL-27.01: a policy that always prompts or denies programmatic access ⇒ fails."""
+        cases = {
+            "prompt": (self.policy(PromptOOMAddressInformationAccess=1), "prompt user"),
+            "deny": (self.policy(PromptOOMAddressInformationAccess=0), "automatically deny"),
+            "address book deny": (
+                self.policy(PromptOOMAddressInformationAccess=2, PromptOOMAddressBookAccess=0),
+                "automatically deny",
+            ),
+        }
+        for label, (policy, wording) in cases.items():
+            with self.subTest(case=label):
+                check = self.guard(policy, fk.FakeSecurityCenter.active())
+                self.assertFalse(check["ok"], check)
+                self.assertIn(wording, check["detail"])
+
+    def test_ol_27_02_policy_that_always_approves_passes(self) -> None:
+        """OL-27.02: a policy that always approves ⇒ passes (even without an antivirus)."""
+        check = self.guard(self.policy(PromptOOMAddressInformationAccess=2), fk.FakeSecurityCenter.none())
+        self.assertTrue(check["ok"], check)
+        self.assertIn("PromptOOMAddressInformationAccess=2 (automatically approve)", check["detail"])
+
+    def test_ol_27_03_no_policy_and_active_antivirus_passes(self) -> None:
+        """OL-27.03: no deciding policy and an active antivirus ⇒ passes."""
+        cases = {
+            "no policy": None,
+            "prompt values without AdminSecurityMode 3": {"PromptOOMAddressInformationAccess": 1},
+            "prompt based on computer security": self.policy(PromptOOMAddressInformationAccess=3),
+        }
+        for label, policy in cases.items():
+            with self.subTest(case=label):
+                center = fk.FakeSecurityCenter.active()
+                check = self.guard(policy, center)
+                self.assertTrue(check["ok"], check)
+                self.assertIn("Fake Defender", check["detail"])
+                self.assertEqual(center.queries, 1)
+
+    def test_ol_27_04_no_policy_and_no_antivirus_fails(self) -> None:
+        """OL-27.04: no deciding policy and no active antivirus ⇒ fails."""
+        for label, center in (("none", fk.FakeSecurityCenter.none()), ("inactive", fk.FakeSecurityCenter.inactive())):
+            with self.subTest(case=label):
+                check = self.guard(None, center)
+                self.assertFalse(check["ok"], check)
+                self.assertIn("no active antivirus", check["detail"])
+
+    def test_ol_27_05_unqueryable_antivirus_is_not_evaluated(self) -> None:
+        """OL-27.05: no deciding policy, SecurityCenter2 unavailable ⇒ `not evaluated: SecurityCenter2 unavailable`."""
+        check = self.guard(None, fk.FakeSecurityCenter.unavailable())
+        self.assertEqual(
+            check,
+            {"name": "object_model_guard", "ok": False, "detail": "not evaluated: SecurityCenter2 unavailable"},
+        )
+
+    def test_ol_27_06_deciding_policy_never_queries_the_antivirus(self) -> None:
+        """OL-27.06: with a deciding policy the antivirus is not queried."""
+        for value in (0, 1, 2):
+            with self.subTest(value=value):
+                center = fk.FakeSecurityCenter.unavailable()
+                self.guard(self.policy(PromptOOMAddressInformationAccess=value), center)
+                self.assertEqual(center.queries, 0)
 
 
 if __name__ == "__main__":  # pragma: no cover

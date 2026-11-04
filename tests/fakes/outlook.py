@@ -1651,6 +1651,21 @@ class FakeOutlook:
                 return spec
         return None
 
+    # -- changes made by the user in Outlook ----------------------------------- #
+
+    def move_item(self, key: str, folder: FolderSpec) -> ItemSpec:
+        """Move an item to ``folder`` as the user would: its EntryID changes (annex B.4)."""
+        spec = self.items[key]
+        if spec.folder is not None:
+            spec.folder.items.remove(spec)
+        store = folder.store
+        index = self._next()
+        spec.entry_id = self._entry_id(store, "item", store.entry_bytes)
+        spec.short_id = _digest(24, "short", store.key, key, index).hex().upper()
+        spec.folder = folder
+        folder.items.append(spec)
+        return spec
+
     # -- builders ------------------------------------------------------------- #
 
     def _next(self) -> int:

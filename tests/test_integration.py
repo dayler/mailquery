@@ -845,6 +845,7 @@ class OutlookGoldenTest(unittest.TestCase):
             outlook_app=self.fake,
             registry=self.fake.registry,
             security_center=self.fake.security_center,
+            tmp_root=self.home / "tmp",
         )
         self.addCleanup(backend.close)
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -916,6 +917,270 @@ class OutlookGoldenTest(unittest.TestCase):
             "W_BODY_UNREADABLE: S/MIME encrypted content is not supported", payload["warnings"]
         )
         _assert_golden(self, "outlook/show_smime.json", payload, self.root)
+
+    def test_tc_02_06_new_first_run(self) -> None:
+        """TC-02.06: first run of ``new``: the [D - lookback, D] window, hex uids (golden)."""
+        from mailquery.backends.outlook import OutlookBackend
+
+        normal = self.fake.item("normal").entry_id
+        payload = self.run_ok("new")
+        self.assertEqual([message["uid"] for message in payload["messages"]], [normal])
+        self.assertEqual(
+            payload["warnings"],
+            [
+                OUTLOOK_STORE_EXCLUDED,
+                "W_FIRST_RUN: first run: emitted the messages received in the last "
+                "10min before the newest message",
+            ],
+        )
+        self.assertIsNone(payload["cursor"]["previous"])
+        self.assertEqual(payload["cursor"]["current"]["last_uid"], normal)
+        state = StateStore(self.home, OutlookBackend.check_state_uid).load()
+        self.assertEqual(state.emitted_uids, (normal,))
+        _assert_golden(self, "outlook/new_first_run.json", payload, self.root)
+
+    def test_tc_02_07_doctor(self) -> None:
+        """TC-02.07: ``doctor --json`` of the golden profile: every check passes (golden)."""
+        payload = self.run_ok("doctor", "--json")
+        checks = payload["checks"]
+        self.assertEqual(
+            [check["name"] for check in checks],
+            [
+                "python", "home", "pywin32", "outlook", "stores", "readonly_strategy",
+                "object_model_guard", "config", "state", "lock",
+            ],
+        )
+        for check in checks:
+            self.assertIs(check["ok"], True, check)
+        by_name = {check["name"]: check for check in checks}
+        self.assertIn(OUTLOOK_STORE_EXCLUDED, by_name["config"]["detail"])
+        self.assertIn(str(self.home / "tmp" / "gen_py"), by_name["readonly_strategy"]["detail"])
+        _assert_golden(self, "outlook/doctor.json", payload, self.root)
+
+
+# --------------------------------------------------------------------------- #
+# TC-04 / TC-05 — recipes and JSON shape on both backends (PRD 21.2, RF-30)
+# --------------------------------------------------------------------------- #
+
+RECIPES_DIR = Path(__file__).resolve().parents[1] / "docs" / "recipes"
+#: Outlook config of TC-04/TC-05 over ``FakeOutlook.item_matrix()``: the Exchange
+#: account with ``INBOX/Facturas``, which holds a message of the last month.
+OUTLOOK_ITEMS_CONFIG = '[scope."ana@example.com"]\nmailbox_list = ["INBOX/Facturas"]\n'
+
+
+def _recipe_commands(name: str) -> list[list[str]]:
+    """Each line that starts with ``mailquery`` inside a code block of the recipe (plan 7.4).
+
+    Fenced blocks may be indented (inside a list). The shell comment that
+    follows a command is dropped and the quotes are resolved as a shell would.
+    """
+    import shlex
+
+    commands: list[list[str]] = []
+    inside = False
+    for line in (RECIPES_DIR / name).read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            inside = not inside
+            continue
+        if inside and (stripped == "mailquery" or stripped.startswith("mailquery ")):
+            commands.append(shlex.split(stripped, comments=True)[1:])
+    return commands
+
+
+def _key_paths(value: object, prefix: str = "") -> set[str]:
+    """Recursive set of JSON keys (``a.b``, list elements as ``a[]``), values ignored."""
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{prefix}.{key}"
+            paths.add(path)
+            paths |= _key_paths(item, path)
+    elif isinstance(value, list):
+        for item in value:
+            paths |= _key_paths(item, f"{prefix}[]")
+    return paths
+
+
+class _BothBackendsCase(unittest.TestCase):
+    """``cli.main`` on Apple Mail (fixture store) and on Outlook (in-memory fake).
+
+    Apple Mail runs over ``build_store()`` with ``DEFAULT_CONFIG``; Outlook over
+    ``outlook_fake()`` (``FakeOutlook.item_matrix()`` by default) with
+    ``OUTLOOK_ITEMS_CONFIG``, each in its own temporary home.
+    """
+
+    def setUp(self) -> None:
+        from mailquery.backends import outlook_com
+
+        self.fx = build_store()
+        self.addCleanup(self.fx.cleanup)
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(_close_log_handlers)  # before the cleanups above (Windows)
+        self.outlook_home = Path(tmp.name) / ".mailquery"
+        self.outlook_home.mkdir()
+        (self.outlook_home / "config.toml").write_text(OUTLOOK_ITEMS_CONFIG, encoding="utf-8")
+        self.fake = self.outlook_fake()
+        patcher = mock.patch.object(outlook_com, "get_drive_type", self.fake.drive_type)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def outlook_fake(self):
+        from tests.fakes import outlook as fake_outlook
+
+        return fake_outlook.FakeOutlook.item_matrix()
+
+    @staticmethod
+    def _capture(call) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = call()
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def run_backend(self, backend: str, *args: str) -> tuple[int, dict, str]:
+        """Run ``mailquery <args>`` on ``"apple_mail"`` or ``"outlook"``: (exit, JSON, stderr)."""
+        if backend == "apple_mail":
+            code, stdout, stderr = self._capture(
+                lambda: cli.main(
+                    list(args),
+                    home=self.fx.home,
+                    mail_root=self.fx.mail_root,
+                    accounts_db=self.fx.accounts_db,
+                )
+            )
+        else:
+            from mailquery.backends import get_backend
+
+            instance = get_backend(
+                platform="win32",
+                outlook_app=self.fake,
+                registry=self.fake.registry,
+                security_center=self.fake.security_center,
+                tmp_root=self.outlook_home / "tmp",
+            )
+            self.addCleanup(instance.close)
+            code, stdout, stderr = self._capture(
+                lambda: cli.main(list(args), home=self.outlook_home, backend=instance)
+            )
+        self.assertTrue(stdout.strip(), f"{backend} {args}: no JSON on stdout; stderr={stderr}")
+        return code, json.loads(stdout), stderr
+
+    def run_both_ok(self, *args: str) -> dict[str, dict]:
+        """``args`` on both backends, each with exit 0: ``{backend: payload}``."""
+        payloads = {}
+        for backend in ("apple_mail", "outlook"):
+            code, payload, stderr = self.run_backend(backend, *args)
+            self.assertEqual(code, 0, f"{backend} {args}: {payload} {stderr}")
+            payloads[backend] = payload
+        return payloads
+
+
+class RecipeCommandTest(_BothBackendsCase):
+    """TC-04 (PRD 21.2): every recipe command runs with exit 0 on both backends."""
+
+    def assert_recipe(self, name: str, uid_command: tuple[str, ...]) -> None:
+        commands = _recipe_commands(name)
+        self.assertTrue(commands, f"no mailquery command in {name}")
+        for backend in ("apple_mail", "outlook"):
+            code, payload, stderr = self.run_backend(backend, *uid_command)
+            self.assertEqual(code, 0, f"{backend} {uid_command}: {payload} {stderr}")
+            self.assertTrue(payload["messages"], f"{backend} {uid_command}: no message for <uid>")
+            uid = str(payload["messages"][0]["uid"])
+            for command in commands:
+                argv = [uid if arg == "<uid>" else arg for arg in command]
+                with self.subTest(backend=backend, command=" ".join(command)):
+                    code, payload, stderr = self.run_backend(backend, *argv)
+                    self.assertEqual(code, 0, f"{payload} {stderr}")
+                    self.assertIs(payload["ok"], True)
+
+    def test_tc_04_01_new_mail_digest_commands_exit_0_on_both_backends(self) -> None:
+        """TC-04.01: each command of 01-new-mail-digest.md exits 0 (<uid> from `new --peek`)."""
+        self.assert_recipe("01-new-mail-digest.md", ("new", "--peek"))
+
+    def test_tc_04_02_search_invoices_commands_exit_0_on_both_backends(self) -> None:
+        """TC-04.02: each command of 02-search-invoices.md exits 0 (<uid> from `search --since 1mo`)."""
+        self.assert_recipe("02-search-invoices.md", ("search", "--since", "1mo"))
+
+
+class JsonShapeParityTest(_BothBackendsCase):
+    """TC-05 (RF-30): the same recursive set of JSON keys on both backends.
+
+    The Outlook profile adds to ``item_matrix`` a message with To, Cc and a
+    visible attachment (the counterpart of Apple Mail's uid 2714), so that the
+    lists of both payloads have elements whose keys can be compared.
+    """
+
+    def outlook_fake(self):
+        from tests.fakes import outlook as fake_outlook
+
+        fake = fake_outlook.FakeOutlook.item_matrix()
+        inbox = fake.store("exchange").inbox
+        assert inbox is not None
+        inbox.add_message(
+            "complete",
+            subject="Factura completa",
+            sender=("Proveedor", "ventas@proveedor.example"),
+            to=[("Ana", "ana@example.com")],
+            cc=[("Copia", "copia@example.com")],
+            body="Adjuntamos la factura.\r\n",
+            attachments=[fake_outlook.AttachmentSpec("factura.pdf")],
+        )
+        return fake
+
+    def assert_same_keys(self, payloads: dict[str, dict]) -> None:
+        apple, outlook = (_key_paths(payloads[name]) for name in ("apple_mail", "outlook"))
+        self.assertTrue(apple)
+        self.assertEqual(
+            (sorted(apple - outlook), sorted(outlook - apple)),
+            ([], []),
+            "keys only on Apple Mail / only on Outlook",
+        )
+
+    def test_tc_05_01_search(self) -> None:
+        """TC-05.01: `search` has the same recursive keys on both backends."""
+        payloads = self.run_both_ok("search", "--limit", "200")
+        for payload in payloads.values():
+            self.assertTrue(any(message["cc"] for message in payload["messages"]))
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_02_new(self) -> None:
+        """TC-05.02: `new` (first run) has the same recursive keys on both backends."""
+        payloads = self.run_both_ok("new")
+        for payload in payloads.values():
+            self.assertTrue(payload["messages"])
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_03_show(self) -> None:
+        """TC-05.03: `show` (message with To, Cc and an attachment) has the same keys."""
+        payloads = {}
+        for backend, uid in (
+            ("apple_mail", "2714"),
+            ("outlook", self.fake.item("complete").entry_id),
+        ):
+            code, payload, stderr = self.run_backend(backend, "show", uid)
+            self.assertEqual(code, 0, f"{backend}: {payload} {stderr}")
+            self.assertTrue(payload["message"]["cc"] and payload["message"]["attachments"])
+            payloads[backend] = payload
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_04_mailboxes(self) -> None:
+        """TC-05.04: `mailboxes` has the same recursive keys on both backends."""
+        self.assert_same_keys(self.run_both_ok("mailboxes"))
+
+    def test_tc_05_05_error(self) -> None:
+        """TC-05.05: an error has the same recursive keys on both backends."""
+        payloads = {}
+        for backend in ("apple_mail", "outlook"):
+            code, payload, _stderr = self.run_backend(backend, "search", "--since", "banana")
+            self.assertEqual((code, payload["error"]["code"]), (2, "E_BAD_TIME"))
+            payloads[backend] = payload
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_06_doctor_json(self) -> None:
+        """TC-05.06: `doctor --json` has the same recursive keys on both backends."""
+        self.assert_same_keys(self.run_both_ok("doctor", "--json"))
 
 
 # --------------------------------------------------------------------------- #
