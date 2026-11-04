@@ -1,6 +1,6 @@
 # Backend Apple Mail (macOS) — anexo del PRD
 
-**Documento padre:** [`docs/PRD.md`](../PRD.md) v1.0, que manda sobre este anexo.
+**Documento padre:** [`docs/PRD.md`](../PRD.md) v1.1, que manda sobre este anexo.
 **Plataforma:** macOS con Apple Mail.
 **Estado:** implementado y validado (contenido trasladado desde el PRD v0.13).
 
@@ -9,8 +9,8 @@ invariante I-1, cómo se localiza y lee el store, las reglas del modelo de datos
 de origen y los permisos de macOS. Lo común a todas las plataformas (CLI,
 contrato JSON, configuración, cursor, errores) vive en el PRD.
 
-> **Regla de compatibilidad:** la v1.0 cambia en este backend exactamente lo
-> listado en PRD §23.3. Todo lo demás queda igual.
+> **Regla de compatibilidad:** la versión 2.0.0 cambia en este backend
+> exactamente lo listado en PRD §23.3.
 
 ---
 
@@ -130,10 +130,11 @@ como fallback.
 | Concepto común (PRD §11) | Apple Mail |
 |--------------------------|------------|
 | `uid` | id de fila del mensaje en el `Envelope Index` (**entero**) |
-| `message_id` / clave de dedupe | Message-ID RFC del mensaje (identificador global de Mail) |
+| `message_id` | Message-ID RFC del mensaje |
+| Clave de dedupe | `messages.global_message_id`, el identificador global de Mail; NULL o 0 ⇒ mensaje único (RF-07) |
 | `account.uuid` | authority de la URL de carpeta (= identificador en `Accounts4.sqlite`) |
 | `mailbox.url` | URL de la carpeta (`imap://…`, `local://…`) |
-| INBOX | path `INBOX` (directo o por etiqueta en Gmail) |
+| INBOX | carpeta de primer nivel cuyo path es `INBOX` sin distinguir mayúsculas, o la etiqueta INBOX en Gmail |
 | Buzón agregado | path que contiene `all mail` (`[Gmail]/All Mail`) |
 | Cuerpo / `body.partial` | `.emlx` / `.partial.emlx` |
 | `source.emlx_path` | ruta absoluta del `.emlx` |
@@ -161,10 +162,19 @@ Chequeos (nombres estables de `checks[].name`): `python`, `home`, `store`,
 | Chequeo | Qué valida |
 |---------|------------|
 | `store` | Versión `V*` detectada y ruta del store. |
-| `envelope_index` | Existe y se puede abrir en solo lectura (FDA). |
+| `envelope_index` | Existe y se abre con la estrategia de §A.4 (`live_ro`/`copy_ro`), nunca de otra forma (FDA). |
 | `schema` | Están todas las tablas/columnas obligatorias. |
 | `readonly_strategy` | `live_ro` o `copy_ro` (§A.4). |
 | `accounts_db` | `Accounts4.sqlite` legible y número de etiquetas disponibles. |
+
+Dependencias (un chequeo cuya dependencia directa falló sale como
+`not evaluated: <dependencia> failed`, PRD §12.8):
+
+- `store` → `envelope_index`;
+- `envelope_index` → `schema` y `readonly_strategy`;
+- `schema` → resolución de bloques de `config` (la sintaxis se valida siempre).
+- `python`, `home`, `accounts_db`, `state` y `lock` no dependen de otro
+  chequeo.
 
 ---
 
@@ -175,10 +185,7 @@ Chequeos (nombres estables de `checks[].name`): `python`, `home`, `store`,
 | Store ausente o versión no soportada | `E_STORE_NOT_FOUND` / `E_SCHEMA_UNSUPPORTED`, exit 3, con rutas/versión detectada. |
 | FDA denegado | `E_PERMISSION`, exit 3, con instrucciones. |
 | `Envelope Index` bloqueado | Reintento único; si persiste `E_DB_BUSY`, exit 5. |
-| Mensaje sin `.emlx` | `body.available=false` + `W_EMLX_MISSING`. |
-| `.emlx` corrupto | Cuerpo vacío (o lo recuperable) + `W_EMLX_CORRUPT`. |
-| `.emlx` que no se puede abrir, S/MIME (cifrado o firmado) o mensaje sin carpeta | `readable=false` + `W_BODY_UNREADABLE` con el motivo (antes `W_EMLX_UNREADABLE`, PRD §23.3). |
-| `show` de un uid de una cuenta no declarada | `E_ACCOUNT_NOT_IN_SCOPE`, exit 2 (antes se mostraba; PRD §23.3). |
+| `.emlx` ausente, corrupto o ilegible, S/MIME o mensaje sin carpeta | Valores de `body` y warning: PRD §12.5. |
 | Etiqueta/email sin base de cuentas disponible | `E_ACCOUNT_LABELS_UNAVAILABLE`, exit 2, con hint para usar el UUID. |
 | Rebuild del índice de Mail | Los uid pueden cambiar; `new` es tolerante (fecha), `show` debe repetir la búsqueda. |
 
@@ -189,8 +196,8 @@ Chequeos (nombres estables de `checks[].name`): `python`, `home`, `store`,
 En el equipo de referencia (store vivo, ~66.000 mensajes, 2,5 GB): consulta de
 metadatos de 500 filas en 0,1–1 ms, resolución `uid → ruta` en < 1 ms y
 parseo de un `.emlx` medio en ~3,7 ms. Un escaneo de contenido sin acotar
-costaría ~4 minutos: por eso RF-17 exige filtros y un máximo de 5.000
-candidatos. Los presupuestos p95 están en PRD §19.
+costaría ~4 minutos: por eso RF-17 exige filtros y un máximo de candidatos
+(`[search].max_scan`, PRD §15.1). Los presupuestos p95 están en PRD §19.
 
 ---
 
@@ -199,8 +206,7 @@ candidatos. Los presupuestos p95 están en PRD §19.
 Test de integración **bloqueante** en CI: compara hashes y `mtime` de cada
 archivo de un store sintético antes y después de ejecutar todos los comandos,
 y verifica que no se crean archivos nuevos en el store. Los goldens JSON de
-este backend fijan su contrato: la v1.0 solo los modifica por los cambios de
-PRD §23.3 (W0) y el refactor W2 no puede cambiarlos.
+este backend fijan su contrato (PRD RNF-11).
 
 ---
 
