@@ -37,7 +37,6 @@ __all__ = [
     "db_busy",
     "permission_denied",
     "tcc_denied",
-    "unexpected_schema",
 ]
 
 
@@ -54,11 +53,6 @@ def permission_denied() -> PermissionError:
 def db_busy_error() -> sqlite3.OperationalError:
     """Return the error SQLite raises for a locked database."""
     return sqlite3.OperationalError("database is locked")
-
-
-def unexpected_schema_error() -> sqlite3.OperationalError:
-    """Return the error SQLite raises for a missing column/table."""
-    return sqlite3.OperationalError("no such column: message_id_header")
 
 
 # --------------------------------------------------------------------------- #
@@ -84,13 +78,6 @@ def tcc_denied() -> Iterator[mock.MagicMock]:
 def db_busy() -> Iterator[mock.MagicMock]:
     """Simulate a locked ``Envelope Index``: every SQLite open says "busy"."""
     with _sqlite_connect_raising(db_busy_error()) as patched:
-        yield patched
-
-
-@contextlib.contextmanager
-def unexpected_schema() -> Iterator[mock.MagicMock]:
-    """Simulate schema drift: opening the Envelope Index fails on a column."""
-    with _sqlite_connect_raising(unexpected_schema_error()) as patched:
         yield patched
 
 

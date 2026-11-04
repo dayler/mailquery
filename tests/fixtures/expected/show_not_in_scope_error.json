@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "command": "show",
+  "error": {
+    "code": "E_ACCOUNT_NOT_IN_SCOPE",
+    "message": "message uid 83160 belongs to account 'BBBBBBBB-0000-4000-8000-000000000002', which is not declared in config.toml",
+    "hint": "only accounts declared with a [scope.<account>] block are read; declare the account in ~/.mailquery/config.toml"
+  }
+}

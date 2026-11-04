@@ -18,7 +18,7 @@
 # --- Valores globales (todos opcionales; estos son los defaults) ------------
 # [logging]
 # level = "info"                 # error | warning | info | debug
-# retention_days = 7             # 1..365
+# max_size_mb = 10              # 1..1024; rota el log al superar este tamaño (5 rotados)
 
 # [search]
 # default_limit = 20             # 1..200

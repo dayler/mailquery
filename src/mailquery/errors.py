@@ -24,9 +24,18 @@ _EXIT_ERRORS: Final[dict[int, tuple[str, ...]]] = {
         "E_BAD_TIME",
         "E_BAD_FILTER",
     ),
-    3: ("E_STORE_NOT_FOUND", "E_SCHEMA_UNSUPPORTED", "E_PERMISSION", "E_STATE_CORRUPT"),
+    3: (
+        "E_STORE_NOT_FOUND",
+        "E_SCHEMA_UNSUPPORTED",
+        "E_PERMISSION",
+        "E_STATE_CORRUPT",
+        "E_CLIENT_UNSUPPORTED",
+        "E_DEPENDENCY_MISSING",
+        "E_CLIENT_TIMEOUT",
+    ),
     4: ("E_UNBOUNDED_SCAN", "E_SCAN_TOO_LARGE"),
-    5: ("E_LOCKED", "E_DB_BUSY"),
+    5: ("E_LOCKED", "E_DB_BUSY", "E_CLIENT_BUSY"),
+    6: ("E_OUTLOOK_NOT_RUNNING",),
 }
 
 CODE_EXIT: Final[dict[str, int]] = {
@@ -47,12 +56,22 @@ class MailqueryError(Exception):
 
     ``code`` is the stable machine-readable identifier, ``message`` the short
     explanation and ``hint`` an actionable suggestion shown to the harness.
+    ``log_message`` is the same text without the data PRD 14 forbids in the log
+    (paths, folders, accounts, terms, uids...); the log writes it when present
+    and ``message`` otherwise.
     """
 
-    def __init__(self, code: str, message: str, hint: str = "") -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        hint: str = "",
+        log_message: str | None = None,
+    ) -> None:
         self.code = code if code in CODE_EXIT else "E_INTERNAL"
         self.message = message
         self.hint = hint
+        self.log_message = log_message
         super().__init__(message)
 
     @property
@@ -77,12 +96,12 @@ class MailqueryError(Exception):
         }
 
 
-def usage_error(message: str, hint: str = "") -> MailqueryError:
-    return MailqueryError("E_USAGE", message, hint)
+def usage_error(message: str, hint: str = "", log_message: str | None = None) -> MailqueryError:
+    return MailqueryError("E_USAGE", message, hint, log_message)
 
 
-def config_error(message: str, hint: str = "") -> MailqueryError:
-    return MailqueryError("E_CONFIG_INVALID", message, hint)
+def config_error(message: str, hint: str = "", log_message: str | None = None) -> MailqueryError:
+    return MailqueryError("E_CONFIG_INVALID", message, hint, log_message)
 
 
 def bad_time(value: str) -> MailqueryError:

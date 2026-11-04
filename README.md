@@ -883,7 +883,7 @@ Contenido del objeto `message`:
 
 Si el mensaje no tiene `.emlx` legible, la consulta **no se rompe**: se entrega
 con el cuerpo no disponible y un warning (`W_EMLX_MISSING` / `W_EMLX_CORRUPT` /
-`W_EMLX_UNREADABLE`). Los `.emlx` huérfanos (sin fila en el índice) se ignoran.
+`W_BODY_UNREADABLE`). Los `.emlx` huérfanos (sin fila en el índice) se ignoran.
 Un mensaje cifrado S/MIME puede reportarse como `readable: false` (limitación
 conocida).
 
@@ -955,7 +955,7 @@ resúmenes humanos de error a `stderr`. Las excepciones documentadas son
 
 Códigos de warning previstos: `W_NO_ACCOUNTS`, `W_FIRST_RUN`,
 `W_ACCOUNT_LABELS_UNAVAILABLE`, `W_EMLX_MISSING`, `W_EMLX_CORRUPT`,
-`W_EMLX_UNREADABLE`, `W_HTML_NO_TEXT`, `W_BODY_TRUNCATED`,
+`W_BODY_UNREADABLE`, `W_HTML_NO_TEXT`, `W_BODY_TRUNCATED`,
 `W_ATTACHMENTS_UNAVAILABLE`.
 
 ### Estructura de error

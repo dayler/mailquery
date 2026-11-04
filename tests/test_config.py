@@ -2,9 +2,8 @@
 
 Covers the strict ``config.toml`` schema, duration parsing, the application
 home layout and the account/mailbox scope resolution rules (PRD 15). Scope
-resolution is tested against small fake store/labels objects (always runs) and
-against the synthetic fixture store (skipped while ``store.py``/``accounts.py``
-are still stubs).
+resolution is tested against small fake store/labels objects and against the
+synthetic fixture store.
 """
 
 from __future__ import annotations
@@ -206,9 +205,11 @@ class AppHomeTests(unittest.TestCase):
             for name in APP_HOME_SUBDIRS:
                 directory = home / name
                 self.assertTrue(directory.is_dir(), name)
-                mode = stat.S_IMODE(os.stat(directory).st_mode)
-                self.assertEqual(mode, 0o700, name)
-            self.assertEqual(stat.S_IMODE(os.stat(home).st_mode), 0o700)
+                if os.name == "posix":
+                    mode = stat.S_IMODE(os.stat(directory).st_mode)
+                    self.assertEqual(mode, 0o700, name)
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(os.stat(home).st_mode), 0o700)
 
 
 class ParseDurationTests(unittest.TestCase):
@@ -308,7 +309,7 @@ class LoadConfigTests(_ErrorAssertions):
         content = f"""\
 [logging]
 level = "debug"
-retention_days = 14
+max_size_mb = 14
 
 [search]
 default_limit = 50
@@ -324,7 +325,7 @@ mailbox_list = ["Facturas", "Archivo"]
 [scope."{ACCOUNT_GMAIL}"]
 """
         config = self._load(content)
-        self.assertEqual(config.logging, LoggingConfig(level="debug", retention_days=14))
+        self.assertEqual(config.logging, LoggingConfig(level="debug", max_size_mb=14))
         self.assertEqual(config.search, SearchConfig(default_limit=50, max_scan=10000))
         self.assertEqual(config.new, NewConfig(default_limit=200, lookback="15min", lookback_seconds=900))
         self.assertEqual(
@@ -398,10 +399,10 @@ mailbox_list = ["Facturas", "Archivo"]
         cases = (
             ('[logging]\nlevel = "loud"\n', "[logging].level"),
             ("[logging]\nlevel = 1\n", "[logging].level"),
-            ("[logging]\nretention_days = 0\n", "retention_days"),
-            ("[logging]\nretention_days = 366\n", "retention_days"),
-            ('[logging]\nretention_days = "7"\n', "must be an integer"),
-            ("[logging]\nretention_days = true\n", "must be an integer"),
+            ("[logging]\nmax_size_mb = 0\n", "max_size_mb"),
+            ("[logging]\nmax_size_mb = 1025\n", "max_size_mb"),
+            ('[logging]\nmax_size_mb = "10"\n', "must be an integer"),
+            ("[logging]\nmax_size_mb = true\n", "must be an integer"),
             ("[search]\ndefault_limit = 0\n", "default_limit"),
             ("[search]\ndefault_limit = 201\n", "default_limit"),
             ("[search]\nmax_scan = 99\n", "max_scan"),
@@ -425,7 +426,7 @@ mailbox_list = ["Facturas", "Archivo"]
 
     def test_range_hints_document_valid_ranges(self) -> None:
         cases = (
-            ("[logging]\nretention_days = 400\n", "1..365"),
+            ("[logging]\nmax_size_mb = 2000\n", "1..1024"),
             ("[search]\ndefault_limit = 0\n", "1..200"),
             ("[search]\nmax_scan = 99\n", "100..50000"),
             ("[new]\ndefault_limit = 0\n", "1..500"),
@@ -435,6 +436,18 @@ mailbox_list = ["Facturas", "Archivo"]
             with self.subTest(content=content):
                 error = self._load_error(content)
                 self.assertIn(hint, error.hint)
+
+    def test_ut_cfg_01_01_max_size_mb_accepts_its_limits(self) -> None:
+        """UT-CFG-01.01: 1 and 1024 are valid max_size_mb values."""
+        self.assertEqual(self._load("[logging]\nmax_size_mb = 1\n").logging.max_size_mb, 1)
+        self.assertEqual(self._load("[logging]\nmax_size_mb = 1024\n").logging.max_size_mb, 1024)
+
+    def test_ut_cfg_02_01_retention_days_is_an_unknown_key_with_its_hint(self) -> None:
+        """UT-CFG-02.01: [logging].retention_days => E_CONFIG_INVALID with the replacement hint."""
+        error = self._load_error("[logging]\nretention_days = 7\n")
+        self.assertEqual(error.code, "E_CONFIG_INVALID")
+        self.assertIn("retention_days", error.message)
+        self.assertEqual(error.hint, "retention_days was replaced by max_size_mb")
 
     def test_enum_hint_lists_valid_levels(self) -> None:
         error = self._load_error('[logging]\nlevel = "warn"\n')
@@ -616,7 +629,7 @@ class ResolveScopeTests(_ErrorAssertions):
 
 
 class FixtureScopeResolutionTests(unittest.TestCase):
-    """Uses ``build_store()``; skipped while store/accounts are still stubs."""
+    """Uses ``build_store()``."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -630,23 +643,17 @@ class FixtureScopeResolutionTests(unittest.TestCase):
     def _open_store(self):
         from mailquery.store import open_store
 
-        try:
-            store = open_store(self.fx.mail_root, tmp_root=self.fx.root / "tmp")
-        except NotImplementedError as exc:
-            self.skipTest(f"store.py dependency not implemented yet: {exc}")
+        store = open_store(self.fx.mail_root, tmp_root=self.fx.root / "tmp")
         self.addCleanup(store.close)
         return store
 
     def _open_labels(self, db_path: Path | None = None):
         from mailquery.accounts import AccountLabels
 
-        try:
-            return AccountLabels(
-                self.fx.accounts_db if db_path is None else db_path,
-                tmp_dir=self.fx.root / "tmp",
-            )
-        except NotImplementedError as exc:
-            self.skipTest(f"accounts.py dependency not implemented yet: {exc}")
+        return AccountLabels(
+            self.fx.accounts_db if db_path is None else db_path,
+            tmp_dir=self.fx.root / "tmp",
+        )
 
     def test_fixture_accounts_resolve_by_label(self) -> None:
         store = self._open_store()
