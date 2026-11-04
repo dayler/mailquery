@@ -15,8 +15,9 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
+from mailquery.backends.base import StateUidError, Uid
 from mailquery.errors import MailqueryError
 from mailquery.output import now_iso
 
@@ -39,7 +40,7 @@ class Cursor:
     """Watermark for ``mailquery new``."""
 
     last_date_received: int
-    last_uid: int
+    last_uid: Uid
     lookback_seconds: int = DEFAULT_LOOKBACK_SECONDS
 
 
@@ -55,7 +56,13 @@ class AppState:
     updated_at: str = ""
     last_run: LastRun | None = None
     cursor: Cursor | None = None
-    emitted_uids: tuple[int, ...] = ()
+    emitted_uids: tuple[Uid, ...] = ()
+
+
+# A uid validator is the backend's ``check_state_uid`` (PRD 11.2, D-05): it returns
+# ``None`` for a valid ``state.json`` uid and raises ``StateUidError`` carrying
+# the backend's own ``E_STATE_CORRUPT`` details otherwise.
+UidValidator = Callable[[object], None]
 
 
 class _MissingFile(Exception):
@@ -69,11 +76,14 @@ class StateStore:
     with unknown keys (they are ignored), but it is strict about the file being
     a JSON object with schema ``1`` and about the types of the known fields: a
     damaged state must fail loudly with ``E_STATE_CORRUPT`` (PRD 11.2) instead
-    of silently re-baselining and re-emitting a window of mail.
+    of silently re-baselining and re-emitting a window of mail. The uids
+    (``cursor.last_uid`` and ``emitted_uids``) are validated by ``validate_uid``,
+    the backend's rule (D-05); they are otherwise opaque (``int`` or ``str``).
     """
 
-    def __init__(self, home: Path) -> None:
+    def __init__(self, home: Path, validate_uid: UidValidator) -> None:
         self._home = Path(home)
+        self._validate_uid = validate_uid
 
     @property
     def home(self) -> Path:
@@ -110,7 +120,7 @@ class StateStore:
 
         if not isinstance(payload, dict):
             raise _corrupt("the top-level value must be a JSON object")
-        return _state_from_payload(payload)
+        return _state_from_payload(payload, self._validate_uid)
 
     def save(self, state: AppState) -> None:
         """Atomically persist ``state`` as 0600 JSON."""
@@ -174,7 +184,7 @@ class StateStore:
     def record_new(
         self,
         state: AppState,
-        emitted: Sequence[tuple[int, int]],
+        emitted: Sequence[tuple[int, Uid]],
         lookback_seconds: int,
         command: str = "new",
     ) -> AppState:
@@ -191,7 +201,7 @@ class StateStore:
         (``search.run_new``) saves it only when the run is not ``--peek``, so a
         peek can never advance the cursor (PRD 12.3, 18).
         """
-        pairs = [(int(date), int(uid)) for date, uid in emitted]
+        pairs = [(int(date), uid) for date, uid in emitted]
         previous = state.cursor
         lookback = int(lookback_seconds)
 
@@ -358,7 +368,7 @@ def _state_to_payload(state: AppState) -> dict:
     }
 
 
-def _state_from_payload(payload: dict) -> AppState:
+def _state_from_payload(payload: dict, validate_uid: UidValidator) -> AppState:
     """Build ``AppState`` from raw JSON, raising E_STATE_CORRUPT on bad types."""
     schema = payload.get("schema", STATE_SCHEMA)
     if schema != STATE_SCHEMA or isinstance(schema, bool):
@@ -371,8 +381,8 @@ def _state_from_payload(payload: dict) -> AppState:
         raise _corrupt("'updated_at' must be a string")
 
     last_run = _last_run_from_payload(payload.get("last_run"))
-    cursor = _cursor_from_payload(payload.get("cursor"))
-    emitted_uids = _ring_from_payload(payload.get("emitted_uids", []))
+    cursor = _cursor_from_payload(payload.get("cursor"), validate_uid)
+    emitted_uids = _ring_from_payload(payload.get("emitted_uids", []), validate_uid)
 
     return AppState(
         schema=STATE_SCHEMA,
@@ -395,7 +405,7 @@ def _last_run_from_payload(value: object) -> LastRun | None:
     return LastRun(command=command, at=at)
 
 
-def _cursor_from_payload(value: object) -> Cursor | None:
+def _cursor_from_payload(value: object, validate_uid: UidValidator) -> Cursor | None:
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -403,14 +413,16 @@ def _cursor_from_payload(value: object) -> Cursor | None:
     date = value.get("last_date_received")
     uid = value.get("last_uid")
     lookback = value.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
-    if not _is_int(date) or not _is_int(uid) or not _is_int(lookback):
+    if not _is_int(date) or not _is_int(lookback):
         raise _corrupt(
             "'cursor' must hold integer 'last_date_received' and 'last_uid'"
         )
     if date < 0:
         raise _corrupt("'cursor.last_date_received' must not be negative")
-    if uid < 1:
-        raise _corrupt("'cursor.last_uid' must be a uid (an integer >= 1)")
+    try:
+        validate_uid(uid)
+    except StateUidError as exc:
+        raise _corrupt(exc.cursor_detail) from exc
     if lookback < 1:
         raise _corrupt("'cursor.lookback_seconds' must be positive")
     return Cursor(
@@ -420,27 +432,28 @@ def _cursor_from_payload(value: object) -> Cursor | None:
     )
 
 
-def _ring_from_payload(value: object) -> tuple[int, ...]:
+def _ring_from_payload(value: object, validate_uid: UidValidator) -> tuple[Uid, ...]:
     if value is None:
         return ()
     if not isinstance(value, list):
         raise _corrupt("'emitted_uids' must be a list of integers")
-    uids: list[int] = []
+    uids: list[Uid] = []
     for item in value:
-        if not _is_int(item) or item < 1:
-            raise _corrupt("'emitted_uids' must be a list of uids (integers >= 1)")
+        try:
+            validate_uid(item)
+        except StateUidError as exc:
+            raise _corrupt(exc.ring_detail) from exc
         uids.append(item)
     return tuple(uids[-MAX_EMITTED_UIDS:])
 
 
 def _advance_ring(
-    current: Sequence[int],
-    pairs: Sequence[tuple[int, int]],
-) -> tuple[int, ...]:
+    current: Sequence[Uid],
+    pairs: Sequence[tuple[int, Uid]],
+) -> tuple[Uid, ...]:
     """Append emitted uids in chronological order, caps the ring at 1.000."""
-    ring = [int(uid) for uid in current]
+    ring = list(current)
     for _, uid in sorted(pairs, key=lambda pair: (pair[0], pair[1])):
-        uid = int(uid)
         if uid in ring:
             ring.remove(uid)
         ring.append(uid)

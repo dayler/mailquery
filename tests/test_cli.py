@@ -22,6 +22,8 @@ from unittest import mock
 
 import mailquery
 from mailquery import cli as cli_mod
+from mailquery.backends import apple_mail as apple_mail_mod
+from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.errors import MailqueryError
 from mailquery.search import Filters
 
@@ -46,9 +48,20 @@ FORBIDDEN_FLAGS = (
 )
 
 
-class _FakeStore:
+class _FakeBackend:
+    """Minimal stand-in for a ``MailBackend``: only what ``cli`` itself touches."""
+
+    name = "apple_mail"
+
     def __init__(self) -> None:
         self.closed = False
+
+    @staticmethod
+    def check_state_uid(uid: object) -> None:
+        return None
+
+    def describe(self) -> dict:
+        return {}
 
     def close(self) -> None:
         self.closed = True
@@ -798,11 +811,10 @@ class ErrorContractTests(_CliTestCase):
         self.assertIn("Traceback", log_text)
 
     def test_store_is_closed_when_the_command_fails(self) -> None:
-        store = _FakeStore()
+        backend = _FakeBackend()
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
-            mock.patch.object(cli_mod, "open_store", return_value=store),
-            mock.patch.object(cli_mod, "AccountLabels", return_value=object()),
+            mock.patch.object(cli_mod, "get_backend", return_value=backend),
             mock.patch.object(
                 cli_mod,
                 "run_search",
@@ -812,7 +824,7 @@ class ErrorContractTests(_CliTestCase):
             exit_code, stdout, _ = self.run_cli(["search"])
         self.assertEqual(exit_code, 2)
         self.assertEqual(self.json_object(stdout)["error"]["code"], "E_BAD_FILTER")
-        self.assertTrue(store.closed)
+        self.assertTrue(backend.closed)
 
     def test_lock_busy_maps_to_exit_5(self) -> None:
         with mock.patch.object(cli_mod, "RunLock", _BusyLock):
@@ -838,12 +850,11 @@ class ErrorContractTests(_CliTestCase):
 
 
 class DispatchTests(_CliTestCase):
-    def test_open_store_receives_test_paths_and_home_tmp(self) -> None:
-        store = _FakeStore()
+    def test_get_backend_receives_test_paths_and_home_tmp(self) -> None:
+        backend = _FakeBackend()
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
-            mock.patch.object(cli_mod, "open_store", return_value=store) as open_mock,
-            mock.patch.object(cli_mod, "AccountLabels", return_value=object()) as labels_mock,
+            mock.patch.object(cli_mod, "get_backend", return_value=backend) as backend_mock,
             mock.patch.object(
                 cli_mod,
                 "run_mailboxes",
@@ -852,24 +863,21 @@ class DispatchTests(_CliTestCase):
         ):
             exit_code, stdout, _ = self.run_cli(["mailboxes"])
         self.assertEqual(exit_code, 0)
-        open_mock.assert_called_once_with(
+        backend_mock.assert_called_once_with(
+            platform="darwin",
             mail_root=self.fx.mail_root,
+            accounts_db=self.fx.accounts_db,
             tmp_root=self.fx.home / "tmp",
         )
-        labels_mock.assert_called_once_with(
-            self.fx.accounts_db,
-            tmp_dir=self.fx.home / "tmp",
-        )
-        self.assertTrue(store.closed)
+        self.assertTrue(backend.closed)
         self.assertTrue(self.json_object(stdout)["ok"])
 
     def test_search_dispatch_builds_filters(self) -> None:
-        store = _FakeStore()
+        backend = _FakeBackend()
         config = cli_mod.load_config(self.fx.home)
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
-            mock.patch.object(cli_mod, "open_store", return_value=store),
-            mock.patch.object(cli_mod, "AccountLabels", return_value=object()),
+            mock.patch.object(cli_mod, "get_backend", return_value=backend),
             mock.patch.object(
                 cli_mod,
                 "run_search",
@@ -906,7 +914,7 @@ class DispatchTests(_CliTestCase):
         rendered = self.json_object(stdout)
         self.assertEqual(rendered["count"], 0)
         run_mock.assert_called_once()
-        _, call_config, _, filters = run_mock.call_args.args
+        _, call_config, filters = run_mock.call_args.args
         self.assertEqual(call_config.home, config.home)
         self.assertIsInstance(filters, Filters)
         self.assertEqual(filters.subject, ("a", "b"))
@@ -923,11 +931,10 @@ class DispatchTests(_CliTestCase):
         self.assertIsNone(filters.until)
 
     def test_show_dispatch(self) -> None:
-        store = _FakeStore()
+        backend = _FakeBackend()
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
-            mock.patch.object(cli_mod, "open_store", return_value=store),
-            mock.patch.object(cli_mod, "AccountLabels", return_value=object()),
+            mock.patch.object(cli_mod, "get_backend", return_value=backend),
             mock.patch.object(
                 cli_mod,
                 "run_show",
@@ -937,14 +944,14 @@ class DispatchTests(_CliTestCase):
             exit_code, stdout, _ = self.run_cli(["show", "83143"])
         self.assertEqual(exit_code, 0)
         run_mock.assert_called_once()
-        # run_show(store, config, labels, uid): B-01 gives it the config.
-        _, call_config, _, call_uid = run_mock.call_args.args
+        # run_show(backend, config, uid): B-01 gives it the config.
+        _, call_config, call_uid = run_mock.call_args.args
         self.assertEqual(call_config.home, self.fx.home)
         self.assertEqual(call_uid, 83143)
         self.assertEqual(self.json_object(stdout)["message"], {"uid": 83143})
 
     def test_new_dispatch_peek_and_limit(self) -> None:
-        store = _FakeStore()
+        backend = _FakeBackend()
         state_store = object()
         payload = {
             "messages": [],
@@ -955,19 +962,133 @@ class DispatchTests(_CliTestCase):
         }
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
-            mock.patch.object(cli_mod, "open_store", return_value=store),
-            mock.patch.object(cli_mod, "AccountLabels", return_value=object()),
+            mock.patch.object(cli_mod, "get_backend", return_value=backend),
             mock.patch.object(cli_mod, "StateStore", return_value=state_store) as state_mock,
             mock.patch.object(cli_mod, "run_new", return_value=payload) as run_mock,
         ):
             exit_code, stdout, _ = self.run_cli(["new", "--peek", "--limit", "7"])
         self.assertEqual(exit_code, 0)
-        state_mock.assert_called_once_with(self.fx.home)
-        self.assertEqual(run_mock.call_args.args[3], state_store)
+        state_mock.assert_called_once_with(self.fx.home, backend.check_state_uid)
+        self.assertEqual(run_mock.call_args.args[2], state_store)
         self.assertEqual(run_mock.call_args.kwargs, {"peek": True, "limit": 7})
         rendered = self.json_object(stdout)
         self.assertEqual(rendered["cursor"], {"previous": None, "current": None})
         self.assertEqual(rendered["count"], 0)
+
+
+class _InjectedBackend(_FakeBackend):
+    """Backend instance passed to ``main(backend=...)`` (the Outlook fake later)."""
+
+    name = "injected"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parsed: list = []
+
+    def parse_uid(self, raw):
+        self.parsed.append(raw)
+        if not str(raw).isalnum():
+            raise MailqueryError("E_USAGE", f"invalid uid {raw!r}", "use a hex uid")
+        return str(raw).upper()
+
+    def doctor_checks(self) -> list[dict]:
+        return [{"name": "fake_check", "ok": True, "detail": "from the backend"}]
+
+
+class BackendInjectionTests(_CliTestCase):
+    """``main(..., backend=...)``: the CLI obtains, uses and closes the backend (plan 4.2)."""
+
+    def run_injected(self, argv, backend, **kwargs):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = cli_mod.main(argv, home=self.fx.home, backend=backend, **kwargs)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_injected_backend_is_used_logged_and_closed(self) -> None:
+        backend = _InjectedBackend()
+        with (
+            mock.patch.object(cli_mod, "get_backend") as get_mock,
+            mock.patch.object(
+                cli_mod,
+                "run_mailboxes",
+                return_value={"accounts": [], "mailboxes": [], "warnings": []},
+            ) as run_mock,
+        ):
+            exit_code, stdout, _ = self.run_injected(["mailboxes"], backend)
+        self.assertEqual(exit_code, 0)
+        get_mock.assert_not_called()
+        self.assertIs(run_mock.call_args.args[0], backend)
+        self.assertTrue(backend.closed)
+        log_text = (self.fx.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+        self.assertIn("backend=injected", log_text)
+
+    def test_without_injection_the_platform_backend_is_requested(self) -> None:
+        backend = _FakeBackend()
+        with (
+            mock.patch.object(cli_mod, "get_backend", return_value=backend) as get_mock,
+            mock.patch.object(
+                cli_mod,
+                "run_mailboxes",
+                return_value={"accounts": [], "mailboxes": [], "warnings": []},
+            ),
+        ):
+            exit_code, _, _ = self.run_cli(
+                ["mailboxes"], mail_root=None, accounts_db=None
+            )
+        self.assertEqual(exit_code, 0)
+        get_mock.assert_called_once_with(
+            platform=None,
+            mail_root=None,
+            accounts_db=None,
+            tmp_root=self.fx.home / "tmp",
+        )
+        self.assertTrue(backend.closed)
+
+    def test_injected_backend_is_closed_when_the_command_fails(self) -> None:
+        backend = _InjectedBackend()
+        with mock.patch.object(
+            cli_mod,
+            "run_search",
+            side_effect=MailqueryError("E_BAD_FILTER", "bad filter", "fix it"),
+        ):
+            exit_code, stdout, _ = self.run_injected(["search"], backend)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(self.json_object(stdout)["error"]["code"], "E_BAD_FILTER")
+        self.assertTrue(backend.closed)
+
+    def test_show_uid_is_validated_by_the_backend_before_the_home_exists(self) -> None:
+        backend = _InjectedBackend()
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_home = Path(tmp) / "no-home"
+            stdout = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+                code = cli_mod.main(
+                    ["show", "not-hex!"], home=missing_home, backend=backend
+                )
+            self.assertEqual(code, 2)
+            self.assertEqual(self.json_object(stdout.getvalue())["error"]["code"], "E_USAGE")
+            self.assertEqual(backend.parsed, ["not-hex!"])
+            self.assertFalse(missing_home.exists())
+            self.assertFalse(backend.closed)  # never obtained, never opened
+
+    def test_show_passes_the_backend_uid_to_run_show(self) -> None:
+        backend = _InjectedBackend()
+        with mock.patch.object(
+            cli_mod, "run_show", return_value={"message": {}, "warnings": []}
+        ) as run_mock:
+            exit_code, _, _ = self.run_injected(["show", "ab12"], backend)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run_mock.call_args.args[2], "AB12")
+
+    def test_doctor_is_common_checks_plus_the_backend_checks(self) -> None:
+        backend = _InjectedBackend()
+        exit_code, stdout, _ = self.run_injected(["doctor", "--json"], backend)
+        self.assertEqual(exit_code, 0)
+        names = [check["name"] for check in self.json_object(stdout)["checks"]]
+        self.assertEqual(
+            names, ["python", "home", "fake_check", "config", "state", "lock"]
+        )
+        self.assertTrue(backend.closed)
 
 
 # --------------------------------------------------------------------------- #
@@ -1168,7 +1289,7 @@ class DoctorTests(_CliTestCase):
     def test_ut_cli_10_03_envelope_index_failure_blocks_schema_and_strategy(self) -> None:
         """UT-CLI-10.03: envelope_index fails with store ok => schema/readonly_strategy not evaluated."""
         error = MailqueryError("E_PERMISSION", "Envelope Index is not readable", "grant access")
-        with mock.patch.object(cli_mod, "probe_envelope_index", side_effect=error):
+        with mock.patch.object(apple_mail_mod, "probe_envelope_index", side_effect=error):
             payload = self._doctor()
         by_name = {check["name"]: check for check in payload["checks"]}
         self.assertTrue(by_name["store"]["ok"])
@@ -1181,7 +1302,7 @@ class DoctorTests(_CliTestCase):
     def test_ut_cli_10_04_schema_failure_blocks_resolution_but_not_syntax(self) -> None:
         """UT-CLI-10.04: schema fails => block resolution not evaluated; invalid syntax still reported."""
         write_config(self.fx.home)
-        with mock.patch.object(cli_mod, "open_store", side_effect=RuntimeError("kaboom")):
+        with mock.patch.object(apple_mail_mod, "open_store", side_effect=RuntimeError("kaboom")):
             payload = self._doctor()
             by_name = {check["name"]: check for check in payload["checks"]}
             self.assertTrue(by_name["envelope_index"]["ok"])
@@ -1263,8 +1384,8 @@ class DoctorTests(_CliTestCase):
 
     def test_doctor_tolerates_unexpected_store_errors(self) -> None:
         with (
-            mock.patch.object(cli_mod, "detect_version", side_effect=RuntimeError("kaboom")),
-            mock.patch.object(cli_mod, "open_store", side_effect=RuntimeError("kaboom")),
+            mock.patch.object(apple_mail_mod, "detect_version", side_effect=RuntimeError("kaboom")),
+            mock.patch.object(apple_mail_mod, "open_store", side_effect=RuntimeError("kaboom")),
         ):
             payload = self._doctor()
         by_name = {check["name"]: check for check in payload["checks"]}
@@ -1279,8 +1400,8 @@ class DoctorTests(_CliTestCase):
             "grant Full Disk Access to the application running mailquery",
         )
         with (
-            mock.patch.object(cli_mod, "detect_version", side_effect=error),
-            mock.patch.object(cli_mod, "open_store", side_effect=error),
+            mock.patch.object(apple_mail_mod, "detect_version", side_effect=error),
+            mock.patch.object(apple_mail_mod, "open_store", side_effect=error),
         ):
             payload = self._doctor()
         by_name = {check["name"]: check for check in payload["checks"]}
@@ -1288,6 +1409,28 @@ class DoctorTests(_CliTestCase):
         self.assertIn("E_PERMISSION", by_name["store"]["detail"])
         self.assertFalse(by_name["envelope_index"]["ok"])
         self.assertEqual(by_name["envelope_index"]["detail"], "not evaluated: store failed")
+
+    def test_doctor_without_blocks_lists_every_account_label(self) -> None:
+        # Labels of accounts that have no folders in the store are still listed.
+        from tests.test_config import MISSING_LABEL, _fake_labels
+
+        backend = AppleMailBackend(
+            mail_root=self.fx.mail_root,
+            labels=_fake_labels(),
+            tmp_root=self.fx.home / "tmp",
+        )
+        exit_code, stdout, _ = self._run_with_backend(["doctor", "--json"], backend)
+        self.assertEqual(exit_code, 0)
+        config = next(c for c in json.loads(stdout)["checks"] if c["name"] == "config")
+        self.assertTrue(config["ok"])
+        self.assertIn("available:", config["detail"])
+        self.assertIn(MISSING_LABEL, config["detail"])
+
+    def _run_with_backend(self, argv, backend):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = cli_mod.main(argv, home=self.fx.home, backend=backend)
+        return code, stdout.getvalue(), stderr.getvalue()
 
     def test_doctor_reports_invalid_config_but_exits_zero(self) -> None:
         write_config(self.fx.home, "unknown_key = 1\n")
@@ -1308,7 +1451,13 @@ class DoctorTests(_CliTestCase):
             self.assertFalse(by_name["config"]["ok"])
 
     def _home_check(self, home: Path) -> dict:
-        checks = cli_mod._collect_doctor_checks(home, self.fx.mail_root, self.fx.accounts_db)
+        backend = AppleMailBackend(
+            mail_root=self.fx.mail_root,
+            accounts_db=self.fx.accounts_db,
+            tmp_root=home / "tmp",
+        )
+        self.addCleanup(backend.close)
+        checks = cli_mod._collect_doctor_checks(home, backend)
         return next(check for check in checks if check["name"] == "home")
 
     def test_ut_cli_13_01_home_with_mode_0755_fails(self) -> None:

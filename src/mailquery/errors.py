@@ -115,3 +115,11 @@ def bad_time(value: str) -> MailqueryError:
 
 def bad_filter(message: str, hint: str = "") -> MailqueryError:
     return MailqueryError("E_BAD_FILTER", message, hint)
+
+
+def error_detail(exc: Exception) -> str:
+    """One-line ``doctor`` detail for an exception: ``CODE: message`` or ``Type: text``."""
+    if isinstance(exc, MailqueryError):
+        return f"{exc.code}: {exc.message}"
+    text = str(exc).strip()
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__

@@ -27,6 +27,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from mailquery import cli
+from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.state import StateStore
 from tests.fixtures.make_fixtures import (
     ACCOUNT_GMAIL,
@@ -609,7 +610,7 @@ class NewTest(IntegrationBase):
 
     def test_tc_01_05_first_run_emits_the_lookback_window(self) -> None:
         """TC-01.05: first run of ``new`` emits the [D - lookback, D] window (golden)."""
-        self.assertFalse(StateStore(self.fx.home).path.exists())
+        self.assertFalse(StateStore(self.fx.home, AppleMailBackend.check_state_uid).path.exists())
         payload = self.run_ok("new")
         self.assertEqual(payload["command"], "new")
         self.assertEqual(payload["count"], 2)
@@ -631,7 +632,7 @@ class NewTest(IntegrationBase):
         self.assertEqual(cursor["current"]["last_date_received"], expected_date)
         self.assertEqual(cursor["current"]["lookback_seconds"], 600)
 
-        state = StateStore(self.fx.home).load()
+        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
         self.assertIsNotNone(state.cursor)
         assert state.cursor is not None
         self.assertEqual(state.cursor.last_uid, 83170)
@@ -664,7 +665,7 @@ class NewTest(IntegrationBase):
         )
         self.assertEqual(cursor["current"]["lookback_seconds"], 600)
 
-        state = StateStore(self.fx.home).load()
+        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
         assert state.cursor is not None
         self.assertEqual(state.cursor.last_uid, 83170)
         self.assertEqual(set(state.emitted_uids), {83143, 83150, 83160, 83170})
@@ -683,7 +684,7 @@ class NewTest(IntegrationBase):
             [message["uid"] for message in peeked["messages"]],
             [83143, 83150, 83160, 83170],
         )
-        state = StateStore(self.fx.home).load()
+        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
         assert state.cursor is not None
         self.assertEqual(state.cursor.last_uid, 1)
         self.assertEqual(state.emitted_uids, ())

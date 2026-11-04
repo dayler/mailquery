@@ -12,10 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from email import message_from_bytes, policy
 from email.message import Message
-from html.parser import HTMLParser
 from pathlib import Path
 import plistlib
 from typing import TYPE_CHECKING, Iterator
+
+from mailquery.output import html_to_text
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mailquery.store import EnvelopeStore, Mailbox
@@ -35,56 +36,6 @@ _EMLX_SUFFIXES: tuple[str, ...] = (".emlx", ".partial.emlx")
 
 #: Markers that start an ``.emlx`` plist trailer (XML and binary plists).
 _PLIST_MARKERS: tuple[bytes, ...] = (b"<?xml", b"bplist00")
-
-#: Tags whose text content is not part of the visible body.
-_SKIP_TAGS = frozenset(
-    {"head", "title", "script", "style", "noscript", "template", "svg", "math"}
-)
-
-#: Tags that visually separate text; they become whitespace before collapsing.
-_BLOCK_TAGS = frozenset(
-    {
-        "address",
-        "article",
-        "aside",
-        "blockquote",
-        "br",
-        "caption",
-        "dd",
-        "div",
-        "dl",
-        "dt",
-        "fieldset",
-        "figcaption",
-        "figure",
-        "footer",
-        "form",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "header",
-        "hr",
-        "li",
-        "main",
-        "nav",
-        "ol",
-        "p",
-        "pre",
-        "section",
-        "table",
-        "tbody",
-        "td",
-        "tfoot",
-        "th",
-        "thead",
-        "tr",
-        "ul",
-    }
-)
-
 
 @dataclass(frozen=True)
 class EmlxMessage:
@@ -217,24 +168,6 @@ def parse_emlx(path: Path) -> EmlxMessage:
         readable=True,
         warnings=tuple(warnings),
     )
-
-
-def html_to_text(html: str) -> str:
-    """Convert HTML to plain text using ``html.parser``.
-
-    Script/style/head content is dropped, character references are decoded,
-    block-level elements become whitespace and runs of whitespace collapse to a
-    single space. The result is used for snippets and for ``--text`` search.
-    """
-    if not isinstance(html, str) or not html:
-        return ""
-    extractor = _HtmlTextExtractor()
-    try:
-        extractor.feed(html)
-        extractor.close()
-    except Exception:  # pragma: no cover - HTMLParser is tolerant; never crash
-        pass
-    return extractor.text()
 
 
 # --------------------------------------------------------------------------- #
@@ -516,37 +449,3 @@ def _unparsed(
         readable=False,
         warnings=warnings,
     )
-
-
-# --------------------------------------------------------------------------- #
-# HTML to text
-# --------------------------------------------------------------------------- #
-
-
-class _HtmlTextExtractor(HTMLParser):
-    """Collect visible text while dropping non-content elements."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self._chunks: list[str] = []
-        self._skip_depth = 0
-
-    def handle_starttag(self, tag: str, attrs) -> None:
-        if tag in _SKIP_TAGS:
-            self._skip_depth += 1
-        elif tag in _BLOCK_TAGS:
-            self._chunks.append(" ")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in _SKIP_TAGS:
-            if self._skip_depth:
-                self._skip_depth -= 1
-        elif tag in _BLOCK_TAGS:
-            self._chunks.append(" ")
-
-    def handle_data(self, data: str) -> None:
-        if not self._skip_depth:
-            self._chunks.append(data)
-
-    def text(self) -> str:
-        return " ".join("".join(self._chunks).split())
