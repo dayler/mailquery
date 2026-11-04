@@ -16,6 +16,7 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.vscode/
 
 # Generated at test runtime (synthetic Apple Mail store fixtures)
 tests/fixtures/generated/
