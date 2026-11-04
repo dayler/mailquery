@@ -24,7 +24,7 @@
 | **1.0** | **Cambio de alcance: soporte de Windows + Outlook clásico sin perder macOS + Apple Mail.** El PRD pasa a ser el núcleo común (CLI, contrato JSON, configuración, cursor, errores, invariante I-1 generalizado) y lo específico de cada cliente se traslada a anexos por backend. Nuevos: interfaz de backend (ADR-10), Outlook vía COM (ADR-11), `uid` string en Windows (ADR-12), sin lanzar Outlook y exit 6 `E_OUTLOOK_NOT_RUNNING` (ADR-13), `pywin32` solo en Windows (ADR-14), stores locales de cuentas + PST (ADR-15). Flag global `-v`/`--version` (RF-31, §12.9). Correcciones de paridad que **cambian macOS** (§22.2): `show` limitado a las cuentas declaradas, la primera corrida de `new` emite la ventana de lookback, `[new].lookback` aplica de inmediato, `W_EMLX_UNREADABLE` pasa a `W_BODY_UNREADABLE`, `mailboxes` añade `excluded_stores`, la salida es siempre UTF-8 y JSON formateado, y los logs rotan por tamaño (`max_size_mb` sustituye a `retention_days`). |
 | **1.1** | Sin ampliar el alcance: completa la lista de todos los cambios de macOS que el PRD exige, resuelve las contradicciones y ambigüedades de tres revisiones independientes y elimina redundancias (cada regla tiene una sola sección dueña). |
 | **1.2** | Sin cambiar el producto, ajusta el documento al estándar de un PRD, con la arquitectura como excepción porque no hay TRD: retira la planificación, la implementación y la estrategia de pruebas. |
-| **1.3** | Sin cambiar el producto: un solo documento. Integra lo que es PRD de los anexos por backend y elimina el resto (implementación, escenarios y casos de prueba, mediciones); el resumen del spike de Outlook queda como Anexo A. Elimina la tabla de decisiones cerradas (cada decisión vive en su ADR o en su sección) y los escenarios de los criterios de aceptación. |
+| **1.3** | Sin cambiar el producto: un solo documento. Integra lo que es PRD de los anexos por backend y elimina el resto (implementación, escenarios y casos de prueba, mediciones); quedan como anexos (§24) el resumen del spike de Outlook, los hechos verificados en macOS, los ejemplos de invocación y el glosario. Elimina la tabla de decisiones cerradas (cada decisión vive en su ADR o en su sección) y los escenarios de los criterios de aceptación. |
 
 ---
 
@@ -1210,7 +1210,77 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 
 ---
 
-## 24. Ejemplos de invocación
+## 24. Anexos
+
+### Anexo A — Resumen del spike de Outlook (2026-11-03)
+
+Ejecutado con un script de solo lectura fuera del repositorio en el host de
+referencia: Windows 11 x64, Outlook clásico (Microsoft 365 Apps) 16.0 x64, dos
+cuentas Exchange en caché más un buzón compartido y carpetas públicas; sin
+PST, IMAP ni EAS. Contadores de no leídos idénticos antes y después.
+
+**Confirmado (y decisión que fijó):**
+
+- **P-9** El identificador de las vistas de metadatos de Outlook es de sesión,
+  no permanente ⇒ el `uid` es siempre el `EntryID` permanente (§11.3).
+- **P-5** Una de las vías de lectura entrega la hora de recepción mal
+  etiquetada ⇒ las fechas se leen en UTC (§11.3).
+- **P-7** Los filtros de fecha de Outlook no respetan los segundos ⇒ el corte
+  exacto de `--since`/`--until` lo hace `mailquery` (§11.3).
+- **P-8** Las carpetas internas se identifican por función ⇒ se ocultan sin
+  depender del idioma (§15.7).
+- **P-6** ~5 ms por item para abrirlo y leer su cuerpo (p95 ~6 ms) y ~350 ms
+  para los metadatos de una carpeta de 240 items ⇒ presupuestos de §19
+  (`doctor` y `mailboxes` no se midieron).
+- **P-3 / P-11** Leer 239 cuerpos no cambió los no leídos ni mostró avisos (sin
+  directivas, dos antivirus activos) ⇒ criterio de `object_model_guard` (§12.8). `pywin32` puede dejar
+  una caché fuera del home ⇒ la caché se confina a `~/.mailquery` (§9.3).
+- **P-1** Abrir un item por `EntryID` funciona en stores no predeterminados
+  (239/239); con PST no probado.
+- **P-4** `pywin32` funciona en un entorno aislado como el de `pipx`, sin pasos
+  de post-instalación (ADR-14).
+
+**No probado** (riesgo residual): **P-2** el estado de descarga en modo solo
+cabeceras, IMAP y EAS; **P-3** el caso "sin antivirus"; **P-10** abortar una
+llamada a Outlook bloqueada; **P-12** la marca de borrado IMAP; **P-13** PST
+local y en red.
+
+**Prueba A2** (2026-11-03, solo lectura; contadores de no leídos idénticos
+antes y después):
+
+- En los dos stores locales, el `EntryID` de cada item contiene el
+  `PR_RECORD_KEY` de su store, único por store.
+- El `PR_RECORD_KEY` se lee en los 4 stores del perfil, incluidos el buzón
+  compartido y las carpetas públicas (excluidos), sin abrir sus items ⇒
+  `account.uuid` y regla de `show` de §12.4.
+- No se pudo comprobar con items de un store excluido, porque leerlos violaría
+  I-1; si en algún caso no coincide, el resultado es "not found", nunca un
+  error incorrecto de alcance (§12.4).
+- Con Outlook desconectado del servidor, enumerar los stores falló ⇒ un store
+  ilegible se reporta como `unavailable` (§15.7).
+
+### Anexo B — Hechos verificados en macOS (2026-11-01/02)
+
+Tomados el 2026-11-01/02 (macOS 27.0.1 arm64, Apple Mail 16.0, store `V10`),
+los que fijaron decisiones:
+
+- La resolución de rutas por fórmula alcanza el 100 % (66.028/66.028).
+- Gmail guarda todo en `[Gmail]/All Mail`; INBOX sale de las etiquetas, y los
+  contadores de Mail en carpetas virtuales no son fiables (INBOX 36 vs 0
+  reales) ⇒ membresía por etiqueta y contadores recalculados.
+- Hay 86 grupos de duplicados por identificador global ⇒ dedupe (RF-07).
+- Abrir la base viva en solo lectura no cambia inode, tamaño ni `mtime`, y las
+  escrituras se rechazan; el modo `immutable` ignora el WAL ⇒ prohibido.
+- `mdfind` no indexa el store ⇒ Spotlight descartado.
+- La app del harness tiene FDA y `Terminal` no ⇒ el permiso es por app.
+
+En el equipo de referencia (store vivo, ~66.000 mensajes, 2,5 GB): consulta de
+metadatos de 500 filas en 0,1–1 ms, resolución `uid → ruta` en < 1 ms y
+parseo de un `.emlx` medio en ~3,7 ms. Un escaneo de contenido sin acotar
+costaría ~4 minutos: por eso RF-17 exige filtros y un máximo de candidatos
+(`[search].max_scan`, §15.1). Los presupuestos p95 están en §19.
+
+### Anexo C — Ejemplos de invocación
 
 ```bash
 # Ayuda y diagnóstico (search/new necesitan al menos una cuenta declarada en ~/.mailquery/config.toml)
@@ -1242,9 +1312,7 @@ mailquery show 83143                  # macOS
 mailquery show 00000000A1B2C3D4…      # Windows
 ```
 
----
-
-## 25. Glosario
+### Anexo D — Glosario
 
 - **Backend:** implementación de la interfaz de backend (§9.2) para un cliente de correo concreto (Apple Mail u Outlook clásico).
 - **Cursor:** marca de agua `(fecha de recepción, uid)` que da a `new` su semántica de procesamiento único.
@@ -1260,50 +1328,3 @@ mailquery show 00000000A1B2C3D4…      # Windows
 - **OST / PST:** archivos de datos de Outlook; OST = caché local de una cuenta de servidor, PST = archivo de datos local.
 - **Modo caché (Cached Exchange Mode):** Outlook mantiene una copia local del buzón y lee de ella sin ir al servidor.
 - **Object Model Guard:** protección de Outlook que avisa cuando un programa externo accede a datos sensibles por COM.
-
----
-
-## Anexo A. Resumen del spike de Outlook (2026-11-03)
-
-Ejecutado con un script de solo lectura fuera del repositorio en el host de
-referencia: Windows 11 x64, Outlook clásico (Microsoft 365 Apps) 16.0 x64, dos
-cuentas Exchange en caché más un buzón compartido y carpetas públicas; sin
-PST, IMAP ni EAS. Contadores de no leídos idénticos antes y después.
-
-**Confirmado (y decisión que fijó):**
-
-- **P-9** El identificador de las vistas de metadatos de Outlook es de sesión,
-  no permanente ⇒ el `uid` es siempre el `EntryID` permanente (§11.3).
-- **P-5** Una de las vías de lectura entrega la hora de recepción mal
-  etiquetada ⇒ las fechas se leen en UTC (§11.3).
-- **P-7** Los filtros de fecha de Outlook no respetan los segundos ⇒ el corte
-  exacto de `--since`/`--until` lo hace `mailquery` (§11.3).
-- **P-8** Las carpetas internas se identifican por función ⇒ se ocultan sin
-  depender del idioma (§15.7).
-- **P-6** Coste por item medido ⇒ presupuestos de §19.
-- **P-3 / P-11** Leer 239 cuerpos no cambió los no leídos ni mostró avisos (sin
-  directivas, dos antivirus activos) ⇒ criterio de `object_model_guard` (§12.8). `pywin32` puede dejar
-  una caché fuera del home ⇒ la caché se confina a `~/.mailquery` (§9.3).
-- **P-1** Abrir un item por `EntryID` funciona en stores no predeterminados
-  (239/239); con PST no probado.
-- **P-4** `pywin32` funciona en un entorno aislado como el de `pipx`, sin pasos
-  de post-instalación (ADR-14).
-
-**No probado** (riesgo residual): **P-2** el estado de descarga en modo solo
-cabeceras, IMAP y EAS; **P-3** el caso "sin antivirus"; **P-10** abortar una
-llamada a Outlook bloqueada; **P-12** la marca de borrado IMAP; **P-13** PST
-local y en red.
-
-**Prueba A2** (2026-11-03, solo lectura; contadores de no leídos idénticos
-antes y después):
-
-- En los dos stores locales, el `EntryID` de cada item contiene el
-  `PR_RECORD_KEY` de su store, único por store.
-- El `PR_RECORD_KEY` se lee en los 4 stores del perfil, incluidos el buzón
-  compartido y las carpetas públicas (excluidos), sin abrir sus items ⇒
-  `account.uuid` y regla de `show` de §12.4.
-- No se pudo comprobar con items de un store excluido, porque leerlos violaría
-  I-1; si en algún caso no coincide, el resultado es "not found", nunca un
-  error incorrecto de alcance (§12.4).
-- Con Outlook desconectado del servidor, enumerar los stores falló ⇒ un store
-  ilegible se reporta como `unavailable` (§15.7).
