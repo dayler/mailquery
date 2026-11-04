@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -84,6 +83,8 @@ def setup_logging(home: Path, level: str = "info", max_size_mb: int = DEFAULT_MA
     )
     handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logger.addHandler(handler)
+
+    import uuid  # lazy: only needed once per run
 
     _current_run_id = uuid.uuid4().hex[:12]
     logger.debug("logging initialized level=%s max_size_mb=%s", level, max_size_mb)

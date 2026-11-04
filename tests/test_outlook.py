@@ -27,6 +27,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from tests.fakes import outlook as fk
@@ -1766,9 +1767,11 @@ class OutlookListedFoldersTests(_FolderCase):
         self.assertEqual(
             [row["path"] for row in self.folders(backend, fake, "de")], [*_DE_PATHS, "Conflicts"]
         )
-        # Hidden folders are not read: one table per listed folder, never one of theirs.
+        # Hidden folders are not read: two counter tables per listed folder with items
+        # (an empty one is counted from its own counters), never one of theirs.
         self.assertEqual(
-            fake.call_log.count(kind="Folder", member="GetTable"), len(backend.mailboxes())
+            fake.call_log.count(kind="Folder", member="GetTable"),
+            2 * _listed_with_items(fake, backend.mailboxes()),
         )
         # The default English profile hides them too.
         default = fk.FakeOutlook.default()
@@ -2587,6 +2590,12 @@ def _store_excluded(label: str, path: str | None, reason: str) -> str:
     return f"W_STORE_EXCLUDED: {where} is excluded: {reason}"
 
 
+def _listed_with_items(fake: fk.FakeOutlook, rows) -> int:
+    """Listed folders (``mailboxes()`` rows) that hold at least one item in the fake."""
+    specs = {folder.entry_id: folder for store in fake.stores for folder in store.walk()}
+    return sum(1 for row in rows if specs[row["id"]].items)
+
+
 def _tables(fake: fk.FakeOutlook) -> list[list[str]]:
     """Columns added to each ``Folder.GetTable`` of the CallLog, in call order."""
     tables: list[list[str]] = []
@@ -2937,7 +2946,10 @@ class OutlookCounterTests(_CommandScenarioCase):
         self.assertEqual(_tables(fake), [])
         fake.call_log.clear()
         payload = self.run_json("mailboxes")
-        self.assertEqual(_tables(fake), [self._COUNTER_COLUMNS] * len(payload["mailboxes"]))
+        # Only INBOX has items: the empty folders are counted from their own counters.
+        # INBOX: the searchable-class row count, then the rows that may be IMAP-deleted.
+        self.assertEqual(len(payload["mailboxes"]), 3)
+        self.assertEqual(_tables(fake), [[], self._COUNTER_COLUMNS])
         inbox = next(row for row in payload["mailboxes"] if row["path"] == "INBOX")
         self.assertEqual((inbox["total"], inbox["unread"]), (3, 2))
 
@@ -2952,7 +2964,303 @@ class OutlookCounterTests(_CommandScenarioCase):
             first = backend.mailboxes()
             second = backend.mailboxes()
         self.assertEqual(first, second)
-        self.assertEqual(len(_tables(fake)), len(first))
+        self.assertEqual(len(_tables(fake)), 2 * _listed_with_items(fake, first))
+
+
+def _counter_profile(*, content_counters: bool = True) -> fk.FakeOutlook:
+    """One Exchange INBOX mixing searchable items with every kind of non-searchable row."""
+    fake = fk.FakeOutlook()
+    store = fake.add_exchange_account("exchange", "ana@example.com")
+    inbox = store.inbox
+    assert inbox is not None
+    inbox.content_counters = content_counters
+    for index in range(6):
+        inbox.add_message(f"mail_{index}", read=index < 2)
+    inbox.add_message("smime_lowercase", message_class="ipm.note.smime")
+    inbox.add_message("meeting_response", message_class="IPM.Schedule.Meeting.Resp.Pos")
+    inbox.add_message("answered", msg_status=0x200)  # PR_MSG_STATUS >= 8 without the IMAP mark
+    inbox.add_message("receipt", message_class="IPM.Report.IPM.Note.DR")
+    inbox.add_message("notebook", message_class="IPM.NoteBook", read=True)
+    inbox.add_message("imap_deleted", msg_status=fk.MSGSTATUS_DELMARKED)
+    return fake
+
+
+class OutlookRoundTripTests(_CommandScenarioCase):
+    """Fewest COM round trips (PRD 19, RNF-03): counters, bulk tables, per-store walks."""
+
+    def backend_of(self, fake: fk.FakeOutlook):
+        patcher = mock.patch.object(_oc(), "get_drive_type", fake.drive_type)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        backend = _backend(fake)
+        self.addCleanup(backend.close)
+        return backend
+
+    def inbox_counters(self, fake: fk.FakeOutlook) -> tuple[int, int]:
+        row = next(row for row in self.backend_of(fake).mailboxes() if row["is_inbox"])
+        return row["total"], row["unread"]
+
+    def test_mailboxes_counts_from_folder_counters_and_reads_only_exception_rows(self) -> None:
+        fake = _counter_profile()
+        # 6 mails (2 read), S/MIME, meeting and answered count; receipt, notebook, IMAP-deleted not.
+        self.assertEqual(self.inbox_counters(fake), (9, 7))
+        from mailquery.backends import outlook as ol
+
+        tables = [e.args for e in fake.call_log if (e.kind, e.member) == ("Folder", "GetTable")]
+        # Rows of other classes exist (10 of 12 have a searchable class): exceptions table.
+        self.assertEqual(
+            tables,
+            [
+                (ol.SEARCHABLE_CLASS_FILTER, fk.OL_USER_ITEMS),
+                (ol.COUNTER_EXCEPTIONS_FILTER, fk.OL_USER_ITEMS),
+            ],
+        )
+        self.assertEqual(fake.call_log.count(kind="Table", member="GetRowCount"), 1)
+        self.assertEqual(fake.call_log.count(kind="Table", member="GetNextRow"), 0)
+        self.assertEqual(fake.call_log.count(kind="Row"), 0)
+        self.assertEqual(fake.call_log.count(kind="Table", member="GetArray"), 1)
+        # The restricted table holds only the rows that may not be searchable.
+        inbox = _stores(fake)["exchange"].GetDefaultFolder(fk.OL_FOLDER_INBOX)
+        exceptions = inbox.GetTable(ol.COUNTER_EXCEPTIONS_FILTER, fk.OL_USER_ITEMS)
+        self.assertEqual(exceptions.GetRowCount(), 4)  # answered, receipt, notebook, IMAP-deleted
+        self.assertEqual(fake.mutations.total, 0)
+
+    def test_folder_of_searchable_classes_reads_only_the_deletion_candidates(self) -> None:
+        from mailquery.backends import outlook as ol
+
+        fake = fk.FakeOutlook()
+        inbox = fake.add_exchange_account("exchange", "ana@example.com").inbox
+        assert inbox is not None
+        for index in range(5):
+            inbox.add_message(f"mail_{index}", read=index == 0)
+        inbox.add_message("meeting", message_class="IPM.Schedule.Meeting.Request")
+        inbox.add_message("answered", msg_status=0x200)
+        inbox.add_message("imap_deleted", msg_status=fk.MSGSTATUS_DELMARKED)
+        self.assertEqual(self.inbox_counters(fake), (7, 6))
+        tables = [e.args for e in fake.call_log if (e.kind, e.member) == ("Folder", "GetTable")]
+        self.assertEqual(
+            tables,
+            [
+                (ol.SEARCHABLE_CLASS_FILTER, fk.OL_USER_ITEMS),
+                (ol.DELETION_CANDIDATES_FILTER, fk.OL_USER_ITEMS),
+            ],
+        )
+        folder = _stores(fake)["exchange"].GetDefaultFolder(fk.OL_FOLDER_INBOX)
+        candidates = folder.GetTable(ol.DELETION_CANDIDATES_FILTER, fk.OL_USER_ITEMS)
+        self.assertEqual(candidates.GetRowCount(), 2)  # answered, IMAP-deleted
+        self.assertEqual(fake.call_log.count(kind="Row"), 0)
+
+    def test_mailboxes_without_folder_counters_classifies_every_row(self) -> None:
+        fake = _counter_profile(content_counters=False)
+        self.assertEqual(self.inbox_counters(fake), (9, 7))
+        tables = [e.args for e in fake.call_log if (e.kind, e.member) == ("Folder", "GetTable")]
+        self.assertEqual(tables, [("", fk.OL_USER_ITEMS)])
+        self.assertEqual(fake.call_log.count(kind="Table", member="GetNextRow"), 0)
+
+    def test_empty_folders_are_counted_without_a_table(self) -> None:
+        fake = fk.FakeOutlook.default()
+        rows = self.backend_of(fake).mailboxes()
+        self.assertEqual(
+            [(row["path"], row["total"], row["unread"]) for row in rows],
+            [("INBOX", 3, 2), ("Deleted Items", 0, 0), ("Sent Items", 0, 0)],
+        )
+        self.assertEqual(fake.call_log.count(kind="Folder", member="GetTable"), 2)  # INBOX only
+
+    def test_item_tables_are_read_in_bulk(self) -> None:
+        from mailquery.backends import outlook as ol
+
+        fake = fk.FakeOutlook.item_matrix(_ITEMS_NOW)
+        backend = self.backend_of(fake)
+        ids = [row["id"] for row in backend.mailboxes_without_counters()]
+        expected = backend.query(ids)
+        inbox_rows = len(fake.store("exchange").inbox.items)
+        fake.call_log.clear()
+        with mock.patch.object(ol, "TABLE_CHUNK_ROWS", 4):
+            self.assertEqual(backend.query(ids), expected)
+            self.assertEqual(backend.duplicate_counts(ids), backend.duplicate_counts(ids))
+        self.assertEqual(fake.call_log.count(kind="Table", member="GetNextRow"), 0)
+        self.assertEqual(fake.call_log.count(kind="Table", member="EndOfTable"), 0)
+        self.assertEqual(fake.call_log.count(kind="Row"), 0)
+        self.assertGreaterEqual(
+            fake.call_log.count(kind="Table", member="GetArray"), -(-inbox_rows // 4)
+        )
+
+    def two_accounts(self) -> fk.FakeOutlook:
+        fake = fk.FakeOutlook()
+        for key, smtp in (("first", "ana@example.com"), ("second", "bea@example.com")):
+            store = fake.add_exchange_account(key, smtp)
+            assert store.inbox is not None
+            store.inbox.add_message(f"{key}_message", received=_ITEMS_NOW - timedelta(hours=1))
+        return self.use(fake, _scope_toml("ana@example.com"))
+
+    def test_search_new_and_show_walk_only_the_declared_store(self) -> None:
+        fake = self.two_accounts()
+        runs = {
+            "search": ("search", *_SINCE_ALL),
+            "new": ("new", "--peek"),
+            "show": ("show", fake.item("first_message").entry_id),
+        }
+        for name, argv in runs.items():
+            fake.call_log.clear()
+            self.run_json(*argv)
+            with self.subTest(command=name):
+                self.assertEqual(fake.call_log.count(kind="Store", member="GetRootFolder"), 1)
+                # The inbox and the four hidden sync folders of that store only.
+                self.assertEqual(fake.call_log.count(kind="Store", member="GetDefaultFolder"), 5)
+        fake.call_log.clear()
+        self.run_json("mailboxes")
+        self.assertEqual(fake.call_log.count(kind="Store", member="GetRootFolder"), 2)
+        self.assertEqual(fake.mutations.total, 0)
+
+    def test_show_finds_the_folder_without_walking_the_tree_again(self) -> None:
+        fake = self.two_accounts()
+        fake.call_log.clear()
+        shown = self.run_json("show", fake.item("first_message").entry_id)["message"]
+        self.assertEqual(shown["mailbox"]["path"], "INBOX")
+        # One walk for the scope; finding the message reuses it.
+        self.assertEqual(fake.call_log.count(kind="Store", member="GetRootFolder"), 1)
+        self.assertEqual(fake.call_log.count(kind="Folder", member="GetTable"), 0)
+
+
+class PyIDispatch:
+    """Stand-in of pywin32's ``PyIDispatch`` (the proxy recognises it by type name)."""
+
+    def __init__(self, members: dict[str, Any], log: list) -> None:
+        self.members = members
+        self.log = log
+        self.ids = {name: 100 + index for index, name in enumerate(members)}
+
+    def GetIDsOfNames(self, name: str) -> int:  # noqa: N802 - COM name
+        self.log.append(("GetIDsOfNames", name))
+        if name not in self.ids:
+            raise fk.make_com_error(0x80020006)  # DISP_E_UNKNOWNNAME
+        return self.ids[name]
+
+    def Invoke(self, dispid: int, lcid: int, flags: int, result: bool, *args: Any) -> Any:  # noqa: N802
+        name = next(n for n, i in self.ids.items() if i == dispid)
+        self.log.append(("Invoke", name, flags, args))
+        value = self.members[name]
+        return value(*args) if callable(value) else value
+
+
+class _CDispatch:
+    """Stand-in of pywin32's dynamic ``CDispatch``: the raw interface is ``_oleobj_``."""
+
+    def __init__(self, oleobj: PyIDispatch) -> None:
+        self._oleobj_ = oleobj
+
+
+class OutlookDirectDispatchTests(unittest.TestCase):
+    """pywin32 objects are called through ``IDispatch::Invoke``, behind the same whitelist."""
+
+    def setUp(self) -> None:
+        patcher = mock.patch.dict(_oc()._KIND_DISPIDS, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.watchdog = _RecordingWatchdog(30).watchdog
+        self.log: list = []
+
+    def proxy(self, target, kind: str):
+        return _oc().ReadOnlyCom(target, kind, self.watchdog)
+
+    def test_properties_and_methods_use_invoke_with_dispids_looked_up_once_per_kind(self) -> None:
+        oc = _oc()
+        table = PyIDispatch({"GetRowCount": lambda: 7}, self.log)
+        folders = [
+            PyIDispatch({"Name": "A", "EntryID": "01", "GetTable": lambda *a: table}, self.log),
+            PyIDispatch({"Name": "B", "EntryID": "02", "GetTable": lambda *a: table}, self.log),
+        ]
+        names = [self.proxy(_CDispatch(folders[0]), "Folder").Name, self.proxy(folders[1], "Folder").Name]
+        self.assertEqual(names, ["A", "B"])
+        proxy_table = self.proxy(folders[0], "Folder").GetTable("", 0)
+        self.assertIsInstance(proxy_table, oc.ReadOnlyCom)
+        self.assertEqual(proxy_table.GetRowCount(), 7)
+        lookups = [entry[1] for entry in self.log if entry[0] == "GetIDsOfNames"]
+        self.assertEqual(lookups, ["Name", "GetTable", "GetRowCount"])
+        invokes = [entry[1:] for entry in self.log if entry[0] == "Invoke"]
+        self.assertEqual(
+            invokes,
+            [
+                ("Name", oc.DISPATCH_PROPERTYGET, ()),
+                ("Name", oc.DISPATCH_PROPERTYGET, ()),
+                ("GetTable", oc.DISPATCH_METHOD | oc.DISPATCH_PROPERTYGET, ("", 0)),
+                ("GetRowCount", oc.DISPATCH_METHOD | oc.DISPATCH_PROPERTYGET, ()),
+            ],
+        )
+
+    def test_items_look_dispids_up_per_object_and_unknown_names_are_attribute_errors(self) -> None:
+        mail = PyIDispatch({"MessageClass": "IPM.Note", "HTMLBody": "<p>x</p>"}, self.log)
+        meeting = PyIDispatch({"MessageClass": "IPM.Schedule.Meeting.Request"}, self.log)
+        self.assertEqual(self.proxy(mail, "Item").MessageClass, "IPM.Note")
+        self.assertEqual(self.proxy(meeting, "Item").MessageClass, "IPM.Schedule.Meeting.Request")
+        with self.assertRaises(AttributeError):
+            self.proxy(meeting, "Item").HTMLBody
+        lookups = [entry[1] for entry in self.log if entry[0] == "GetIDsOfNames"]
+        self.assertEqual(lookups, ["MessageClass", "MessageClass", "HTMLBody"])
+
+    def test_the_whitelist_is_checked_before_any_call(self) -> None:
+        from mailquery.errors import MailqueryError
+
+        item = PyIDispatch({"Delete": lambda: None, "UnRead": True}, self.log)
+        for member in ("Delete", "UnRead", "_oleobj_"):
+            with self.subTest(member=member), self.assertRaises(MailqueryError) as caught:
+                getattr(self.proxy(item, "Item"), member)
+            self.assertEqual(caught.exception.code, "E_INTERNAL")
+        with self.assertRaises(MailqueryError):
+            self.proxy(item, "Item").UnRead = False
+        self.assertEqual(self.log, [])
+
+    def test_com_errors_of_invoke_are_mapped_like_dynamic_dispatch(self) -> None:
+        oc = _oc()
+
+        def fail(*_args):
+            raise fk.make_com_error(fk.MAPI_E_NOT_FOUND, wrapped=True)
+
+        accessor = PyIDispatch({"GetProperty": fail}, self.log)
+        with self.assertRaises(oc.ComCallError) as caught:
+            self.proxy(accessor, "PropertyAccessor").GetProperty("x")
+        self.assertEqual(caught.exception.hresult, oc.MAPI_E_NOT_FOUND)
+
+
+class FakeBulkTableTests(unittest.TestCase):
+    def test_get_array_returns_rows_in_chunks_then_an_empty_tuple(self) -> None:
+        fake = fk.FakeOutlook.default()
+        inbox = _stores(fake)["exchange"].GetDefaultFolder(fk.OL_FOLDER_INBOX)
+        table = inbox.GetTable("", fk.OL_USER_ITEMS)
+        table.Columns.Add(fk.PR_LONGTERM_ENTRYID_FROM_TABLE)
+        first, second, third = table.GetArray(2), table.GetArray(2), table.GetArray(2)
+        self.assertIsInstance(first, list)
+        self.assertEqual([len(first), len(second)], [2, 1])
+        self.assertEqual(third, ())
+        self.assertTrue(table.EndOfTable)
+        reference = inbox.GetTable("", fk.OL_USER_ITEMS)
+        reference.Columns.Add(fk.PR_LONGTERM_ENTRYID_FROM_TABLE)
+        rows = []
+        while not reference.EndOfTable:
+            rows.append(reference.GetNextRow().GetValues())
+        self.assertEqual(first + second, rows)
+
+    def test_class_and_status_restrictions(self) -> None:
+        fake = _counter_profile()
+        inbox = _stores(fake)["exchange"].GetDefaultFolder(fk.OL_FOLDER_INBOX)
+        mc, status = fk.PR_MESSAGE_CLASS, fk.PR_MSG_STATUS
+
+        def count(text: str) -> int:
+            return inbox.GetTable("@SQL=" + text, fk.OL_USER_ITEMS).GetRowCount()
+
+        self.assertEqual(count(f"\"{mc}\" = 'ipm.note'"), 8)  # case-insensitive equality
+        self.assertEqual(count(f"\"{mc}\" LIKE 'IPM.Note.%'"), 1)  # prefix, not IPM.NoteBook
+        self.assertEqual(count(f"\"{mc}\" LIKE 'IPM.Note%'"), 10)
+        self.assertEqual(count(f"NOT (\"{mc}\" = 'IPM.Note') AND \"{status}\" < 8"), 4)
+        self.assertEqual(count(f"\"{status}\" >= 8 OR \"{mc}\" <> 'IPM.Note'"), 6)
+        for unsupported in (
+            f"\"{fk.PR_SUBJECT}\" = 'x'",
+            f"\"{status}\" >= 'x'",
+            f"\"{mc}\" > 'IPM'",
+            f"(\"{mc}\" = 'IPM.Note'",
+        ):
+            with self.subTest(filter=unsupported), self.assertRaises(fk.FakeFilterError):
+                count(unsupported)
 
 
 class OutlookInternalErrorLogTests(_CommandScenarioCase):

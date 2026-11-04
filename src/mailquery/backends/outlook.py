@@ -22,11 +22,8 @@ from __future__ import annotations
 
 import math
 import re
-import uuid as uuid_module
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from email import policy as email_policy
-from email.parser import HeaderParser
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 from urllib.parse import quote, unquote
@@ -139,6 +136,38 @@ MESSAGE_COLUMNS = (
 )
 #: Columns of the Message-ID count of ``duplicate_counts``.
 DEDUPE_COLUMNS = (PR_INTERNET_MESSAGE_ID, PR_MSG_STATUS)
+#: Columns of the folder counters of ``mailboxes``.
+COUNTER_COLUMNS = (PR_MESSAGE_FLAGS, PR_MSG_STATUS)
+#: Rows per ``Table.GetArray`` call (bulk read; design note "Performance").
+TABLE_CHUNK_ROWS = 1000
+
+# Folder counters (read-only folder properties; equal to the item table rows and
+# their unread ones, verified on the host).
+PR_CONTENT_COUNT = PROPTAG + "36020003"
+PR_CONTENT_UNREAD = PROPTAG + "36030003"
+PR_MESSAGE_CLASS = PROPTAG + "001A001F"
+#: DASL restriction matching the searchable classes of :func:`is_searchable_class`
+#: (``=`` and ``LIKE`` on the class are case-insensitive, verified on the host).
+SEARCHABLE_CLASS_RESTRICTION = (
+    f"(\"{PR_MESSAGE_CLASS}\" = 'IPM.Note' OR \"{PR_MESSAGE_CLASS}\" LIKE 'IPM.Note.%' OR "
+    f"\"{PR_MESSAGE_CLASS}\" = 'IPM.Schedule.Meeting' OR "
+    f"\"{PR_MESSAGE_CLASS}\" LIKE 'IPM.Schedule.Meeting.%')"
+)
+#: Rows of a searchable class (Outlook keeps this positive restriction cached, so
+#: counting it is cheap even on a large folder; ``NOT``/``<>`` restrictions are
+#: evaluated again on every call: verified on the host).
+SEARCHABLE_CLASS_FILTER = "@SQL=" + SEARCHABLE_CLASS_RESTRICTION
+#: Rows of a searchable class whose ``PR_MSG_STATUS`` can hold the IMAP deletion mark
+#: (DASL has no bit test; Python classifies these rows).
+DELETION_CANDIDATES_FILTER = (
+    f"@SQL={SEARCHABLE_CLASS_RESTRICTION} AND \"{PR_MSG_STATUS}\" >= 8"
+)
+#: Rows that may not be searchable: another class, or a ``PR_MSG_STATUS`` that can
+#: hold the IMAP deletion mark (only for a folder with rows of other classes).
+COUNTER_EXCEPTIONS_FILTER = (
+    f"@SQL=(NOT {SEARCHABLE_CLASS_RESTRICTION}) OR "
+    f"\"{PR_MSG_STATUS}\" >= 8"  # MSGSTATUS_DELMARKED: every value with the bit is >= 8
+)
 
 UNKNOWN_LABEL = "unknown"
 
@@ -305,7 +334,8 @@ class OutlookBackend(MailBackend):
         self._watchdog = watchdog if watchdog is not None else outlook_com.WATCHDOG
         self._application: outlook_com.ReadOnlyCom | None = None
         self._stores: list[StoreInfo] | None = None
-        self._mailboxes: list[MailboxRow] | None = None
+        #: Listed folders of each candidate store walked so far, by store position.
+        self._store_folders: dict[int, list[MailboxRow]] = {}
         #: Folder proxy of each listed mailbox, by its ``id`` (the folder ``EntryID``).
         self._folder_objects: dict[str, outlook_com.ReadOnlyCom] = {}
         #: ``(total, unread)`` of each listed mailbox counted so far, by its ``id``.
@@ -361,21 +391,44 @@ class OutlookBackend(MailBackend):
 
     # -- folders (annex B.3, B.4) --------------------------------------------- #
 
-    def _folders(self) -> list[MailboxRow]:
-        """Listed folders of every candidate store, walked once (excluded stores never).
+    def _folders(self, account_uuids: Sequence[str] | None = None) -> list[MailboxRow]:
+        """Listed folders of the candidate stores (all, or those of ``account_uuids``).
 
-        Walking reads no item table: ``total``/``unread`` are ``None`` here and
-        only :meth:`mailboxes` counts them.
+        Each store is walked once per backend, and only when one of its folders
+        is needed (excluded stores never). Walking reads no item table:
+        ``total``/``unread`` are ``None`` here and only :meth:`mailboxes` counts
+        them.
         """
-        if self._mailboxes is None:
-            rows: list[MailboxRow] = []
-            objects: dict[str, outlook_com.ReadOnlyCom] = {}
-            for info in self._profile():
-                if info.reason is None and info.store is not None and info.uuid is not None:
-                    _walk_store(info.uuid, info.store, rows, objects)
-            self._mailboxes = rows
-            self._folder_objects = objects
-        return self._mailboxes
+        wanted = (
+            None
+            if account_uuids is None
+            else {str(uuid).casefold() for uuid in account_uuids if uuid}
+        )
+        rows: list[MailboxRow] = []
+        for info in self._profile():
+            if info.reason is not None or info.store is None or info.uuid is None:
+                continue
+            if wanted is None or info.uuid.casefold() in wanted:
+                rows.extend(self._walked(info))
+        return rows
+
+    def _walked(self, info: StoreInfo) -> list[MailboxRow]:
+        """Listed folders of one candidate store, walked on first use."""
+        rows = self._store_folders.get(info.position)
+        if rows is None:
+            rows = []
+            assert info.store is not None and info.uuid is not None
+            _walk_store(info.uuid, info.store, rows, self._folder_objects)
+            self._store_folders[info.position] = rows
+        return rows
+
+    def _folder_object(self, mailbox_id: Any) -> outlook_com.ReadOnlyCom | None:
+        """Folder proxy of a listed mailbox ``id``; walks every candidate store if unknown."""
+        folder = self._folder_objects.get(mailbox_id)
+        if folder is None:
+            self._folders()
+            folder = self._folder_objects.get(mailbox_id)
+        return folder
 
     # -- items (annex B.4) ------------------------------------------------------ #
 
@@ -552,7 +605,9 @@ class OutlookBackend(MailBackend):
             return None
         folded = needle.casefold()
         account = str(account_uuid or "").casefold()
-        candidates = [row for row in self._folders() if row["account_uuid"].casefold() == account]
+        candidates = [
+            row for row in self._folders([account]) if row["account_uuid"].casefold() == account
+        ]
         found: MailboxRow | None = None
         if folded == INBOX.casefold():
             found = next((row for row in candidates if row["is_inbox"]), None)
@@ -586,11 +641,10 @@ class OutlookBackend(MailBackend):
         to the second here (P-7). Total order ``(date_received, uid)``, ``uid``
         compared as a string; ``order="desc"`` reverses it.
         """
-        self._folders()
         filter_text = _date_filter(since, until)
         rows: list[MessageRow] = []
         for mailbox_id in dict.fromkeys(mailbox_ids):
-            folder = self._folder_objects.get(mailbox_id)
+            folder = self._folder_object(mailbox_id)
             if folder is None:
                 continue
             for message_class, props in _table_rows(folder, filter_text, MESSAGE_COLUMNS):
@@ -625,10 +679,9 @@ class OutlookBackend(MailBackend):
 
         A missing or empty Message-ID has no key: the message is unique.
         """
-        self._folders()
         counts: dict[int, int] = {}
         for mailbox_id in dict.fromkeys(mailbox_ids):
-            folder = self._folder_objects.get(mailbox_id)
+            folder = self._folder_object(mailbox_id)
             if folder is None:
                 continue
             for message_class, props in _table_rows(folder, "", DEDUPE_COLUMNS):
@@ -703,7 +756,7 @@ class OutlookBackend(MailBackend):
             if excluded is not None:
                 raise ExcludedStoreError(excluded.excluded_entry())
             return None
-        listed = {row["id"]: row for row in self._folders() if row["account_uuid"] == info.uuid}
+        listed = {row["id"]: row for row in self._walked(info)}
         item = self._open_item(text, info)
         if item is None:
             return None
@@ -776,14 +829,18 @@ class OutlookBackend(MailBackend):
 
     # -- core hooks (looked up with getattr; outside the PRD 9.3 surface) ------ #
 
-    def mailboxes_without_counters(self) -> list[MailboxRow]:
+    def mailboxes_without_counters(
+        self, account_uuids: Sequence[str] | None = None
+    ) -> list[MailboxRow]:
         """:meth:`mailboxes` without counting: ``total``/``unread`` are ``None``.
 
         ``config.listed_mailboxes`` uses it for everything but the ``mailboxes``
         command (scope resolution, dedupe, display), so ``search``, ``new`` and
         ``show`` read no table of a folder outside the query (PRD 19, annex B.9).
+        With ``account_uuids`` only the folders of those accounts are listed (and
+        only their stores are walked): the callers that need nothing else.
         """
-        return [MailboxRow(**row) for row in self._folders()]
+        return [MailboxRow(**row) for row in self._folders(account_uuids)]
 
     #: Hint of the ``message uid … was not found`` error of ``show`` (PRD 12.4).
     not_found_hint = NOT_FOUND_HINT
@@ -1004,7 +1061,7 @@ class OutlookBackend(MailBackend):
 
     def close(self) -> None:
         """Drop the COM references (Outlook itself is never closed)."""
-        self._mailboxes = None
+        self._store_folders = {}
         self._folder_objects = {}
         self._counters = {}
         self._uid_folders = {}
@@ -1057,6 +1114,8 @@ def _classify_store(
     ``unavailable``, labelled with its ``DisplayName`` and ``FilePath`` if they
     were read before the failure; it never blocks the other stores.
     """
+    import uuid as uuid_module  # lazy: only needed when reading stores
+
     name: str | None = None
     path: str | None = None
     try:
@@ -1222,27 +1281,55 @@ def _as_int(value: Any) -> int:
     return value if isinstance(value, int) else 0
 
 
+def _count_int(value: Any) -> int | None:
+    """A folder counter property: a non-negative ``int``, else ``None``."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _count_searchable(folder: outlook_com.ReadOnlyCom) -> tuple[int, int]:
-    """``(total, unread)`` of the searchable items, read from the folder table (no item opened)."""
-    table = folder.GetTable("", OL_USER_ITEMS)
-    columns = table.Columns
-    columns.Add(PR_MESSAGE_FLAGS)
-    columns.Add(PR_MSG_STATUS)
-    total = unread = 0
-    while not table.EndOfTable:
-        row = table.GetNextRow()
-        if row is None:
-            break
-        values = row.GetValues()
-        flags, status = values[-2], values[-1]
-        if not is_searchable_class(values[_MESSAGE_CLASS_COLUMN]):
-            continue
-        if _as_int(status) & MSGSTATUS_DELMARKED:
-            continue
-        total += 1
-        if not _as_int(flags) & MSGFLAG_READ:
-            unread += 1
-    return total, unread
+    """``(total, unread)`` of the searchable items of a folder (annex B.4); no item opened.
+
+    The folder's own counters (``PR_CONTENT_COUNT``/``PR_CONTENT_UNREAD``, one
+    read each; equal to the rows of its item table and their unread ones,
+    verified on the host) minus the rows that are not searchable. When every
+    row has a searchable class (row count of :data:`SEARCHABLE_CLASS_FILTER`),
+    only the rows of :data:`DELETION_CANDIDATES_FILTER` are read; otherwise
+    those of :data:`COUNTER_EXCEPTIONS_FILTER` (class not searchable, or a
+    status that may hold the IMAP deletion mark). Rows read are classified
+    exactly in Python. Without readable counters, every row of the table is
+    classified. An empty folder reads no table.
+    """
+    accessor = folder.PropertyAccessor
+    count = _count_int(_get_property(accessor, PR_CONTENT_COUNT))
+    unread = _count_int(_get_property(accessor, PR_CONTENT_UNREAD))
+    if count is None or unread is None:
+        total, unread_total, _skipped, _skipped_unread = _tally_rows(folder, "")
+        return total, unread_total
+    if count == 0:
+        return 0, 0
+    searchable_class = folder.GetTable(SEARCHABLE_CLASS_FILTER, OL_USER_ITEMS).GetRowCount()
+    if searchable_class == count:
+        # Every row has a searchable class: only the IMAP deletion mark can exclude one.
+        _total, _unread, skipped, skipped_unread = _tally_rows(folder, DELETION_CANDIDATES_FILTER)
+    else:
+        _total, _unread, skipped, skipped_unread = _tally_rows(folder, COUNTER_EXCEPTIONS_FILTER)
+    return max(count - skipped, 0), max(unread - skipped_unread, 0)
+
+
+def _tally_rows(folder: outlook_com.ReadOnlyCom, filter_text: str) -> tuple[int, int, int, int]:
+    """``(searchable, searchable unread, other, other unread)`` rows of a folder table."""
+    total = unread = skipped = skipped_unread = 0
+    for message_class, props in _table_rows(folder, filter_text, COUNTER_COLUMNS):
+        is_unread = not _as_int(props[PR_MESSAGE_FLAGS]) & MSGFLAG_READ
+        if _is_searchable(message_class, props):
+            total += 1
+            unread += is_unread
+        else:
+            skipped += 1
+            skipped_unread += is_unread
+    return total, unread, skipped, skipped_unread
 
 
 # --------------------------------------------------------------------------- #
@@ -1266,12 +1353,15 @@ def _table_rows(
     for column in columns:
         table_columns.Add(column)
     first = len(TABLE_DEFAULT_COLUMNS)
-    while not table.EndOfTable:
-        row = table.GetNextRow()
-        if row is None:
+    while True:
+        # Rows in bulk: one call per TABLE_CHUNK_ROWS rows; past the end Outlook returns ().
+        chunk = table.GetArray(TABLE_CHUNK_ROWS)
+        if not chunk:
             break
-        values = row.GetValues()
-        yield values[_MESSAGE_CLASS_COLUMN], dict(zip(columns, values[first:]))
+        for values in chunk:
+            yield values[_MESSAGE_CLASS_COLUMN], dict(zip(columns, values[first:]))
+        if len(chunk) < TABLE_CHUNK_ROWS:
+            break
 
 
 def _is_searchable(message_class: Any, props: dict[str, Any]) -> bool:
@@ -1371,6 +1461,9 @@ def _parse_headers(raw: Any) -> dict[str, str]:
     text = _text(raw)
     if not text.strip():
         return {}
+    from email import policy as email_policy  # lazy: ~15 ms, only needed by show
+    from email.parser import HeaderParser
+
     try:
         parsed = HeaderParser(policy=email_policy.default).parsestr(text)
     except Exception:  # noqa: BLE001 - malformed headers never break show

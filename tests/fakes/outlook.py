@@ -178,6 +178,8 @@ PR_DISPLAY_NAME = proptag(0x3001001F)
 PR_ADDRTYPE = proptag(0x3002001F)
 PR_EMAIL_ADDRESS = proptag(0x3003001F)
 PR_FOLDER_TYPE = proptag(0x36010003)
+PR_CONTENT_COUNT = proptag(0x36020003)
+PR_CONTENT_UNREAD = proptag(0x36030003)
 PR_ATTACH_LONG_FILENAME = proptag(0x3707001F)
 PR_SMTP_ADDRESS = proptag(0x39FE001F)
 PR_SENDER_SMTP_ADDRESS = proptag(0x5D01001F)
@@ -223,7 +225,13 @@ OOM_MEMBERS: dict[str, dict[str, str | None]] = {
         "PropertyAccessor": "PropertyAccessor",
         "GetTable": "Table",
     },
-    "Table": {"Columns": "Columns", "EndOfTable": None, "GetNextRow": "Row", "GetRowCount": None},
+    "Table": {
+        "Columns": "Columns",
+        "EndOfTable": None,
+        "GetNextRow": "Row",
+        "GetRowCount": None,
+        "GetArray": None,
+    },
     "Columns": {"Add": "Column"},
     "Column": {},
     "Row": {"GetValues": None},
@@ -467,10 +475,11 @@ _PROPTAG_RE = re.compile(
 _NAMED_ID_RE = re.compile(
     r"^http://schemas\.microsoft\.com/mapi/id/\{([0-9a-f-]{36})\}/([0-9a-f]{8})$", re.IGNORECASE
 )
-_CLAUSE_RE = re.compile(
-    r'^"(?P<prop>[^"]+)"\s*(?P<op>>=|<=|<>|=|<|>)\s*'
-    r"'(?P<value>\d{4}-\d{2}-\d{2} \d{2}:\d{2})'$"
+_TOKEN_RE = re.compile(
+    r"""\s*(?:(?P<lpar>\()|(?P<rpar>\))|"(?P<prop>[^"]+)"|'(?P<str>[^']*)'"""
+    r"""|(?P<int>-?\d+)|(?P<op>>=|<=|<>|=|<|>)|(?P<word>[A-Za-z]+))"""
 )
+_DATE_LITERAL_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 
 
 def canonical_schema(name: Any) -> str | None:
@@ -505,43 +514,149 @@ _OPS: dict[str, Callable[[datetime, datetime], bool]] = {
 }
 
 
-def parse_filter(text: Any) -> list[tuple[str, str, datetime]]:
-    """Parse the only filter grammar the fake supports (design note 5).
+Predicate = Callable[["ItemSpec"], bool]
 
-    ``""`` (no filter) or ``@SQL=`` + optional outer parentheses + clauses joined
-    by `` AND ``; each clause ``"<date proptag>" <op> 'YYYY-MM-DD HH:MM'`` in UTC.
+
+def _tokens(body: str) -> list[tuple[str, str]]:
+    tokens: list[tuple[str, str]] = []
+    position = 0
+    while position < len(body):
+        if body[position:].strip() == "":
+            break
+        match = _TOKEN_RE.match(body, position)
+        if match is None or match.end() == position:
+            raise FakeFilterError(f"unsupported filter syntax at {body[position:]!r}")
+        kind = match.lastgroup
+        assert kind is not None
+        value = match.group(kind)
+        if kind == "word":
+            value = value.upper()
+            if value not in ("AND", "OR", "NOT", "LIKE"):
+                raise FakeFilterError(f"unsupported filter keyword: {value!r}")
+        tokens.append((kind, value))
+        position = match.end()
+    return tokens
+
+
+def _like(pattern: str) -> re.Pattern[str]:
+    """DASL ``LIKE``: ``%`` is any sequence; case-insensitive (verified on the host)."""
+    return re.compile(
+        "^" + ".*".join(re.escape(part) for part in pattern.split("%")) + "$", re.IGNORECASE
+    )
+
+
+def _comparison(schema: str, op: str, kind: str, literal: str) -> Predicate:
+    """One ``"<property>" <op> <literal>`` restriction; a missing property never matches."""
+    if schema in DATE_PROPERTIES:
+        if kind != "str" or op == "LIKE" or not _DATE_LITERAL_RE.match(literal):
+            raise FakeFilterError(f"unsupported date comparison: {op} {literal!r}")
+        moment = datetime.strptime(literal, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        compare = _OPS[op]
+
+        def date_test(item: "ItemSpec") -> bool:
+            current = item.mapi(schema)
+            # Outlook ignores seconds in date restrictions (P-7).
+            return current is not _MISSING and compare(
+                current.replace(second=0, microsecond=0), moment
+            )
+
+        return date_test
+    if schema == PR_MESSAGE_CLASS:
+        if kind != "str" or op not in ("=", "<>", "LIKE"):
+            raise FakeFilterError(f"unsupported MessageClass comparison: {op} {literal!r}")
+        if op == "LIKE":
+            pattern = _like(literal)
+            return lambda item: pattern.match(item.message_class or "") is not None
+        folded = literal.casefold()
+        if op == "=":
+            return lambda item: item.message_class.casefold() == folded
+        return lambda item: item.message_class.casefold() != folded
+    if schema == PR_MSG_STATUS:
+        if kind != "int" or op == "LIKE":
+            raise FakeFilterError(f"unsupported PR_MSG_STATUS comparison: {op} {literal!r}")
+        number = int(literal)
+        compare = _OPS[op]
+        return lambda item: compare(item.msg_status, number)
+    raise FakeFilterError(f"unsupported filter property: {schema!r}")
+
+
+class _FilterParser:
+    """``expr := term (OR term)*; term := factor (AND factor)*;
+    factor := NOT factor | ( expr ) | "<prop>" <op> <literal>``."""
+
+    def __init__(self, tokens: list[tuple[str, str]]) -> None:
+        self.tokens = tokens
+        self.position = 0
+
+    def peek(self) -> tuple[str, str] | None:
+        return self.tokens[self.position] if self.position < len(self.tokens) else None
+
+    def take(self) -> tuple[str, str]:
+        token = self.peek()
+        if token is None:
+            raise FakeFilterError("unexpected end of filter")
+        self.position += 1
+        return token
+
+    def expr(self) -> Predicate:
+        parts = [self.term()]
+        while self.peek() == ("word", "OR"):
+            self.take()
+            parts.append(self.term())
+        return parts[0] if len(parts) == 1 else (lambda item: any(p(item) for p in parts))
+
+    def term(self) -> Predicate:
+        parts = [self.factor()]
+        while self.peek() == ("word", "AND"):
+            self.take()
+            parts.append(self.factor())
+        return parts[0] if len(parts) == 1 else (lambda item: all(p(item) for p in parts))
+
+    def factor(self) -> Predicate:
+        kind, value = self.take()
+        if (kind, value) == ("word", "NOT"):
+            inner = self.factor()
+            return lambda item: not inner(item)
+        if kind == "lpar":
+            inner = self.expr()
+            if self.take()[0] != "rpar":
+                raise FakeFilterError("unbalanced parentheses in filter")
+            return inner
+        if kind != "prop":
+            raise FakeFilterError(f"unsupported filter clause at {value!r}")
+        schema = canonical_schema(value)
+        op_kind, op = self.take()
+        if not (op_kind == "op" or (op_kind, op) == ("word", "LIKE")):
+            raise FakeFilterError(f"unsupported filter operator: {op!r}")
+        literal_kind, literal = self.take()
+        if literal_kind not in ("str", "int"):
+            raise FakeFilterError(f"unsupported filter value: {literal!r}")
+        return _comparison(schema or value, op, literal_kind, literal)
+
+
+def parse_filter(text: Any) -> Predicate:
+    """Parse the DASL grammar the backend sends (design note 5 and its "Performance" section).
+
+    ``""`` (no filter) or ``@SQL=`` + a boolean expression (``NOT``, ``AND``, ``OR``,
+    parentheses) of restrictions on: the delivery/submit time
+    (``'YYYY-MM-DD HH:MM'`` UTC, seconds ignored), ``PR_MESSAGE_CLASS`` (``=``,
+    ``<>`` and ``LIKE`` with ``%``, case-insensitive) and ``PR_MSG_STATUS``
+    (integer comparisons). A restriction on a missing property is false.
+    Anything else raises :class:`FakeFilterError`.
     """
     if text is None or text == "":
-        return []
+        return lambda item: True
     if not isinstance(text, str) or not text.startswith("@SQL="):
-        raise FakeFilterError(f"unsupported filter (only @SQL= date clauses): {text!r}")
-    body = text[len("@SQL="):].strip()
-    if body.startswith("(") and body.endswith(")"):
-        body = body[1:-1].strip()
-    clauses: list[tuple[str, str, datetime]] = []
-    for part in re.split(r"\s+AND\s+", body, flags=re.IGNORECASE):
-        match = _CLAUSE_RE.match(part.strip())
-        if match is None:
-            raise FakeFilterError(f"unsupported filter clause: {part!r}")
-        schema = canonical_schema(match.group("prop"))
-        if schema not in DATE_PROPERTIES:
-            raise FakeFilterError(f"unsupported filter property: {match.group('prop')!r}")
-        value = datetime.strptime(match.group("value"), "%Y-%m-%d %H:%M").replace(
-            tzinfo=timezone.utc
-        )
-        clauses.append((schema, match.group("op"), value))
-    return clauses
+        raise FakeFilterError(f"unsupported filter (only @SQL=): {text!r}")
+    parser = _FilterParser(_tokens(text[len("@SQL="):]))
+    predicate = parser.expr()
+    if parser.peek() is not None:
+        raise FakeFilterError(f"unsupported filter syntax at {parser.peek()!r}")
+    return predicate
 
 
-def _matches(item: "ItemSpec", clauses: Sequence[tuple[str, str, datetime]]) -> bool:
-    for schema, op, value in clauses:
-        current = item.mapi(schema)
-        if current is _MISSING:
-            return False
-        # Outlook ignores seconds in date restrictions (P-7).
-        if not _OPS[op](current.replace(second=0, microsecond=0), value):
-            return False
-    return True
+def _matches(item: "ItemSpec", predicate: Predicate) -> bool:
+    return predicate(item)
 
 
 # --------------------------------------------------------------------------- #
@@ -815,6 +930,7 @@ class FolderSpec:
     entry_id: str = ""
     children: list["FolderSpec"] = field(default_factory=list)
     items: list[ItemSpec] = field(default_factory=list)
+    content_counters: bool = True  # False: PR_CONTENT_COUNT/PR_CONTENT_UNREAD missing
 
     def add_folder(self, name: str, **kwargs: Any) -> "FolderSpec":
         return self.store.add_folder(name, parent=self, **kwargs)
@@ -1243,10 +1359,18 @@ class FakeFolder(_ComObject):
         return FakeFolders(self._rt, self._spec)
 
     def _get_PropertyAccessor(self) -> FakePropertyAccessor:
-        folder_type = self._spec.folder_type
-        return FakePropertyAccessor(
-            self._rt, lambda schema: folder_type if schema == PR_FOLDER_TYPE else _MISSING
-        )
+        spec = self._spec
+
+        def getter(schema: str) -> Any:
+            if schema == PR_FOLDER_TYPE:
+                return spec.folder_type
+            if spec.content_counters and schema == PR_CONTENT_COUNT:
+                return len(spec.items)  # every user item: the rows of its table
+            if spec.content_counters and schema == PR_CONTENT_UNREAD:
+                return sum(1 for item in spec.items if not item.read)
+            return _MISSING
+
+        return FakePropertyAccessor(self._rt, getter)
 
     def _call_GetTable(self, filter_text: Any = "", table_contents: Any = OL_USER_ITEMS) -> "FakeTable":
         clauses = parse_filter(filter_text)
@@ -1284,7 +1408,7 @@ class FakeColumns(_ComObject):
 class FakeTable(_ComObject):
     _KIND = "Table"
     _PROPS = ("Columns", "EndOfTable")
-    _METHODS = ("GetNextRow", "GetRowCount")
+    _METHODS = ("GetNextRow", "GetRowCount", "GetArray")
 
     def __init__(self, runtime: _Runtime, rows: list[ItemSpec], zone: tzinfo) -> None:
         super().__init__(runtime)
@@ -1308,6 +1432,19 @@ class FakeTable(_ComObject):
         item = self._rows[self._cursor]
         self._cursor += 1
         return FakeRow(self._rt, self, item)
+
+    def _call_GetArray(self, max_rows: Any) -> "list[tuple] | tuple":
+        """The next ``max_rows`` rows as a list of value tuples (verified on the host).
+
+        Like ``GetNextRow``, it advances the cursor; past the end it returns ``()``.
+        """
+        if not isinstance(max_rows, int) or isinstance(max_rows, bool) or max_rows < 1:
+            raise make_com_error(E_INVALIDARG)
+        chunk = self._rows[self._cursor:self._cursor + max_rows]
+        if not chunk:
+            return ()
+        self._cursor += len(chunk)
+        return [tuple(self._value(item, column) for column in self._columns) for item in chunk]
 
     def _value(self, item: ItemSpec, column: str) -> Any:
         if column.startswith("http://"):

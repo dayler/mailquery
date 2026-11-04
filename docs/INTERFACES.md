@@ -69,7 +69,9 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     ├── test_cli.py
     ├── test_readonly.py            # obligatorio y bloqueante
     ├── test_integration.py         # flujos completos y goldens
-    └── test_install_scripts.py     # instaladores (install.sh / install.ps1)
+    ├── test_install_scripts.py     # instaladores (install.sh / install.ps1; UT-INS-01)
+    ├── test_packaging.py           # pyproject.toml y versión (TC-06)
+    └── test_smoke.py               # SMOKE contra el cliente real, solo lectura; se salta donde no aplica
 ```
 
 `outlook.py`, `outlook_com.py` y `tests/fakes/` llegan en la fase W3: con ellos
@@ -262,7 +264,7 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 | Gancho | Lo usa | Para qué |
 |--------|--------|----------|
 | `bind_command(command)` | `cli` antes de ejecutar | Outlook: el vigilante D-03 informa el comando en `E_CLIENT_TIMEOUT` |
-| `mailboxes_without_counters()` | `config.listed_mailboxes` | Outlook: carpetas sin leer las tablas de contadores (`total`/`unread` = `None`) |
+| `mailboxes_without_counters(account_uuids=None)` | `config.listed_mailboxes` | Outlook: carpetas sin contadores (`total`/`unread` = `None`); con `account_uuids` solo recorre los stores de esas cuentas |
 | `not_found_hint` (atributo) | `search.run_show` | Outlook: el hint de `message uid … was not found` remite a `excluded_stores` |
 | `unreadable_attachments(row)` | `search.run_show` | Outlook: `(nombres, warning)` de un item ilegible: `[]` y `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` y no es S/MIME (PRD §12.10) |
 | `recipients_open_items` (atributo) | `search.run_search` | Outlook (`True`): `--to`/`--cc` abren cada item, así que se validan como `--text` (acotamiento y `max_scan`), no acotan y se aplican después de contar los candidatos (RF-17) |
@@ -284,9 +286,13 @@ tests). No abre nada hasta el primer uso; toda llamada COM pasa por
   perfil. De un store excluido nunca se leen carpetas ni items.
 - Carpetas (§B.3, §B.4): recorrido en profundidad desde `GetRootFolder`; INBOX
   y carpetas de sincronización por función (`GetDefaultFolder`); `id` = el
-  `EntryID` de la carpeta. `mailboxes()` cuenta `total`/`unread` con una tabla
-  por carpeta (una vez por instancia); `mailboxes_without_counters()` y
-  `resolve_mailbox` no leen tablas.
+  `EntryID` de la carpeta. El árbol de cada store se recorre de forma perezosa,
+  una vez por instancia. `mailboxes()` cuenta `total`/`unread` a partir de
+  `PR_CONTENT_COUNT`/`PR_CONTENT_UNREAD` de la carpeta, un `GetRowCount` sobre
+  el filtro de clases buscables y, solo si hace falta, las filas de excepción
+  (clases no buscables o borrados IMAP) clasificadas en Python;
+  `mailboxes_without_counters()` y `resolve_mailbox` no leen tablas. Las
+  lecturas de tablas usan `Table.GetArray` por bloques de `TABLE_CHUNK_ROWS`.
 - Items (§B.4): `query` con `Folder.GetTable` (uid = `EntryID` permanente,
   fechas UTC, prefiltro DASL ensanchado y corte exacto en Python);
   `find_message` identifica el store por los bytes 4..20 del `EntryID`;
@@ -338,7 +344,10 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   `win32com.__gen_path__` antes de importar `win32com.client`.
 - `READONLY_MEMBERS` (`{tipo: {miembro: tipo devuelto o None}}`) y
   `ReadOnlyCom(target, kind, watchdog)`: proxy de lista blanca; cualquier otro
-  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM.
+  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM. Sobre
+  objetos de `pywin32` llama directamente a `IDispatch.Invoke` con el DISPID
+  cacheado por tipo y miembro (por objeto en los `Item`), sin el coste de la
+  información de tipos del dispatch dinámico; el fake sigue pasando por `getattr`.
 - `Watchdog` y `WATCHDOG` (D-03): plazo `CALL_TIMEOUT_SECONDS` (30 s, punto de
   inyección) por llamada; `call_com(watchdog, call)` arma el plazo y reintenta
   una vez a los 100 ms un rechazo transitorio.
@@ -448,9 +457,11 @@ clave que resuelve a un store excluido (fila de `accounts()` con `excluded`)
 no se lee ni entra en el resultado; si se pasa una lista en `excluded`, se le
 añade su entrada `{label, path, reason}` una sola vez, en el orden de los
 bloques (para `W_STORE_EXCLUDED`, PRD §15.3).
-`listed_mailboxes(backend) -> list[MailboxRow]`: las carpetas cuando solo
-importa su identidad (alcance, dedupe, presentación, hints):
-`mailboxes_without_counters()` si el backend lo ofrece, si no `mailboxes()`.
+`listed_mailboxes(backend, account_uuids=None) -> list[MailboxRow]`: las
+carpetas cuando solo importa su identidad (alcance, dedupe, presentación,
+hints): `mailboxes_without_counters(account_uuids)` si el backend lo ofrece,
+si no `mailboxes()` (Apple Mail ignora `account_uuids`). `resolve_scope` y
+`search` piden solo las cuentas declaradas.
 Solo el comando `mailboxes` necesita los contadores (PRD §19, §B.9).
 `include_mailbox_not_found(ref, account_uuids, backend)`: `E_MAILBOX_NOT_FOUND`
 de `--include-mailbox` con las carpetas de las cuentas declaradas.
