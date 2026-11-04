@@ -53,6 +53,21 @@ MAILBOX_URLS: dict[int, str] = {
     MAILBOX_LOCAL_RECOVERED: f"local://{ACCOUNT_LOCAL}/Recovered%20Messages",
 }
 
+# Extra mailboxes created only by ``build_store(extended=True)``.
+MAILBOX_ICLOUD_PROYECTOS_INBOX = 20
+MAILBOX_ICLOUD_PROYECTOS_FACTURAS = 21
+MAILBOX_ICLOUD_CLIENTES_FACTURAS = 22
+# B-27: a top-level folder whose *name* ("Proyectos/Inbox", slash encoded as %2F)
+# equals the *path* of MAILBOX_ICLOUD_PROYECTOS_INBOX. It holds no messages.
+MAILBOX_ICLOUD_SLASH_NAME = 23
+
+EXTENDED_MAILBOX_URLS: dict[int, str] = {
+    MAILBOX_ICLOUD_PROYECTOS_INBOX: f"imap://{ACCOUNT_ICLOUD}/Proyectos/Inbox",
+    MAILBOX_ICLOUD_PROYECTOS_FACTURAS: f"imap://{ACCOUNT_ICLOUD}/Proyectos/Facturas",
+    MAILBOX_ICLOUD_CLIENTES_FACTURAS: f"imap://{ACCOUNT_ICLOUD}/Clientes/Facturas",
+    MAILBOX_ICLOUD_SLASH_NAME: f"imap://{ACCOUNT_ICLOUD}/Proyectos%2FInbox",
+}
+
 # mailboxes.total_count is deliberately wrong for the Gmail INBOX (real Mail
 # reports unreliable counters); mailquery must recalculate it.
 FAKE_COUNTERS: dict[int, tuple[int, int]] = {
@@ -88,6 +103,14 @@ class FixtureMessage:
     global_id: int = 0
     labels: tuple[int, ...] = ()
     extra_note: str = ""
+    # "encrypted" (pkcs7-mime enveloped-data) or "signed" (multipart/signed).
+    smime: str | None = None
+    # attachments rows without a MIME part in the .emlx (DB-only).
+    attachment_rows: tuple[str, ...] = ()
+    # When True, date_received/date_sent in the DB come from ``date_value``
+    # (None -> NULL) instead of now - age. The .emlx still uses ``age``.
+    date_override: bool = False
+    date_value: float | int | None = None
 
 
 DEFAULT_MESSAGES: tuple[FixtureMessage, ...] = (
@@ -238,6 +261,175 @@ DEFAULT_MESSAGES: tuple[FixtureMessage, ...] = (
     ),
 )
 
+# Extended-store uids (build_store(extended=True)); none collide with the defaults.
+UID_PROYECTOS_INBOX = 90101
+UID_PROYECTOS_FACTURAS = 90102
+UID_CLIENTES_FACTURAS = 90103
+UID_SMIME_ENCRYPTED = 90110
+UID_SMIME_SIGNED = 90111
+UID_MISSING_EMLX_ATTACH = 90120
+UID_DELETED = 90130
+UID_GLOBAL_ZERO = 90140
+UID_DUP_FOLDER = 90150  # iCloud/Facturas
+UID_DUP_AGGREGATE = 90151  # Gmail/[Gmail]/All Mail, same global_id/Message-ID
+UID_DATE_NULL = 90160
+UID_DATE_ZERO = 90161
+UID_DATE_HUGE = 90162  # date_received = 1e20
+UID_DATE_FUTURE = 90163  # now + 30 days
+
+EXTENDED_MESSAGES: tuple[FixtureMessage, ...] = (
+    FixtureMessage(
+        uid=UID_PROYECTOS_INBOX,
+        mailbox=MAILBOX_ICLOUD_PROYECTOS_INBOX,
+        subject="Proyectos inbox item",
+        sender=("Projects", "projects@fixture.example"),
+        age=timedelta(days=4),
+        body="Message in the nested Proyectos/Inbox folder.",
+        global_id=101,
+        message_id_header="<proyectos-inbox-90101@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_PROYECTOS_FACTURAS,
+        mailbox=MAILBOX_ICLOUD_PROYECTOS_FACTURAS,
+        subject="Proyectos facturas item",
+        sender=("Projects", "projects@fixture.example"),
+        age=timedelta(days=6),
+        body="Same folder name, path Proyectos/Facturas.",
+        global_id=102,
+        message_id_header="<proyectos-facturas-90102@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_CLIENTES_FACTURAS,
+        mailbox=MAILBOX_ICLOUD_CLIENTES_FACTURAS,
+        subject="Clientes facturas item",
+        sender=("Clients", "clients@fixture.example"),
+        age=timedelta(days=7),
+        body="Same folder name, path Clientes/Facturas.",
+        global_id=103,
+        message_id_header="<clientes-facturas-90103@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_SMIME_ENCRYPTED,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Encrypted S/MIME",
+        sender=("Secure", "secure@fixture.example"),
+        age=timedelta(days=8),
+        smime="encrypted",
+        attachment_rows=("smime.p7m",),
+        global_id=110,
+        message_id_header="<smime-enc-90110@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_SMIME_SIGNED,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Signed S/MIME",
+        sender=("Signer", "signer@fixture.example"),
+        age=timedelta(days=9),
+        smime="signed",
+        body="This message is signed.",
+        global_id=111,
+        message_id_header="<smime-sig-90111@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_MISSING_EMLX_ATTACH,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Missing emlx with attachment row",
+        sender=("Ghost", "ghost@fixture.example"),
+        age=timedelta(days=11),
+        missing_emlx=True,
+        attachment_names=("ghost.pdf",),
+        global_id=120,
+        message_id_header="<missing-attach-90120@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DELETED,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Deleted message",
+        sender=("Deleted", "deleted@fixture.example"),
+        age=timedelta(days=13),
+        deleted=True,
+        body="This message is flagged deleted.",
+        global_id=130,
+        message_id_header="<deleted-90130@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_GLOBAL_ZERO,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Global id zero",
+        sender=("Zero", "zero@fixture.example"),
+        age=timedelta(days=14),
+        body="global_message_id is 0 for this message.",
+        global_id=0,
+        message_id_header="<global-zero-90140@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DUP_FOLDER,
+        mailbox=MAILBOX_ICLOUD_FACTURAS,
+        subject="Aggregate duplicate",
+        sender=("Dup", "dup@fixture.example"),
+        age=timedelta(days=15),
+        body="Copy in a normal folder.",
+        global_id=150,
+        message_id_header="<aggregate-dup-150@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DUP_AGGREGATE,
+        mailbox=MAILBOX_GMAIL_ALL_MAIL,
+        subject="Aggregate duplicate",
+        sender=("Dup", "dup@fixture.example"),
+        age=timedelta(days=15),
+        body="Copy in the aggregate mailbox.",
+        global_id=150,
+        message_id_header="<aggregate-dup-150@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DATE_NULL,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Date received NULL",
+        sender=("Dates", "dates@fixture.example"),
+        age=timedelta(days=16),
+        body="date_received is NULL.",
+        date_override=True,
+        date_value=None,
+        global_id=160,
+        message_id_header="<date-null-90160@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DATE_ZERO,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Date received zero",
+        sender=("Dates", "dates@fixture.example"),
+        age=timedelta(days=16),
+        body="date_received is 0.",
+        date_override=True,
+        date_value=0,
+        global_id=161,
+        message_id_header="<date-zero-90161@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DATE_HUGE,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Date received huge",
+        sender=("Dates", "dates@fixture.example"),
+        age=timedelta(days=16),
+        body="date_received is 1e20.",
+        date_override=True,
+        date_value=1e20,
+        global_id=162,
+        message_id_header="<date-huge-90162@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_DATE_FUTURE,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Date received future",
+        sender=("Dates", "dates@fixture.example"),
+        age=timedelta(days=-30),
+        body="date_received is 30 days after the fixture clock.",
+        global_id=163,
+        message_id_header="<date-future-90163@fixture.example>",
+    ),
+)
+
 # A uid that exists on disk but has no row in the Envelope Index (orphan .emlx).
 ORPHAN_UID = 99999
 
@@ -257,7 +449,27 @@ mailbox_list = ["Facturas", "Archivo"]
 
 @dataclass(frozen=True)
 class FixturePaths:
-    """Paths and metadata of a built synthetic Mail store."""
+    """Paths and metadata of a built synthetic Mail store.
+
+    ``build_store(extended=True)`` additionally exposes (uids are module
+    constants ``UID_*``; use ``message(uid)`` for details):
+
+    * ``mailboxes``: ``iCloud/Proyectos/Inbox`` (20), ``iCloud/Proyectos/Facturas``
+      (21), ``iCloud/Clientes/Facturas`` (22; same name as 21 and as
+      ``iCloud/Facturas``, different paths) and ``iCloud/Proyectos%2FInbox`` (23;
+      top-level folder whose name equals the path of 20; no messages, B-27).
+    * 90101/90102/90103: one message in each of mailboxes 20/21/22.
+    * 90110 encrypted S/MIME (pkcs7-mime, ``attachments`` row ``smime.p7m``);
+      90111 signed S/MIME (multipart/signed, no ``attachments`` row).
+    * 90120: ``.emlx`` absent on disk but an ``attachments`` row exists.
+    * 90130: deleted (flags bit 2, ``deleted=1``).
+    * 90140: ``global_message_id`` 0 (no ``message_global_data`` row).
+    * 90150 (iCloud/Facturas) and 90151 (Gmail/All Mail): duplicate pair,
+      same global_message_id 150 and Message-ID.
+    * 90160 date_received NULL, 90161 = 0, 90162 = 1e20, 90163 = now + 30 days.
+    * ``wal_path`` / ``shm_path``: the Envelope Index is in WAL journal mode and
+      both ``Envelope Index-wal`` and ``Envelope Index-shm`` exist on disk.
+    """
 
     root: Path
     mail_root: Path
@@ -268,6 +480,10 @@ class FixturePaths:
     now: datetime
     mailboxes: dict[str, int] = field(default_factory=dict)
     messages: tuple[FixtureMessage, ...] = ()
+    extended: bool = False
+    # Extended store only (None otherwise): the WAL-mode Envelope Index sidecars.
+    wal_path: Path | None = None
+    shm_path: Path | None = None
 
     def cleanup(self) -> None:
         import shutil
@@ -281,11 +497,14 @@ class FixturePaths:
         raise KeyError(uid)
 
 
-def build_store(root: str | Path | None = None, *, now: datetime | None = None) -> FixturePaths:
+def build_store(
+    root: str | Path | None = None, *, now: datetime | None = None, extended: bool = False
+) -> FixturePaths:
     """Build a complete synthetic Mail store and return its paths.
 
     When ``root`` is ``None`` a new temporary directory is created (the caller
-    owns it and can call :meth:`FixturePaths.cleanup`).
+    owns it and can call :meth:`FixturePaths.cleanup`). ``extended=True`` adds
+    the edge-case data documented on :class:`FixturePaths`.
     """
     if now is None:
         now = datetime.now()
@@ -303,12 +522,15 @@ def build_store(root: str | Path | None = None, *, now: datetime | None = None) 
         directory.mkdir(parents=True, exist_ok=True)
 
     _write_persistence_info(mail_root)
-    messages = DEFAULT_MESSAGES
+    messages = DEFAULT_MESSAGES + EXTENDED_MESSAGES if extended else DEFAULT_MESSAGES
     for message in messages:
         _write_emlx_files(mail_root, message, now)
     _write_orphan_emlx(mail_root, now)
-    _write_envelope_index(envelope_index, messages, now)
+    _write_envelope_index(envelope_index, messages, now, extended=extended)
     _write_accounts_db(accounts_db)
+    wal_path = shm_path = None
+    if extended:
+        wal_path, shm_path = _make_wal_variant(envelope_index)
 
     mailboxes = {
         "iCloud/INBOX": MAILBOX_ICLOUD_INBOX,
@@ -319,6 +541,15 @@ def build_store(root: str | Path | None = None, *, now: datetime | None = None) 
         "Gmail/Important": MAILBOX_GMAIL_IMPORTANT,
         "Local/Recovered Messages": MAILBOX_LOCAL_RECOVERED,
     }
+    if extended:
+        mailboxes.update(
+            {
+                "iCloud/Proyectos/Inbox": MAILBOX_ICLOUD_PROYECTOS_INBOX,
+                "iCloud/Proyectos/Facturas": MAILBOX_ICLOUD_PROYECTOS_FACTURAS,
+                "iCloud/Clientes/Facturas": MAILBOX_ICLOUD_CLIENTES_FACTURAS,
+                "iCloud/Proyectos%2FInbox": MAILBOX_ICLOUD_SLASH_NAME,
+            }
+        )
     return FixturePaths(
         root=root_path,
         mail_root=mail_root,
@@ -329,6 +560,9 @@ def build_store(root: str | Path | None = None, *, now: datetime | None = None) 
         now=now,
         mailboxes=mailboxes,
         messages=messages,
+        extended=extended,
+        wal_path=wal_path,
+        shm_path=shm_path,
     )
 
 
@@ -361,7 +595,7 @@ def _mailbox_segments(rowid: int) -> tuple[str, tuple[str, ...]]:
     """Return ``(account_uuid, path_segments)`` for a mailbox rowid."""
     from urllib.parse import unquote, urlsplit
 
-    url = MAILBOX_URLS[rowid]
+    url = MAILBOX_URLS.get(rowid) or EXTENDED_MAILBOX_URLS[rowid]
     parts = urlsplit(url)
     account_uuid = parts.netloc
     segments = tuple(unquote(segment) for segment in parts.path.split("/") if segment)
@@ -423,9 +657,28 @@ def _emlx_bytes(message: FixtureMessage, received: datetime) -> bytes:
     body = message.body
     if body is None and message.html is not None:
         body = ""
-    email.set_content(body if body is not None else "")
+    if message.smime == "encrypted":
+        email.set_content(
+            b"synthetic enveloped-data",
+            maintype="application",
+            subtype="pkcs7-mime",
+            filename="smime.p7m",
+            params={"smime-type": "enveloped-data"},
+        )
+    else:
+        email.set_content(body if body is not None else "")
     if message.html is not None:
         email.add_alternative(message.html, subtype="html")
+    if message.smime == "signed":
+        email.add_attachment(
+            b"synthetic signature",
+            maintype="application",
+            subtype="pkcs7-signature",
+            filename="smime.p7s",
+            disposition="inline",
+        )
+        del email["Content-Type"]
+        email["Content-Type"] = 'multipart/signed; protocol="application/pkcs7-signature"; micalg=sha-256'
     for name in message.attachment_names:
         email.add_attachment(
             b"synthetic attachment payload",
@@ -557,15 +810,17 @@ CREATE TABLE message_global_data (
 """
 
 
-def _write_envelope_index(path: Path, messages: tuple[FixtureMessage, ...], now: datetime) -> None:
+def _write_envelope_index(
+    path: Path, messages: tuple[FixtureMessage, ...], now: datetime, *, extended: bool = False
+) -> None:
     connection = sqlite3.connect(path)
     try:
         connection.executescript(_ENVELOPE_SCHEMA)
-        _insert_mailboxes(connection)
+        _insert_mailboxes(connection, extended)
         address_cache: dict[tuple[str, str], int] = {}
         subject_cache: dict[str, int] = {}
         message_id_cache: dict[str, int] = {}
-        global_ids = sorted({message.global_id for message in messages})
+        global_ids = sorted({message.global_id for message in messages if message.global_id})
         for global_id in global_ids:
             header = next(
                 (m.message_id_header for m in messages if m.global_id == global_id and m.message_id_header),
@@ -580,6 +835,8 @@ def _write_envelope_index(path: Path, messages: tuple[FixtureMessage, ...], now:
         for message in messages:
             received = int((now - message.age).timestamp())
             sent = received - 30
+            if message.date_override:
+                received = sent = message.date_value
             subject_id = subject_cache.get(message.subject)
             if subject_id is None:
                 cursor = connection.execute(
@@ -620,7 +877,7 @@ def _write_envelope_index(path: Path, messages: tuple[FixtureMessage, ...], now:
                     "INSERT INTO labels (message_id, mailbox_id) VALUES (?, ?)",
                     (message.uid, label_mailbox),
                 )
-            for name in message.attachment_names:
+            for name in message.attachment_names + message.attachment_rows:
                 connection.execute(
                     "INSERT INTO attachments (message, attachment_id, name) VALUES (?, ?, ?)",
                     (message.uid, f"att-{message.uid}-{name}", name),
@@ -630,8 +887,25 @@ def _write_envelope_index(path: Path, messages: tuple[FixtureMessage, ...], now:
         connection.close()
 
 
-def _insert_mailboxes(connection: sqlite3.Connection) -> None:
-    for rowid, url in MAILBOX_URLS.items():
+def _make_wal_variant(envelope_index: Path) -> tuple[Path, Path]:
+    """Put the Envelope Index in WAL mode and leave ``-wal``/``-shm`` on disk."""
+    connection = sqlite3.connect(envelope_index)
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+    finally:
+        connection.close()
+    wal = envelope_index.with_name(envelope_index.name + "-wal")
+    shm = envelope_index.with_name(envelope_index.name + "-shm")
+    # SQLite removes the sidecars on a clean close; recreate them empty (valid:
+    # SQLite reinitialises both on the next open).
+    wal.touch()
+    shm.touch()
+    return wal, shm
+
+
+def _insert_mailboxes(connection: sqlite3.Connection, extended: bool = False) -> None:
+    urls = {**MAILBOX_URLS, **EXTENDED_MAILBOX_URLS} if extended else MAILBOX_URLS
+    for rowid, url in urls.items():
         total, unread = FAKE_COUNTERS.get(rowid, (0, 0))
         source = MAILBOX_GMAIL_ALL_MAIL if rowid == MAILBOX_GMAIL_INBOX else None
         connection.execute(

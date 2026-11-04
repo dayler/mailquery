@@ -12,6 +12,7 @@ import argparse
 from dataclasses import replace
 import logging
 import os
+import platform
 import shutil
 import stat
 import sys
@@ -20,11 +21,13 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
+from mailquery import __version__
 from mailquery.accounts import AccountLabels
 from mailquery.config import (
     APP_HOME_SUBDIRS,
     DEFAULT_LOG_LEVEL,
-    DEFAULT_RETENTION_DAYS,
+    DEFAULT_LOOKBACK,
+    DEFAULT_MAX_SIZE_MB,
     LOG_LEVELS,
     MAX_NEW_LIMIT,
     MAX_SEARCH_LIMIT,
@@ -36,19 +39,22 @@ from mailquery.config import (
 )
 from mailquery.errors import MailqueryError
 from mailquery.logging_setup import get_logger, setup_logging
-from mailquery.output import now_iso, write_json
+from mailquery.output import configure_streams, now_iso, write_json
 from mailquery.search import (
     Filters,
     parse_relative_time,
+    parse_uid,
     run_mailboxes,
     run_new,
     run_search,
     run_show,
 )
 from mailquery.state import RunLock, StateStore
-from mailquery.store import detect_version, open_store
+from mailquery.store import detect_version, open_store, probe_envelope_index
 
 COMMANDS = ("doctor", "mailboxes", "search", "new", "show")
+# The only backend implemented at W0 (RF-26); logged as ``backend=`` (PRD 14).
+BACKEND_NAME = "apple_mail"
 DOCTOR_CHECK_NAMES = (
     "python",
     "home",
@@ -75,17 +81,18 @@ Examples:
   mailquery show 83143
 
 Configuration: ~/.mailquery/config.toml (optional; see README.md)
-Output: one JSON object on stdout for every command (this help is the only
-        non-JSON output); logs go to ~/.mailquery/logs/mailquery.log
+Output: one JSON object on stdout for every command, in UTF-8 (this help,
+        --version and the default doctor report are the only non-JSON output);
+        logs go to ~/.mailquery/logs/mailquery.log
 Exit codes: 0 ok | 2 usage or config error | 3 environment error
-            | 4 rejected query | 5 busy or transient error
+            | 4 rejected query | 5 busy or transient error | 6 mail client not running
 """
 
 _DOCTOR_EPILOG = """\
 Examples:
   mailquery doctor
   mailquery doctor --json
-  mailquery doctor --log-level debug
+  mailquery --log-level debug doctor
 
 Notes:
   Prints a human-readable report by default; --json emits the machine-readable
@@ -100,15 +107,17 @@ Examples:
 Notes:
   A folder is included when its account is declared in ~/.mailquery/config.toml
   and the folder is INBOX or listed in mailbox_list. Counters are recalculated
-  from the Envelope Index because Mail's own counters are not reliable.
+  from the mail store because the mail client's own counters are not reliable.
 """
 
 _SEARCH_EPILOG = """\
 Matching:
-  Patterns are case-insensitive; * matches any sequence and ? one character;
-  without wildcards the value is matched as a substring. A value without
-  wildcards is split on spaces into AND terms; a value with wildcards stays a
-  single pattern.
+  Patterns are case- and accent-insensitive; * matches any sequence and ? one
+  character; without wildcards the value is matched as a substring anywhere in
+  the text. A pattern is not anchored: factura* also matches "la factura".
+  --subject: words separated by spaces are AND terms, with or without wildcards.
+  --text, --from, --to and --cc: the whole value is one pattern, spaces included.
+  Repeating a flag is AND too. An empty value does not filter.
 
 Examples:
   mailquery search --since 1w
@@ -117,8 +126,14 @@ Examples:
   mailquery search --text "*factura*" --since 1mo --has-attachments
 
 Notes:
-  --text requires a narrowing filter (date, sender, subject or an extra folder)
-  and refuses to scan more than [search].max_scan candidates.
+  --text needs a narrowing filter: --since, --until, --subject, --from or an extra
+  folder (one other than INBOX in mailbox_list or --include-mailbox). --to and --cc
+  narrow on macOS but not on Windows, where checking them opens every message (they
+  are validated like --text). An empty value does not narrow. Without a narrowing
+  filter the query fails with E_UNBOUNDED_SCAN (exit 4); with more than
+  [search].max_scan candidates after the filters, with E_SCAN_TOO_LARGE (exit 4).
+  --include-mailbox takes folders of declared accounts; INBOX is the inbox of the
+  first declared account.
 """
 
 _NEW_EPILOG = """\
@@ -128,8 +143,12 @@ Examples:
   mailquery new --limit 200
 
 Notes:
-  The first run is a baseline: it emits nothing, sets the cursor to the newest
-  scoped message and reports W_FIRST_RUN. --peek never advances the cursor.
+  The first run (no saved cursor) emits, oldest first, the messages received in the
+  last [new].lookback before the newest message of the scope (at least that one) and
+  adds W_FIRST_RUN; with a smaller --limit, the most recent ones. Later runs emit what
+  arrived after the cursor. --peek never writes the state.
+  Messages with a null, invalid or future date are ignored until their date is valid.
+  Accounts or folders added to config.toml do not emit their history: use search.
 """
 
 _SHOW_EPILOG = """\
@@ -138,7 +157,8 @@ Examples:
 
 Notes:
   The body is truncated to 20,000 characters; headers and attachment names are
-  included, and .partial.emlx messages are flagged with partial: true.
+  included. Only messages of accounts declared in config.toml can be shown; use
+  the uid reported by search or new.
 """
 
 
@@ -187,16 +207,52 @@ class _ArgumentParser(argparse.ArgumentParser):
         )
 
 
+def _version_line() -> str:
+    """Return the ``--version`` line (RF-31, PRD 12.9) without touching any backend."""
+    if sys.platform == "win32":
+        backend = "outlook"
+        system = f"Windows {platform.version()} {platform.machine()}"
+    elif sys.platform == "darwin":
+        backend = "apple_mail"
+        system = f"macOS {platform.mac_ver()[0]} {platform.machine()}"
+    else:
+        backend = "apple_mail"
+        system = f"{platform.system()} {platform.release()} {platform.machine()}"
+    return (
+        f"mailquery {__version__} (backend {backend}; "
+        f"Python {platform.python_version()}; {system})"
+    )
+
+
+class _VersionAction(argparse.Action):
+    """Print the version line and exit 0 as soon as the option is parsed."""
+
+    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any) -> None:
+        super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None) -> None:  # type: ignore[override]
+        sys.stdout.write(_version_line() + "\n")
+        sys.stdout.flush()
+        parser.exit(0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``mailquery`` argparse parser with all subcommands."""
     parser = _ArgumentParser(
         prog="mailquery",
-        description="Read-only CLI to read and search Apple Mail.",
+        description="Read-only CLI to read and search local mail "
+        "(Apple Mail on macOS, classic Outlook on Windows).",
         epilog=_ROOT_EPILOG,
         formatter_class=_HelpFormatter,
         allow_abbrev=False,
     )
     _style_parser(parser, root=True)
+    parser.add_argument(
+        "-v",
+        "--version",
+        action=_VersionAction,
+        help="print the version, backend, Python and platform, then exit",
+    )
     parser.add_argument(
         "--log-level",
         metavar="LEVEL",
@@ -251,32 +307,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--subject",
         action="append",
         metavar="PATTERN",
-        help="subject filter: substring or wildcards * and ?; repeatable (AND)",
+        help="subject filter: substring or wildcards * and ?; words separated by spaces "
+        "are AND; repeatable (AND)",
     )
     search_parser.add_argument(
         "--text",
         action="append",
         metavar="PATTERN",
-        help="body text filter: substring or wildcards; repeatable (AND)",
+        help="body text filter: substring or wildcards; the whole value is one pattern; "
+        "repeatable (AND)",
     )
     search_parser.add_argument(
         "--from",
         dest="from_",
         action="append",
         metavar="PATTERN",
-        help="sender name or address filter: substring or wildcards; repeatable (AND)",
+        help="sender name or address filter: substring or wildcards; the whole value is "
+        "one pattern; repeatable (AND)",
     )
     search_parser.add_argument(
         "--to",
         action="append",
         metavar="PATTERN",
-        help="recipient name or address filter: substring or wildcards; repeatable (AND)",
+        help="recipient name or address filter: substring or wildcards; the whole value "
+        "is one pattern; repeatable (AND)",
     )
     search_parser.add_argument(
         "--cc",
         action="append",
         metavar="PATTERN",
-        help="cc name or address filter: substring or wildcards; repeatable (AND)",
+        help="cc name or address filter: substring or wildcards; the whole value is "
+        "one pattern; repeatable (AND)",
     )
     search_parser.add_argument(
         "--since",
@@ -299,8 +360,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-mailbox",
         action="append",
         metavar="LIST",
-        help="extra folder to include in this run (name, path or URL); "
-        "repeatable or comma-separated",
+        help="extra folder of a declared account for this run (name, path or URL; "
+        "INBOX is an alias); repeatable or comma-separated",
     )
     search_parser.add_argument(
         "--limit",
@@ -340,7 +401,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_parser.set_defaults(command="show")
     _style_parser(show_parser, root=False)
-    show_parser.add_argument("uid", metavar="UID", type=int, help="message uid (see `mailquery search`)")
+    # The format is validated by search.parse_uid in main(), not by argparse (PRD 12.4).
+    show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
     return parser
 
@@ -357,6 +419,7 @@ def main(
     ``home``, ``mail_root`` and ``accounts_db`` are test-only injection points;
     they are not CLI flags nor environment variables of the public contract.
     """
+    configure_streams()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     try:
         args = build_parser().parse_args(raw_argv)
@@ -366,6 +429,12 @@ def main(
         return _report_error(exc, _guess_command(raw_argv))
 
     command = str(args.command)
+    if command == "show":
+        # Before the home is created, the config is read or the store is opened.
+        try:
+            args.uid = parse_uid(args.uid)
+        except MailqueryError as exc:
+            return _report_error(exc, command)
     try:
         home_path = Path(home) if home is not None else app_home()
     except (OSError, RuntimeError) as exc:
@@ -373,6 +442,7 @@ def main(
             "E_PERMISSION",
             f"cannot resolve the application home: {exc}",
             "make sure HOME points to a writable directory",
+            log_message="cannot resolve the application home",
         )
         return _report_error(error, command)
 
@@ -407,6 +477,7 @@ def _run_command(
             f"cannot create the application home {home_path}: {exc.strerror or exc}",
             "check write permissions on the home directory and its parent "
             "(mode 0700 is required)",
+            log_message="cannot create the application home",
         )
         return _report_error(error, command)
 
@@ -419,17 +490,18 @@ def _run_command(
     level = args.log_level or config.logging.level
     try:
         _close_logging_handlers()
-        setup_logging(home_path, level, config.logging.retention_days)
+        setup_logging(home_path, level, config.logging.max_size_mb)
     except OSError as exc:
         error = MailqueryError(
             "E_PERMISSION",
             f"cannot write logs under {home_path}: {exc.strerror or exc}",
             "check permissions of the application home and its logs directory",
+            log_message="cannot write logs under the application home",
         )
         return _report_error(error, command)
 
     logger = get_logger("mailquery.cli")
-    logger.info("event=start command=%s", command)
+    logger.info("event=start command=%s backend=%s", command, BACKEND_NAME)
     started = time.perf_counter()
     try:
         payload = _execute(args, config, home_path, mail_root, accounts_db)
@@ -455,15 +527,17 @@ def _run_command(
 
     write_json(_success_payload(command, payload))
     duration_ms = int((time.perf_counter() - started) * 1000)
+    warnings = payload.get("warnings") or ()
     raw_scan = payload.get("scan")
     scan: dict[str, Any] = raw_scan if isinstance(raw_scan, dict) else {}
     logger.info(
         "event=end command=%s exit_code=0 count=%s truncated=%s warnings=%d "
-        "mode=%s candidates=%s messages_read=%s duration_ms=%d",
+        "warning_codes=%s mode=%s candidates=%s messages_read=%s duration_ms=%d",
         command,
         payload.get("count", 0),
         bool(payload.get("truncated", False)),
-        len(payload.get("warnings") or ()),
+        len(warnings),
+        ",".join(_warning_code(warning) for warning in warnings) or "-",
         scan.get("mode", "-"),
         scan.get("candidates", "-"),
         scan.get("messages_read", "-"),
@@ -507,7 +581,7 @@ def _execute(
                     limit=new_limit,
                 )
             elif command == "show":
-                payload = run_show(store, labels, int(args.uid))
+                payload = run_show(store, config, labels, int(args.uid))
             else:  # pragma: no cover - argparse prevents this
                 raise MailqueryError(
                     "E_USAGE",
@@ -533,7 +607,7 @@ def _log_store_connection(store: Any) -> None:
             "strategy=%s version=%s schema_ok=%s",
             getattr(store, "strategy", "-"),
             version_name,
-            schema_ok,
+            str(schema_ok).lower(),
         )
     except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
         pass
@@ -628,8 +702,8 @@ def _run_doctor(
     *,
     json_output: bool = False,
 ) -> int:
-    level, retention = _doctor_log_settings(home_path, log_level)
-    logger = _best_effort_logger(home_path, level, retention)
+    level, max_size_mb = _doctor_log_settings(home_path, log_level)
+    logger = _best_effort_logger(home_path, level, max_size_mb)
     try:
         checks = _collect_doctor_checks(home_path, mail_root, accounts_db)
     except Exception as exc:  # noqa: BLE001 - doctor never raises
@@ -721,16 +795,29 @@ def _collect_doctor_checks(
     try:
         ensure_app_home(home_path)
         problems: list[str] = []
+        windows = sys.platform == "win32"
         for name in (None,) + tuple(APP_HOME_SUBDIRS):
             directory = home_path if name is None else home_path / name
             if not directory.is_dir():
                 problems.append(f"missing {directory.name or directory}")
                 continue
+            if windows:
+                continue  # POSIX modes are meaningless on Windows (D-04)
             mode = stat.S_IMODE(directory.stat().st_mode)
             if mode != 0o700:
                 problems.append(f"{directory.name or directory} mode={oct(mode)}")
+        if windows and not problems:
+            # Windows: the home must exist and be writable (probe file, D-04).
+            probe = home_path / "tmp" / f".doctor-probe-{os.getpid()}"
+            try:
+                probe.write_bytes(b"")
+                probe.unlink()
+            except OSError as exc:
+                problems.append(f"not writable: {exc.strerror or exc}")
         if problems:
             record("home", False, "; ".join(problems))
+        elif windows:
+            record("home", True, f"{home_path} (writable)")
         else:
             record("home", True, f"{home_path} (mode 0700)")
     except OSError as exc:
@@ -747,66 +834,51 @@ def _collect_doctor_checks(
         record("store", False, _detail(exc))
 
     # envelope_index ---------------------------------------------------------
-    try:
-        if version is None:
-            # Preserve the real cause (e.g. E_PERMISSION) instead of reporting
-            # a misleading E_STORE_NOT_FOUND when detection was denied.
-            if version_error is not None:
-                raise version_error
-            raise MailqueryError(
-                "E_STORE_NOT_FOUND",
-                "Mail store not detected",
-                "open Apple Mail once; mailquery only reads the existing store",
-            )
-        index_path = version.envelope_index
-        if not index_path.exists():
-            raise MailqueryError(
-                "E_STORE_NOT_FOUND",
-                f"missing Envelope Index: {index_path}",
-                "open Apple Mail once so the store is created",
-            )
-        if not os.access(index_path, os.R_OK):
-            raise MailqueryError(
-                "E_PERMISSION",
-                f"Envelope Index is not readable: {index_path}",
-                "grant Full Disk Access to the application running mailquery",
-            )
-        record("envelope_index", True, str(index_path))
-    except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("envelope_index", False, _detail(exc))
+    envelope_ok = False
+    if version is None:
+        record("envelope_index", False, "not evaluated: store failed")
+    else:
+        try:
+            probe_envelope_index(version, tmp_root=home_path / "tmp")
+            envelope_ok = True
+            record("envelope_index", True, str(version.envelope_index))
+        except Exception as exc:  # noqa: BLE001 - diagnostics only
+            record("envelope_index", False, _detail(exc))
 
     # schema + readonly_strategy --------------------------------------------
     store = None
-    store_open_error: Exception | None = None
-    try:
-        store = open_store(mail_root=mail_root, tmp_root=home_path / "tmp")
-    except Exception as exc:  # noqa: BLE001 - diagnostics only
-        store_open_error = exc
-
-    if store is None:
-        detail = _detail(store_open_error) if store_open_error else "store is not open"
-        record("schema", False, detail)
+    schema_ok = False
+    if not envelope_ok:
+        record("schema", False, "not evaluated: envelope_index failed")
+        record("readonly_strategy", False, "not evaluated: envelope_index failed")
     else:
+        store_open_error: Exception | None = None
         try:
-            fingerprint = store.fingerprint()
-            missing = [table for table, present in fingerprint.items() if not present]
-            if missing:
-                record("schema", False, f"missing tables: {', '.join(missing)}")
-            else:
-                record("schema", True, "all required tables present")
+            store = open_store(mail_root=mail_root, tmp_root=home_path / "tmp")
         except Exception as exc:  # noqa: BLE001 - diagnostics only
-            record("schema", False, _detail(exc))
+            store_open_error = exc
 
-    if store is None:
-        detail = _detail(store_open_error) if store_open_error else "store is not open"
-        record("readonly_strategy", False, detail)
-    else:
-        strategy = getattr(store, "strategy", None) or _infer_readonly_strategy(version)
-        record(
-            "readonly_strategy",
-            True,
-            f"{strategy}: Envelope Index opened read-only (mode=ro, query_only=ON)",
-        )
+        if store is None:
+            detail = _detail(store_open_error) if store_open_error else "store is not open"
+            record("schema", False, detail)
+            record("readonly_strategy", False, detail)
+        else:
+            try:
+                fingerprint = store.fingerprint()
+                missing = [table for table, present in fingerprint.items() if not present]
+                if missing:
+                    record("schema", False, f"missing tables: {', '.join(missing)}")
+                else:
+                    schema_ok = True
+                    record("schema", True, "all required tables present")
+            except Exception as exc:  # noqa: BLE001 - diagnostics only
+                record("schema", False, _detail(exc))
+            strategy = getattr(store, "strategy", None) or _infer_readonly_strategy(version)
+            record(
+                "readonly_strategy",
+                True,
+                f"{strategy}: Envelope Index opened read-only (mode=ro, query_only=ON)",
+            )
 
     # accounts_db ------------------------------------------------------------
     labels_obj: AccountLabels | None = None
@@ -834,7 +906,12 @@ def _collect_doctor_checks(
                 prefix = "config.toml exists but declares no [scope.*] blocks"
             else:
                 prefix = "no config.toml (optional)"
-            if labels_obj is not None and labels_obj.available:
+            if not schema_ok:
+                detail = (
+                    f"{prefix}; 0 account block(s) declared; available accounts: unknown "
+                    "(schema failed)"
+                )
+            elif labels_obj is not None and labels_obj.available:
                 labels = labels_obj.all()
                 if labels:
                     available = ", ".join(label.label for label in labels)
@@ -856,13 +933,9 @@ def _collect_doctor_checks(
             record("config", True, detail)
         else:
             problems: list[str] = []
-            if store is None:
-                reason = (
-                    _detail(store_open_error)
-                    if store_open_error
-                    else "Mail store is not available"
-                )
-                problems.append(f"cannot resolve account blocks: {reason}")
+            lines: list[str] = []
+            if not schema_ok or store is None:
+                problems.append("not evaluated: schema failed")
             elif labels_obj is None:
                 problems.append(
                     "cannot resolve account blocks: account labels are unavailable"
@@ -870,17 +943,28 @@ def _collect_doctor_checks(
             else:
                 for entry in config.scopes:
                     try:
-                        resolve_scope(replace(config, scopes=(entry,)), store, labels_obj)
+                        resolved = resolve_scope(
+                            replace(config, scopes=(entry,)), store, labels_obj
+                        )
                     except MailqueryError as exc:
                         hint = f" (hint: {exc.hint})" if exc.hint else ""
                         problems.append(f"{entry.key}: {exc.code}: {exc.message}{hint}")
+                        continue
                     except Exception as exc:  # noqa: BLE001 - diagnostics only
                         problems.append(f"{entry.key}: {_detail(exc)}")
+                        continue
+                    for scope in resolved:
+                        folders = [
+                            mailbox.path for mailbox in scope.mailboxes if not mailbox.is_inbox
+                        ]
+                        lines.append(
+                            f"{entry.key} \u2192 {scope.account_label} ({scope.account_uuid}): "
+                            + ", ".join(["INBOX"] + folders)
+                        )
             if problems:
                 record("config", False, "; ".join(problems))
             else:
-                declared = ", ".join(entry.key for entry in config.scopes)
-                record("config", True, f"{len(config.scopes)} account block(s): {declared}")
+                record("config", True, "; ".join(lines))
     except Exception as exc:  # noqa: BLE001 - diagnostics only
         record("config", False, _detail(exc))
 
@@ -894,7 +978,16 @@ def _collect_doctor_checks(
     try:
         state = StateStore(home_path).load()
         if state.cursor is None:
-            record("state", True, "no cursor yet (the first `new` run baselines)")
+            try:
+                lookback = load_config(home_path).new.lookback
+            except Exception:  # noqa: BLE001 - config problems are reported by `config`
+                lookback = DEFAULT_LOOKBACK
+            record(
+                "state",
+                True,
+                "no state yet; the next new run is a first run and emits the messages "
+                f"received in the last {lookback} before the newest message",
+            )
         else:
             record(
                 "state",
@@ -954,19 +1047,31 @@ def _report_error(error: MailqueryError, command: str | None) -> int:
 def _log_error(logger: Any, command: str, error: MailqueryError) -> None:
     if logger is None:
         return
-    # Never log message/hint: they may contain account emails or folder names.
-    logger.error("event=error command=%s code=%s", command, error.code)
+    # Never log message/hint: they may contain account emails, folders or paths.
+    # ``log_message`` is the text without that data (PRD 14); fall back to the
+    # plain message only when the error carries no sanitized variant.
+    logger.error(
+        "event=error command=%s code=%s message=%s",
+        command,
+        error.code,
+        error.log_message if error.log_message is not None else error.message,
+    )
+
+
+def _warning_code(warning: Any) -> str:
+    """Return the ``W_*`` code of a rendered warning, without its detail."""
+    return str(warning).split(":", 1)[0].strip()
 
 
 def _best_effort_logger(
     home_path: Path,
     level: str | None,
-    retention_days: int = DEFAULT_RETENTION_DAYS,
+    max_size_mb: int = DEFAULT_MAX_SIZE_MB,
 ) -> Any:
     try:
         ensure_app_home(home_path)
         _close_logging_handlers()
-        setup_logging(home_path, level or DEFAULT_LOG_LEVEL, retention_days)
+        setup_logging(home_path, level or DEFAULT_LOG_LEVEL, max_size_mb)
     except Exception:  # noqa: BLE001 - logging is never fatal
         return None
     return get_logger("mailquery.cli")
@@ -977,10 +1082,10 @@ def _doctor_log_settings(home_path: Path, log_level: str | None) -> tuple[str, i
     try:
         config = load_config(home_path)
     except Exception:  # noqa: BLE001 - doctor diagnoses broken configs itself
-        return log_level or DEFAULT_LOG_LEVEL, DEFAULT_RETENTION_DAYS
+        return log_level or DEFAULT_LOG_LEVEL, DEFAULT_MAX_SIZE_MB
     return (
         log_level or config.logging.level,
-        config.logging.retention_days,
+        config.logging.max_size_mb,
     )
 
 

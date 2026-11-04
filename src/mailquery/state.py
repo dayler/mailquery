@@ -8,9 +8,10 @@ with mode 0600, and the file never contains subjects, bodies or addresses.
 
 from __future__ import annotations
 
-import fcntl
+import errno
 import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,11 @@ from typing import Sequence
 
 from mailquery.errors import MailqueryError
 from mailquery.output import now_iso
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 MAX_EMITTED_UIDS = 1000
 STATE_SCHEMA = 1
@@ -92,6 +98,7 @@ class StateStore:
                 f"cannot read state file: {path}",
                 "check that ~/.mailquery is readable by the current user "
                 "(it must be mode 0700 and owned by the invoking account)",
+                "cannot read the state file",
             ) from exc
         except OSError as exc:
             raise _corrupt(f"cannot read {path} ({exc.strerror or exc})") from exc
@@ -117,15 +124,19 @@ class StateStore:
                 "E_PERMISSION",
                 f"cannot create the application home: {directory}",
                 "check the permissions of the parent directory",
+                "cannot create the application home",
             ) from exc
 
         data = json.dumps(_state_to_payload(state), ensure_ascii=False, indent=2) + "\n"
         tmp_path = self._write_temp(directory, data)
         try:
             os.replace(tmp_path, path)
-        except OSError:
+        except OSError as exc:
             _unlink_quietly(tmp_path)
-            raise
+            mapped = _write_error(exc, directory)
+            if mapped is None:
+                raise
+            raise mapped from exc
         _fsync_dir(directory)
 
     @staticmethod
@@ -134,10 +145,13 @@ class StateStore:
         try:
             fd, tmp_name = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=directory)
         except OSError as exc:
+            if exc.errno == errno.ENOSPC:
+                raise _write_error(exc, directory) from exc
             raise MailqueryError(
                 "E_PERMISSION",
                 f"cannot create a temporary state file in {directory}",
                 "check that ~/.mailquery is writable by the current user",
+                "cannot create a temporary state file",
             ) from exc
         tmp_path = Path(tmp_name)
         try:
@@ -146,6 +160,12 @@ class StateStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.chmod(tmp_path, 0o600)
+        except OSError as exc:
+            _unlink_quietly(tmp_path)
+            mapped = _write_error(exc, directory)
+            if mapped is None:
+                raise
+            raise mapped from exc
         except BaseException:
             _unlink_quietly(tmp_path)
             raise
@@ -155,15 +175,17 @@ class StateStore:
         self,
         state: AppState,
         emitted: Sequence[tuple[int, int]],
+        lookback_seconds: int,
         command: str = "new",
     ) -> AppState:
         """Advance the cursor and the emitted-uid ring, returning the new state.
 
         ``emitted`` holds ``(date_received, uid)`` pairs for the messages this
         run emits. The cursor only ever moves forward (a Mail index rebuild may
-        change uids but never the dates, PRD 18); the previous
-        ``lookback_seconds`` is preserved, and the emitted uids are appended to
-        the ring in chronological order (newest last) capped at 1.000 entries.
+        change uids but never the dates, PRD 18); ``lookback_seconds`` is the
+        lookback of the current config (PRD 12.3) and is the one stored in the
+        cursor, and the emitted uids are appended to the ring in chronological
+        order (newest last) capped at 1.000 entries.
 
         This method does **not** persist the new state: the caller
         (``search.run_new``) saves it only when the run is not ``--peek``, so a
@@ -171,16 +193,22 @@ class StateStore:
         """
         pairs = [(int(date), int(uid)) for date, uid in emitted]
         previous = state.cursor
-        previous_lookback = previous.lookback_seconds if previous is not None else DEFAULT_LOOKBACK_SECONDS
+        lookback = int(lookback_seconds)
 
         cursor = previous
+        if previous is not None and previous.lookback_seconds != lookback:
+            cursor = Cursor(
+                last_date_received=previous.last_date_received,
+                last_uid=previous.last_uid,
+                lookback_seconds=lookback,
+            )
         if pairs:
             newest = max(pairs, key=lambda pair: (pair[0], pair[1]))
             if previous is None or newest > (previous.last_date_received, previous.last_uid):
                 cursor = Cursor(
                     last_date_received=newest[0],
                     last_uid=newest[1],
-                    lookback_seconds=previous_lookback,
+                    lookback_seconds=lookback,
                 )
 
         ring = _advance_ring(state.emitted_uids, pairs)
@@ -194,8 +222,50 @@ class StateStore:
         )
 
 
+def _write_error(exc: OSError, directory: Path) -> MailqueryError | None:
+    """Map a failed state write (PRD 17): ENOSPC is internal, EACCES/EPERM a permission error.
+
+    Returns ``None`` for any other I/O error, which keeps its current handling.
+    The previous ``state.json`` is never touched by a failed write.
+    """
+    if exc.errno == errno.ENOSPC:
+        return MailqueryError(
+            "E_INTERNAL",
+            f"no space left on the device to write the state file in {directory}",
+            "free disk space and retry; the previous cursor was not changed",
+            "no space left on the device to write the state file",
+        )
+    if exc.errno in (errno.EACCES, errno.EPERM):
+        return MailqueryError(
+            "E_PERMISSION",
+            f"cannot write the state file in {directory}: {exc.strerror or exc}",
+            "check that ~/.mailquery is writable by the current user",
+            "cannot write the state file",
+        )
+    return None
+
+
+def _lock_fd(fd: int) -> None:
+    """Take a non-blocking exclusive lock on ``fd``; raise ``OSError`` if held."""
+    if sys.platform == "win32":
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_fd(fd: int) -> None:
+    if sys.platform == "win32":
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 class RunLock:
-    """Non-blocking ``fcntl.flock`` lock under ``~/.mailquery/locks``.
+    """Non-blocking lock under ``~/.mailquery/locks``.
+
+    Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows.
 
     Every invocation takes the lock before touching the store so two harness
     calls cannot overlap (PRD 21.3). A contended lock raises ``E_LOCKED``
@@ -224,13 +294,14 @@ class RunLock:
                 "E_PERMISSION",
                 f"cannot open the run lock: {path}",
                 "check that ~/.mailquery is writable by the current user",
+                "cannot open the run lock",
             ) from exc
         try:
             os.chmod(path, 0o600)
         except OSError:  # pragma: no cover - best effort on foreign filesystems
             pass
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_fd(fd)
         except OSError as exc:
             os.close(fd)
             raise MailqueryError(
@@ -247,7 +318,7 @@ class RunLock:
             return
         self._fd = None
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _unlock_fd(fd)
         finally:
             os.close(fd)
 
@@ -329,13 +400,17 @@ def _cursor_from_payload(value: object) -> Cursor | None:
         return None
     if not isinstance(value, dict):
         raise _corrupt("'cursor' must be an object")
-    date = value.get("last_date_received", 0)
-    uid = value.get("last_uid", 0)
+    date = value.get("last_date_received")
+    uid = value.get("last_uid")
     lookback = value.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
     if not _is_int(date) or not _is_int(uid) or not _is_int(lookback):
-        raise _corrupt("'cursor' fields must be integers")
-    if date < 0 or uid < 0:
-        raise _corrupt("'cursor' fields must not be negative")
+        raise _corrupt(
+            "'cursor' must hold integer 'last_date_received' and 'last_uid'"
+        )
+    if date < 0:
+        raise _corrupt("'cursor.last_date_received' must not be negative")
+    if uid < 1:
+        raise _corrupt("'cursor.last_uid' must be a uid (an integer >= 1)")
     if lookback < 1:
         raise _corrupt("'cursor.lookback_seconds' must be positive")
     return Cursor(
@@ -352,8 +427,8 @@ def _ring_from_payload(value: object) -> tuple[int, ...]:
         raise _corrupt("'emitted_uids' must be a list of integers")
     uids: list[int] = []
     for item in value:
-        if not _is_int(item) or item < 0:
-            raise _corrupt("'emitted_uids' must be a list of non-negative integers")
+        if not _is_int(item) or item < 1:
+            raise _corrupt("'emitted_uids' must be a list of uids (integers >= 1)")
         uids.append(item)
     return tuple(uids[-MAX_EMITTED_UIDS:])
 
@@ -382,9 +457,10 @@ def _corrupt(detail: str) -> MailqueryError:
     return MailqueryError(
         "E_STATE_CORRUPT",
         f"state.json is corrupt: {detail}",
-        "rename ~/.mailquery/state.json (for example to state.json.bak) to "
-        "re-baseline: the next 'mailquery new' creates a fresh state and, on "
-        "its first run, emits nothing",
+        "rename ~/.mailquery/state.json (for example to state.json.bak): the "
+        "next 'mailquery new' is a first run that emits the messages of the "
+        "lookback window",
+        "state.json is corrupt",
     )
 
 
