@@ -348,6 +348,64 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual(leftovers, [])
 
 
+class OutlookStateUidTest(unittest.TestCase):
+    """UT-ST-03: ``state.json`` uids on Windows (PRD 11.2, D-05), in ``last_uid`` and ``emitted_uids``."""
+
+    _HEX = "00000000D70DBCF61C2A4B6E9A51E0C3B2A49F1007000000"
+
+    def setUp(self) -> None:
+        from mailquery.backends.outlook import OutlookBackend
+
+        self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name) / "home"
+        self.home.mkdir(parents=True)
+        self.store = StateStore(self.home, OutlookBackend.check_state_uid)
+
+    def _write(self, last_uid: object, emitted: list) -> None:
+        payload = {
+            "schema": 1,
+            "cursor": {"last_date_received": 100, "last_uid": last_uid, "lookback_seconds": 600},
+            "emitted_uids": emitted,
+        }
+        self.store.path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _assert_both_corrupt(self, uid: object) -> None:
+        cases = (
+            ("last_uid", uid, [self._HEX], "'cursor.last_uid'"),
+            ("emitted_uids", self._HEX, [self._HEX, uid], "'emitted_uids'"),
+        )
+        for field_name, last_uid, emitted, detail in cases:
+            with self.subTest(field=field_name, uid=uid):
+                self._write(last_uid, emitted)
+                with self.assertRaises(MailqueryError) as caught:
+                    self.store.load()
+                self.assertEqual(caught.exception.code, "E_STATE_CORRUPT")
+                self.assertEqual(caught.exception.exit_code, 3)
+                self.assertIn(detail, caught.exception.message)
+                self.assertIn("uppercase hexadecimal", caught.exception.message)
+
+    def test_ut_st_03_01_uppercase_hex_is_valid(self) -> None:
+        """UT-ST-03.01: uppercase hex strings in ``last_uid`` and ``emitted_uids`` are valid."""
+        other = "0123456789ABCDEF"
+        self._write(self._HEX, [other, self._HEX])
+        state = self.store.load()
+        self.assertEqual(state.cursor, Cursor(last_date_received=100, last_uid=self._HEX))
+        self.assertEqual(state.emitted_uids, (other, self._HEX))
+
+    def test_ut_st_03_02_lowercase_hex_is_corrupt(self) -> None:
+        """UT-ST-03.02: lowercase hex is E_STATE_CORRUPT."""
+        self._assert_both_corrupt(self._HEX.lower())
+
+    def test_ut_st_03_03_empty_string_is_corrupt(self) -> None:
+        """UT-ST-03.03: the empty string is E_STATE_CORRUPT."""
+        self._assert_both_corrupt("")
+
+    def test_ut_st_03_04_integer_uid_of_the_other_backend_is_corrupt(self) -> None:
+        """UT-ST-03.04: an integer (Apple Mail uid) is E_STATE_CORRUPT."""
+        self._assert_both_corrupt(83143)
+
+
 class RecordNewTest(unittest.TestCase):
     """Cursor advancement, ring cap and no-regression semantics."""
 

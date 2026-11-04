@@ -81,6 +81,30 @@ DRIVE_REMOVABLE = 2
 DRIVE_FIXED = 3
 DRIVE_REMOTE = 4
 
+#: Detail of the running ``doctor`` check when a COM call times out (PRD 12.8, literal).
+DOCTOR_TIMEOUT_DETAIL = (
+    "timeout after 30 s: Outlook did not respond (possible security prompt)"
+)
+
+# Outlook Object Model Guard policies (annex B.6; W3 design note section 8). Group
+# Policy values of Outlook 2016+ (user configuration); the PromptOOM* values apply
+# only with AdminSecurityMode = 3 ("use Outlook Security Group Policy").
+OOM_POLICY_KEY = r"Software\Policies\Microsoft\Office\16.0\Outlook\Security"
+ADMIN_SECURITY_MODE = "AdminSecurityMode"
+ADMIN_SECURITY_MODE_GROUP_POLICY = 3
+PROMPT_OOM_ADDRESS_INFORMATION = "PromptOOMAddressInformationAccess"
+PROMPT_OOM_ADDRESS_BOOK = "PromptOOMAddressBookAccess"
+OOM_DENY = 0  # automatically deny
+OOM_PROMPT = 1  # prompt user
+OOM_APPROVE = 2  # automatically approve (3 = prompt based on computer security)
+OOM_SETTING_NAMES = {
+    OOM_DENY: "automatically deny",
+    OOM_PROMPT: "prompt user",
+    OOM_APPROVE: "automatically approve",
+}
+#: ``AntiVirusProduct.productState`` bit set while real-time protection is on.
+ANTIVIRUS_ENABLED_BIT = 0x1000
+
 HINT_DEPENDENCY = "pipx reinstall mailquery"
 HINT_UNSUPPORTED = (
     "install classic Outlook (version 16.0 or later); the new Outlook is not supported"
@@ -319,7 +343,7 @@ class Watchdog:
     ``doctor_handler`` is the D-03 doctor-mode hook: when ``command`` is
     ``"doctor"`` and it is set, the default handler calls
     ``doctor_handler(seconds)`` instead, which must complete the report and end
-    the process with exit 0 (implemented by W4-T03).
+    the process with exit 0 (``OutlookBackend.bind_doctor_timeout``).
     """
 
     def __init__(
@@ -402,7 +426,7 @@ def default_on_expire(watchdog: Watchdog, seconds: float) -> None:
     process: the main thread is blocked inside COM and cannot be interrupted.
     """
     if watchdog.doctor_mode and watchdog.doctor_handler is not None:
-        watchdog.doctor_handler(seconds)  # W4-T03: complete the report, os._exit(0)
+        watchdog.doctor_handler(seconds)  # completes the doctor report, os._exit(0)
         return
     error = client_timeout(seconds)
     command = watchdog.command or "-"
@@ -568,6 +592,58 @@ class WinRegistry:
         with winreg.OpenKey(roots[hive.upper()], key, 0, winreg.KEY_READ) as handle:
             value, _kind = winreg.QueryValueEx(handle, name)
         return value
+
+
+def pywin32_gen_path() -> str | None:
+    """``win32com.__gen_path__`` if pywin32 is already imported (never imports it)."""
+    module = sys.modules.get("win32com")
+    value = getattr(module, "__gen_path__", None) if module is not None else None
+    return str(value) if value is not None else None
+
+
+def _policy_dword(registry: Any, name: str) -> int | None:
+    try:
+        value = registry.get_value(HKCU, OOM_POLICY_KEY, name)
+    except OSError:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def oom_policy(registry: Any) -> tuple[str, int] | None:
+    """The Outlook security policy that decides programmatic access, or ``None`` (annex B.6).
+
+    Read-only. Only with ``AdminSecurityMode = 3`` do the ``PromptOOM*`` values
+    apply. ``PromptOOMAddressInformationAccess`` covers what mailquery reads
+    (addresses, recipients, bodies, MAPI properties): deny (0) or prompt (1)
+    decide, then a deny of ``PromptOOMAddressBookAccess`` (Outlook then denies
+    every program), then approve (2). Missing values and 3 ("prompt based on
+    computer security") decide nothing.
+    """
+    if _policy_dword(registry, ADMIN_SECURITY_MODE) != ADMIN_SECURITY_MODE_GROUP_POLICY:
+        return None
+    information = _policy_dword(registry, PROMPT_OOM_ADDRESS_INFORMATION)
+    if information in (OOM_DENY, OOM_PROMPT):
+        return PROMPT_OOM_ADDRESS_INFORMATION, int(information)
+    if _policy_dword(registry, PROMPT_OOM_ADDRESS_BOOK) == OOM_DENY:
+        return PROMPT_OOM_ADDRESS_BOOK, OOM_DENY
+    if information == OOM_APPROVE:
+        return PROMPT_OOM_ADDRESS_INFORMATION, OOM_APPROVE
+    return None
+
+
+def active_antivirus(products: list[dict[str, Any]]) -> list[str]:
+    """Display names of the SecurityCenter2 antivirus products whose protection is on."""
+    names = []
+    for product in products:
+        try:
+            state = int(product.get("productState", 0))
+        except (TypeError, ValueError):
+            continue
+        if state & ANTIVIRUS_ENABLED_BIT:
+            names.append(str(product.get("displayName") or "unknown"))
+    return names
 
 
 def outlook_major_version(registry: Any) -> int | None:

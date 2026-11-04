@@ -1,15 +1,19 @@
 """Classic Outlook backend (Windows, annex B).
 
 Implemented so far: the connection (``describe``), ``name``,
-``labels_available``, ``parse_uid``, ``close``, the D-03 ``bind_command`` hook
+``labels_available``, ``parse_uid``, ``check_state_uid`` (``state.json`` uids,
+D-05), ``close``, the D-03 ``bind_command`` hook
 the stores of the profile (``accounts``, ``excluded_stores``; annex B.3,
 B.4), their folders (``mailboxes``, ``resolve_mailbox``; annex B.3, B.4,
 PRD 15.3), their items (``query``, ``membership``, ``duplicate_counts``,
 ``recipients``, ``attachment_names``, ``find_message``; annex B.4, PRD 12.4)
 and their bodies (``load_body`` plus the ``show`` hooks ``not_found_hint`` and
 ``unreadable_attachments``; PRD 12.4, 12.5, 12.10). Folder counters are read
-only by ``mailboxes`` (core hook ``mailboxes_without_counters``; PRD 19). ``doctor_checks`` raises
-``NotImplementedError`` until W4-T03 implements it. Every COM access goes through
+only by ``mailboxes`` (core hook ``mailboxes_without_counters``; PRD 19). The
+``search`` hooks ``recipients_open_items``, ``items_opened`` and
+``load_snippet`` serve the bounded ``--text``/``--to``/``--cc`` scan (PRD RF-17,
+19). ``doctor_checks`` and the D-03 hook ``bind_doctor_timeout`` serve
+``doctor`` (PRD 12.8, annex B.6, B.8). Every COM access goes through
 :mod:`mailquery.backends.outlook_com` (the only module that imports pywin32),
 so this module imports on any OS.
 """
@@ -24,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from email import policy as email_policy
 from email.parser import HeaderParser
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence
 from urllib.parse import quote, unquote
 
 from mailquery import output
@@ -36,9 +40,10 @@ from mailquery.backends.base import (
     MailboxRow,
     MessageRow,
     AccountRow,
+    StateUidError,
     Uid,
 )
-from mailquery.errors import usage_error
+from mailquery.errors import MailqueryError, error_detail, usage_error
 
 BACKEND_NAME = "outlook"
 STRATEGY = "com_readonly"
@@ -174,14 +179,32 @@ ENTRYID_STORE_KEY = slice(4, 20)
 #: widened by whole minutes and the exact cut is done in Python.
 FILTER_MARGIN_BEFORE = timedelta(minutes=1)
 FILTER_MARGIN_AFTER = timedelta(minutes=2)
+#: Opened items kept per command (the first ones opened, which are the newest
+#: candidates in ``search`` order), so the page's recipients and bodies open each
+#: item once (PRD 19). The maximum ``--limit`` fits.
+ITEM_CACHE_SIZE = 200
 _UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 INBOX = "INBOX"
 URL_SCHEME = "outlook://"
 
 
-def _pending(task: str) -> NotImplementedError:
-    return NotImplementedError(f"Outlook backend: implemented in {task}")
+#: Backend checks of ``doctor`` in the order of PRD 12.8 (annex B.8).
+DOCTOR_CHECKS = ("pywin32", "outlook", "stores", "readonly_strategy", "object_model_guard")
+#: Checks that need Outlook, in the evaluation order of D-03.
+DOCTOR_COM_CHECKS = ("outlook", "readonly_strategy", "stores")
+#: Direct dependency of each check (annex B.8); the others are independent.
+DOCTOR_DEPENDENCIES = {"outlook": "pywin32", "readonly_strategy": "outlook", "stores": "outlook"}
+
+
+def _not_evaluated(name: str, dependency: str) -> dict[str, Any]:
+    return {"name": name, "ok": False, "detail": f"not evaluated: {dependency} failed"}
+
+
+def _error_with_hint(exc: MailqueryError) -> str:
+    """``CODE: message (hint: ...)``: the doctor detail of a detection error (annex B.7)."""
+    detail = error_detail(exc)
+    return f"{detail} (hint: {exc.hint})" if exc.hint else detail
 
 
 @dataclass
@@ -291,6 +314,17 @@ class OutlookBackend(MailBackend):
         self._uid_folders: dict[str, str] = {}
         #: Dedupe key of each Internet Message-ID (``global_message_id`` > 0).
         self._message_keys: dict[str, int] = {}
+        #: ``GetItemFromID`` result (item or :data:`_UNOPENABLE`) of the first
+        #: :data:`ITEM_CACHE_SIZE` uids opened, plus the last one opened.
+        self._items: dict[str, Any] = {}
+        self._last_item: tuple[str, Any] | None = None
+        #: Uids whose item was opened (``scan.messages_read``, PRD RF-17).
+        self._opened: set[str] = set()
+        #: ``recipients`` result of each uid read so far.
+        self._recipient_cache: dict[str, dict[str, list[dict[str, str]]]] = {}
+        #: ``doctor`` progress: finished checks by name and the running one (D-03).
+        self._doctor_done: dict[str, dict[str, Any]] = {}
+        self._doctor_running: str | None = None
 
     # -- connection ---------------------------------------------------------- #
 
@@ -401,18 +435,30 @@ class OutlookBackend(MailBackend):
 
         ``None`` when the store or the item does not exist, :data:`_UNOPENABLE`
         when the item exists but cannot be opened; other COM errors propagate.
+        Each uid is opened once per command while it stays cached (the first
+        :data:`ITEM_CACHE_SIZE` uids and the last one).
         """
+        if uid in self._items:
+            return self._items[uid]
+        if self._last_item is not None and self._last_item[0] == uid:
+            return self._last_item[1]
         info = info if info is not None else self._store_of(uid, candidate=True)
         if info is None or not info.store_id:
             return None
         try:
-            return self._app().Session.GetItemFromID(uid, info.store_id)
+            item = self._app().Session.GetItemFromID(uid, info.store_id)
         except outlook_com.ComCallError as exc:
             if exc.hresult in ITEM_NOT_FOUND_HRESULTS:
                 return None
-            if exc.hresult in ITEM_UNOPENABLE_HRESULTS:
-                return _UNOPENABLE
-            raise
+            if exc.hresult not in ITEM_UNOPENABLE_HRESULTS:
+                raise
+            item = _UNOPENABLE
+        else:
+            self._opened.add(uid)
+        if len(self._items) < ITEM_CACHE_SIZE:
+            self._items[uid] = item
+        self._last_item = (uid, item)
+        return item
 
     def _find_in_tables(
         self, uid: str, listed: dict[str, MailboxRow]
@@ -600,10 +646,14 @@ class OutlookBackend(MailBackend):
         else ``PR_EMAIL_ADDRESS`` only when the address type is SMTP), never an
         Exchange DN and never the address book; without one it is ``""`` and the
         name is kept. Bcc is not reported. Items that cannot be found or opened
-        are left out.
+        are left out. Each item's recipients are read once per command.
         """
         result: dict[Uid, Any] = {}
         for uid in dict.fromkeys(uids):
+            cached = self._recipient_cache.get(str(uid))
+            if cached is not None:
+                result[uid] = cached
+                continue
             item = self._open_item(str(uid))
             if item is None or item is _UNOPENABLE:
                 continue
@@ -619,6 +669,7 @@ class OutlookBackend(MailBackend):
                     "address": _recipient_address(recipient.PropertyAccessor),
                 }
                 bucket["to" if kind == OL_TO else "cc"].append(entry)
+            self._recipient_cache[str(uid)] = bucket
             result[uid] = bucket
         return result
 
@@ -686,6 +737,10 @@ class OutlookBackend(MailBackend):
         ``partial`` and ``source.partial`` are always ``False`` and
         ``source.emlx_path`` ``None`` (PRD 12.5).
         """
+        return self._load_body(row, details=True)
+
+    def _load_body(self, row: MessageRow, *, details: bool) -> BodyRow:
+        """:meth:`load_body`; without ``details`` no attachment or header is read."""
         uid = str(row.get("uid") or "")
         message_class = row.get("message_class")
         if is_smime_class(message_class):
@@ -706,10 +761,13 @@ class OutlookBackend(MailBackend):
                     "the body is never downloaded"
                 )
             body_text, warnings = _item_text(item)
-            attachments = [{"name": name} for name in _visible_attachment_names(item)]
-            headers = _parse_headers(
-                _get_property(item.PropertyAccessor, PR_TRANSPORT_MESSAGE_HEADERS)
-            )
+            attachments: list[dict[str, str]] = []
+            headers: dict[str, str] = {}
+            if details:
+                attachments = [{"name": name} for name in _visible_attachment_names(item)]
+                headers = _parse_headers(
+                    _get_property(item.PropertyAccessor, PR_TRANSPORT_MESSAGE_HEADERS)
+                )
         except outlook_com.ComCallError as exc:
             if exc.hresult in ITEM_UNOPENABLE_HRESULTS:
                 return _unavailable_body(_unopenable_warning(uid))
@@ -729,6 +787,23 @@ class OutlookBackend(MailBackend):
 
     #: Hint of the ``message uid … was not found`` error of ``show`` (PRD 12.4).
     not_found_hint = NOT_FOUND_HINT
+
+    #: Evaluating ``--to``/``--cc`` opens every candidate item: on Windows they are
+    #: bounded like ``--text`` and do not narrow (PRD RF-17).
+    recipients_open_items = True
+
+    @property
+    def items_opened(self) -> int:
+        """Distinct items opened so far (``scan.messages_read``, PRD RF-17)."""
+        return len(self._opened)
+
+    def load_snippet(self, row: MessageRow) -> BodyRow:
+        """:meth:`load_body` for ``search``/``new``: the body only.
+
+        Attachment names and transport headers are only needed by ``show``
+        (``attachments: []``, ``headers: {}``; PRD 19).
+        """
+        return self._load_body(row, details=False)
 
     def unreadable_attachments(self, row: MessageRow) -> tuple[list[str], str | None]:
         """``show`` attachments of an item whose body could not be read (PRD 12.10).
@@ -759,8 +834,173 @@ class OutlookBackend(MailBackend):
             )
         return text
 
+    @staticmethod
+    def check_state_uid(uid: Any) -> None:
+        """Validate a ``state.json`` uid (PRD 11.2): a non-empty uppercase hex string.
+
+        Integers (Apple Mail uids), lowercase and empty strings are invalid. Shares
+        only the hex expression with ``parse_uid``, not its text parsing or its
+        ``E_USAGE`` error (D-05). Raises ``StateUidError`` carrying the exact
+        ``E_STATE_CORRUPT`` details of Outlook.
+        """
+        if isinstance(uid, str) and _UID_PATTERN.fullmatch(uid) is not None:
+            return
+        raise StateUidError(
+            "'cursor.last_uid' must be a uid (an uppercase hexadecimal EntryID)",
+            "'emitted_uids' must be a list of uids (uppercase hexadecimal EntryIDs)",
+        )
+
     def doctor_checks(self) -> list[dict[str, Any]]:
-        raise _pending("W4-T03")
+        """``pywin32``, ``outlook``, ``stores``, ``readonly_strategy``, ``object_model_guard``.
+
+        Returned in the order of PRD 12.8; evaluated in the order of D-03: the
+        checks that never call Outlook first (``pywin32``, ``object_model_guard``),
+        then ``outlook``, ``readonly_strategy`` (no COM call) and ``stores``.
+        A check whose direct dependency failed is ``not evaluated: <dependency>
+        failed`` (annex B.8). Outlook is never launched. The progress is kept so
+        that a COM timeout can complete the report (:meth:`bind_doctor_timeout`).
+        """
+        self._doctor_done = {}
+        self._doctor_running = None
+        self._doctor_step("pywin32", self._check_pywin32)
+        self._doctor_step("object_model_guard", self._check_object_model_guard)
+        for name in DOCTOR_COM_CHECKS:
+            failed = self._doctor_failed_dependency(name)
+            if failed is not None:
+                self._doctor_done[name] = _not_evaluated(name, failed)
+            else:
+                self._doctor_step(name, getattr(self, f"_check_{name}"))
+        return [self._doctor_done[name] for name in DOCTOR_CHECKS]
+
+    def bind_doctor_timeout(
+        self, finish: Callable[[list[dict[str, Any]] | None, str], None]
+    ) -> None:
+        """D-03 in ``doctor``: on a COM timeout the watchdog calls ``finish``.
+
+        ``finish(backend_checks, detail)`` gets the backend checks completed per
+        PRD 12.8 (the running check ``ok=false`` with ``detail``, its dependents
+        ``not evaluated``), or ``None`` when no backend check was running (the
+        timeout hit the CLI's ``config`` resolution); it must write the report
+        and end the process with exit 0.
+        """
+        self._watchdog.doctor_handler = lambda _seconds: finish(
+            self._doctor_interrupted(), outlook_com.DOCTOR_TIMEOUT_DETAIL
+        )
+
+    def _doctor_step(self, name: str, check: Callable[[], tuple[bool, str]]) -> None:
+        self._doctor_running = name
+        try:
+            ok, detail = check()
+        except MailqueryError as exc:
+            ok, detail = False, _error_with_hint(exc)
+        except Exception as exc:  # noqa: BLE001 - diagnostics only
+            ok, detail = False, error_detail(exc)
+        finally:
+            self._doctor_running = None
+        self._doctor_done[name] = {"name": name, "ok": bool(ok), "detail": str(detail)}
+
+    def _doctor_failed_dependency(self, name: str) -> str | None:
+        dependency = DOCTOR_DEPENDENCIES.get(name)
+        if dependency is None:
+            return None
+        done = self._doctor_done.get(dependency)
+        return None if done is not None and done["ok"] else dependency
+
+    def _doctor_interrupted(self) -> list[dict[str, Any]] | None:
+        """The backend checks after a timeout in the running one (PRD 12.8), or ``None``."""
+        running = self._doctor_running
+        if running is None:
+            return None
+        done = dict(self._doctor_done)
+        done[running] = {
+            "name": running,
+            "ok": False,
+            "detail": outlook_com.DOCTOR_TIMEOUT_DETAIL,
+        }
+        for name in ("pywin32", "object_model_guard") + DOCTOR_COM_CHECKS:
+            if name not in done:
+                dependency = DOCTOR_DEPENDENCIES.get(name) or running
+                done[name] = _not_evaluated(name, dependency)
+        return [done[name] for name in DOCTOR_CHECKS]
+
+    def _gen_path(self) -> Path:
+        if self._tmp_root is not None:
+            return self._tmp_root / "gen_py"
+        from mailquery.config import app_home
+
+        return app_home() / "tmp" / "gen_py"
+
+    def _check_pywin32(self) -> tuple[bool, str]:
+        """pywin32 importable by this interpreter (fixed by the ``pywin32`` seam, plan 4.2)."""
+        if self._pywin32 is False:
+            raise outlook_com.dependency_missing()
+        if self._pywin32 is None and self._outlook_app is None:
+            outlook_com.import_pywin32(self._gen_path())
+        return True, "win32com importable"
+
+    def _check_outlook(self) -> tuple[bool, str]:
+        """Registered, >= 16.0, running and reachable; only ``GetActiveObject`` (PRD 12.6)."""
+        version = self._app().Version
+        return True, f"classic Outlook {version} running (attached with GetActiveObject)"
+
+    def _check_readonly_strategy(self) -> tuple[bool, str]:
+        """``com_readonly`` without any COM call: proxy, no launch, confined pywin32 cache."""
+        gen_path = self._gen_path()
+        if not isinstance(self._application, outlook_com.ReadOnlyCom):
+            return False, f"{STRATEGY}: the Outlook connection is not behind the read-only proxy"
+        if self._outlook_app is None:
+            current = outlook_com.pywin32_gen_path()
+            if current is None or Path(current) != gen_path:
+                return False, f"{STRATEGY}: the pywin32 cache is not confined to {gen_path}"
+        return True, (
+            f"{STRATEGY}: read-only whitelist proxy active, attached with GetActiveObject "
+            f"(Outlook is never launched), pywin32 cache confined to {gen_path}"
+        )
+
+    def _check_stores(self) -> tuple[bool, str]:
+        """Candidate stores (label and type) and excluded ones (label, path, reason; RF-34)."""
+        stores = self._profile()
+        candidates = [f"{info.label} [{info.kind}]" for info in stores if info.reason is None]
+        excluded = [
+            (f"{info.label} at {info.path}" if info.path else info.label) + f" [{info.reason}]"
+            for info in stores
+            if info.reason is not None
+        ]
+        return True, (
+            f"{len(candidates)} candidate(s): {', '.join(candidates) or 'none'}; "
+            f"{len(excluded)} excluded: {', '.join(excluded) or 'none'}"
+        )
+
+    def _check_object_model_guard(self) -> tuple[bool, str]:
+        """Annex B.6: a deciding policy, else an active antivirus (SecurityCenter2)."""
+        registry = self._registry if self._registry is not None else outlook_com.WinRegistry()
+        policy = outlook_com.oom_policy(registry)
+        if policy is not None:
+            name, value = policy
+            setting = outlook_com.OOM_SETTING_NAMES[value]
+            if value == outlook_com.OOM_APPROVE:
+                return True, f"Outlook security policy {name}={value} ({setting})"
+            effect = (
+                "programmatic access is refused"
+                if value == outlook_com.OOM_DENY
+                else "Outlook always shows a security prompt to programmatic access"
+            )
+            return False, f"Outlook security policy {name}={value} ({setting}): {effect}"
+        center = self._security_center
+        if center is None:
+            center = outlook_com.WmiSecurityCenter(self._gen_path())
+        try:
+            products = center.antivirus_products()
+        except OSError:
+            return False, "not evaluated: SecurityCenter2 unavailable"
+        active = outlook_com.active_antivirus(products)
+        if active:
+            names = ", ".join(active)
+            return True, f"no Outlook security policy decides; active antivirus: {names}"
+        return False, (
+            "no Outlook security policy decides and no active antivirus: Outlook shows a "
+            "security prompt to programmatic access"
+        )
 
     def close(self) -> None:
         """Drop the COM references (Outlook itself is never closed)."""
@@ -769,6 +1009,10 @@ class OutlookBackend(MailBackend):
         self._counters = {}
         self._uid_folders = {}
         self._message_keys = {}
+        self._items = {}
+        self._last_item = None
+        self._opened = set()
+        self._recipient_cache = {}
         self._stores = None
         self._application = None
 
