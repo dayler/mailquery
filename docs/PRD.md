@@ -736,7 +736,7 @@ Los warnings son strings `"W_CODIGO: detalle"`; el detalle es en inglés y siemp
 | `W_BODY_TRUNCATED` | ambas | `show` truncó el cuerpo a 20.000 caracteres. |
 | `W_HTML_NO_TEXT` | ambas | El cuerpo HTML no produjo texto. |
 | `W_BODY_UNREADABLE` | ambas | El cuerpo no se puede leer; el detalle dice por qué (archivo o item que no se puede abrir, mensaje sin carpeta). Para S/MIME, en ambas plataformas, el texto es `W_BODY_UNREADABLE: S/MIME encrypted content is not supported` o `W_BODY_UNREADABLE: S/MIME signed content is not supported`. **Sustituye a `W_EMLX_UNREADABLE`** en todos sus usos. |
-| `W_ATTACHMENTS_UNAVAILABLE` | ambas | En `show`, el cuerpo no se pudo leer. macOS: los nombres de adjuntos salen de los metadatos del `Envelope Index`. Windows: si el item no se puede abrir, `attachments` es `[]` (§B.4). En S/MIME, `attachments` es `[]` en Windows y este warning no se emite. |
+| `W_ATTACHMENTS_UNAVAILABLE` | ambas | En `show`, solo si el cuerpo no se pudo leer **y** el mensaje tiene adjuntos; sin adjuntos no se emite. macOS: "tiene adjuntos" = el `Envelope Index` tiene nombres de adjuntos para el mensaje, y `attachments` lista esos nombres (como hoy). Windows: "tiene adjuntos" = `has_attachments` (se lee sin abrir el item), y `attachments` es `[]` porque los nombres no se pueden leer sin abrirlo (§B.4). Diferencia documentada: en Windows un S/MIME siempre trae un adjunto técnico (`smime.p7m`), así que `has_attachments` no indica adjuntos reales; para S/MIME, `attachments` es `[]` y este warning no se emite. |
 | `W_ACCOUNT_LABELS_UNAVAILABLE` | macOS | `Accounts4.sqlite` no está disponible; solo funcionan los UUID. |
 | `W_EMLX_MISSING` | macOS | No existe el `.emlx` del mensaje (`body.available=false`). |
 | `W_EMLX_CORRUPT` | macOS | El `.emlx` está corrupto. |
@@ -1241,7 +1241,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo l
 | Cambio | Antes (1.x, PRD v0.13) | Después (2.0.0) |
 |--------|---------------|----------------|
 | `show` fuera de las cuentas declaradas | Busca el uid en todo el store y no lee `[scope]` | Solo cuentas declaradas; fuera ⇒ `E_ACCOUNT_NOT_IN_SCOPE`; un `[scope]` que no resuelve falla como en `search` (§12.4) |
-| Primera corrida de `new` sin estado | No emite nada (baseline); sin cuentas declaradas, solo `W_NO_ACCOUNTS` | Emite `[más reciente − lookback, más reciente]`; `warnings` según §12.3 paso 5 |
+| Primera corrida de `new` sin estado | No emite nada (baseline); sin cuentas declaradas, solo `W_NO_ACCOUNTS` | Emite `[más reciente − lookback, más reciente]`; `warnings` según §12.3 paso 6 |
 | Mensajes con fecha futura en `new` | Entran en la ventana y pueden mover el cursor al futuro | Se ignoran hasta que su fecha deja de ser futura (§12.3) |
 | `[new].lookback` | Solo se toma en la corrida base | Se aplica en cada corrida |
 | Warning de cuerpo ilegible | `W_EMLX_UNREADABLE` | `W_BODY_UNREADABLE` (mismo texto de motivo) |
@@ -1261,7 +1261,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo l
 | Errores y warnings en el log | Errores: solo el `code`; warnings: solo su número | Errores: `code` + mensaje; warnings: número y códigos `W_*`; siempre con la redacción de §14 |
 | Permisos de archivos | Los logs rotados y las copias temporales del `Envelope Index` no se fuerzan a 0600 (la copia hereda el modo del original) | 0600 en todos los archivos que crea mailquery, incluidos los logs rotados y las copias de `tmp/` (RNF-05) |
 | Formato del uid en `show` | Lo valida el parser de argumentos: `E_USAGE` con el mensaje de `argparse` (`invalid int value`) | Lo valida el backend (`parse_uid`, §9.3): `E_USAGE` con el mensaje `invalid uid …: expected an integer` (§12.4) |
-| Warnings | `W_ACCOUNT_LABELS_UNAVAILABLE` solo en `mailboxes`; S/MIME con `W_EMLX_CORRUPT` espurio y sin `W_ATTACHMENTS_UNAVAILABLE` | `W_ACCOUNT_LABELS_UNAVAILABLE` también en `search`/`new`/`show` (§A.5.2); S/MIME solo con `W_BODY_UNREADABLE`, y `W_ATTACHMENTS_UNAVAILABLE` en `show` (§12.10) |
+| Warnings | `W_ACCOUNT_LABELS_UNAVAILABLE` solo en `mailboxes`; S/MIME con `W_EMLX_CORRUPT` espurio y sin `W_ATTACHMENTS_UNAVAILABLE` | `W_ACCOUNT_LABELS_UNAVAILABLE` también en `search`/`new`/`show` (§A.5.2); S/MIME solo con `W_BODY_UNREADABLE`, y `W_ATTACHMENTS_UNAVAILABLE` en `show` si el `Envelope Index` tiene adjuntos para el mensaje (§12.10) |
 | Estado (`state.json`) | Acepta uid 0 y un cursor que es un objeto vacío | uids ≥ 1; `cursor` ausente o `null` = primera corrida; un objeto sin campos válidos es `E_STATE_CORRUPT` (§11.2) |
 | Correcciones de conformidad | `--text` con un filtro vacío pasa sin acotar; `--include-mailbox` inexistente no lista carpetas; catálogo bloqueado ⇒ `E_INTERNAL`; disco lleno ⇒ exit 3; log sin `backend=` y con `.` en los milisegundos | `E_UNBOUNDED_SCAN` (RF-17); hint con las carpetas válidas (§15.3); `E_DB_BUSY` tras un reintento (§A.4); exit 1 con el cursor intacto (§17); formato de §14 con `backend=` |
 
