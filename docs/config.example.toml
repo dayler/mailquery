@@ -1,5 +1,5 @@
 # ============================================================================
-# mailquery — configuración de ejemplo (v1)
+# mailquery — configuración de ejemplo (2.0.0, macOS y Windows)
 #
 # Este archivo lo copian los instaladores (`scripts/install.sh` o
 # `scripts/install.ps1`) a `~/.mailquery/config.toml` si ese archivo no
@@ -10,7 +10,13 @@
 # Identifícala con la etiqueta que muestra `mailquery mailboxes` (también
 # sirve su email si es único, o el UUID/prefijo de al menos 8 caracteres).
 # Dentro de cada cuenta declarada, INBOX se incluye siempre; `mailbox_list`
-# solo añade carpetas extra.
+# solo añade carpetas extra. Claves desconocidas => E_CONFIG_INVALID (exit 2).
+#
+# El namespace `scope` es obligatorio en las claves, pero no hace falta
+# escribir [scope] por separado: [scope."..."] crea la tabla padre implícita.
+#
+# Cada equipo tiene su propio config.toml: solo resuelven las cuentas del
+# backend de ese equipo (una cuenta de otro backend => E_CONFIG_ACCOUNT_UNKNOWN).
 #
 # Tras editarlo, valida con:  mailquery doctor && mailquery mailboxes
 # ============================================================================
@@ -18,7 +24,7 @@
 # --- Valores globales (todos opcionales; estos son los defaults) ------------
 # [logging]
 # level = "info"                 # error | warning | info | debug
-# max_size_mb = 10              # 1..1024; rota el log al superar este tamaño (5 rotados)
+# max_size_mb = 10               # 1..1024; rota el log al superar este tamaño (5 rotados)
 
 # [search]
 # default_limit = 20             # 1..200
@@ -28,7 +34,8 @@
 # default_limit = 100            # 1..500
 # lookback = "10min"             # 1min..1d
 
-# --- Cuentas observadas (descomenta y ajusta a tus cuentas) -----------------
+# --- Cuentas observadas: macOS (Apple Mail) ---------------------------------
+# Descomenta y ajusta a tus cuentas.
 # [scope."iCloud (tu@email.com)"]
 # mailbox_list = ["Facturas", "Archivo"]
 
@@ -36,3 +43,33 @@
 # mailbox_list = ["[Gmail]/Important"]
 
 # [scope."On My Device"]
+
+# --- Cuentas observadas: Windows (Outlook clásico) --------------------------
+# Cuenta Exchange en modo caché: INBOX (la bandeja de entrada, sea cual sea el
+# idioma de Outlook) + una subcarpeta de la bandeja + una carpeta de primer nivel.
+# [scope."Exchange (tu@empresa.com)"]
+# mailbox_list = ["INBOX/Facturas", "Archivo"]
+
+# Segunda cuenta del perfil, solo INBOX.
+# [scope."Exchange (otra@empresa.com)"]
+
+# Archivo de datos PST en disco local (no tiene email: se declara por etiqueta).
+# [scope."PST (Archivo 2025)"]
+# mailbox_list = ["Proyectos/2025"]
+
+# Una cuenta declarada que resulte excluida (compartida, carpetas públicas,
+# modo online, ruta de red...) no se lee y genera W_STORE_EXCLUDED con su motivo;
+# `mailquery mailboxes` las lista en `excluded_stores`.
+
+# ----------------------------------------------------------------------------
+# Formas alternativas de identificar la MISMA cuenta (usar UNA por bloque;
+# si se repiten bloques para la misma cuenta, sus listas se unen):
+#
+#   [scope."tu@gmail.com"]                           # por email único
+#   [scope."<uuid de la cuenta>"]                    # por UUID completo (lo muestra `mailboxes`)
+#   [scope."<8+ primeros caracteres del uuid>"]      # por prefijo único (>= 8)
+#
+# Cada elemento de mailbox_list es un nombre, un path o una URL de carpeta
+# tal como los muestra `mailquery mailboxes`. Deben existir en esa cuenta;
+# si no, el comando falla con E_MAILBOX_NOT_FOUND.
+# ----------------------------------------------------------------------------

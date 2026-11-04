@@ -1314,5 +1314,64 @@ class ErrorContractTest(IntegrationBase):
         self.assertIs(checks["schema"]["ok"], False)
 
 
+# --------------------------------------------------------------------------- #
+# TC-07 — user documentation (PRD 21.2, 23.3)
+# --------------------------------------------------------------------------- #
+
+DOCS_ROOT = Path(__file__).resolve().parents[1]
+#: Terms the 1.x documentation used and the 2.0.0 contract retired (TC-07.01-.04).
+_FORBIDDEN_DOC_TERMS = (
+    re.compile(r"baseline", re.IGNORECASE),
+    re.compile(r"retention_days(?! was replaced by max_size_mb)"),
+    re.compile(r"W_EMLX_UNREADABLE"),
+    re.compile(r"only runs on macOS", re.IGNORECASE),
+    re.compile(r"solo macOS", re.IGNORECASE),
+)
+
+
+class UserDocumentationTest(unittest.TestCase):
+    """TC-07: the user documentation has no 1.x leftovers and the recipes cover exits 3, 5, 6."""
+
+    def assert_clean(self, label: str, text: str) -> None:
+        for pattern in _FORBIDDEN_DOC_TERMS:
+            match = pattern.search(text)
+            self.assertIsNone(match, f"{label} contains {match.group(0)!r}" if match else "")
+
+    def test_tc_07_01_readme_has_no_retired_terms(self) -> None:
+        """TC-07.01: README.md without baseline, retention_days (but the hint), W_EMLX_UNREADABLE, macOS-only."""
+        self.assert_clean("README.md", (DOCS_ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_tc_07_02_recipes_have_no_retired_terms(self) -> None:
+        """TC-07.02: the recipes without the retired terms."""
+        recipes = sorted(RECIPES_DIR.glob("*.md"))
+        self.assertEqual(len(recipes), 2)
+        for recipe in recipes:
+            self.assert_clean(recipe.name, recipe.read_text(encoding="utf-8"))
+
+    def test_tc_07_03_config_example_has_no_retired_terms(self) -> None:
+        """TC-07.03: docs/config.example.toml without the retired terms."""
+        path = DOCS_ROOT / "docs" / "config.example.toml"
+        self.assert_clean(path.name, path.read_text(encoding="utf-8"))
+
+    def test_tc_07_04_help_has_no_retired_terms(self) -> None:
+        """TC-07.04: the --help output of the root and of the 5 commands without the retired terms."""
+        for argv in (["--help"], *([command, "--help"] for command in ("doctor", "mailboxes", "search", "new", "show"))):
+            with self.subTest(argv=argv):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                    code = cli.main(argv)
+                self.assertEqual(code, 0)
+                self.assertTrue(stdout.getvalue().strip())
+                self.assert_clean(" ".join(argv), stdout.getvalue())
+
+    def test_tc_07_05_each_recipe_mentions_exits_3_5_and_6(self) -> None:
+        """TC-07.05: every recipe handles the exit codes 3, 5 and 6."""
+        for recipe in sorted(RECIPES_DIR.glob("*.md")):
+            text = recipe.read_text(encoding="utf-8")
+            for code in ("3", "5", "6"):
+                with self.subTest(recipe=recipe.name, exit=code):
+                    self.assertIsNotNone(re.search(rf"exit {code}(?!\d)|`{code}`", text), f"no mention of exit {code}")
+
+
 if __name__ == "__main__":  # pragma: no cover - manual runs
     unittest.main()
