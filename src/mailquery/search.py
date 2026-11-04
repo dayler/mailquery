@@ -183,10 +183,10 @@ def run_search(
     started = time.perf_counter()
     opened_before = _items_opened(backend)
     accounts = _accounts_by_uuid(backend)
-    mailbox_map = _mailbox_map(backend)
 
     excluded: list[dict] = []
     resolved = _resolved_scope(config, backend, excluded)
+    mailbox_map = _mailbox_map(backend, resolved)
     text_terms = _filter_terms(filters.text)
     mode = "text" if text_terms else "metadata"
     opens_recipients = _recipients_open_items(backend)
@@ -301,10 +301,10 @@ def run_new(
     opened_before = _items_opened(backend)
     now = float(clock()) if clock is not None else time.time()
     accounts = _accounts_by_uuid(backend)
-    mailbox_map = _mailbox_map(backend)
 
     excluded: list[dict] = []
     resolved = _resolved_scope(config, backend, excluded)
+    mailbox_map = _mailbox_map(backend, resolved)
     scope_mailboxes = _scope_mailboxes(resolved)
     allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
 
@@ -595,8 +595,14 @@ def _accounts_by_uuid(backend: "MailBackend") -> "dict[str, AccountRow]":
     return {account["uuid"]: account for account in backend.accounts()}
 
 
-def _mailbox_map(backend: "MailBackend") -> "dict[Any, MailboxRow]":
-    return {mailbox["id"]: mailbox for mailbox in config_module.listed_mailboxes(backend)}
+def _mailbox_map(backend: "MailBackend", resolved: Sequence[Any]) -> "dict[Any, MailboxRow]":
+    """Folders by ``id``; only the declared accounts' folders are used (scope, dedupe,
+    display), so a backend may list only those (Outlook reads no other store)."""
+    declared = list(dict.fromkeys(_scope_account_uuid(scope) for scope in resolved))
+    return {
+        mailbox["id"]: mailbox
+        for mailbox in config_module.listed_mailboxes(backend, [uuid for uuid in declared if uuid])
+    }
 
 
 def _has_valid_date(row: dict, now: float) -> bool:

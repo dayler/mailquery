@@ -72,7 +72,15 @@ CO_E_CLASSSTRING = 0x800401F3
 MAPI_E_NOT_FOUND = 0x8004010F
 MAPI_E_INVALID_ENTRYID = 0x80040107
 E_FAIL = 0x80004005
+DISP_E_UNKNOWNNAME = 0x80020006
 TRANSIENT_HRESULTS = frozenset({RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER})
+
+# IDispatch::Invoke flags (oaidl.h) of the direct calls of the proxy.
+DISPATCH_METHOD = 0x1
+DISPATCH_PROPERTYGET = 0x2
+#: Kinds whose COM class differs per object (MailItem, MeetingItem, ReportItem...):
+#: their DISPIDs are looked up per object, not per kind.
+PER_OBJECT_DISPID_KINDS = frozenset({"Item"})
 
 # GetDriveTypeW results.
 DRIVE_UNKNOWN = 0
@@ -162,7 +170,13 @@ READONLY_MEMBERS: dict[str, dict[str, str | None]] = {
         "PropertyAccessor": "PropertyAccessor",
         "GetTable": "Table",
     },
-    "Table": {"Columns": "Columns", "EndOfTable": None, "GetNextRow": "Row", "GetRowCount": None},
+    "Table": {
+        "Columns": "Columns",
+        "EndOfTable": None,
+        "GetNextRow": "Row",
+        "GetRowCount": None,
+        "GetArray": None,  # rows as a list of value tuples (bulk read of the in-memory view)
+    },
     "Columns": {"Add": "Column"},  # in-memory table view only; Folders.Add stays forbidden
     "Column": {},
     "Row": {"GetValues": None},
@@ -194,6 +208,7 @@ READONLY_METHODS = frozenset(
         "GetTable",
         "GetNextRow",
         "GetRowCount",
+        "GetArray",
         "Add",
         "GetValues",
         "GetProperty",
@@ -490,15 +505,21 @@ class ReadOnlyCom:
     too. Everything else, every assignment or deletion and every private or
     dunder name raises ``E_INTERNAL`` before the COM object is touched. The only
     name answered by the proxy itself is ``__class__`` (the proxy class), so that
-    ``isinstance`` checks keep working.
+    ``isinstance`` checks keep working. A pywin32 object is called through its
+    ``IDispatch`` directly (:func:`_direct_member`); any other target (the
+    in-memory fake) through ``getattr``. The whitelist check is the same.
     """
 
-    __slots__ = ("_mq_target", "_mq_kind", "_mq_watchdog")
+    __slots__ = ("_mq_target", "_mq_kind", "_mq_watchdog", "_mq_dispatch", "_mq_dispids")
 
     def __init__(self, target: Any, kind: str, watchdog: Watchdog) -> None:
         object.__setattr__(self, "_mq_target", target)
         object.__setattr__(self, "_mq_kind", kind)
         object.__setattr__(self, "_mq_watchdog", watchdog)
+        dispatch = _raw_dispatch(target)
+        object.__setattr__(self, "_mq_dispatch", dispatch)
+        per_object = dispatch is not None and kind in PER_OBJECT_DISPID_KINDS
+        object.__setattr__(self, "_mq_dispids", {} if per_object else _KIND_DISPIDS)
 
     def __getattribute__(self, name: str) -> Any:
         if name == "__class__":
@@ -511,7 +532,13 @@ class ReadOnlyCom:
             raise readonly_violation(kind, name, "not in the read-only whitelist")
         target = object.__getattribute__(self, "_mq_target")
         watchdog = object.__getattribute__(self, "_mq_watchdog")
+        dispatch = object.__getattribute__(self, "_mq_dispatch")
         result_kind = members[name]
+        if dispatch is not None:
+            return _direct_member(
+                dispatch, kind, name, object.__getattribute__(self, "_mq_dispids"),
+                result_kind, watchdog,
+            )
         if name in READONLY_METHODS:
 
             def method(*args: Any, **kwargs: Any) -> Any:
@@ -530,6 +557,71 @@ class ReadOnlyCom:
 
     def __repr__(self) -> str:
         return f"<ReadOnlyCom {object.__getattribute__(self, '_mq_kind')}>"
+
+
+#: DISPID of each ``(kind, member)`` already looked up (one COM class per kind,
+#: except :data:`PER_OBJECT_DISPID_KINDS`). Process-wide: DISPIDs are fixed by the
+#: Outlook type library.
+_KIND_DISPIDS: dict[Any, int] = {}
+
+
+def _raw_dispatch(target: Any) -> Any:
+    """The ``PyIDispatch`` behind a pywin32 object, or ``None`` (the in-memory fake).
+
+    pywin32's dynamic ``CDispatch`` fetches type information for every new object
+    and looks names up through it: several cross-process round trips per
+    member. The proxy calls ``IDispatch::Invoke`` directly instead (one round
+    trip), with the DISPID looked up once (verified on the host, design note).
+    """
+    if type(target).__name__ == "PyIDispatch":
+        return target
+    inner = getattr(target, "_oleobj_", None)
+    return inner if type(inner).__name__ == "PyIDispatch" else None
+
+
+def _direct_member(
+    dispatch: Any,
+    kind: str,
+    name: str,
+    dispids: dict[Any, int],
+    result_kind: str | None,
+    watchdog: Watchdog,
+) -> Any:
+    """A whitelisted member through ``IDispatch::Invoke`` (property GET or method call).
+
+    An unknown name (``DISP_E_UNKNOWNNAME``) is ``AttributeError``, as pywin32's
+    dynamic dispatch reports it (e.g. ``HTMLBody`` of a MeetingItem).
+    """
+    key = name if dispids is not _KIND_DISPIDS else (kind, name)
+
+    def dispid() -> int:
+        found = dispids.get(key)
+        if found is None:
+            try:
+                found = dispatch.GetIDsOfNames(name)
+            except Exception as exc:
+                if is_com_error(exc) and hresult_of(exc) == DISP_E_UNKNOWNNAME:
+                    raise AttributeError(f"{kind}.{name}") from None
+                raise
+            dispids[key] = found
+        return found
+
+    if name in READONLY_METHODS:
+
+        def method(*args: Any) -> Any:
+            value = call_com(
+                watchdog,
+                lambda: dispatch.Invoke(
+                    dispid(), 0, DISPATCH_METHOD | DISPATCH_PROPERTYGET, True, *args
+                ),
+            )
+            return _wrap(value, result_kind, watchdog)
+
+        return method
+    value = call_com(
+        watchdog, lambda: dispatch.Invoke(dispid(), 0, DISPATCH_PROPERTYGET, True)
+    )
+    return _wrap(value, result_kind, watchdog)
 
 
 def _wrap(value: Any, kind: str | None, watchdog: Watchdog) -> Any:

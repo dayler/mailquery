@@ -10,10 +10,11 @@
 
     Requirements: Python >= 3.11 and pipx (this script installs pipx when missing).
 
-    WARNING: mailquery only runs on macOS with Apple Mail. On Windows this
-    script prepares the environment (pipx + package) for development/CI, but the
-    data commands cannot work because there is no Apple Mail store nor the fcntl
-    module.
+    On Windows mailquery reads Outlook (classic, 16.0) through COM: the package
+    depends on pywin32, which pipx installs automatically. When the installation
+    ends, the script checks that pywin32 can be imported from the pipx venv and
+    that 'mailquery -v' reports 'backend outlook'; otherwise it prints the
+    problem with the hint 'pipx reinstall mailquery' and exits with a non-zero code.
 
 .PARAMETER DryRun
     Print the plan without executing or writing anything.
@@ -100,6 +101,23 @@ function Invoke-Pipx {
     }
 }
 
+function Get-PipxVenvPython {
+    # Interpreter of the venv pipx created for mailquery, or $null when unknown.
+    try {
+        if (Get-Command pipx -ErrorAction SilentlyContinue) {
+            $venvs = (& pipx environment --value PIPX_LOCAL_VENVS 2>$null | Select-Object -First 1)
+        } else {
+            $venvs = (& $script:PythonExe -m pipx environment --value PIPX_LOCAL_VENVS 2>$null | Select-Object -First 1)
+        }
+    } catch {
+        return $null
+    }
+    if (-not $venvs) { return $null }
+    $venvPython = Join-Path (Join-Path (Join-Path "$venvs".Trim() "mailquery") "Scripts") "python.exe"
+    if (Test-Path -LiteralPath $venvPython) { return $venvPython }
+    return $null
+}
+
 function Test-MailqueryInstalled {
     try {
         if (Get-Command pipx -ErrorAction SilentlyContinue) {
@@ -148,7 +166,7 @@ if ($DryRun) {
     if ($Python) {
         Write-Log "     interpreter: $Python"
     }
-    Write-Log "  3. verify 'mailquery' is in PATH and run 'mailquery doctor' (macOS only)"
+    Write-Log "  3. verify 'mailquery' is in PATH and run 'mailquery --help' and 'mailquery doctor'"
     if ($NoConfig) {
         Write-Log "  4. config: skipped (-NoConfig)"
     } elseif ((Test-Path -LiteralPath $ConfigFile) -and -not $ForceConfig) {
@@ -158,12 +176,9 @@ if ($DryRun) {
     } else {
         Write-Log "  4. config: create $ConfigFile from the template (0600 equivalent)"
     }
-    Write-Log "  5. print next steps"
+    Write-Log "  5. final check: 'import win32com' in the pipx venv and 'mailquery -v' shows 'backend outlook'"
+    Write-Log "  6. print next steps"
     exit 0
-}
-
-if ($IsWindowsHost) {
-    Write-Log "warning: mailquery only runs on macOS with Apple Mail; on Windows the install is for development/CI."
 }
 
 if ($Uninstall) {
@@ -221,11 +236,7 @@ if (-not $mailquery) {
 }
 Write-Log "mailquery: $($mailquery.Source)"
 
-if ($IsWindowsHost) {
-    Write-Log "warning: skipping 'mailquery --help' (the app requires macOS/Apple Mail)"
-} else {
-    Invoke-Step -Display "mailquery --help" -Action { & mailquery --help | Out-Null }
-}
+Invoke-Step -Display "mailquery --help" -Action { & mailquery --help | Out-Null }
 
 if ($NoConfig) {
     Write-Log "config: skipped (-NoConfig)"
@@ -258,14 +269,36 @@ if ($NoConfig) {
     }
 }
 
-if (-not $IsWindowsHost) {
-    Write-Log "running 'mailquery doctor' (preflight)..."
-    & mailquery doctor | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log "warning: 'mailquery doctor' reported problems; run it without redirection to see the details"
+Write-Log "running 'mailquery doctor' (preflight)..."
+& mailquery doctor | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Log "warning: 'mailquery doctor' reported problems; run it without redirection to see the details"
+}
+
+if ($IsWindowsHost) {
+    # Final check (PRD 13.2): pywin32 importable from the pipx venv and Outlook backend selected.
+    $hint = "run: pipx reinstall mailquery"
+    $venvPython = Get-PipxVenvPython
+    if (-not $venvPython) {
+        Write-Fail "could not locate the pipx venv of mailquery to check pywin32 ($hint)"
     }
-} else {
-    Write-Log "warning: 'mailquery doctor' is skipped outside macOS"
+    # Native stderr must not raise under $ErrorActionPreference = "Stop".
+    $ErrorActionPreference = "Continue"
+    $importOutput = & $venvPython -c "import win32com" 2>&1
+    $importExit = $LASTEXITCODE
+    if ($importExit -ne 0) {
+        $ErrorActionPreference = "Stop"
+        Write-Host ($importOutput | Out-String)
+        Write-Fail "pywin32 (win32com) cannot be imported in the pipx venv ($hint)"
+    }
+    $versionOutput = (& mailquery -v 2>&1 | Out-String).Trim()
+    $versionExit = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    if ($versionExit -ne 0 -or $versionOutput -notmatch "backend outlook") {
+        Write-Host $versionOutput
+        Write-Fail "'mailquery -v' failed or does not show 'backend outlook' ($hint)"
+    }
+    Write-Log "check: win32com importable; $versionOutput"
 }
 
 Write-Log ""
