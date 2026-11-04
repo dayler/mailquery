@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from mailquery import __version__
-from mailquery.accounts import AccountLabels
+from mailquery.backends import backend_class, get_backend
 from mailquery.config import (
     APP_HOME_SUBDIRS,
     DEFAULT_LOG_LEVEL,
@@ -37,36 +37,23 @@ from mailquery.config import (
     load_config,
     resolve_scope,
 )
-from mailquery.errors import MailqueryError
+from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
 from mailquery.output import configure_streams, now_iso, write_json
 from mailquery.search import (
     Filters,
     parse_relative_time,
-    parse_uid,
     run_mailboxes,
     run_new,
     run_search,
     run_show,
 )
 from mailquery.state import RunLock, StateStore
-from mailquery.store import detect_version, open_store, probe_envelope_index
 
 COMMANDS = ("doctor", "mailboxes", "search", "new", "show")
-# The only backend implemented at W0 (RF-26); logged as ``backend=`` (PRD 14).
-BACKEND_NAME = "apple_mail"
-DOCTOR_CHECK_NAMES = (
-    "python",
-    "home",
-    "store",
-    "envelope_index",
-    "schema",
-    "readonly_strategy",
-    "accounts_db",
-    "config",
-    "state",
-    "lock",
-)
+# Backend check that the resolution of the ``[scope]`` blocks depends on, by
+# backend name (PRD 12.8; annex A.7 and B.8).
+_RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
 
 _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
@@ -401,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_parser.set_defaults(command="show")
     _style_parser(show_parser, root=False)
-    # The format is validated by search.parse_uid in main(), not by argparse (PRD 12.4).
+    # The format is validated by AppleMailBackend.parse_uid in main(), not by argparse (PRD 12.4).
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
     return parser
@@ -413,11 +400,15 @@ def main(
     home: Path | None = None,
     mail_root: Path | None = None,
     accounts_db: Path | None = None,
+    backend: Any = None,
 ) -> int:
     """Run one command and return the process exit code (never raises).
 
-    ``home``, ``mail_root`` and ``accounts_db`` are test-only injection points;
-    they are not CLI flags nor environment variables of the public contract.
+    ``home``, ``mail_root``, ``accounts_db`` and ``backend`` are test-only
+    injection points; they are not CLI flags nor environment variables of the
+    public contract. ``mail_root`` or ``accounts_db`` select Apple Mail on any
+    OS; ``backend`` is an already built instance (the Outlook fake); otherwise
+    the backend of the platform is selected (RF-26).
     """
     configure_streams()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
@@ -432,7 +423,7 @@ def main(
     if command == "show":
         # Before the home is created, the config is read or the store is opened.
         try:
-            args.uid = parse_uid(args.uid)
+            args.uid = _uid_parser(mail_root, accounts_db, backend)(args.uid)
         except MailqueryError as exc:
             return _report_error(exc, command)
     try:
@@ -451,10 +442,47 @@ def main(
             home_path,
             mail_root,
             accounts_db,
+            backend,
             args.log_level,
             json_output=bool(getattr(args, "json", False)),
         )
-    return _run_command(args, home_path, mail_root, accounts_db)
+    return _run_command(args, home_path, mail_root, accounts_db, backend)
+
+
+def _uid_parser(mail_root: Path | None, accounts_db: Path | None, backend: Any):
+    """``parse_uid`` of the backend that would be selected, without opening anything."""
+    if backend is not None:
+        return backend.parse_uid
+    return backend_class(platform=_platform_override(mail_root, accounts_db)).parse_uid
+
+
+def _platform_override(mail_root: Path | None, accounts_db: Path | None) -> str | None:
+    """Apple Mail on any OS when a test passes its store locations (plan 4.2)."""
+    return "darwin" if (mail_root is not None or accounts_db is not None) else None
+
+
+def _make_backend(
+    home_path: Path, mail_root: Path | None, accounts_db: Path | None, backend: Any
+) -> Any:
+    """The injected backend, or the one of the platform (built lazily, nothing opened)."""
+    if backend is not None:
+        return backend
+    return get_backend(
+        platform=_platform_override(mail_root, accounts_db),
+        mail_root=mail_root,
+        accounts_db=accounts_db,
+        tmp_root=home_path / "tmp",
+    )
+
+
+def _close_backend(backend: Any) -> None:
+    """Release the backend; closing must never mask the result."""
+    if backend is None:
+        return
+    try:
+        backend.close()
+    except Exception:  # noqa: BLE001 - best effort
+        pass
 
 
 # --------------------------------------------------------------------------- #
@@ -467,6 +495,7 @@ def _run_command(
     home_path: Path,
     mail_root: Path | None,
     accounts_db: Path | None,
+    backend: Any = None,
 ) -> int:
     command = str(args.command)
     try:
@@ -501,10 +530,12 @@ def _run_command(
         return _report_error(error, command)
 
     logger = get_logger("mailquery.cli")
-    logger.info("event=start command=%s backend=%s", command, BACKEND_NAME)
     started = time.perf_counter()
+    selected = None
     try:
-        payload = _execute(args, config, home_path, mail_root, accounts_db)
+        selected = _make_backend(home_path, mail_root, accounts_db, backend)
+        logger.info("event=start command=%s backend=%s", command, selected.name)
+        payload = _execute(args, config, home_path, selected)
         if not isinstance(payload, dict):
             raise MailqueryError(
                 "E_INTERNAL",
@@ -524,6 +555,8 @@ def _run_command(
             "~/.mailquery/logs/mailquery.log for the traceback",
         )
         return _report_error(error, command)
+    finally:
+        _close_backend(selected)
 
     write_json(_success_payload(command, payload))
     duration_ms = int((time.perf_counter() - started) * 1000)
@@ -550,8 +583,7 @@ def _execute(
     args: argparse.Namespace,
     config: Config,
     home_path: Path,
-    mail_root: Path | None,
-    accounts_db: Path | None,
+    backend: Any,
 ) -> dict:
     command = str(args.command)
     filters: Filters | None = None
@@ -562,52 +594,49 @@ def _execute(
         new_limit = _validate_limit(args.limit, MAX_NEW_LIMIT)
 
     with RunLock(home_path):
-        store = open_store(mail_root=mail_root, tmp_root=home_path / "tmp")
-        try:
-            _log_store_connection(store)
-            labels = AccountLabels(accounts_db, tmp_dir=home_path / "tmp")
-            if command == "mailboxes":
-                payload = run_mailboxes(store, config, labels)
-            elif command == "search":
-                payload = run_search(store, config, labels, filters)  # type: ignore[arg-type]
-            elif command == "new":
-                state_store = StateStore(home_path)
-                payload = run_new(
-                    store,
-                    config,
-                    labels,
-                    state_store,
-                    peek=bool(args.peek),
-                    limit=new_limit,
-                )
-            elif command == "show":
-                payload = run_show(store, config, labels, int(args.uid))
-            else:  # pragma: no cover - argparse prevents this
-                raise MailqueryError(
-                    "E_USAGE",
-                    f"unknown command: {command}",
-                    'run "mailquery --help" to see the available commands',
-                )
-        finally:
-            try:
-                store.close()
-            except Exception:  # noqa: BLE001 - closing must never mask the result
-                pass
+        _log_backend_connection(backend)
+        if command == "mailboxes":
+            payload = run_mailboxes(backend, config)
+        elif command == "search":
+            payload = run_search(backend, config, filters)  # type: ignore[arg-type]
+        elif command == "new":
+            state_store = StateStore(home_path, backend.check_state_uid)
+            payload = run_new(
+                backend,
+                config,
+                state_store,
+                peek=bool(args.peek),
+                limit=new_limit,
+            )
+        elif command == "show":
+            payload = run_show(backend, config, args.uid)
+        else:  # pragma: no cover - argparse prevents this
+            raise MailqueryError(
+                "E_USAGE",
+                f"unknown command: {command}",
+                'run "mailquery --help" to see the available commands',
+            )
     return payload
 
 
-def _log_store_connection(store: Any) -> None:
-    """Log the connection strategy and store version (best effort, never fails)."""
+def _log_backend_connection(backend: Any) -> None:
+    """Open the backend and log its strategy and version (a failure to log is ignored).
+
+    The store errors of the client (not found, permission, unsupported schema)
+    surface here, as they did when the CLI opened the store itself.
+    """
     try:
-        version = getattr(store, "version", None)
-        version_name = getattr(version, "version", "-") if version is not None else "-"
-        fingerprint = store.fingerprint()
-        schema_ok = all(fingerprint.values()) if isinstance(fingerprint, dict) else True
+        info = backend.describe()
+    except MailqueryError:
+        raise
+    except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
+        return
+    try:
         get_logger("mailquery.store").info(
             "strategy=%s version=%s schema_ok=%s",
-            getattr(store, "strategy", "-"),
-            version_name,
-            str(schema_ok).lower(),
+            info.get("strategy", "-"),
+            info.get("version", "-"),
+            str(info.get("schema_ok", True)).lower(),
         )
     except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
         pass
@@ -698,16 +727,21 @@ def _run_doctor(
     home_path: Path,
     mail_root: Path | None,
     accounts_db: Path | None,
+    backend: Any,
     log_level: str | None,
     *,
     json_output: bool = False,
 ) -> int:
     level, max_size_mb = _doctor_log_settings(home_path, log_level)
     logger = _best_effort_logger(home_path, level, max_size_mb)
+    selected = None
     try:
-        checks = _collect_doctor_checks(home_path, mail_root, accounts_db)
+        selected = _make_backend(home_path, mail_root, accounts_db, backend)
+        checks = _collect_doctor_checks(home_path, selected)
     except Exception as exc:  # noqa: BLE001 - doctor never raises
-        checks = [{"name": "doctor", "ok": False, "detail": _detail(exc)}]
+        checks = [{"name": "doctor", "ok": False, "detail": error_detail(exc)}]
+    finally:
+        _close_backend(selected)
     payload = {
         "ok": True,
         "command": "doctor",
@@ -777,11 +811,8 @@ def _render_doctor_report(payload: dict) -> str:
     return "\n".join(lines)
 
 
-def _collect_doctor_checks(
-    home_path: Path,
-    mail_root: Path | None,
-    accounts_db: Path | None,
-) -> list[dict]:
+def _collect_doctor_checks(home_path: Path, backend: Any) -> list[dict]:
+    """Common checks plus ``backend.doctor_checks()``, in the order of PRD 12.8."""
     checks: list[dict] = []
 
     def record(name: str, ok: bool, detail: str) -> None:
@@ -823,81 +854,19 @@ def _collect_doctor_checks(
     except OSError as exc:
         record("home", False, f"cannot create {home_path}: {exc.strerror or exc}")
 
-    # store ------------------------------------------------------------------
-    version = None
-    version_error: Exception | None = None
+    # backend checks (store/pywin32, ..., accounts_db/object_model_guard) ------
     try:
-        version = detect_version(mail_root)
-        record("store", True, f"{version.version} at {version.mail_root}")
+        backend_checks = [dict(check) for check in backend.doctor_checks()]
     except Exception as exc:  # noqa: BLE001 - diagnostics only
-        version_error = exc
-        record("store", False, _detail(exc))
-
-    # envelope_index ---------------------------------------------------------
-    envelope_ok = False
-    if version is None:
-        record("envelope_index", False, "not evaluated: store failed")
-    else:
-        try:
-            probe_envelope_index(version, tmp_root=home_path / "tmp")
-            envelope_ok = True
-            record("envelope_index", True, str(version.envelope_index))
-        except Exception as exc:  # noqa: BLE001 - diagnostics only
-            record("envelope_index", False, _detail(exc))
-
-    # schema + readonly_strategy --------------------------------------------
-    store = None
-    schema_ok = False
-    if not envelope_ok:
-        record("schema", False, "not evaluated: envelope_index failed")
-        record("readonly_strategy", False, "not evaluated: envelope_index failed")
-    else:
-        store_open_error: Exception | None = None
-        try:
-            store = open_store(mail_root=mail_root, tmp_root=home_path / "tmp")
-        except Exception as exc:  # noqa: BLE001 - diagnostics only
-            store_open_error = exc
-
-        if store is None:
-            detail = _detail(store_open_error) if store_open_error else "store is not open"
-            record("schema", False, detail)
-            record("readonly_strategy", False, detail)
-        else:
-            try:
-                fingerprint = store.fingerprint()
-                missing = [table for table, present in fingerprint.items() if not present]
-                if missing:
-                    record("schema", False, f"missing tables: {', '.join(missing)}")
-                else:
-                    schema_ok = True
-                    record("schema", True, "all required tables present")
-            except Exception as exc:  # noqa: BLE001 - diagnostics only
-                record("schema", False, _detail(exc))
-            strategy = getattr(store, "strategy", None) or _infer_readonly_strategy(version)
-            record(
-                "readonly_strategy",
-                True,
-                f"{strategy}: Envelope Index opened read-only (mode=ro, query_only=ON)",
-            )
-
-    # accounts_db ------------------------------------------------------------
-    labels_obj: AccountLabels | None = None
-    try:
-        labels = AccountLabels(accounts_db, tmp_dir=home_path / "tmp")
-        labels_obj = labels
-        if labels.available:
-            count = len(labels.all())
-            record("accounts_db", True, f"{count} account label(s) available")
-        else:
-            record(
-                "accounts_db",
-                False,
-                "Accounts4.sqlite unavailable; only UUID account identifiers work",
-            )
-    except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("accounts_db", False, _detail(exc))
+        backend_checks = [{"name": "backend", "ok": False, "detail": error_detail(exc)}]
+    checks.extend(backend_checks)
+    by_name = {str(check.get("name")): check for check in backend_checks}
 
     # config -----------------------------------------------------------------
+    # The syntax is always validated; the resolution of the blocks depends on a
+    # check of the backend (annex A.7 / B.8).
+    dependency = _RESOLUTION_DEPENDENCY.get(str(getattr(backend, "name", "")))
+    dependency_ok = dependency is None or bool(by_name.get(dependency, {}).get("ok"))
     try:
         config = load_config(home_path)
         config_path = home_path / "config.toml"
@@ -906,15 +875,15 @@ def _collect_doctor_checks(
                 prefix = "config.toml exists but declares no [scope.*] blocks"
             else:
                 prefix = "no config.toml (optional)"
-            if not schema_ok:
+            if not dependency_ok:
                 detail = (
                     f"{prefix}; 0 account block(s) declared; available accounts: unknown "
-                    "(schema failed)"
+                    f"({dependency} failed)"
                 )
-            elif labels_obj is not None and labels_obj.available:
-                labels = labels_obj.all()
-                if labels:
-                    available = ", ".join(label.label for label in labels)
+            elif backend.labels_available:
+                accounts = [a for a in backend.accounts() if a.get("labelled", True)]
+                if accounts:
+                    available = ", ".join(account["label"] for account in accounts)
                     detail = (
                         f"{prefix}; 0 account block(s) declared; available: {available} "
                         "(declare one in config.toml to observe it; commands return "
@@ -932,30 +901,26 @@ def _collect_doctor_checks(
                 )
             record("config", True, detail)
         else:
-            problems: list[str] = []
+            problems = []
             lines: list[str] = []
-            if not schema_ok or store is None:
-                problems.append("not evaluated: schema failed")
-            elif labels_obj is None:
-                problems.append(
-                    "cannot resolve account blocks: account labels are unavailable"
-                )
+            if not dependency_ok:
+                problems.append(f"not evaluated: {dependency} failed")
             else:
                 for entry in config.scopes:
                     try:
-                        resolved = resolve_scope(
-                            replace(config, scopes=(entry,)), store, labels_obj
-                        )
+                        resolved = resolve_scope(replace(config, scopes=(entry,)), backend)
                     except MailqueryError as exc:
                         hint = f" (hint: {exc.hint})" if exc.hint else ""
                         problems.append(f"{entry.key}: {exc.code}: {exc.message}{hint}")
                         continue
                     except Exception as exc:  # noqa: BLE001 - diagnostics only
-                        problems.append(f"{entry.key}: {_detail(exc)}")
+                        problems.append(f"{entry.key}: {error_detail(exc)}")
                         continue
                     for scope in resolved:
                         folders = [
-                            mailbox.path for mailbox in scope.mailboxes if not mailbox.is_inbox
+                            mailbox["path"]
+                            for mailbox in scope.mailboxes
+                            if not mailbox["is_inbox"]
                         ]
                         lines.append(
                             f"{entry.key} \u2192 {scope.account_label} ({scope.account_uuid}): "
@@ -966,17 +931,11 @@ def _collect_doctor_checks(
             else:
                 record("config", True, "; ".join(lines))
     except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("config", False, _detail(exc))
-
-    if store is not None:
-        try:
-            store.close()
-        except Exception:  # noqa: BLE001 - best effort
-            pass
+        record("config", False, error_detail(exc))
 
     # state ------------------------------------------------------------------
     try:
-        state = StateStore(home_path).load()
+        state = StateStore(home_path, backend.check_state_uid).load()
         if state.cursor is None:
             try:
                 lookback = load_config(home_path).new.lookback
@@ -998,7 +957,7 @@ def _collect_doctor_checks(
                 ),
             )
     except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("state", False, _detail(exc))
+        record("state", False, error_detail(exc))
 
     # lock -------------------------------------------------------------------
     lock_path = home_path / "locks" / _LOCK_FILENAME
@@ -1013,21 +972,11 @@ def _collect_doctor_checks(
         if exc.code == "E_LOCKED":
             record("lock", False, f"held by another mailquery process: {lock_path}")
         else:
-            record("lock", False, _detail(exc))
+            record("lock", False, error_detail(exc))
     except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("lock", False, _detail(exc))
+        record("lock", False, error_detail(exc))
 
     return checks
-
-
-def _infer_readonly_strategy(version: Any) -> str:
-    if version is None:
-        return "unknown"
-    try:
-        shm = Path(f"{version.envelope_index}-shm")
-        return "live_ro" if shm.exists() else "copy_ro"
-    except Exception:  # pragma: no cover - defensive
-        return "unknown"
 
 
 # --------------------------------------------------------------------------- #
@@ -1104,13 +1053,6 @@ def _close_logging_handlers() -> None:
         except Exception:  # noqa: BLE001 - closing is best effort
             pass
     logger.handlers.clear()
-
-
-def _detail(exc: Exception) -> str:
-    if isinstance(exc, MailqueryError):
-        return f"{exc.code}: {exc.message}"
-    text = str(exc).strip()
-    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
 def _system_exit_code(exc: SystemExit) -> int:
