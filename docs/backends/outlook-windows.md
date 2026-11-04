@@ -1,10 +1,10 @@
 # Backend Outlook clásico (Windows) — anexo del PRD
 
-**Documento padre:** [`docs/PRD.md`](../PRD.md) v1.0, que manda sobre este anexo.
+**Documento padre:** [`docs/PRD.md`](../PRD.md) v1.1, que manda sobre este anexo.
 **Plataforma:** Windows 10/11 con **Outlook clásico de escritorio**
 (Microsoft 365 Apps / Outlook 2016+, versión 16.0).
-**Estado:** spike W1 ejecutado el 2026-11-03 en el host de referencia
-(resumen en §B.11); pendiente de aprobación del dueño del producto.
+**Estado:** aprobado por el dueño del producto el 2026-11-03, tras el spike W1
+ejecutado ese día en el host de referencia (resumen en §B.11).
 
 Este anexo describe lo específico del backend Outlook: por qué se usa el
 Outlook Object Model (COM), cómo se cumple el invariante I-1, qué stores entran
@@ -38,8 +38,10 @@ como única dependencia (ADR-14), y **nunca** lanza Outlook (ADR-13).
 Concreción del invariante general (PRD §4):
 
 > `mailquery` no modifica ningún item, carpeta ni store de Outlook; no lanza
-> Outlook; no provoca descargas desde el servidor; no lee stores que no estén
-> disponibles localmente; y solo escribe dentro de `~/.mailquery`.
+> Outlook; no provoca descargas desde el servidor; no lee carpetas ni items de
+> stores que no estén disponibles localmente (de cualquier store del perfil sí
+> lee propiedades de nivel store: etiqueta, tipo, ruta e identificador); y solo
+> escribe dentro de `~/.mailquery`.
 
 El OOM es una API de lectura **y escritura**: no hay un modo de solo lectura
 impuesto por el sistema. La garantía se construye en capas:
@@ -59,10 +61,10 @@ impuesto por el sistema. La garantía se construye en capas:
 5. **S/MIME sin tocar:** no se lee cuerpo ni adjuntos (podrían pedir PIN o
    certificado).
 6. **Escritura confinada:** toda escritura queda en `~/.mailquery`
-   (`%USERPROFILE%\.mailquery`), incluida la caché de `pywin32`.
-7. **Timeout de 30 s** (RF-33): si una llamada a Outlook no responde (p. ej.
-   por un aviso de seguridad en pantalla), el proceso emite `E_CLIENT_TIMEOUT`
-   y termina.
+   (`%USERPROFILE%\.mailquery`), incluida la caché de `pywin32`, que va en
+   `~/.mailquery/tmp/gen_py` (PRD §10.2).
+7. **Timeout de 30 s** (RF-33): una llamada a Outlook que no responde no
+   cuelga al harness.
 
 Leer propiedades de un item por OOM (incluido el cuerpo) no lo marca como
 leído; solo lo hacen mostrarlo en la UI o asignar el estado, y ninguno está en
@@ -77,7 +79,7 @@ la lista blanca. El spike lo confirmó (§B.11). Verificación: §B.10.
 | Store | Condición | Etiqueta |
 |-------|-----------|----------|
 | Buzón de entrega de una cuenta del perfil | Cuenta Exchange, IMAP, POP3 o EAS cuyo store es local: Exchange en modo caché; las demás, con su archivo de datos en un disco local | `Exchange (…)`, `IMAP (…)`, `POP3 (…)`, `EAS (…)` (con el email SMTP) |
-| Archivo de datos `.pst` | En un disco local y que no es el buzón de entrega de una cuenta | `PST ({nombre visible})` |
+| Archivo de datos `.pst` | En un disco local (incluido un disco extraíble) y que no es el buzón de entrega de una cuenta | `PST ({nombre visible})` |
 
 Si un `.pst` es el buzón de entrega de una cuenta POP3, se etiqueta como la
 cuenta (`POP3 (…)`), no como `PST (…)`.
@@ -89,17 +91,20 @@ cuenta (`POP3 (…)`), no como `PST (…)`.
 | Buzón delegado/compartido | `shared_mailbox` | `Exchange shared ({nombre})` | `null` |
 | Carpetas públicas | `public_folders` | `Public Folders ({nombre})` | `null` |
 | Cuenta Exchange sin modo caché | `online_mode` | la de la cuenta (`Exchange (…)`) | `null` |
+| Otro store de Exchange sin copia local (p. ej. archivo en línea, grupos de Microsoft 365) | `online_mode` | su nombre visible | `null` |
 | `.pst` (o archivo de una cuenta) en ruta UNC o unidad de red mapeada | `network_path` | la que tendría si fuera local | ruta completa |
 | Cuenta de otro tipo | `unsupported_account_type` | `{tipo} ({smtp})` | ruta o `null` |
+| Store del perfil cuyas propiedades no se pueden leer (p. ej. Outlook no logra conectar con el servidor de un store que no es local) | `unavailable` | su nombre visible si se pudo leer; si no, `unknown` | ruta si se pudo leer; si no, `null` |
 
-Las claves de `[scope]` resuelven contra candidatos **y** excluidos, para que
-una cuenta declarada que resulta excluida se reporte con `W_STORE_EXCLUDED`
-en vez de `E_CONFIG_ACCOUNT_UNKNOWN` (PRD §15.3).
+Un store `unavailable` no impide leer el resto: los comandos siguen con los
+stores candidatos. La resolución de `[scope]` contra excluidos: PRD §15.3.
 
 **Carpetas ocultas:** las carpetas internas de sincronización (`Conflicts`,
 `Sync Issues`, `Local Failures`, `Server Failures` y sus subcarpetas) no se
 listan ni se leen; se identifican por su función, no por su nombre, así que
-funciona en cualquier idioma de Outlook.
+funciona en cualquier idioma de Outlook. La bandeja de entrada de cada store
+(también de un PST) también se identifica por su función: es la carpeta que
+Outlook tiene asignada como bandeja de entrada.
 
 Como en macOS, ser candidato no basta: solo se leen las cuentas **declaradas**
 en `[scope."<cuenta>"]` (PRD §15).
@@ -112,35 +117,37 @@ en `[scope."<cuenta>"]` (PRD §15).
 |--------------------------|---------|
 | `uid` | **`EntryID` permanente** del item, en hex mayúsculas (140 caracteres en Exchange). |
 | `message_id` / clave de dedupe | Message-ID de Internet; si falta o está vacío, el mensaje es único (RF-07). |
-| `account.uuid` | UUID derivado de forma determinista del `StoreID`: estable mientras no se recree el perfil y compatible con la regla de prefijo ≥ 8. |
+| `account.uuid` | Los 16 bytes del `PR_RECORD_KEY` del store con formato de UUID en mayúsculas (`8-4-4-4-12`). Es único por store (prueba A2), se lee sin abrir items y no cambia si se mueve un PST. |
 | `account.label` / `account.email` | §B.3; email = dirección SMTP de la cuenta (`null` para PST). |
-| `mailbox.path` | Ruta de la carpeta dentro del store, con `/` como separador (un `/` dentro de un nombre se escribe `%2F`). La bandeja de entrada se escribe siempre `INBOX`, también como prefijo (`INBOX/Facturas`). |
-| `mailbox.name` | Último segmento de `path`. |
-| `mailbox.url` | `outlook://<account-uuid>/<path>`, con cada segmento percent-encoded. |
-| Referencias en `mailbox_list` / `--include-mailbox` | Nombre, `path` o URL, case-insensitive; `INBOX` y `INBOX/…` funcionan en cualquier idioma. |
+| `mailbox.path` | Ruta de la carpeta dentro del store, con `/` como separador. Dentro de cada segmento, `%` se escribe `%25` y `/` se escribe `%2F`. La bandeja de entrada se escribe siempre `INBOX`, también como prefijo (`INBOX/Facturas`). |
+| `mailbox.name` | Último segmento de `path`, con la misma codificación. |
+| `mailbox.url` | `outlook://<account-uuid>/<path>`, con los segmentos de `path` decodificados (la bandeja de entrada es siempre `INBOX`) y luego percent-encoded en UTF-8: se codifica todo carácter que no sea *unreserved* según RFC 3986. |
+| Referencias en `mailbox_list` / `--include-mailbox` | Como en macOS (PRD §15.3); `INBOX` y `INBOX/…` funcionan en cualquier idioma. |
 | Buzón agregado | No existe: `is_aggregate = false` siempre. |
 | Carpetas listadas | Solo carpetas de correo, sin las ocultas de §B.3 (no calendario, contactos, tareas ni carpetas de búsqueda). |
 | Items buscables | Correos (incluidos S/MIME) y convocatorias de reunión, sin marca de borrado IMAP. El resto (acuses, tareas, etc.) se ignora en `search`, `new`, `show` y contadores. |
 | Contadores `total`/`unread` | Recuento de items buscables de la carpeta. |
-| `date_received` / `date_sent` | Hora de entrega y de envío reales en UTC. |
-| `from` / `to` / `cc` | Direcciones SMTP; nunca un DN interno de Exchange. |
+| `date_received` / `date_sent` | Hora de entrega y de envío reales, leídas en UTC y emitidas como en macOS (PRD §12.5). |
+| `from` / `to` / `cc` | Dirección SMTP que trae el propio item; nunca un DN interno de Exchange. Si el item no la trae, `address` es `""` y se conserva `name`. Nunca se consulta la libreta de direcciones (podría ir al servidor). |
+| `is_flagged` | Marcado y no completado. Un marcado como completado es `false`. |
+| `has_attachments` / adjuntos | Solo adjuntos no ocultos; los ocultos no cuentan ni se listan. |
 | Cabeceras de `show` | Las cabeceras de transporte; si faltan (correo interno), se sintetizan From/To/Cc/Subject/Date/Message-ID. |
 | Cuerpo | Texto plano; si está vacío, HTML convertido a texto (código común). |
-| Adjuntos | Solo nombres; nunca se guardan. En S/MIME, `attachments: []`. |
-| S/MIME (cifrado o firmado) | `readable=false`, `W_BODY_UNREADABLE: S/MIME encrypted|signed content is not supported`, sin leer el contenido. |
+| Adjuntos | Solo nombres; nunca se guardan. En S/MIME, `attachments: []`. Si el item no se puede abrir, `attachments: []` con `W_ATTACHMENTS_UNAVAILABLE`. |
+| S/MIME (cifrado o firmado) | `readable=false` y `W_BODY_UNREADABLE` (texto en PRD §12.10), sin leer el contenido. |
 | `body.partial` / `source.emlx_path` | Siempre `false` / siempre `null` (se conserva la forma del JSON). |
 
 **Filtros y orden:** `--since` incluye y `--until` excluye al segundo; los
-patrones se evalúan con el código común; `--to`/`--cc` exigen abrir cada item,
-así que siguen el acotamiento y `max_scan` de `--text` (RF-11, RF-17). Orden
+patrones se evalúan con el código común; `--to`/`--cc` siguen RF-17. Orden
 total `(date_received, uid)`, comparando `uid` como string.
 
-**`show <uid>`** (PRD §12.4): un uid que no es hex mayúsculas ⇒ `E_USAGE`. Se
-busca en los stores de las **cuentas declaradas**: si existe y es buscable,
-éxito (cualquier carpeta). Si solo aparece en otro store candidato, o en un
-store excluido (aunque sea de una cuenta declarada) ⇒ `E_ACCOUNT_NOT_IN_SCOPE`,
-con el motivo de la exclusión en el mensaje cuando aplique; si no aparece o no
-es buscable ⇒ `E_USAGE` ("not found").
+**Store de un uid en `show`** (resultados: PRD §12.4): el uid se busca en los
+stores candidatos. Si no aparece en ninguno, se comparan los 16 bytes del
+`EntryID` desde el offset 4 (identificador del store) con el `PR_RECORD_KEY`
+de cada store excluido, que es una propiedad del store y se lee sin abrir sus
+items (verificado, prueba A2 en §B.11): si coincide, el uid es de ese store
+excluido; si no coincide con ninguno, el mensaje no se encuentra, con un hint
+que remite a `excluded_stores` de `mailboxes`.
 
 **`EntryID` y movimientos:** el `EntryID` cambia si el mensaje se **mueve** de
 carpeta. `new` sigue siendo correcto porque el cursor usa la fecha; el riesgo
@@ -157,7 +164,7 @@ es una re-emisión puntual, aceptada por el dueño del producto (PRD §18).
 | Python y dependencia | ≥ 3.11 (el de `pipx`) y `pywin32` (solo Windows; ADR-14). |
 | Sesión | El harness debe correr en la **misma sesión interactiva** y con el **mismo nivel de integridad** que Outlook. Un proceso elevado o un servicio de Windows no ve el Outlook del usuario y obtiene `E_OUTLOOK_NOT_RUNNING`. |
 | Modo de conexión | Cuentas Exchange en **modo caché**; las demás, con su archivo en disco local (§B.3). |
-| Permisos | No hay equivalente a FDA. El home hereda la ACL del perfil de usuario; el instalador restringe la de `config.toml`. |
+| Permisos | No hay equivalente a FDA; permisos del home: PRD RNF-05. |
 
 ---
 
@@ -166,8 +173,8 @@ es una re-emisión puntual, aceptada por el dueño del producto (PRD §18).
 Outlook muestra un aviso de seguridad cuando un proceso externo lee
 direcciones, cuerpos o destinatarios y no hay un antivirus activo reconocido, o
 una directiva endurece la protección. En modo no interactivo ese aviso
-bloquearía al harness; el timeout de 30 s (RF-33) lo convierte en
-`E_CLIENT_TIMEOUT`, y el chequeo `object_model_guard` de `doctor` lo anticipa.
+bloquearía al harness: el chequeo `object_model_guard` de `doctor` lo anticipa
+y el timeout de RF-33 evita el bloqueo.
 
 Criterio del chequeo (decisión del dueño del producto), leyendo en solo
 lectura las directivas de Outlook y el estado del antivirus:
@@ -176,31 +183,27 @@ lectura las directivas de Outlook y el estado del antivirus:
   programático, o si ninguna directiva lo decide y no hay un antivirus activo.
 - **Pasa** si una directiva lo permite siempre, o si ninguna lo decide y hay un
   antivirus activo.
-- Si el estado del antivirus no se puede consultar (p. ej. Windows Server):
-  `ok=false`, `not evaluated: SecurityCenter2 unavailable`.
+- Si ninguna directiva lo decide y el estado del antivirus no se puede
+  consultar (p. ej. Windows Server): `ok=false`,
+  `not evaluated: SecurityCenter2 unavailable`. Si una directiva lo decide, el
+  antivirus no se consulta.
 
 ---
 
 ## B.7 Errores y warnings específicos
 
-Orden de detección del cliente: PRD §12.6 (`E_DEPENDENCY_MISSING` →
-`E_CLIENT_UNSUPPORTED` → `E_OUTLOOK_NOT_RUNNING`). Hints respectivos:
-`pipx reinstall mailquery`; instalar Outlook clásico (el nuevo Outlook no está
-soportado); abrir Outlook clásico con el mismo usuario, sin elevar, y
-reintentar.
+Hints de la detección del cliente (orden: PRD §12.6): `E_DEPENDENCY_MISSING` ⇒
+`pipx reinstall mailquery`; `E_CLIENT_UNSUPPORTED` ⇒ instalar Outlook clásico
+(el nuevo Outlook no está soportado); `E_OUTLOOK_NOT_RUNNING` ⇒ abrir Outlook
+clásico con el mismo usuario, sin elevar, y reintentar.
 
 | Código | Exit | Cuándo |
 |--------|------|--------|
 | `E_CLIENT_BUSY` | 5 | Outlook rechaza la llamada de forma transitoria: un reintento tras 100 ms y, si persiste, este error. |
-| `E_CLIENT_TIMEOUT` | 3 | Una llamada a Outlook no responde en 30 s (RF-33). Hint: ejecutar `mailquery doctor` y revisar `object_model_guard`. |
+| `E_CLIENT_TIMEOUT` | 3 | RF-33. |
 | `E_PERMISSION` | 3 | Outlook deniega el acceso COM, p. ej. por directiva. |
 
-| Warning | Cuándo |
-|---------|--------|
-| `W_BODY_NOT_LOCAL` | El item solo tiene cabeceras en local; `body.available=false`. |
-| `W_BODY_UNREADABLE` | S/MIME o item que no se puede abrir; el detalle da el motivo. |
-| `W_STORE_EXCLUDED` | Una cuenta declarada resuelve a un store excluido; el detalle incluye etiqueta, ruta y motivo (p. ej. `W_STORE_EXCLUDED: PST (Archivo 2019) at \\nas01\backup\archivo2019.pst is excluded: network_path`). |
-
+Warnings de este backend: PRD §12.10 (texto de `W_STORE_EXCLUDED`: PRD §15.3).
 `E_STORE_NOT_FOUND`, `E_SCHEMA_UNSUPPORTED`, `E_DB_BUSY`,
 `E_ACCOUNT_LABELS_UNAVAILABLE`, `W_ACCOUNT_LABELS_UNAVAILABLE`,
 `W_EMLX_MISSING` y `W_EMLX_CORRUPT` no se usan en este backend.
@@ -221,28 +224,24 @@ Chequeos (nombres estables de `checks[].name`): `python`, `home`, `pywin32`,
 | `stores` | Stores candidatos (etiqueta y tipo) y excluidos (etiqueta, ruta y motivo). |
 | `readonly_strategy` | `com_readonly`: proxy de lista blanca activo, conexión sin lanzamiento, caché de `pywin32` confinada. |
 | `object_model_guard` | Criterio de §B.6. |
-| `config` | Igual que en macOS; además, `W_STORE_EXCLUDED` para cuentas declaradas excluidas. |
+| `config` | PRD §12.8; además, `W_STORE_EXCLUDED` en el `detail` para cuentas declaradas excluidas (PRD §15.3). |
 
-`python`, `state` y `lock` son idénticos a macOS. `doctor` nunca lanza
-Outlook: si está cerrado, `outlook` falla y los chequeos que dependen de él se
-reportan con `ok=false` y `not evaluated: outlook failed`.
+Dependencias (un chequeo cuya dependencia directa falló sale como
+`not evaluated: <dependencia> failed`, PRD §12.8):
+
+- `pywin32` → `outlook`;
+- `outlook` → `stores` y `readonly_strategy`;
+- `stores` → resolución de bloques de `config` (la sintaxis se valida siempre).
+- `python`, `home`, `object_model_guard`, `state` y `lock` no dependen de otro
+  chequeo.
+
+Si Outlook está cerrado, `outlook` falla y nunca se lanza.
 
 ---
 
 ## B.9 Rendimiento
 
-Presupuestos p95 (los mismos de PRD §19):
-
-| Operación | Objetivo |
-|-----------|----------|
-| `doctor` | < 3 s |
-| `mailboxes` | < 1 s |
-| `search` metadatos (página de 20 con snippets) | < 1 s |
-| `new` (típico ≤ 50 mensajes nuevos) | < 1 s |
-| `show` | < 500 ms |
-| `search --text` acotado (≤ 500 candidatos) | < 10 s |
-
-El spike midió ~5 ms por item para abrirlo y leer su cuerpo (p95 ~6 ms) y
+Presupuestos p95: PRD §19. El spike midió ~5 ms por item para abrirlo y leer su cuerpo (p95 ~6 ms) y
 ~350 ms para los metadatos de una carpeta de 240 items, lo que deja holgados
 `search`, `new`, `show` y `--text`. `doctor` y `mailboxes` no se midieron.
 
@@ -268,11 +267,10 @@ Escenarios esenciales y de borde que el backend debe cubrir:
   provocar descargas.
 - Bandeja localizada mostrada como `INBOX`; carpetas internas ocultas en
   cualquier idioma.
-- Outlook ausente, cerrado o colgado: `E_DEPENDENCY_MISSING` →
-  `E_CLIENT_UNSUPPORTED` → `E_OUTLOOK_NOT_RUNNING` (exit 6), y
-  `E_CLIENT_TIMEOUT` a los 30 s.
-- Fechas correctas en UTC con zona local distinta de UTC y en cambio de
-  horario.
+- Outlook ausente, cerrado o colgado (PRD §12.6 y RF-33), y un store que no
+  se puede leer (`unavailable`).
+- Fechas correctas (leídas en UTC) con zona local distinta de UTC y en cambio
+  de horario.
 
 ---
 
@@ -293,7 +291,7 @@ PST, IMAP ni EAS. Contadores de no leídos idénticos antes y después.
   exacto de `--since`/`--until` se hace en `mailquery` (§B.4).
 - **P-8** Las carpetas internas se identifican por función ⇒ se ocultan sin
   depender del idioma (§B.3).
-- **P-6** ~5 ms por item (n = 239) ⇒ presupuestos de §B.9.
+- **P-6** ~5 ms por item (n = 239) ⇒ presupuestos de PRD §19 (§B.9).
 - **P-3 / P-11** Leer 239 cuerpos no cambió los no leídos ni mostró avisos (sin
   directivas, dos antivirus activos); con dispatch dinámico, `pywin32` no
   escribió archivos, aunque existe una caché previa en `%TEMP%` ⇒ la caché se
@@ -309,6 +307,24 @@ PST, IMAP ni EAS. Contadores de no leídos idénticos antes y después.
 el estado de descarga en modo solo cabeceras, IMAP y EAS; **P-3** el caso "sin
 antivirus"; **P-10** abortar una llamada COM bloqueada; **P-12** la marca de
 borrado IMAP; **P-13** PST local y en red.
+
+**Prueba A2** (2026-11-03, solo lectura; contadores de no leídos idénticos
+antes y después; sin archivos de caché fuera de la ruta redirigida):
+
+- En los dos stores locales (300 items de INBOX en cada uno), los 16 bytes
+  desde el offset 4 del `EntryID` permanente (140 caracteres hex) son un único
+  valor por store, igual
+  a su `PR_RECORD_KEY` y distinto del de cualquier otro store.
+- `PR_RECORD_KEY` se lee en los 4 stores del perfil, incluidos el buzón
+  compartido y las carpetas públicas (excluidos), sin abrir sus items, y los 4
+  valores son distintos ⇒ regla de `show` de §B.4.
+- No se pudo comprobar con items de un store excluido, porque leerlos violaría
+  I-1; el formato del `EntryID` de Exchange fija ese campo como identificador
+  del store. Si en algún caso no coincide, el resultado es `E_USAGE` "not
+  found", nunca un error incorrecto de alcance.
+- Un primer intento falló al enumerar los stores ("The attempt to log on to
+  Microsoft Exchange has failed") con Outlook desconectado; con Outlook
+  conectado funcionó ⇒ un store ilegible se reporta como `unavailable` (§B.3).
 
 ---
 
