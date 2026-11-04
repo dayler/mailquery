@@ -31,14 +31,14 @@ APP_HOME_SUBDIRS = ("logs", "locks", "tmp")
 DEFAULT_APP_HOME_DIRNAME = ".mailquery"
 
 DEFAULT_LOG_LEVEL = "info"
-DEFAULT_RETENTION_DAYS = 7
+DEFAULT_MAX_SIZE_MB = 10
 DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_SEARCH_MAX_SCAN = 5000
 DEFAULT_NEW_LIMIT = 100
 DEFAULT_LOOKBACK = "10min"
 
-MIN_RETENTION_DAYS = 1
-MAX_RETENTION_DAYS = 365
+MIN_MAX_SIZE_MB = 1
+MAX_MAX_SIZE_MB = 1024
 MIN_SEARCH_LIMIT = 1
 MAX_SEARCH_LIMIT = 200
 MIN_SEARCH_MAX_SCAN = 100
@@ -70,7 +70,7 @@ _CONSERVATIVE_LABELS_HINT = (
 @dataclass(frozen=True)
 class LoggingConfig:
     level: str = DEFAULT_LOG_LEVEL
-    retention_days: int = DEFAULT_RETENTION_DAYS
+    max_size_mb: int = DEFAULT_MAX_SIZE_MB
 
 
 @dataclass(frozen=True)
@@ -183,11 +183,13 @@ def load_config(home: Path | None = None) -> Config:
             f"invalid TOML in {path}: {exc}",
             "fix the TOML syntax; quoted keys with spaces, dots or parentheses, "
             'e.g. [scope."iCloud (user@example.com)"]',
+            "invalid TOML in config.toml",
         ) from exc
     except OSError as exc:
         raise config_error(
             f"cannot read {path}: {exc.strerror or exc}",
             f"check that {path} is a readable file with mode 0600",
+            "cannot read config.toml",
         ) from exc
 
     if not isinstance(data, dict):  # pragma: no cover - tomllib always returns a dict
@@ -220,11 +222,13 @@ def _unknown_top_level(key: str, value: Any) -> MailqueryError:
             f"unknown top-level section [{key}]",
             'account blocks must be declared as [scope."<account-id>"], not as '
             "top-level tables; only [logging], [search], [new] and [scope.*] are allowed",
+            "unknown top-level section in config.toml",
         )
     return config_error(
         f"unknown top-level key {key!r}",
         "only the [logging], [search], [new] and [scope.*] sections are allowed; "
         "see the configuration reference in docs/PRD.md §15",
+        "unknown top-level key in config.toml",
     )
 
 
@@ -273,23 +277,28 @@ def _parse_logging(value: Any) -> LoggingConfig:
         return LoggingConfig()
     table = _as_table(value, "logging")
     for key in table:
-        if key not in ("level", "retention_days"):
-            raise _unknown_key("[logging]", ("level", "retention_days"), key)
+        if key == "retention_days":
+            raise config_error(
+                "unknown key [logging].retention_days",
+                "retention_days was replaced by max_size_mb",
+            )
+        if key not in ("level", "max_size_mb"):
+            raise _unknown_key("[logging]", ("level", "max_size_mb"), key)
     level = table.get("level", DEFAULT_LOG_LEVEL)
     if not isinstance(level, str) or level not in LOG_LEVELS:
         raise config_error(
             f"invalid [logging].level: {level!r}",
             f"valid values: {', '.join(LOG_LEVELS)}",
         )
-    retention = _parse_int(
+    max_size_mb = _parse_int(
         table,
         display="[logging]",
-        key="retention_days",
-        default=DEFAULT_RETENTION_DAYS,
-        minimum=MIN_RETENTION_DAYS,
-        maximum=MAX_RETENTION_DAYS,
+        key="max_size_mb",
+        default=DEFAULT_MAX_SIZE_MB,
+        minimum=MIN_MAX_SIZE_MB,
+        maximum=MAX_MAX_SIZE_MB,
     )
-    return LoggingConfig(level=level, retention_days=retention)
+    return LoggingConfig(level=level, max_size_mb=max_size_mb)
 
 
 def _parse_search(value: Any) -> SearchConfig:
@@ -358,23 +367,27 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
             raise config_error(
                 "empty account identifier in [scope]",
                 'use a label, a unique email or a UUID, e.g. [scope."iCloud (user@example.com)"]',
+                "invalid account block in config.toml",
             )
         if not isinstance(block, dict):
             raise config_error(
                 f"{display} must be a TOML table",
                 'declare each account as its own table, e.g. [scope."iCloud (user@example.com)"]',
+                "invalid account block in config.toml",
             )
         for inner_key in block:
             if inner_key != "mailbox_list":
                 raise config_error(
                     f"unknown key {display}.{inner_key}",
                     'the only allowed key inside an account block is "mailbox_list"',
+                    "unknown key in an account block of config.toml",
                 )
         raw_refs = block.get("mailbox_list", [])
         if not isinstance(raw_refs, list):
             raise config_error(
                 f"{display}.mailbox_list must be an array of strings",
                 'write it as a TOML array, e.g. mailbox_list = ["Facturas", "Archivo"]',
+                "invalid mailbox_list in config.toml",
             )
         refs: list[str] = []
         for index, ref in enumerate(raw_refs):
@@ -382,11 +395,13 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
                 raise config_error(
                     f"{display}.mailbox_list[{index}] must be a string",
                     "each mailbox reference must be a string (name, path or URL)",
+                    "invalid mailbox_list in config.toml",
                 )
             if not ref.strip():
                 raise config_error(
                     f"{display}.mailbox_list[{index}] must not be empty",
                     "use a mailbox name, path or URL as shown by `mailquery mailboxes`",
+                    "invalid mailbox_list in config.toml",
                 )
             refs.append(ref)
         entries.append(ScopeEntry(key=account_key, mailbox_list=tuple(refs)))
@@ -512,6 +527,7 @@ def _resolve_account(
             "E_ACCOUNT_LABELS_UNAVAILABLE",
             f"cannot resolve account {key!r}: account labels are unavailable",
             _CONSERVATIVE_LABELS_HINT,
+            "cannot resolve an account: account labels are unavailable",
         )
     raise _unknown_account(key, entries)
 
@@ -525,6 +541,7 @@ def _ambiguous_account(
         "E_ACCOUNT_AMBIGUOUS",
         f"account reference {key!r} matches more than one account",
         f"use a more specific identifier; matching accounts: {pairs}",
+        "an account reference matches more than one account",
     )
 
 
@@ -541,6 +558,7 @@ def _unknown_account(key: str, entries: Sequence["AccountLabel"]) -> MailqueryEr
         "E_CONFIG_ACCOUNT_UNKNOWN",
         f"unknown account in config.toml: {key!r}",
         hint,
+        "unknown account in config.toml",
     )
 
 
@@ -572,18 +590,43 @@ def _find_mailbox(
     account_mailboxes: Sequence["Mailbox"],
     ref: str,
 ) -> "Mailbox | None":
+    # PRD 15.3: INBOX is always the account inbox, an exact path or URL beats a
+    # name match and the first name match wins; all of that lives in the store.
     mailbox = store.resolve_mailbox(account_uuid, ref)
     if mailbox is not None and mailbox.account_uuid == account_uuid:
         return mailbox
-    needle = ref.strip().casefold()
-    for candidate in account_mailboxes:
-        if needle in (
-            candidate.name.casefold(),
-            candidate.path.casefold(),
-            candidate.url.casefold(),
-        ):
-            return candidate
     return None
+
+
+def _valid_folders(account_mailboxes: Sequence["Mailbox"]) -> str:
+    valid = sorted({mailbox.path or mailbox.name for mailbox in account_mailboxes})
+    return ", ".join(valid) if valid else "(no folders)"
+
+
+def include_mailbox_not_found(
+    ref: str,
+    account_uuids: Sequence[str],
+    store: "EnvelopeStore",
+    labels: "AccountLabels | None",
+) -> MailqueryError:
+    """``E_MAILBOX_NOT_FOUND`` for an ``--include-mailbox`` reference (PRD 15.3).
+
+    The hint lists the folders of every declared account.
+    """
+    parts: list[str] = []
+    for account_uuid in account_uuids:
+        account_mailboxes = [
+            mailbox for mailbox in store.mailboxes if mailbox.account_uuid == account_uuid
+        ]
+        label = _account_identity(labels, account_uuid)[0] if labels is not None else account_uuid
+        parts.append(f"{_format_account(label, account_uuid)}: {_valid_folders(account_mailboxes)}")
+    valid_text = "; ".join(parts) if parts else "(no declared accounts)"
+    return MailqueryError(
+        "E_MAILBOX_NOT_FOUND",
+        f"mailbox {ref!r} was not found in the declared accounts",
+        f"valid folders: {valid_text}; run `mailquery mailboxes` to list names, paths and URLs",
+        "an included mailbox was not found in the declared accounts",
+    )
 
 
 def _mailbox_not_found(
@@ -593,10 +636,10 @@ def _mailbox_not_found(
     labels: "AccountLabels",
 ) -> MailqueryError:
     account_label, _ = _account_identity(labels, account_uuid)
-    valid = sorted({mailbox.path or mailbox.name for mailbox in account_mailboxes})
-    valid_text = ", ".join(valid) if valid else "(no folders)"
+    valid_text = _valid_folders(account_mailboxes)
     return MailqueryError(
         "E_MAILBOX_NOT_FOUND",
         f"mailbox {ref!r} not found in account {_format_account(account_label, account_uuid)}",
         f"valid folders: {valid_text}; run `mailquery mailboxes` to list names, paths and URLs",
+        "mailbox not found in an account",
     )

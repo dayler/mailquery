@@ -1,6 +1,6 @@
 """Stable JSON output helpers.
 
-All commands emit exactly one compact JSON object on ``stdout``. These helpers
+All commands emit exactly one formatted JSON object on ``stdout``. These helpers
 keep serialization deterministic, strip control characters from untrusted
 message content (prompt-injection hygiene, PRD 16.3) and build 200-character
 snippets.
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Fixed product values (PRD 15.6).
 SNIPPET_CHARS = 200
@@ -57,7 +57,10 @@ def make_snippet(body_text: str, max_chars: int = SNIPPET_CHARS) -> str:
 
 
 def iso_timestamp(epoch_seconds: float | int | None) -> str | None:
-    """Convert Unix seconds to local ISO 8601 (``2026-11-01T22:54:09-04:00``)."""
+    """Convert Unix seconds to local ISO 8601 (``2026-11-01T22:54:09-04:00``).
+
+    ``None``, values <= 0 and values the platform cannot represent give ``None``.
+    """
     if epoch_seconds is None:
         return None
     try:
@@ -66,7 +69,14 @@ def iso_timestamp(epoch_seconds: float | int | None) -> str | None:
         return None
     if value <= 0:
         return None
-    return datetime.fromtimestamp(value).astimezone().isoformat(timespec="seconds")
+    try:
+        # Through an aware UTC value: a naive local conversion fails on Windows
+        # for dates whose local time falls before 1970 (epoch 1 with UTC-4).
+        moment = datetime.fromtimestamp(value, tz=timezone.utc).astimezone()
+        return moment.isoformat(timespec="seconds")
+    except (OverflowError, OSError, ValueError):
+        # Unrepresentable on this platform (for example 1e20): null (PRD 17).
+        return None
 
 
 def now_iso() -> str:
@@ -75,12 +85,20 @@ def now_iso() -> str:
 
 
 def dumps_json(payload: dict) -> str:
-    """Serialize a payload as compact JSON (UTF-8, no ASCII escaping)."""
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
+    """Serialize a payload as JSON: 2-space indent, one field per line, no ASCII escaping."""
+    return json.dumps(payload, ensure_ascii=False, indent=2, separators=(",", ": "), sort_keys=False)
+
+
+def configure_streams() -> None:
+    """Force UTF-8 and LF on ``stdout``/``stderr`` (RF-32), also when piped on Windows."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", newline="\n")
 
 
 def write_json(payload: dict) -> None:
-    """Write one compact JSON object to ``stdout`` followed by a newline."""
+    """Write one formatted JSON object to ``stdout`` followed by a single LF."""
     sys.stdout.write(dumps_json(payload))
     sys.stdout.write("\n")
     sys.stdout.flush()

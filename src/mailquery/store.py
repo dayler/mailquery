@@ -18,6 +18,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Sequence
 from urllib.parse import unquote, urlsplit
 
 from mailquery.errors import MailqueryError
@@ -77,19 +78,20 @@ def _permission_error(path: Path, action: str, detail: str = "") -> MailqueryErr
         f"cannot {action} {path}: {reason}",
         "grant Full Disk Access to the app running mailquery "
         "(System Settings -> Privacy & Security -> Full Disk Access) and retry",
+        log_message=f"cannot {action} a store path: permission denied",
     )
 
 
-def _store_not_found(message: str, hint: str) -> MailqueryError:
-    return MailqueryError("E_STORE_NOT_FOUND", message, hint)
+def _store_not_found(message: str, hint: str, log_message: str | None = None) -> MailqueryError:
+    return MailqueryError("E_STORE_NOT_FOUND", message, hint, log_message)
 
 
 def _schema_unsupported(message: str, hint: str) -> MailqueryError:
     return MailqueryError("E_SCHEMA_UNSUPPORTED", message, hint)
 
 
-def _internal_error(message: str, hint: str = "") -> MailqueryError:
-    return MailqueryError("E_INTERNAL", message, hint)
+def _internal_error(message: str, hint: str = "", log_message: str | None = None) -> MailqueryError:
+    return MailqueryError("E_INTERNAL", message, hint, log_message)
 
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +196,7 @@ def detect_version(mail_root: Path | None = None) -> StoreVersion:
             f"Apple Mail store not found at {root}",
             "open Apple Mail at least once, check the path and make sure only "
             "read access is needed (Full Disk Access if the app is sandboxed)",
+            "Apple Mail store not found",
         )
 
     payload = _read_persistence_payload(root)
@@ -222,6 +225,7 @@ def detect_version(mail_root: Path | None = None) -> StoreVersion:
             raise _store_not_found(
                 f"Apple Mail store version directory {root / plist_version} is missing",
                 "open Apple Mail once so it rebuilds its store, or check the path",
+                "Apple Mail store version directory is missing",
             )
         raise _store_not_found(
             f"no supported Apple Mail store version ({', '.join(SUPPORTED_VERSIONS)}) "
@@ -239,7 +243,7 @@ def detect_version(mail_root: Path | None = None) -> StoreVersion:
     if not version_uuid:
         version_uuid = _find_version_uuid(version_dir)
         if version_uuid:
-            _log().debug("recovered version uuid from disk: %s", version_uuid)
+            _log().debug("recovered version uuid from disk")
 
     return StoreVersion(
         mail_root=root,
@@ -268,14 +272,53 @@ def _connect_readonly(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _is_busy(exc: sqlite3.Error) -> bool:
+    """Return True when ``exc`` says the database is locked or busy."""
+    text = str(exc).lower()
+    return "locked" in text or "busy" in text
+
+
+def run_query(
+    connection: sqlite3.Connection,
+    sql: str,
+    params: Sequence[Any] = (),
+    *,
+    first: bool = False,
+) -> Any:
+    """Run a read query; a locked database is retried once after 100 ms (PRD A.4).
+
+    Returns ``fetchall()`` (or ``fetchone()`` with ``first``). A lock that
+    persists raises ``E_DB_BUSY``; any other ``sqlite3`` error propagates.
+    """
+    for attempt in (1, 2):
+        try:
+            cursor = connection.execute(sql, params)
+            return cursor.fetchone() if first else cursor.fetchall()
+        except sqlite3.OperationalError as exc:
+            if not _is_busy(exc):
+                raise
+            if attempt == 1:
+                time.sleep(_RETRY_DELAY_SECONDS)
+                continue
+            raise MailqueryError(
+                "E_DB_BUSY",
+                "the Envelope Index is locked by another process",
+                "close Apple Mail or wait a moment and retry; mailquery "
+                "never forces a lock on the live database",
+                "the Envelope Index is locked",
+            ) from exc
+    raise _internal_error(  # pragma: no cover - the loop always returns/raises
+        "the Envelope Index query failed", "retry the command"
+    )
+
+
 def _connect_with_retry(path: Path) -> sqlite3.Connection:
     """Open the database, retrying once after a short delay when locked."""
     for attempt in (1, 2):
         try:
             return _connect_readonly(path)
         except sqlite3.OperationalError as exc:
-            text = str(exc).lower()
-            locked = "locked" in text or "busy" in text
+            locked = _is_busy(exc)
             if locked and attempt == 1:
                 time.sleep(_RETRY_DELAY_SECONDS)
                 continue
@@ -285,16 +328,19 @@ def _connect_with_retry(path: Path) -> sqlite3.Connection:
                     f"the Envelope Index is locked: {path} ({exc})",
                     "close Apple Mail or wait a moment and retry; mailquery "
                     "never forces a lock on the live database",
+                    "the Envelope Index is locked",
                 ) from exc
             raise _store_not_found(
                 f"cannot open the Envelope Index at {path}: {exc}",
                 "check that the file is a readable SQLite database and that the "
                 "app running mailquery has Full Disk Access",
+                "cannot open the Envelope Index",
             ) from exc
         except sqlite3.Error as exc:
             raise _internal_error(
                 f"cannot open Envelope Index at {path}: {exc}",
                 "verify the file is a readable SQLite database",
+                "cannot open the Envelope Index",
             ) from exc
         except OSError as exc:
             # macOS TCC (/Full Disk Access) can surface as a raw PermissionError
@@ -303,6 +349,7 @@ def _connect_with_retry(path: Path) -> sqlite3.Connection:
     raise _internal_error(  # pragma: no cover - the loop always returns/raises
         f"cannot open Envelope Index at {path}",
         "restart mailquery and retry",
+        "cannot open the Envelope Index",
     )
 
 
@@ -329,6 +376,7 @@ def _ensure_tmp_dir(tmp_root: Path | None, mail_root: Path) -> Path:
             f"refusing to use {tmp_dir} as a temporary directory: "
             "it is inside the Apple Mail store",
             "point the temporary directory to the app home (~/.mailquery/tmp)",
+            "refusing to use a temporary directory inside the Apple Mail store",
         )
     try:
         tmp_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -338,12 +386,21 @@ def _ensure_tmp_dir(tmp_root: Path | None, mail_root: Path) -> Path:
         raise _internal_error(
             f"cannot create temporary directory {tmp_dir}: {exc}",
             "check free space and permissions under the app home",
+            "cannot create the temporary directory",
         ) from exc
     try:
         tmp_dir.chmod(0o700)
     except OSError:  # pragma: no cover - best effort on foreign filesystems
         pass
     return tmp_dir
+
+
+def _make_private(path: Path) -> None:
+    """Restrict a temporary copy to its owner (0600, RNF-05); best effort."""
+    try:
+        path.chmod(0o600)
+    except OSError:  # pragma: no cover - best effort on foreign filesystems
+        pass
 
 
 def _copy_for_readonly(version: StoreVersion, tmp_root: Path | None) -> tuple[Path, Path]:
@@ -355,14 +412,17 @@ def _copy_for_readonly(version: StoreVersion, tmp_root: Path | None) -> tuple[Pa
         raise _internal_error(
             f"cannot create a temporary copy directory under {tmp_dir}: {exc}",
             "check free space and permissions under the app home",
+            "cannot create a temporary copy directory",
         ) from exc
     source = version.envelope_index
     copied = work_dir / source.name
     try:
         shutil.copy2(source, copied)
+        _make_private(copied)
         wal = _sidecar(source, "-wal")
         if wal.is_file():
             shutil.copy2(wal, work_dir / wal.name)
+            _make_private(work_dir / wal.name)
     except OSError as exc:
         # TCC denial can surface here as a raw PermissionError/OSError.
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -491,7 +551,7 @@ def _mailbox_from_row(
         path=path,
         account_uuid=account_uuid,
         account_kind=account_kind,
-        is_inbox=bool(name) and name.casefold() == "inbox",
+        is_inbox=len(segments) == 1 and segments[0].casefold() == "inbox",
         is_aggregate="all mail" in folded_path,
         message_count=total,
         unread_count=unread,
@@ -534,7 +594,7 @@ def _mailbox_counters(connection: sqlite3.Connection) -> dict[int, tuple[int, in
         LEFT JOIN messages AS msg ON msg.ROWID = mem.message_rowid
         GROUP BY mb.ROWID
     """
-    rows = connection.execute(query).fetchall()
+    rows = run_query(connection, query)
     return {
         int(row["rowid"]): (int(row["message_count"] or 0), int(row["unread_count"] or 0))
         for row in rows
@@ -570,9 +630,9 @@ class EnvelopeStore:
     # -- mailbox catalog ---------------------------------------------------- #
 
     def _load_mailboxes(self) -> tuple[Mailbox, ...]:
-        rows = self.connection.execute(
-            "SELECT ROWID AS rowid, url FROM mailboxes ORDER BY ROWID"
-        ).fetchall()
+        rows = run_query(
+            self.connection, "SELECT ROWID AS rowid, url FROM mailboxes ORDER BY ROWID"
+        )
         counters = _mailbox_counters(self.connection)
         mailboxes = tuple(_mailbox_from_row(row, counters) for row in rows)
         self._mailboxes = mailboxes
@@ -594,7 +654,12 @@ class EnvelopeStore:
             raise KeyError(f"mailbox ROWID {rowid} does not exist") from None
 
     def resolve_mailbox(self, account_uuid: str, ref: str) -> Mailbox | None:
-        """Resolve a mailbox name/path/URL inside one account, case-insensitively."""
+        """Resolve a mailbox name/path/URL inside one account (PRD 15.3).
+
+        Case-insensitive. ``INBOX`` is always the account inbox; otherwise an
+        exact path or URL beats a name match, and among several name matches
+        the first one in catalog order wins.
+        """
         if not ref:
             return None
         needle = str(ref).strip()
@@ -602,15 +667,22 @@ class EnvelopeStore:
             return None
         folded = needle.casefold()
         account = str(account_uuid or "").casefold()
-        for mailbox in self.mailboxes:
-            if mailbox.account_uuid.casefold() != account:
-                continue
+        candidates = [
+            mailbox
+            for mailbox in self.mailboxes
+            if mailbox.account_uuid.casefold() == account
+        ]
+        if folded == "inbox":
+            return next((mailbox for mailbox in candidates if mailbox.is_inbox), None)
+        for mailbox in candidates:
             if folded in (
-                mailbox.name.casefold(),
                 mailbox.path.casefold(),
                 mailbox.url.casefold(),
                 unquote(mailbox.url).casefold(),
             ):
+                return mailbox
+        for mailbox in candidates:
+            if folded == mailbox.name.casefold():
                 return mailbox
         return None
 
@@ -665,6 +737,45 @@ class EnvelopeStore:
         self.close()
 
 
+def probe_envelope_index(version: StoreVersion, tmp_root: Path | None = None) -> str:
+    """Open the Envelope Index with the PRD A.4 strategy, read it and close it.
+
+    Returns ``live_ro`` (``-shm`` present) or ``copy_ro``. The schema is not
+    checked: that is the ``schema`` check of ``doctor``.
+    """
+    index = version.envelope_index
+    try:
+        if not index.is_file():
+            raise _store_not_found(
+                f"missing Envelope Index: {index}",
+                "open Apple Mail once so the store is created",
+                "Envelope Index not found",
+            )
+        strategy = STRATEGY_LIVE if _sidecar(index, "-shm").exists() else STRATEGY_COPY
+    except PermissionError as exc:
+        raise _permission_error(index, "read") from exc
+    work_dir: Path | None = None
+    db_path = index
+    try:
+        if strategy == STRATEGY_COPY:
+            db_path, work_dir = _copy_for_readonly(version, tmp_root)
+        connection = _connect_with_retry(db_path)
+        try:
+            connection.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
+        except sqlite3.Error as exc:
+            raise _store_not_found(
+                f"cannot read the Envelope Index at {index}: {exc}",
+                "check that the file is a readable SQLite database",
+                "cannot read the Envelope Index",
+            ) from exc
+        finally:
+            connection.close()
+    finally:
+        if work_dir is not None:
+            shutil.rmtree(work_dir, ignore_errors=True)
+    return strategy
+
+
 def open_store(mail_root: Path | None = None, tmp_root: Path | None = None) -> EnvelopeStore:
     """Open the Mail store read-only, choosing the live or copied strategy."""
     version = detect_version(mail_root)
@@ -678,6 +789,7 @@ def open_store(mail_root: Path | None = None, tmp_root: Path | None = None) -> E
             f"Envelope Index not found at {index}",
             "open Apple Mail once so it rebuilds its index; if the file exists, "
             "the app may need Full Disk Access",
+            "Envelope Index not found",
         )
 
     shm = _sidecar(index, "-shm")
@@ -705,7 +817,7 @@ def open_store(mail_root: Path | None = None, tmp_root: Path | None = None) -> E
                 "the Apple Mail index drifted from the supported layout "
                 "(V9/V10/V11); update mailquery or check `mailquery doctor`",
             )
-        _log().debug("opened Envelope Index strategy=%s db=%s", strategy, db_path)
+        _log().debug("opened Envelope Index strategy=%s", strategy)
         return store
     except Exception:
         if work_dir is not None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -85,7 +86,7 @@ MESSAGE_FIELDS = {
     "snippet",
     "body",
 }
-BODY_FIELDS = {"available", "partial", "truncated"}
+BODY_FIELDS = {"available", "readable", "partial", "truncated"}
 MAILBOX_FIELDS = {"account", "name", "path", "url"}
 ACCOUNT_FIELDS = {"uuid", "label", "email"}
 
@@ -109,6 +110,8 @@ def _normalize(value: object, root: Path) -> object:
     if isinstance(value, dict):
         if value.get("name") == "python" and "detail" in value:
             value = {**value, "detail": "<PYTHON>"}
+        if value.get("name") == "home" and "detail" in value:
+            value = {**value, "detail": "<HOME>"}
         return {
             key: _normalize(item, root)
             for key, item in value.items()
@@ -119,10 +122,29 @@ def _normalize(value: object, root: Path) -> object:
     if isinstance(value, str):
         text = ISO_RE.sub("<ISO>", value)
         text = EMAIL_DATE_RE.sub("<EMAIL_DATE>", text)
-        return text.replace(str(root), "<ROOT>")
+        text = text.replace(str(root), "<ROOT>")
+        # Goldens use "/" on every OS: normalize separators after the root swap.
+        return text.replace("\\", "/")
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) >= 1_000_000_000:
         return "<EPOCH>"
     return value
+
+
+def _close_log_handlers() -> None:
+    """Release the log file ``cli.main`` leaves open (Windows cannot delete it)."""
+    logger = logging.getLogger("mailquery")
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()
+
+
+@contextlib.contextmanager
+def _closing_log_handlers():
+    try:
+        yield
+    finally:
+        _close_log_handlers()
 
 
 def _insert_candidate_messages(fx, count: int = 130) -> None:
@@ -174,6 +196,7 @@ class IntegrationBase(unittest.TestCase):
     def setUp(self) -> None:
         self.fx = build_store()
         self.addCleanup(self.fx.cleanup)
+        self.addCleanup(_close_log_handlers)
         if self.config_text is not None:
             write_config(self.fx.home, self.config_text)
 
@@ -310,7 +333,8 @@ class IntegrationBase(unittest.TestCase):
 
 
 class DoctorTest(IntegrationBase):
-    def test_doctor_reports_all_documented_checks(self) -> None:
+    def test_tc_01_01_doctor_reports_all_documented_checks(self) -> None:
+        """TC-01.01: doctor reports every documented check (golden)."""
         payload = self.run_ok("doctor", "--json")
         self.assertEqual(payload["command"], "doctor")
         checks = payload["checks"]
@@ -362,7 +386,8 @@ class DoctorTest(IntegrationBase):
 
 
 class MailboxesTest(IntegrationBase):
-    def test_mailboxes_accounts_counters_and_included_flags(self) -> None:
+    def test_tc_01_02_mailboxes_accounts_counters_and_included_flags(self) -> None:
+        """TC-01.02: mailboxes, accounts, counters and included flags (golden)."""
         payload = self.run_ok("mailboxes")
         self.assertEqual(payload["command"], "mailboxes")
         self.assertTrue({"accounts", "mailboxes"} <= set(payload))
@@ -411,7 +436,8 @@ class MailboxesTest(IntegrationBase):
 
 
 class SearchTest(IntegrationBase):
-    def test_search_default_returns_all_distinct_messages(self) -> None:
+    def test_tc_01_03_search_default_returns_all_distinct_messages(self) -> None:
+        """TC-01.03: default search returns all distinct messages (golden)."""
         payload = self.run_ok("search")
         self.assertEqual(payload["command"], "search")
         self.assertTrue({"count", "truncated", "messages", "scan"} <= set(payload))
@@ -440,7 +466,10 @@ class SearchTest(IntegrationBase):
         self.assertIs(invoice["has_attachments"], True)
         self.assertEqual(invoice["size_bytes"], 123456)
         self.assertEqual(invoice["snippet"], "Please find the invoice attached.")
-        self.assertEqual(invoice["body"], {"available": True, "partial": False, "truncated": False})
+        self.assertEqual(
+            invoice["body"],
+            {"available": True, "readable": True, "partial": False, "truncated": False},
+        )
         self.assertEqual(invoice["duplicate_count"], 1)
         self.assertEqual(invoice["message_id"], "<invoice-2714@fixture.example>")
 
@@ -486,7 +515,8 @@ class SearchTest(IntegrationBase):
         self.assertIsInstance(scan["duration_ms"], int)
         self.assert_golden("search_default.json", payload)
 
-    def test_search_with_all_mail_dedupes_to_inbox_canonical(self) -> None:
+    def test_tc_01_04_search_with_all_mail_dedupes_to_inbox_canonical(self) -> None:
+        """TC-01.04: All Mail search dedupes to the INBOX canonical (golden)."""
         self.configure(ALL_MAIL_CONFIG)
         payload = self.run_ok("search")
         self.assertEqual(payload["count"], 12)
@@ -562,7 +592,7 @@ class NewTest(IntegrationBase):
     def _seed_cursor(self, hours: int = 2) -> dict:
         cursor = {
             "last_date_received": int((self.fx.now - timedelta(hours=hours)).timestamp()),
-            "last_uid": 0,
+            "last_uid": 1,
             "lookback_seconds": 600,
         }
         write_state(
@@ -577,13 +607,22 @@ class NewTest(IntegrationBase):
         )
         return cursor
 
-    def test_first_run_baselines_without_emitting(self) -> None:
+    def test_tc_01_05_first_run_emits_the_lookback_window(self) -> None:
+        """TC-01.05: first run of ``new`` emits the [D - lookback, D] window (golden)."""
         self.assertFalse(StateStore(self.fx.home).path.exists())
         payload = self.run_ok("new")
         self.assertEqual(payload["command"], "new")
-        self.assertEqual(payload["count"], 0)
-        self.assertEqual(payload["messages"], [])
-        self.assert_warning(payload, "W_FIRST_RUN")
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(
+            [message["uid"] for message in payload["messages"]], [83160, 83170]
+        )
+        for message in payload["messages"]:
+            self.assert_message_shape(message)
+        self.assertEqual(
+            payload["warnings"][-1],
+            "W_FIRST_RUN: first run: emitted the messages received in the last "
+            "10min before the newest message",
+        )
 
         expected_date = int((self.fx.now - timedelta(minutes=15)).timestamp())
         cursor = payload["cursor"]
@@ -597,10 +636,15 @@ class NewTest(IntegrationBase):
         assert state.cursor is not None
         self.assertEqual(state.cursor.last_uid, 83170)
         self.assertEqual(state.cursor.last_date_received, expected_date)
+        self.assertEqual(state.emitted_uids, (83160, 83170))
         self.assertEqual(state.last_run.command, "new")
         self.assert_golden("new_first_run.json", payload)
 
-    def test_seeded_run_emits_new_messages_and_advances_cursor(self) -> None:
+        # The window was emitted once: the next run has nothing new.
+        self.assertEqual(self.run_ok("new")["count"], 0)
+
+    def test_tc_01_06_seeded_run_emits_new_messages_and_advances_cursor(self) -> None:
+        """TC-01.06: a seeded run emits the new messages (golden)."""
         seeded = self._seed_cursor()
         payload = self.run_ok("new")
         self.assertEqual(payload["count"], 4)
@@ -641,7 +685,7 @@ class NewTest(IntegrationBase):
         )
         state = StateStore(self.fx.home).load()
         assert state.cursor is not None
-        self.assertEqual(state.cursor.last_uid, 0)
+        self.assertEqual(state.cursor.last_uid, 1)
         self.assertEqual(state.emitted_uids, ())
 
         # A real run after the peek still emits the same window.
@@ -658,7 +702,8 @@ class NewTest(IntegrationBase):
 
 
 class ShowTest(IntegrationBase):
-    def test_show_text_message_with_attachment(self) -> None:
+    def test_tc_01_07_show_text_message_with_attachment(self) -> None:
+        """TC-01.07: show of a text message with attachment (golden)."""
         payload = self.run_ok("show", "2714")
         self.assertEqual(payload["command"], "show")
         message = payload["message"]
@@ -684,10 +729,11 @@ class ShowTest(IntegrationBase):
         self.assertIs(message["partial"], False)
         self.assertIs(message["readable"], True)
         self.assertIs(message["source"]["partial"], False)
-        self.assertTrue(message["source"]["emlx_path"].endswith("/2714.emlx"))
+        self.assertEqual(Path(message["source"]["emlx_path"]).name, "2714.emlx")
         self.assert_golden("show_2714.json", payload)
 
-    def test_show_missing_emlx(self) -> None:
+    def test_tc_01_08_show_missing_emlx(self) -> None:
+        """TC-01.08: show with a missing .emlx (golden)."""
         payload = self.run_ok("show", "83170")
         message = payload["message"]
         self.assertEqual(message["uid"], 83170)
@@ -700,7 +746,8 @@ class ShowTest(IntegrationBase):
         self.assert_warning(payload, "W_EMLX_MISSING")
         self.assert_golden("show_83170.json", payload)
 
-    def test_show_corrupt_emlx(self) -> None:
+    def test_tc_01_09_show_corrupt_emlx(self) -> None:
+        """TC-01.09: show with a corrupt .emlx (golden)."""
         payload = self.run_ok("show", "83180")
         message = payload["message"]
         self.assertEqual(message["uid"], 83180)
@@ -718,6 +765,32 @@ class ShowTest(IntegrationBase):
         self.assertIs(message["readable"], True)
         self.assertIn("Adjuntamos la factura de septiembre.", message["body_text"])
         self.assertEqual([attachment["name"] for attachment in message["attachments"]], ["factura-79658.pdf"])
+
+
+class ExtendedGoldenTest(IntegrationBase):
+    """Goldens that need the extended fixture store (only ``setUp`` differs)."""
+
+    def setUp(self) -> None:
+        self.fx = build_store(extended=True)
+        self.addCleanup(self.fx.cleanup)
+        self.addCleanup(_close_log_handlers)
+        write_config(self.fx.home, self.config_text)
+
+    def test_tc_01_10_show_smime_encrypted(self) -> None:
+        """TC-01.10: show of the encrypted S/MIME message with attachment rows (golden)."""
+        payload = self.run_ok("show", "90110")
+        message = payload["message"]
+        self.assertEqual(message["uid"], 90110)
+        self.assertIs(message["has_attachments"], True)
+        self.assert_golden("show_smime_encrypted.json", payload)
+
+    def test_tc_01_11_show_not_in_scope_error(self) -> None:
+        """TC-01.11: show of a uid in an undeclared account (golden)."""
+        self.configure(ICLOUD_ONLY_CONFIG)
+        payload = self.run_error(
+            "show", "83160", expected_exit=2, expected_code="E_ACCOUNT_NOT_IN_SCOPE"
+        )
+        self.assert_golden("show_not_in_scope_error.json", payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -746,7 +819,7 @@ class ErrorContractTest(IntegrationBase):
         self.run_error("search", expected_exit=2, expected_code="E_CONFIG_INVALID")
 
     def test_missing_store_is_exit_3(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="mailquery-nostore-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="mailquery-nostore-") as tmp, _closing_log_handlers():
             empty_root = Path(tmp) / "Mail"
             empty_root.mkdir()
             empty_home = Path(tmp) / "home"
@@ -775,12 +848,15 @@ class ErrorContractTest(IntegrationBase):
             self.assertIs(checks["store"]["ok"], False)
             self.assertIs(checks["schema"]["ok"], False)
 
-    def test_corrupt_state_blocks_new_but_not_search(self) -> None:
+    def test_ut_st_04_02_corrupt_state_blocks_new_but_not_the_other_commands(self) -> None:
+        """UT-ST-04.02: with a corrupt state ``new`` fails; search, show and mailboxes work."""
         (self.fx.home / "state.json").write_text("{this is not json", encoding="utf-8")
-        self.run_error("new", expected_exit=3, expected_code="E_STATE_CORRUPT")
+        error = self.run_error("new", expected_exit=3, expected_code="E_STATE_CORRUPT")
+        self.assertIn("first run", error["error"]["hint"])
         # search/show/mailboxes/doctor are unaffected by a damaged state file.
         self.run_ok("search")
         self.run_ok("show", "2714")
+        self.run_ok("mailboxes")
         code, payload, _stderr = self.run_cli("doctor", "--json")
         self.assertEqual(code, 0)
         assert payload is not None

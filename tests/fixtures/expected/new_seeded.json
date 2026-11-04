@@ -40,6 +40,7 @@
       "snippet": "Duplicate body from the inbox.",
       "body": {
         "available": true,
+        "readable": true,
         "partial": false,
         "truncated": false
       }
@@ -79,6 +80,7 @@
       "snippet": "Remember this.",
       "body": {
         "available": true,
+        "readable": true,
         "partial": false,
         "truncated": false
       }
@@ -118,6 +120,7 @@
       "snippet": "Label membership comes from the labels table.",
       "body": {
         "available": true,
+        "readable": true,
         "partial": false,
         "truncated": false
       }
@@ -157,6 +160,7 @@
       "snippet": "",
       "body": {
         "available": false,
+        "readable": false,
         "partial": false,
         "truncated": false
       }
@@ -170,7 +174,7 @@
   "cursor": {
     "previous": {
       "last_date_received": "<EPOCH>",
-      "last_uid": 0,
+      "last_uid": 1,
       "lookback_seconds": 600
     },
     "current": {

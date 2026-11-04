@@ -7,6 +7,7 @@ the installers.
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import subprocess
@@ -25,11 +26,17 @@ SH = shutil.which("sh")
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
+# Isolation (plan 7.1): no subprocess may see the user's real home.
+_ISOLATED_HOME = tempfile.mkdtemp(prefix="mailquery-test-home-")
+atexit.register(shutil.rmtree, _ISOLATED_HOME, ignore_errors=True)
+
+
 def _env(home: Path | None = None) -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    if home is not None:
-        env["HOME"] = str(home)
+    isolated = str(home) if home is not None else _ISOLATED_HOME
+    env["HOME"] = isolated
+    env["USERPROFILE"] = isolated
     return env
 
 
@@ -40,6 +47,7 @@ def _run_sh(*arguments: str, home: Path | None = None) -> subprocess.CompletedPr
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_env(home),
         timeout=60,
     )
@@ -92,7 +100,7 @@ class ConfigTemplateTest(unittest.TestCase):
         self.assertEqual(config.scopes, ())
         self.assertFalse(config.has_scopes)
         self.assertEqual(config.logging.level, "info")
-        self.assertEqual(config.logging.retention_days, 7)
+        self.assertEqual(config.logging.max_size_mb, 10)
         self.assertEqual(config.search.default_limit, 20)
         self.assertEqual(config.search.max_scan, 5000)
         self.assertEqual(config.new.default_limit, 100)
@@ -120,6 +128,8 @@ class InstallShTest(unittest.TestCase):
             [SH, "-n", str(INSTALL_SH)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=_env(),
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -205,6 +215,8 @@ class InstallPs1Test(unittest.TestCase):
             [PWSH, "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=_env(),
             timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -223,6 +235,8 @@ class InstallPs1Test(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=_env(),
             timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

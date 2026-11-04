@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import plistlib
 import shutil
 import sqlite3
@@ -637,3 +638,74 @@ class MailboxCounterTests(StoreTestCase, unittest.TestCase):
         self.assertTrue(self.opened.mailbox(fixtures.MAILBOX_GMAIL_ALL_MAIL).is_aggregate)
         important = self.opened.mailbox(fixtures.MAILBOX_GMAIL_IMPORTANT)
         self.assertEqual((important.message_count, important.unread_count), (0, 0))
+
+
+class TemporaryCopyModeTests(unittest.TestCase):
+    """UT-STO-01: temporary copies in ``~/.mailquery/tmp`` are 0600 (RNF-05, B-25)."""
+
+    def setUp(self) -> None:
+        self.fx = fixtures.build_store(extended=True)
+        self.addCleanup(self.fx.cleanup)
+        self.tmp_root = self.fx.home / "tmp"
+
+    @staticmethod
+    def mode(path: Path) -> int:
+        return path.stat().st_mode & 0o777
+
+    def test_ut_sto_01_01_envelope_index_and_wal_copies_are_0600(self) -> None:
+        """UT-STO-01.01: the copy of the Envelope Index and of its WAL are 0600 (originals 0644)."""
+        wal = self.fx.wal_path
+        self.assertTrue(wal.is_file())
+        for original in (self.fx.envelope_index, wal):
+            os.chmod(original, 0o644)
+        version = detect_version(self.fx.mail_root)
+        copied, work_dir = store_module._copy_for_readonly(version, self.tmp_root)
+        self.addCleanup(shutil.rmtree, work_dir, True)
+        copied_wal = work_dir / wal.name
+        self.assertTrue(copied.is_file())
+        self.assertTrue(copied_wal.is_file())
+        if os.name == "posix":
+            self.assertEqual(self.mode(copied), 0o600)
+            self.assertEqual(self.mode(copied_wal), 0o600)
+
+    def test_ut_sto_01_02_accounts_database_copy_is_0600(self) -> None:
+        """UT-STO-01.02: the copy of Accounts4.sqlite is 0600 (original 0644)."""
+        from mailquery import accounts as accounts_module
+        from mailquery.accounts import AccountLabels
+
+        os.chmod(self.fx.accounts_db, 0o644)
+        modes: list[int] = []
+        original_connect = accounts_module._connect_with_retry
+
+        def spy(path):
+            modes.append(self.mode(Path(path)))
+            return original_connect(path)
+
+        labels = AccountLabels(self.fx.accounts_db, tmp_dir=self.tmp_root)
+        with mock.patch.object(accounts_module, "_connect_with_retry", side_effect=spy):
+            self.assertTrue(labels.available)
+        self.assertEqual(len(modes), 1)
+        if os.name == "posix":
+            self.assertEqual(modes[0], 0o600)
+
+
+class ExtendedFixtureTests(unittest.TestCase):
+    """Sanity check for ``build_store(extended=True)``."""
+
+    def test_extended_store_contents(self) -> None:
+        fx = fixtures.build_store(extended=True)
+        self.addCleanup(fx.cleanup)
+        self.assertIn("iCloud/Proyectos/Inbox", fx.mailboxes)
+        self.assertTrue(fx.wal_path.exists() and fx.shm_path.exists())
+        connection = sqlite3.connect(f"file:{fx.envelope_index.as_posix()}?mode=ro", uri=True)
+        try:
+            uids = {row[0] for row in connection.execute("SELECT ROWID FROM messages")}
+        finally:
+            connection.close()
+        for uid in (
+            fixtures.UID_SMIME_ENCRYPTED,
+            fixtures.UID_DELETED,
+            fixtures.UID_DATE_FUTURE,
+        ):
+            self.assertIn(uid, uids)
+        self.assertFalse(fixtures.build_store().extended)
