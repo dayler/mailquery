@@ -93,11 +93,11 @@ class MailBackendInterfaceTest(unittest.TestCase):
             MailBackend()
 
 
-class BackendContractMixin:
-    """UT-BE-04: behavior every backend must show (PRD 9.3, 15.3, RF-12, RF-13).
+class BackendResolveContractMixin:
+    """UT-BE-04.04/.05: folder resolution every backend must show (PRD 9.3, 15.3).
 
-    Mix into a ``unittest.TestCase`` and implement the hooks. The Apple Mail
-    fixture runs it in W2; the Outlook fake runs it in W3-T05.
+    Mix into a ``unittest.TestCase`` and implement the hooks. The query cases
+    (.01-.03) are added by :class:`BackendContractMixin`.
     """
 
     def make_backend(self) -> MailBackend:
@@ -120,6 +120,31 @@ class BackendContractMixin:
         super().setUp()
         self.backend = self.make_backend()
         self.addCleanup(self.backend.close)
+
+    def test_ut_be_04_04_resolve_mailbox_by_inbox_name_path_and_url(self) -> None:
+        """UT-BE-04.04: INBOX alias, name, path and URL; path/URL beat a name; first wins."""
+        account = self.contract_account()
+        for ref, expected_id in self.contract_resolve_cases():
+            with self.subTest(ref=ref):
+                row = self.backend.resolve_mailbox(account, ref)
+                self.assertIsNotNone(row)
+                self.assertEqual(row["id"], expected_id)
+
+    def test_ut_be_04_05_resolve_unknown_mailbox_is_none(self) -> None:
+        """UT-BE-04.05: a reference that matches no folder gives None."""
+        account = self.contract_account()
+        for ref in self.contract_unknown_refs():
+            with self.subTest(ref=ref):
+                self.assertIsNone(self.backend.resolve_mailbox(account, ref))
+
+
+class BackendContractMixin(BackendResolveContractMixin):
+    """UT-BE-04: behavior every backend must show (PRD 9.3, 15.3, RF-12, RF-13).
+
+    Mix into a ``unittest.TestCase`` and implement the hooks. The Apple Mail
+    fixture runs it in W2; the Outlook fake runs the resolve cases from W3-T04
+    and the whole contract from W3-T05.
+    """
 
     def all_ids(self) -> list[Any]:
         return [row["id"] for row in self.backend.mailboxes()]
@@ -165,22 +190,6 @@ class BackendContractMixin:
         self.assertLess(len(expected), len(everything))
         got = self.backend.query(self.all_ids(), unread=True)
         self.assertEqual(sorted(row["uid"] for row in got), expected)
-
-    def test_ut_be_04_04_resolve_mailbox_by_inbox_name_path_and_url(self) -> None:
-        """UT-BE-04.04: INBOX alias, name, path and URL; path/URL beat a name; first wins."""
-        account = self.contract_account()
-        for ref, expected_id in self.contract_resolve_cases():
-            with self.subTest(ref=ref):
-                row = self.backend.resolve_mailbox(account, ref)
-                self.assertIsNotNone(row)
-                self.assertEqual(row["id"], expected_id)
-
-    def test_ut_be_04_05_resolve_unknown_mailbox_is_none(self) -> None:
-        """UT-BE-04.05: a reference that matches no folder gives None."""
-        account = self.contract_account()
-        for ref in self.contract_unknown_refs():
-            with self.subTest(ref=ref):
-                self.assertIsNone(self.backend.resolve_mailbox(account, ref))
 
 
 class AppleMailBackendContractTest(BackendContractMixin, unittest.TestCase):
@@ -274,7 +283,133 @@ class AppleMailBackendContractTest(BackendContractMixin, unittest.TestCase):
         self.assertTrue(all(check["ok"] for check in checks), checks)
 
 
-SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "mailquery"
+class OutlookBackendContractTest(BackendContractMixin, unittest.TestCase):
+    """UT-BE-04 against the Outlook fake (folder matrix plus a top-level "Facturas")."""
+
+    def make_backend(self) -> MailBackend:
+        from mailquery.backends import get_backend
+        from tests.fakes.outlook import FakeOutlook
+
+        self.fake = FakeOutlook.folder_matrix()
+        # Its path "Facturas" equals the name of INBOX/Facturas, listed earlier.
+        self.fake.store("es").add_folder("Facturas", key="es.top_facturas")
+        # Same name in two subfolders, no folder has it as path.
+        self.fake.folder("es.proyectos").add_folder("Pendientes", key="es.proyectos_pendientes")
+        self.fake.folder("es.archivo").add_folder("Pendientes", key="es.archivo_pendientes")
+        # Some read messages, so that query(unread=True) is a strict subset (UT-BE-04.03).
+        self.fake.item("es_factura").read = True
+        self.fake.item("de_inbox_message").read = True
+        return get_backend(
+            platform="win32",
+            outlook_app=self.fake,
+            registry=self.fake.registry,
+            security_center=self.fake.security_center,
+        )
+
+    def contract_account(self) -> str:
+        return self.fake.store("es").uuid
+
+    def ids_by_path(self) -> dict[str, Any]:
+        account = self.contract_account()
+        return {
+            row["path"]: row["id"]
+            for row in self.backend.mailboxes()
+            if row["account_uuid"] == account
+        }
+
+    def urls_by_path(self) -> dict[str, str]:
+        account = self.contract_account()
+        return {
+            row["path"]: row["url"]
+            for row in self.backend.mailboxes()
+            if row["account_uuid"] == account
+        }
+
+    def contract_resolve_cases(self) -> list[tuple[str, Any]]:
+        ids = self.ids_by_path()
+        urls = self.urls_by_path()
+        return [
+            ("INBOX", ids["INBOX"]),
+            ("inbox", ids["INBOX"]),
+            # name (unique)
+            ("Archivo", ids["Archivo"]),
+            ("archivo", ids["Archivo"]),
+            # three folders are named Facturas: the exact path of the top-level
+            # one beats the name, and by name the first of mailboxes() wins
+            ("Facturas", ids["Facturas"]),
+            ("FACTURAS", ids["Facturas"]),
+            # two subfolders are named Pendientes: the first of mailboxes() wins
+            ("Pendientes", ids["Proyectos/Pendientes"]),
+            ("pendientes", ids["Proyectos/Pendientes"]),
+            ("Archivo/Pendientes", ids["Archivo/Pendientes"]),
+            # path (nested folders with the same name)
+            ("INBOX/Facturas", ids["INBOX/Facturas"]),
+            ("Archivo/Facturas", ids["Archivo/Facturas"]),
+            ("archivo/FACTURAS", ids["Archivo/Facturas"]),
+            ("Proyectos/Inbox", ids["Proyectos/Inbox"]),
+            # encoded name/path as listed
+            ("Clientes%2FProveedores", ids["Clientes%2FProveedores"]),
+            ("100%25 reales", ids["100%25 Reales"]),
+            ("facturación ñ", ids["Facturación ñ"]),
+            # URL (exact URL of each folder, also decoded and in another case)
+            (urls["Archivo/Facturas"], ids["Archivo/Facturas"]),
+            (urls["Clientes%2FProveedores"], ids["Clientes%2FProveedores"]),
+            (urls["Facturación ñ"], ids["Facturación ñ"]),
+            (urls["Facturación ñ"].lower(), ids["Facturación ñ"]),
+            (f"outlook://{self.contract_account()}/Facturación ñ", ids["Facturación ñ"]),
+            (urls["INBOX/Facturas"], ids["INBOX/Facturas"]),
+        ]
+
+    def contract_unknown_refs(self) -> list[str]:
+        de_inbox = f"outlook://{self.fake.store('de').uuid}/INBOX"
+        return [
+            "Does not exist",
+            "Proyectos/Missing",
+            "",
+            "   ",
+            "Rechnungen",  # a folder of another account
+            de_inbox,
+            "Calendario",  # not a mail folder
+            "Correo sin leer",  # search folder
+            "Problemas de sincronización",  # hidden sync folder
+        ]
+
+    def test_same_name_folders_follow_the_order_of_mailboxes(self) -> None:
+        """The first-wins rule uses the depth-first order of mailboxes()."""
+        paths = [
+            row["path"]
+            for row in self.backend.mailboxes()
+            if row["name"] == "Facturas" and row["account_uuid"] == self.contract_account()
+        ]
+        self.assertEqual(paths, ["INBOX/Facturas", "Archivo/Facturas", "Facturas"])
+        self.assertEqual(
+            self.backend.resolve_mailbox(self.contract_account(), "facturas")["path"], "Facturas"
+        )
+        paths = [
+            row["path"]
+            for row in self.backend.mailboxes()
+            if row["name"] == "Pendientes" and row["account_uuid"] == self.contract_account()
+        ]
+        self.assertEqual(paths, ["Proyectos/Pendientes", "Archivo/Pendientes"])
+
+    def test_parse_uid_is_static_and_offline(self) -> None:
+        """OutlookBackend.parse_uid: uppercase hex EntryIDs only, E_USAGE otherwise (PRD 12.4)."""
+        from mailquery.backends.outlook import OutlookBackend
+
+        entry_id = self.fake.item("es_inbox_message").entry_id
+        self.assertEqual(OutlookBackend.parse_uid(entry_id), entry_id)
+        for raw in ("", "00ab", "0x00AB", " 00AB", "00AB ", "00-AB", "Z1"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(MailqueryError) as context:
+                    OutlookBackend.parse_uid(raw)
+                self.assertEqual(context.exception.code, "E_USAGE")
+                self.assertIn(
+                    "expected an uppercase hexadecimal EntryID", context.exception.message
+                )
+        self.assertEqual(self.fake.call_log.count(), 0)
+
+
+SRC_ROOT =Path(__file__).resolve().parents[1] / "src" / "mailquery"
 _WINDOWS_STDLIB_OK = {"winreg", "msvcrt", "_winapi", "ctypes"}
 _COM_MODULES = {"win32com", "pythoncom", "pywintypes"}
 
@@ -309,6 +444,29 @@ def _imported_modules(path: Path) -> list[str]:
 
 
 class GetBackendSelectionTest(unittest.TestCase):
+    def test_ut_be_01_01_win32_selects_outlook(self) -> None:
+        """UT-BE-01.01: win32 yields the Outlook backend, wired to the injected client."""
+        from mailquery.backends import get_backend
+        from mailquery.backends.outlook import OutlookBackend
+        from tests.fakes.outlook import FakeOutlook
+
+        fake = FakeOutlook.default()
+        backend = get_backend(
+            platform="win32",
+            outlook_app=fake,
+            registry=fake.registry,
+            security_center=fake.security_center,
+        )
+        self.addCleanup(backend.close)
+        self.assertIsInstance(backend, OutlookBackend)
+        self.assertEqual(backend.name, "outlook")
+        self.assertTrue(backend.labels_available)
+        self.assertIn(
+            "Exchange (ana.perez@example.com)",
+            [row["label"] for row in backend.accounts()],
+        )
+        self.assertEqual(fake.call_log.count(member="GetActiveObject"), 1)
+
     def test_ut_be_01_02_non_win32_platforms_select_apple_mail(self) -> None:
         """UT-BE-01.02: any platform other than win32 yields the Apple Mail backend."""
         from mailquery.backends import get_backend

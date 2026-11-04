@@ -27,6 +27,19 @@ class StateUidError(ValueError):
         self.ring_detail = ring_detail
 
 
+class ExcludedStoreError(LookupError):
+    """``find_message``: the uid belongs to an excluded store (PRD 12.4, annex B.4).
+
+    ``entry`` is that store's ``excluded_stores()`` entry ``{label, path, reason}``;
+    the core reports it as ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason. Only a
+    backend that excludes stores (Outlook) raises it.
+    """
+
+    def __init__(self, entry: dict[str, Any]) -> None:
+        super().__init__(entry.get("reason"))
+        self.entry = entry
+
+
 class AccountRow(TypedDict):
     """Candidate account (PRD 9.3 ``accounts()``)."""
 
@@ -39,6 +52,12 @@ class AccountRow(TypedDict):
     # the account has none) and whether a label entry exists for it.
     store_index: NotRequired[int | None]
     labelled: NotRequired[bool]
+    # Outlook only: the row is an excluded store, not a candidate; the value is
+    # its ``excluded_stores()`` entry ``{label, path, reason}``. ``[scope]`` keys
+    # resolve against these rows too, so a declared account that is excluded is
+    # reported instead of being unknown (PRD 15.3). ``uuid`` is ``None`` when the
+    # store could not be read (reason ``unavailable``).
+    excluded: NotRequired[dict[str, Any]]
 
 
 class MailboxRow(TypedDict):
@@ -71,6 +90,9 @@ class MessageRow(TypedDict, total=False):
     size: int
     message_id: str
     has_attachments: bool
+    # Outlook only: the item's MessageClass, so that ``load_body`` knows an
+    # S/MIME item without opening it (annex B.4).
+    message_class: str
 
 
 class AttachmentRow(TypedDict):
@@ -166,7 +188,10 @@ class MailBackend(ABC):
 
     @abstractmethod
     def find_message(self, uid: Uid) -> tuple[MessageRow, MailboxRow | None] | None:
-        """Message row and its folder, or ``None``; the core checks the account is declared."""
+        """Message row and its folder, or ``None``; the core checks the account is declared.
+
+        Raises :class:`ExcludedStoreError` when the uid identifies an excluded store.
+        """
 
     @abstractmethod
     def load_body(self, row: MessageRow) -> BodyRow:

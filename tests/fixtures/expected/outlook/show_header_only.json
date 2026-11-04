@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "command": "show",
+  "message": {
+    "uid": "00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10905C015439DAC973DCB6CAE9B8B95281F3046A7F723DBAD38D49C42F822C29D2113E9B121D8F17ADD2E8575D3E4CBA120A2A",
+    "message_id": "<informe-44@example.com>",
+    "subject": "Informe semanal",
+    "from": {
+      "name": "Equipo de datos",
+      "address": "datos@example.com"
+    },
+    "to": [
+      {
+        "name": "Ana Pérez",
+        "address": "ana.perez@example.com"
+      }
+    ],
+    "cc": [],
+    "date_sent": "<ISO>",
+    "date_received": "<ISO>",
+    "mailbox": {
+      "account": {
+        "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
+        "label": "Exchange (ana.perez@example.com)",
+        "email": "ana.perez@example.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX"
+    },
+    "is_read": true,
+    "is_flagged": false,
+    "has_attachments": false,
+    "size_bytes": 3120,
+    "headers": {
+      "From": "Equipo de datos <datos@example.com>",
+      "To": "Ana Pérez <ana.perez@example.com>",
+      "Cc": "",
+      "Subject": "Informe semanal",
+      "Date": "<ISO>",
+      "Message-ID": "<informe-44@example.com>"
+    },
+    "body_text": "",
+    "body_truncated": false,
+    "attachments": [],
+    "partial": false,
+    "readable": false,
+    "source": {
+      "emlx_path": null,
+      "partial": false
+    }
+  },
+  "warnings": [
+    "W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox",
+    "W_BODY_NOT_LOCAL: only the headers of uid 00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10905C015439DAC973DCB6CAE9B8B95281F3046A7F723DBAD38D49C42F822C29D2113E9B121D8F17ADD2E8575D3E4CBA120A2A are stored locally; the body is never downloaded"
+  ]
+}

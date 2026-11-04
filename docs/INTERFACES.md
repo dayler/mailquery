@@ -42,19 +42,22 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   ├── emlx.py                     # Apple Mail: resolución uid->ruta + parseo .emlx
 │   └── backends/
 │       ├── __init__.py             # get_backend(...), backend_class(...)
-│       ├── base.py                 # MailBackend (ABC), filas TypedDict, StateUidError
+│       ├── base.py                 # MailBackend (ABC), filas TypedDict, StateUidError, ExcludedStoreError
 │       ├── apple_mail.py           # AppleMailBackend (SQL + helpers de Apple Mail)
-│       ├── outlook.py              # (W3) OutlookBackend: lógica de Outlook sin win32com
-│       └── outlook_com.py          # (W3) único módulo que importa win32com
+│       ├── outlook.py              # OutlookBackend: stores, carpetas, items y cuerpos (sin win32com)
+│       └── outlook_com.py          # único módulo que importa win32com: detección, proxy, vigilante
 └── tests/
     ├── __init__.py                 # añade src/ a sys.path
     ├── fixtures/
     │   ├── __init__.py
     │   ├── make_fixtures.py        # store sintético V10 + Envelope Index + Accounts4
-    │   └── expected/*.json         # goldens normalizados
+    │   └── expected/               # goldens normalizados: *.json (Apple Mail), outlook/*.json
     ├── mocks/                      # helpers unittest.mock (TCC, DB busy, esquema roto)
-    ├── fakes/                      # (W3) outlook.py: Outlook falso en memoria; run_cli.py
+    ├── fakes/
+    │   ├── outlook.py              # Outlook falso en memoria (OOM, CallLog, escenarios)
+    │   └── run_cli.py              # lanzador en subprocess: fake + cli.main(argv, backend=…)
     ├── test_backends.py            # contrato de MailBackend, get_backend, AppleMailBackend
+    ├── test_outlook.py             # backend Outlook sobre el fake (casos OL-*)
     ├── test_config.py
     ├── test_store.py
     ├── test_accounts.py
@@ -69,8 +72,9 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     └── test_install_scripts.py     # instaladores (install.sh / install.ps1)
 ```
 
-`outlook.py`, `outlook_com.py` y `tests/fakes/` se añaden en la fase W3; hasta
-entonces `get_backend(platform="win32")` no es utilizable.
+`outlook.py`, `outlook_com.py` y `tests/fakes/` llegan en la fase W3: con ellos
+`get_backend(platform="win32")` da `mailboxes`, `search` (metadatos) y `show`;
+`new`, `--text`/`--to`/`--cc` y `doctor` de Outlook son de la fase W4.
 
 Reglas globales:
 
@@ -98,7 +102,7 @@ Reglas globales:
 ```text
 errors  logging_setup  output          (base, sin imports internos)
    ↑          ↑           ↑
-   │       backends/base (solo stdlib: MailBackend, StateUidError, Uid)
+   │       backends/base (solo stdlib: MailBackend, StateUidError, ExcludedStoreError, Uid)
    │          ↑
    │       state (→ base, errors, output)      config (→ errors; MailBackend solo en TYPE_CHECKING)
    │          ↑                                   ↑
@@ -106,12 +110,16 @@ errors  logging_setup  output          (base, sin imports internos)
 accounts, store, emlx   (Apple Mail; → errors, logging_setup, output)
         ↑
 backends/apple_mail (→ base, emlx, accounts, store, errors)
+backends/outlook_com (→ errors, logging_setup; win32com/pythoncom/pywintypes perezosos;
+                      config y cli solo dentro de funciones)
+backends/outlook (→ base, outlook_com, output, errors)
         ↑
 backends/__init__ ──→ apple_mail | outlook (import perezoso solo en win32)
         ↑
        cli ──→ backends, config, errors, logging_setup, output, search, state
 
-search (→ config, output, errors, state; MailBackend solo en TYPE_CHECKING)
+search (→ config, output, errors, state, backends/base [ExcludedStoreError];
+        MailBackend solo en TYPE_CHECKING)
    ↑
   cli
 ```
@@ -166,7 +174,9 @@ y el backend Outlook).
 - `configure_streams()`: fuerza UTF-8 y LF en `stdout`/`stderr` (RF-32), también
   con pipes en Windows; `cli.main` la llama al empezar.
 - `iso_timestamp`: ISO 8601 en hora local con offset; `None`, valores ≤ 0 o no
-  representables dan `None`.
+  representables dan `None`. La zona local es `LOCAL_ZONE` (`None` = la del
+  sistema): punto de inyección **solo para tests**, porque en Windows no hay
+  `TZ`/`tzset` (los tests de Outlook y los goldens `outlook/` fijan una zona).
 - `sanitize_text` quita ANSI y caracteres de control (deja `\n` y `\t`).
   `make_snippet`: una línea, máximo 200 caracteres contando el `…`.
 
@@ -182,16 +192,24 @@ y el backend Outlook).
 `Uid = int | str` (entero en Apple Mail, hex en mayúsculas en Outlook).
 `StateUidError(cursor_detail, ring_detail)` (subclase de `ValueError`): uid
 inválido de `state.json`; cada backend aporta sus textos de `E_STATE_CORRUPT`.
+`ExcludedStoreError(entry)` (subclase de `LookupError`): la lanza
+`find_message` cuando el uid es de un store excluido (solo Outlook); `entry` es
+su entrada `{label, path, reason}` de `excluded_stores()` y `search.run_show`
+la convierte en `E_ACCOUNT_NOT_IN_SCOPE` con el motivo (PRD §12.4).
 
 Filas `TypedDict` (el `id` de `MailboxRow` nunca sale en el JSON):
 
 - `AccountRow(uuid, label, email, local)` + opcionales `store_index`,
-  `labelled` (solo Apple Mail).
+  `labelled` (solo Apple Mail) y `excluded` (solo Outlook: la fila es un store
+  excluido y el valor es su entrada `{label, path, reason}`; `uuid` es `None`
+  si el store no se pudo leer). Las claves de `[scope]` resuelven también
+  contra estas filas para reportarlas con `W_STORE_EXCLUDED` (PRD §15.3).
 - `MailboxRow(id, account_uuid, name, path, url, is_inbox, is_aggregate, total,
   unread)`.
 - `MessageRow(uid, global_message_id, subject, sender_name, sender_address,
   date_sent, date_received, mailbox_id, read, flagged, size, message_id,
-  has_attachments)` (`total=False`).
+  has_attachments)` (`total=False`) + opcional `message_class` (solo Outlook:
+  `load_body` reconoce un S/MIME sin abrir el item).
 - `AttachmentRow(name)`, `BodySource(emlx_path, partial)` y `BodyRow(available,
   readable, partial, headers, body_text, attachments, source, warnings)`.
 
@@ -211,7 +229,7 @@ Filas `TypedDict` (el `id` de `MailboxRow` nunca sale en el JSON):
 | `duplicate_counts(mailbox_ids)` | `dict`: copias por clave global (`duplicate_count`) |
 | `recipients(uids)` | `dict[Uid, Any]`: to/cc por uid |
 | `attachment_names(uid)` | `list[str]` |
-| `find_message(uid)` | `(MessageRow, MailboxRow o None)` o `None`; el núcleo comprueba que la cuenta esté declarada |
+| `find_message(uid)` | `(MessageRow, MailboxRow o None)` o `None`; el núcleo comprueba que la cuenta esté declarada; uid de un store excluido ⇒ `ExcludedStoreError` |
 | `load_body(row)` | `BodyRow`; nunca dispara descargas; S/MIME ⇒ `readable=False` sin leer el contenido |
 | `parse_uid(text)` | uid del backend o `E_USAGE`; **no abre el cliente** ni importa `win32com` |
 | `doctor_checks()` | chequeos propios del backend (los comunes los añade `cli.py`) |
@@ -228,6 +246,71 @@ tests** para Outlook; `store`, `labels`, `mail_root`, `accounts_db` y
 `backend_class(*, platform=None) -> type[MailBackend]`: la clase que
 construiría `get_backend`, sin instanciar ni abrir nada (permite usar
 `parse_uid` antes de tocar el cliente de correo, PRD §12.4).
+`tmp_root` (`<home>/tmp`) sirve a ambos: copias temporales de Apple Mail y
+caché de `pywin32` de Outlook (`<tmp_root>/gen_py`). `cli` siempre lo pasa.
+`outlook_app` es un *conector* (cualquier objeto con
+`GetActiveObject(prog_id)`), que sustituye a `win32com.client` **por debajo**
+del proxy de producción; `pywin32` (`True`/`False`) fija el resultado del
+import (por defecto `True` si hay `outlook_app`, si no se intenta el import
+real).
+
+**Ganchos opcionales del núcleo** (fuera de la superficie de PRD §9.3; el
+núcleo los busca con `getattr` y Apple Mail no los tiene):
+
+| Gancho | Lo usa | Para qué |
+|--------|--------|----------|
+| `bind_command(command)` | `cli` antes de ejecutar | Outlook: el vigilante D-03 informa el comando en `E_CLIENT_TIMEOUT` |
+| `mailboxes_without_counters()` | `config.listed_mailboxes` | Outlook: carpetas sin leer las tablas de contadores (`total`/`unread` = `None`) |
+| `not_found_hint` (atributo) | `search.run_show` | Outlook: el hint de `message uid … was not found` remite a `excluded_stores` |
+| `unreadable_attachments(row)` | `search.run_show` | Outlook: `(nombres, warning)` de un item ilegible: `[]` y `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` y no es S/MIME (PRD §12.10) |
+
+### `backends/outlook.py`
+`OutlookBackend(*, outlook_app=None, registry=None, security_center=None,
+pywin32=None, tmp_root=None, watchdog=None)`: lo construye `get_backend` en
+`win32` (`watchdog` sustituye al vigilante global `outlook_com.WATCHDOG`; solo
+tests). No abre nada hasta el primer uso; toda llamada COM pasa por
+`outlook_com`. Implementa §9.3 según el anexo B:
+
+- Stores (§B.3): el perfil se clasifica una sola vez leyendo solo propiedades
+  del store; candidatos vía `Account.DeliveryStore`; `account.uuid` = los 16
+  bytes de `PR_RECORD_KEY` en formato UUID. `accounts()` devuelve también los
+  excluidos (con `excluded`); `excluded_stores()` los lista en orden del
+  perfil. De un store excluido nunca se leen carpetas ni items.
+- Carpetas (§B.3, §B.4): recorrido en profundidad desde `GetRootFolder`; INBOX
+  y carpetas de sincronización por función (`GetDefaultFolder`); `id` = el
+  `EntryID` de la carpeta. `mailboxes()` cuenta `total`/`unread` con una tabla
+  por carpeta (una vez por instancia); `mailboxes_without_counters()` y
+  `resolve_mailbox` no leen tablas.
+- Items (§B.4): `query` con `Folder.GetTable` (uid = `EntryID` permanente,
+  fechas UTC, prefiltro DASL ensanchado y corte exacto en Python);
+  `find_message` identifica el store por los bytes 4..20 del `EntryID`;
+  `load_body` nunca descarga (S/MIME y solo cabeceras sin leer contenido).
+- `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
+- `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
+  "com_readonly", schema_ok: True}` para el log.
+- `doctor_checks()`: fase W4.
+
+### `backends/outlook_com.py`
+Único módulo que importa `win32com`/`pythoncom`/`pywintypes`, siempre dentro
+de funciones (importarlo en Linux o macOS no toca `pywin32`).
+
+- `connect(*, outlook_app=None, registry=None, pywin32=None, gen_path=None,
+  watchdog=None) -> ReadOnlyCom`: detección en el orden de PRD §12.6
+  (`E_DEPENDENCY_MISSING` → `E_CLIENT_UNSUPPORTED` → `E_OUTLOOK_NOT_RUNNING`),
+  solo con `GetActiveObject`; `import_pywin32(gen_path)` fija
+  `win32com.__gen_path__` antes de importar `win32com.client`.
+- `READONLY_MEMBERS` (`{tipo: {miembro: tipo devuelto o None}}`) y
+  `ReadOnlyCom(target, kind, watchdog)`: proxy de lista blanca; cualquier otro
+  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM.
+- `Watchdog` y `WATCHDOG` (D-03): plazo `CALL_TIMEOUT_SECONDS` (30 s, punto de
+  inyección) por llamada; `call_com(watchdog, call)` arma el plazo y reintenta
+  una vez a los 100 ms un rechazo transitorio.
+- Errores (§B.7): `hresult_of(exc)`, `map_com_error(exc)` y
+  `ComCallError(hresult)` (`E_INTERNAL` con el HRESULT; el backend captura los
+  esperados por `hresult`). `cli` registra todo `E_INTERNAL`, también este,
+  con su traceback (PRD §14).
+- Fuera del OOM, de solo lectura: `WinRegistry`, `get_drive_type(root)`
+  (punto de inyección para rutas de red) y `WmiSecurityCenter`.
 
 ### `backends/apple_mail.py`
 `AppleMailBackend(store=None, labels=None, *, mail_root=None,
@@ -307,9 +390,19 @@ os.replace`; corrupción → `E_STATE_CORRUPT`; sin PII.
 mailbox_list)`, `Config(home, logging, search, new, scopes)`,
 `ResolvedScope(account_uuid, account_label, account_email, mailboxes)`.
 `app_home()`, `ensure_app_home(home)`, `parse_duration(value)`,
-`load_config(home=None)`, `resolve_scope(config, backend) -> list[ResolvedScope]`
-(usa solo `MailBackend`: `accounts()`, `labels_available`, `resolve_mailbox`;
-nunca el store).
+`load_config(home=None)`, `resolve_scope(config, backend, excluded=None) ->
+list[ResolvedScope]` (usa solo `MailBackend`: `accounts()`, `labels_available`,
+`resolve_mailbox` y las carpetas de `listed_mailboxes`; nunca el store). Una
+clave que resuelve a un store excluido (fila de `accounts()` con `excluded`)
+no se lee ni entra en el resultado; si se pasa una lista en `excluded`, se le
+añade su entrada `{label, path, reason}` una sola vez, en el orden de los
+bloques (para `W_STORE_EXCLUDED`, PRD §15.3).
+`listed_mailboxes(backend) -> list[MailboxRow]`: las carpetas cuando solo
+importa su identidad (alcance, dedupe, presentación, hints):
+`mailboxes_without_counters()` si el backend lo ofrece, si no `mailboxes()`.
+Solo el comando `mailboxes` necesita los contadores (PRD §19, §B.9).
+`include_mailbox_not_found(ref, account_uuids, backend)`: `E_MAILBOX_NOT_FOUND`
+de `--include-mailbox` con las carpetas de las cuentas declaradas.
 Validación estricta: cualquier clave/sección desconocida ⇒ `E_CONFIG_INVALID`.
 `[scope."<cuenta>"]` declara una cuenta observada; INBOX siempre incluida;
 `mailbox_list` aditivo. Resolver la cuenta por etiqueta → email único → UUID o
@@ -342,6 +435,14 @@ ascendente y respetando `--limit`, los mensajes de `[D − lookback, D]` (`D` =
 fecha del más reciente válido del alcance) y añade `W_FIRST_RUN` al final de
 `warnings`; el cursor avanza al último emitido (no hay baseline vacío).
 `[new].lookback` de la config actual aplica de inmediato.
+**Warnings de alcance** (todas las corridas de `search`, `new`, `show` y
+`mailboxes`), en este orden (PRD §12.3, paso 6): `W_NO_ACCOUNTS` (si no queda
+ninguna cuenta declarada legible; no aplica a `show`), un
+`W_STORE_EXCLUDED: <etiqueta> at <ruta> is excluded: <reason>` (sin
+` at <ruta>` si `path` es `null`) por cada cuenta declarada que es un store
+excluido (PRD §15.3) y `W_ACCOUNT_LABELS_UNAVAILABLE`; después los de la
+corrida y, en `new`, `W_FIRST_RUN` al final. `run_show` convierte
+`ExcludedStoreError` en `E_ACCOUNT_NOT_IN_SCOPE` con el motivo.
 
 ### `cli.py`
 `build_parser()`, `main(argv=None, *, home=None, mail_root=None,
@@ -352,7 +453,10 @@ accounts_db=None, backend=None) -> int`. Los 4 kwargs son **solo para tests**
 (`get_backend`). `-h/--help` y `-v/--version` en texto y exit 0; `--log-level`
 global; JSON de error en `stdout` + resumen humano en `stderr`; exit codes
 según `errors.CODE_EXIT`; lock automático; `parse_uid` de `show` antes de crear
-el home; `doctor` devuelve exit 0 y muestra un **informe de texto
+el home; `bind_command(command)` del backend si existe; todo `E_INTERNAL`
+(también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
+su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
+`event=error`), el resto de códigos sin traceback (PRD §14); `doctor` devuelve exit 0 y muestra un **informe de texto
 human-readable** por defecto (`--json` para el payload máquina) aunque algún
 chequeo falle (decisión del usuario).
 
@@ -418,7 +522,10 @@ Igual que `search` más:
  "excluded_stores": []}
 ```
 `excluded_stores` (`[{label, path, reason}]`) existe en ambas plataformas y es
-siempre `[]` en Apple Mail.
+siempre `[]` en Apple Mail. En Outlook lista los stores excluidos en el orden
+del perfil (p. ej. `{"label": "Exchange shared (Soporte)", "path": null,
+"reason": "shared_mailbox"}`); `accounts[]` y `mailboxes[]` solo traen
+candidatos.
 
 ### `doctor`
 Por defecto: **informe de texto human-readable** en `stdout` (mismo estilo que
@@ -632,6 +739,26 @@ fechas fijas.
 `doctor`, errores, etc.) que compara `tests/test_integration.py`. Antes de
 comparar se normalizan los valores variables (`generated_at`,
 `duration_ms`, fechas ISO y epoch, ruta raíz temporal, separadores de ruta).
+`tests/fixtures/expected/outlook/` (`mailboxes`, `search`, `show`,
+`show_header_only`, `show_smime`; TC-02) son las del backend Outlook sobre
+`FakeOutlook.default()`, con la misma normalización y una zona local fija
+(`output.LOCAL_ZONE`, UTC−04:00); la config declara la cuenta Exchange y el
+buzón compartido excluido.
+
+### 8.5 Outlook falso (`tests/fakes/`)
+
+`tests/fakes/outlook.py` implementa en memoria exactamente los miembros del
+OOM de la lista blanca (`OOM_MEMBERS` == `outlook_com.READONLY_MEMBERS`); lo
+demás da `AttributeError` y queda en el log. `FakeOutlook` es el conector que
+se pasa como `get_backend(outlook_app=…)`, con `registry`, `security_center`,
+`zone` y `drive_type` como otros puntos de inyección. Observabilidad:
+`call_log` (`CallLog`: cada miembro leído o invocado, con tipo, acción y
+argumentos) y `mutations` (asignaciones y miembros prohibidos; deben quedar en
+0). Fallos: `fail_next`, `reject_next`, `hang_next`/`release`. Escenarios
+(`SCENARIOS`): `default` (perfil de los goldens), `store_matrix`,
+`folder_matrix`, `item_matrix` y variantes sin instancia, sin registrar y con
+versión < 16. `tests/fakes/run_cli.py` ejecuta `cli.main` con el fake en un
+subprocess (tests del vigilante, que termina el proceso con `os._exit`).
 
 Para regenerarlos tras un cambio **intencional** del contrato:
 
@@ -644,7 +771,7 @@ En PowerShell:
 Revisar el diff de los goldens antes de commitear: un golden solo cambia si el
 PRD (§23.3) lo exige; regenerar no sustituye la revisión.
 
-### 8.5 CI
+### 8.6 CI
 
 `.github/workflows/tests.yml`:
 
@@ -656,7 +783,7 @@ PRD (§23.3) lo exige; regenerar no sustituye la revisión.
   (`scripts/install.sh` en ubuntu y macOS, el instalador de PowerShell en
   Windows).
 
-### 8.6 Git (D-01)
+### 8.7 Git (D-01)
 
 Rige la regla de git de la §1: el orquestador crea la rama de cada fase y
 hace los commits; los merges a `develop` y los tags los hace o autoriza el

@@ -46,7 +46,9 @@ def get_backend(
     The Outlook module is imported lazily and only for ``win32``, so no other platform
     ever imports ``win32com``. ``outlook_app``, ``registry``, ``security_center`` and
     ``pywin32`` are test injection points for Outlook; ``store``, ``labels``,
-    ``mail_root``, ``accounts_db`` and ``tmp_root`` are for Apple Mail.
+    ``mail_root`` and ``accounts_db`` are for Apple Mail. ``tmp_root``
+    (``<home>/tmp``) holds Apple Mail's temporary copies and Outlook's pywin32
+    cache (``<tmp_root>/gen_py``).
     """
     current = sys.platform if platform is None else platform
     if current == "win32":
@@ -57,6 +59,7 @@ def get_backend(
             registry=registry,
             security_center=security_center,
             pywin32=pywin32,
+            tmp_root=tmp_root,
         )
     from mailquery.backends.apple_mail import AppleMailBackend
 

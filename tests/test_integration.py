@@ -25,6 +25,7 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 
 from mailquery import cli
 from mailquery.backends.apple_mail import AppleMailBackend
@@ -129,6 +130,25 @@ def _normalize(value: object, root: Path) -> object:
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) >= 1_000_000_000:
         return "<EPOCH>"
     return value
+
+
+def _assert_golden(case: unittest.TestCase, name: str, payload: dict, root: Path) -> None:
+    """Compare a normalized payload with ``EXPECTED_DIR / name`` (or rewrite it)."""
+    normalized = _normalize(payload, root)
+    path = EXPECTED_DIR / name
+    if os.environ.get("MAILQUERY_UPDATE_GOLDENS") == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return
+    case.assertTrue(
+        path.is_file(),
+        f"missing golden {path}; run with MAILQUERY_UPDATE_GOLDENS=1",
+    )
+    expected = json.loads(path.read_text(encoding="utf-8"))
+    case.assertEqual(normalized, expected, f"golden mismatch: {path.name}")
 
 
 def _close_log_handlers() -> None:
@@ -311,21 +331,7 @@ class IntegrationBase(unittest.TestCase):
     # -- goldens ---------------------------------------------------------- #
 
     def assert_golden(self, name: str, payload: dict) -> None:
-        normalized = _normalize(payload, self.fx.root)
-        path = EXPECTED_DIR / name
-        if os.environ.get("MAILQUERY_UPDATE_GOLDENS") == "1":
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            return
-        self.assertTrue(
-            path.is_file(),
-            f"missing golden {path}; run with MAILQUERY_UPDATE_GOLDENS=1",
-        )
-        expected = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(normalized, expected, f"golden mismatch: {path.name}")
+        _assert_golden(self, name, payload, self.fx.root)
 
 
 # --------------------------------------------------------------------------- #
@@ -792,6 +798,124 @@ class ExtendedGoldenTest(IntegrationBase):
             "show", "83160", expected_exit=2, expected_code="E_ACCOUNT_NOT_IN_SCOPE"
         )
         self.assert_golden("show_not_in_scope_error.json", payload)
+
+
+# --------------------------------------------------------------------------- #
+# TC-02 — Outlook goldens (RF-30, PRD 12.5) over the in-memory fake
+# --------------------------------------------------------------------------- #
+
+#: Golden profile config: the cached Exchange account and the excluded shared
+#: mailbox, both declared (the latter reports W_STORE_EXCLUDED, PRD 15.3).
+OUTLOOK_GOLDEN_CONFIG = (
+    '[scope."ana.perez@example.com"]\n'
+    '[scope."Exchange shared (Soporte)"]\n'
+)
+OUTLOOK_STORE_EXCLUDED = "W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox"
+
+
+class OutlookGoldenTest(unittest.TestCase):
+    """``cli.main`` with the Outlook backend over ``FakeOutlook.default()`` (TC-02 profile).
+
+    The local zone is injected (fixed UTC-04:00) so the converted dates do not
+    depend on the host zone.
+    """
+
+    def setUp(self) -> None:
+        from mailquery import output
+        from tests.fakes import outlook as fake_outlook
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(_close_log_handlers)
+        self.root = Path(tmp.name)
+        self.home = self.root / ".mailquery"
+        self.home.mkdir()
+        (self.home / "config.toml").write_text(OUTLOOK_GOLDEN_CONFIG, encoding="utf-8")
+        self.fake = fake_outlook.FakeOutlook.default()
+        zone = fake_outlook.FakeZone.fixed(-4)
+        patcher = mock.patch.object(output, "LOCAL_ZONE", zone)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_ok(self, *args: str) -> dict:
+        from mailquery.backends import get_backend
+
+        backend = get_backend(
+            platform="win32",
+            outlook_app=self.fake,
+            registry=self.fake.registry,
+            security_center=self.fake.security_center,
+        )
+        self.addCleanup(backend.close)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = cli.main(list(args), home=self.home, backend=backend)
+        self.assertEqual(code, 0, stdout.getvalue() + stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertIs(payload["ok"], True)
+        self.assertRegex(payload["generated_at"], ISO_EXACT_RE)
+        self.assertEqual(self.fake.mutations.total, 0)
+        return payload
+
+    def show(self, key: str) -> dict:
+        payload = self.run_ok("show", self.fake.item(key).entry_id)
+        self.assertEqual(payload["message"]["uid"], self.fake.item(key).entry_id)
+        return payload
+
+    def test_tc_02_01_mailboxes(self) -> None:
+        """TC-02.01: mailboxes of the golden profile (golden)."""
+        payload = self.run_ok("mailboxes")
+        self.assertEqual(
+            payload["excluded_stores"],
+            [{"label": "Exchange shared (Soporte)", "path": None, "reason": "shared_mailbox"}],
+        )
+        self.assertEqual(payload["warnings"], [OUTLOOK_STORE_EXCLUDED])
+        inbox = payload["mailboxes"][0]
+        self.assertEqual(
+            (inbox["path"], inbox["total"], inbox["unread"], inbox["included"]),
+            ("INBOX", 3, 2, True),
+        )
+        _assert_golden(self, "outlook/mailboxes.json", payload, self.root)
+
+    def test_tc_02_02_search(self) -> None:
+        """TC-02.02: search of the golden profile (golden)."""
+        payload = self.run_ok("search")
+        self.assertEqual(
+            [message["uid"] for message in payload["messages"]],
+            [self.fake.item(key).entry_id for key in ("normal", "header_only", "smime_encrypted")],
+        )
+        normal = payload["messages"][0]
+        self.assertEqual(normal["date_received"], "2026-11-02T09:54:09-04:00")
+        self.assertEqual(normal["date_sent"], "2026-11-02T09:54:03-04:00")
+        self.assertEqual(payload["warnings"][0], OUTLOOK_STORE_EXCLUDED)
+        _assert_golden(self, "outlook/search.json", payload, self.root)
+
+    def test_tc_02_03_show(self) -> None:
+        """TC-02.03: show of the normal message with an attachment (golden)."""
+        payload = self.show("normal")
+        message = payload["message"]
+        self.assertEqual(message["attachments"], [{"name": "factura-2026-10.pdf"}])
+        self.assertEqual(message["date_received"], "2026-11-02T09:54:09-04:00")
+        self.assertIs(message["readable"], True)
+        _assert_golden(self, "outlook/show.json", payload, self.root)
+
+    def test_tc_02_04_show_header_only(self) -> None:
+        """TC-02.04: show of a header-only item: no body, W_BODY_NOT_LOCAL (golden)."""
+        payload = self.show("header_only")
+        message = payload["message"]
+        self.assertEqual((message["readable"], message["body_text"]), (False, ""))
+        self.assertTrue(payload["warnings"][1].startswith("W_BODY_NOT_LOCAL: "))
+        _assert_golden(self, "outlook/show_header_only.json", payload, self.root)
+
+    def test_tc_02_05_show_smime(self) -> None:
+        """TC-02.05: show of an S/MIME encrypted item: unreadable, no attachments (golden)."""
+        payload = self.show("smime_encrypted")
+        message = payload["message"]
+        self.assertEqual((message["readable"], message["attachments"]), (False, []))
+        self.assertIn(
+            "W_BODY_UNREADABLE: S/MIME encrypted content is not supported", payload["warnings"]
+        )
+        _assert_golden(self, "outlook/show_smime.json", payload, self.root)
 
 
 # --------------------------------------------------------------------------- #
