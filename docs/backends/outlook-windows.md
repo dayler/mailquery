@@ -133,7 +133,7 @@ en `[scope."<cuenta>"]` (PRD §15).
 | `has_attachments` / adjuntos | Solo adjuntos no ocultos; los ocultos no cuentan ni se listan. |
 | Cabeceras de `show` | Las cabeceras de transporte; si faltan (correo interno), se sintetizan From/To/Cc/Subject/Date/Message-ID. |
 | Cuerpo | Texto plano; si está vacío, HTML convertido a texto (código común). |
-| Adjuntos | Solo nombres; nunca se guardan. En S/MIME, `attachments: []`. Si el item no se puede abrir, `attachments: []` con `W_ATTACHMENTS_UNAVAILABLE`. |
+| Adjuntos | Solo nombres; nunca se guardan. En S/MIME, `attachments: []`. Si el item no se puede abrir, `attachments: []`, con `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` es `true` (PRD §12.10). |
 | S/MIME (cifrado o firmado) | `readable=false` y `W_BODY_UNREADABLE` (texto en PRD §12.10), sin leer el contenido. |
 | `body.partial` / `source.emlx_path` | Siempre `false` / siempre `null` (se conserva la forma del JSON). |
 
