@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
 from mailquery import config as config_module
 from mailquery import output
+from mailquery.backends.base import ExcludedStoreError
 from mailquery.errors import MailqueryError
 from mailquery.state import Cursor
 
@@ -183,25 +184,25 @@ def run_search(
     accounts = _accounts_by_uuid(backend)
     mailbox_map = _mailbox_map(backend)
 
-    resolved = _resolved_scope(config, backend)
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
     text_terms = _filter_terms(filters.text)
     mode = "text" if text_terms else "metadata"
+    scope_warnings = _scope_warnings(backend, excluded)
 
     include = _resolve_include_mailboxes(backend, resolved, filters.include_mailboxes)
     if not resolved and not include:
-        return _empty_search_result(
-            mode, started, [NO_ACCOUNTS_WARNING, *_labels_warnings(backend)]
-        )
+        return _empty_search_result(mode, started, [NO_ACCOUNTS_WARNING, *scope_warnings])
 
     scope_mailboxes = _scope_mailboxes(resolved, include)
     allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
     if not allowed_ids:
-        return _empty_search_result(mode, started, _labels_warnings(backend))
+        return _empty_search_result(mode, started, scope_warnings)
 
     if text_terms:
         _require_bounded_scan(resolved, include, filters)
 
-    warnings: list[str] = _labels_warnings(backend)
+    warnings: list[str] = list(scope_warnings)
 
     rows = backend.query(
         sorted(allowed_ids),
@@ -292,7 +293,8 @@ def run_new(
     accounts = _accounts_by_uuid(backend)
     mailbox_map = _mailbox_map(backend)
 
-    resolved = _resolved_scope(config, backend)
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
     scope_mailboxes = _scope_mailboxes(resolved)
     allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
 
@@ -310,7 +312,7 @@ def run_new(
 
     # Scope warnings of any run come first; W_FIRST_RUN is always last.
     scope_warnings: list[str] = [] if resolved else [NO_ACCOUNTS_WARNING]
-    scope_warnings.extend(_labels_warnings(backend))
+    scope_warnings.extend(_scope_warnings(backend, excluded))
     if not resolved or not allowed_ids:
         return _new_result(
             started,
@@ -405,20 +407,27 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     an undeclared account (or with no declared accounts) raises
     ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
     raises ``E_USAGE`` with an actionable hint, as PRD 12 has no specific
-    "message not found" code.
+    "message not found" code. A uid whose store is excluded (Outlook) raises
+    ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
     """
     accounts = _accounts_by_uuid(backend)
 
-    resolved = _resolved_scope(config, backend)
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
     declared = {_scope_account_uuid(scope) for scope in resolved}
 
-    found = backend.find_message(uid)
+    try:
+        found = backend.find_message(uid)
+    except ExcludedStoreError as exc:
+        raise _excluded_store_error(uid, exc.entry) from None
+    # A backend may word the not-found hint itself (Outlook points to excluded_stores).
+    not_found_hint = getattr(backend, "not_found_hint", None)
     if found is None:
-        raise _message_not_found(uid)
+        raise _message_not_found(uid, not_found_hint)
     row, mailbox = found
     account_uuid = mailbox["account_uuid"] if mailbox is not None else ""
     if not account_uuid:
-        raise _message_not_found(uid)
+        raise _message_not_found(uid, not_found_hint)
     if account_uuid not in declared:
         raise MailqueryError(
             "E_ACCOUNT_NOT_IN_SCOPE",
@@ -432,7 +441,7 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     to_list, cc_list = _recipient_lists(recipients, uid)
 
     body = backend.load_body(row)
-    warnings = _labels_warnings(backend) + list(body["warnings"])
+    warnings = _scope_warnings(backend, excluded) + list(body["warnings"])
 
     body_readable = bool(body["readable"])
     body_text = ""
@@ -452,7 +461,16 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     attachment_names = (
         [str(entry["name"]) for entry in body["attachments"]] if body_readable else []
     )
-    if not attachment_names:
+    # Outlook cannot read the names without the item: its hook applies the
+    # Windows rule of PRD 12.10 (``has_attachments``, S/MIME excepted).
+    unreadable_attachments = (
+        None if body_readable else getattr(backend, "unreadable_attachments", None)
+    )
+    if unreadable_attachments is not None:
+        attachment_names, attachments_warning = unreadable_attachments(row)
+        if attachments_warning:
+            warnings.append(attachments_warning)
+    elif not attachment_names:
         stored_names = backend.attachment_names(uid)
         if stored_names:
             attachment_names = stored_names
@@ -506,7 +524,8 @@ def run_mailboxes(backend: "MailBackend", config: "Config") -> dict:
     """
     accounts_by_uuid = _accounts_by_uuid(backend)
     backend_mailboxes = list(backend.mailboxes())
-    resolved = _resolved_scope(config, backend)
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
     scope_mailboxes = _scope_mailboxes(resolved)
     allowed_ids = {mailbox["id"] for mailbox in scope_mailboxes}
     declared_ids = {_scope_account_uuid(scope) for scope in resolved}
@@ -514,7 +533,7 @@ def run_mailboxes(backend: "MailBackend", config: "Config") -> dict:
     warnings: list[str] = []
     if not resolved:
         warnings.append(NO_ACCOUNTS_WARNING)
-    warnings.extend(_labels_warnings(backend))
+    warnings.extend(_scope_warnings(backend, excluded))
 
     accounts: list[dict] = []
     seen_accounts: set[str] = set()
@@ -565,7 +584,7 @@ def _accounts_by_uuid(backend: "MailBackend") -> "dict[str, AccountRow]":
 
 
 def _mailbox_map(backend: "MailBackend") -> "dict[Any, MailboxRow]":
-    return {mailbox["id"]: mailbox for mailbox in backend.mailboxes()}
+    return {mailbox["id"]: mailbox for mailbox in config_module.listed_mailboxes(backend)}
 
 
 def _has_valid_date(row: dict, now: float) -> bool:
@@ -589,9 +608,15 @@ def _newest_scoped_message(
 # --------------------------------------------------------------------------- #
 
 
-def _resolved_scope(config: "Config", backend: "MailBackend") -> list[Any]:
-    """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`."""
-    resolved = config_module.resolve_scope(config, backend)
+def _resolved_scope(
+    config: "Config", backend: "MailBackend", excluded: list[dict] | None = None
+) -> list[Any]:
+    """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`.
+
+    ``excluded`` receives the entry of each declared account that is an
+    excluded store (Outlook, PRD 15.3).
+    """
+    resolved = config_module.resolve_scope(config, backend, excluded=excluded)
     return list(resolved or ())
 
 
@@ -683,7 +708,7 @@ def _find_reference_outside_scope(
     backend: "MailBackend", declared: set[str], reference: str
 ) -> "MailboxRow | None":
     seen: set[str] = set()
-    for mailbox in backend.mailboxes():
+    for mailbox in config_module.listed_mailboxes(backend):
         account_uuid = mailbox["account_uuid"]
         if not account_uuid or account_uuid in declared or account_uuid in seen:
             continue
@@ -1024,6 +1049,28 @@ def _account_payload(accounts: "dict[str, AccountRow]", uuid: str) -> dict:
     return {"uuid": account_uuid, "label": account_uuid, "email": None}
 
 
+def _scope_warnings(backend: "MailBackend", excluded: Sequence[dict]) -> list[str]:
+    """Scope warnings after ``W_NO_ACCOUNTS`` (PRD 12.3 step 6).
+
+    ``W_STORE_EXCLUDED`` for each declared account that is an excluded store
+    (PRD 15.3), then ``W_ACCOUNT_LABELS_UNAVAILABLE`` (Annex A.5.2).
+    """
+    return [_store_excluded_warning(entry) for entry in excluded] + _labels_warnings(backend)
+
+
+def _store_excluded_warning(entry: dict) -> str:
+    """``W_STORE_EXCLUDED: <label> at <path> is excluded: <reason>`` (no `` at`` without path)."""
+    return f"W_STORE_EXCLUDED: {_store_where(entry)} is excluded: {entry.get('reason')}"
+
+
+def _store_where(entry: dict) -> str:
+    """``<label> at <path>`` of an excluded store, or just ``<label>`` when it has no path."""
+    where = str(entry.get("label") or "")
+    if entry.get("path"):
+        where += f" at {entry['path']}"
+    return where
+
+
 def _labels_warnings(backend: "MailBackend") -> list[str]:
     """``W_ACCOUNT_LABELS_UNAVAILABLE`` for data commands (Annex A.5.2)."""
     return [] if backend.labels_available else [LABELS_UNAVAILABLE_WARNING]
@@ -1303,12 +1350,26 @@ def _bad_time(value: Any) -> MailqueryError:
     return bad_time("" if value is None else value)
 
 
-def _message_not_found(uid: Any) -> MailqueryError:
+def _excluded_store_error(uid: Any, entry: dict) -> MailqueryError:
+    """``E_ACCOUNT_NOT_IN_SCOPE`` for a uid of an excluded store (PRD 12.4)."""
+    where = _store_where(entry)
+    return MailqueryError(
+        "E_ACCOUNT_NOT_IN_SCOPE",
+        f"message uid {uid} belongs to {where}, which is excluded: {entry.get('reason')}",
+        "excluded stores are never read; see excluded_stores in `mailquery mailboxes` "
+        "for the reason",
+        f"the message belongs to an excluded store: {entry.get('reason')}",
+    )
+
+
+def _message_not_found(uid: Any, hint: str | None = None) -> MailqueryError:
+    """``E_USAGE`` for a uid ``show`` cannot find; ``hint`` overrides the Apple Mail one."""
     from mailquery.errors import usage_error
 
     return usage_error(
         f"message uid {uid!r} was not found",
-        "run `mailquery search` to find the uid; deleted messages and orphan "
+        hint
+        or "run `mailquery search` to find the uid; deleted messages and orphan "
         ".emlx files are not shown",
         "message uid was not found",
     )
