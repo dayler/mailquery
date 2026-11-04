@@ -2,7 +2,8 @@
 
 Covers the strict ``config.toml`` schema, duration parsing, the application
 home layout and the account/mailbox scope resolution rules (PRD 15). Scope
-resolution is tested against small fake store/labels objects and against the
+resolution is tested against a small fake backend (the ``MailBackend`` methods
+that ``resolve_scope`` uses) and against the Apple Mail backend over the
 synthetic fixture store.
 """
 
@@ -15,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from mailquery.accounts import AccountLabel
+from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.config import (
     APP_HOME_SUBDIRS,
     Config,
@@ -111,19 +113,45 @@ def _fake_mailboxes() -> tuple[Mailbox, ...]:
     )
 
 
-class _FakeStore:
-    def __init__(self, mailboxes: tuple[Mailbox, ...]) -> None:
+class _FakeBackend:
+    """Fake ``MailBackend``: the PRD 9.3 methods that ``resolve_scope`` uses."""
+
+    name = "apple_mail"
+
+    def __init__(self, mailboxes: tuple[Mailbox, ...], labels: "_FakeLabels") -> None:
         self._mailboxes = mailboxes
-        self._by_rowid = {mailbox.rowid: mailbox for mailbox in mailboxes}
+        self._labels = labels
 
     @property
-    def mailboxes(self) -> tuple[Mailbox, ...]:
-        return self._mailboxes
+    def labels_available(self) -> bool:
+        return self._labels.available
 
-    def mailbox(self, rowid: int) -> Mailbox:
-        return self._by_rowid[rowid]
+    def accounts(self) -> list[dict]:
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for mailbox in self._mailboxes:
+            uuid = mailbox.account_uuid
+            if uuid in seen:
+                continue
+            seen.add(uuid)
+            entry = self._labels.get(uuid)
+            rows.append(
+                {
+                    "uuid": uuid,
+                    "label": entry.label if entry is not None else uuid,
+                    "email": entry.email if entry is not None else None,
+                    "local": mailbox.account_kind == "local",
+                }
+            )
+        return rows
 
-    def resolve_mailbox(self, account_uuid: str, ref: str) -> Mailbox | None:
+    def mailboxes(self) -> list[dict]:
+        return [_row(mailbox) for mailbox in self._mailboxes]
+
+    def excluded_stores(self) -> list[dict]:
+        return []
+
+    def resolve_mailbox(self, account_uuid: str, ref: str) -> dict | None:
         needle = ref.strip().casefold()
         for mailbox in self._mailboxes:
             if mailbox.account_uuid != account_uuid:
@@ -133,8 +161,22 @@ class _FakeStore:
                 mailbox.path.casefold(),
                 mailbox.url.casefold(),
             ):
-                return mailbox
+                return _row(mailbox)
         return None
+
+
+def _row(mailbox: Mailbox) -> dict:
+    return {
+        "id": mailbox.rowid,
+        "account_uuid": mailbox.account_uuid,
+        "name": mailbox.name,
+        "path": mailbox.path,
+        "url": mailbox.url,
+        "is_inbox": mailbox.is_inbox,
+        "is_aggregate": mailbox.is_aggregate,
+        "total": mailbox.message_count,
+        "unread": mailbox.unread_count,
+    }
 
 
 def _fake_labels(available: bool = True) -> "_FakeLabels":
@@ -462,11 +504,10 @@ mailbox_list = ["Facturas", "Archivo"]
 
 class ResolveScopeTests(_ErrorAssertions):
     def setUp(self) -> None:
-        self.store = _FakeStore(_fake_mailboxes())
-        self.labels = _fake_labels()
+        self.backend = _FakeBackend(_fake_mailboxes(), _fake_labels())
 
     def _resolve(self, config: Config):
-        return resolve_scope(config, self.store, self.labels)
+        return resolve_scope(config, self.backend)
 
     def test_no_scopes_resolves_to_empty_list(self) -> None:
         self.assertEqual(self._resolve(Config(home=Path("/tmp"))), [])
@@ -480,12 +521,12 @@ class ResolveScopeTests(_ErrorAssertions):
         self.assertEqual(scope.account_uuid, ACCOUNT_ICLOUD)
         self.assertEqual(scope.account_label, ICLOUD_LABEL)
         self.assertEqual(scope.account_email, "fixture@icloud.com")
-        self.assertEqual([mailbox.name for mailbox in scope.mailboxes], ["INBOX", "Facturas", "Archivo"])
-        self.assertTrue(scope.mailboxes[0].is_inbox)
+        self.assertEqual([mailbox["name"] for mailbox in scope.mailboxes], ["INBOX", "Facturas", "Archivo"])
+        self.assertTrue(scope.mailboxes[0]["is_inbox"])
 
     def test_inbox_is_first_even_when_declared_last(self) -> None:
         scopes = self._resolve(_config((ICLOUD_LABEL, ("Archivo", "Facturas")),))
-        self.assertEqual(scopes[0].mailboxes[0].name, "INBOX")
+        self.assertEqual(scopes[0].mailboxes[0]["name"], "INBOX")
 
     def test_explicit_inbox_reference_is_not_duplicated(self) -> None:
         scopes = self._resolve(_config((ICLOUD_LABEL, ("INBOX", "Facturas")),))
@@ -498,7 +539,7 @@ class ResolveScopeTests(_ErrorAssertions):
     def test_unique_email_resolution(self) -> None:
         scopes = self._resolve(_config(("fixture@gmail.com", ()),))
         self.assertEqual(scopes[0].account_uuid, ACCOUNT_GMAIL)
-        self.assertEqual([mailbox.name for mailbox in scopes[0].mailboxes], ["INBOX"])
+        self.assertEqual([mailbox["name"] for mailbox in scopes[0].mailboxes], ["INBOX"])
 
     def test_duplicate_email_is_ambiguous(self) -> None:
         error = self._resolve_error(_config(("fixture@icloud.com", ()),))
@@ -542,7 +583,7 @@ class ResolveScopeTests(_ErrorAssertions):
         self.assertEqual(error.code, "E_CONFIG_ACCOUNT_UNKNOWN")
 
     def test_labels_unavailable_rejects_labels_and_emails(self) -> None:
-        self.labels = _fake_labels(available=False)
+        self.backend = _FakeBackend(_fake_mailboxes(), _fake_labels(available=False))
         for key in (ICLOUD_LABEL, "fixture@gmail.com"):
             with self.subTest(key=key):
                 error = self._resolve_error(_config((key, ()),))
@@ -551,15 +592,15 @@ class ResolveScopeTests(_ErrorAssertions):
                 self.assertIn("UUID", error.hint)
 
     def test_labels_unavailable_still_resolves_uuid_and_prefix(self) -> None:
-        self.labels = _fake_labels(available=False)
+        self.backend = _FakeBackend(_fake_mailboxes(), _fake_labels(available=False))
         scopes = self._resolve(_config((ACCOUNT_ICLOUD, ()), ("BBBBBBBB", ()),))
         self.assertEqual([scope.account_uuid for scope in scopes], [ACCOUNT_ICLOUD, ACCOUNT_GMAIL])
         self.assertEqual(scopes[0].account_label, ACCOUNT_ICLOUD)
         self.assertIsNone(scopes[0].account_email)
-        self.assertTrue(scopes[0].mailboxes[0].is_inbox)
+        self.assertTrue(scopes[0].mailboxes[0]["is_inbox"])
 
     def test_labels_unavailable_unknown_uuid_is_an_unknown_account(self) -> None:
-        self.labels = _fake_labels(available=False)
+        self.backend = _FakeBackend(_fake_mailboxes(), _fake_labels(available=False))
         for key in (ACCOUNT_MISSING, "DDDDDDDD"):
             with self.subTest(key=key):
                 error = self._resolve_error(_config((key, ()),))
@@ -574,7 +615,7 @@ class ResolveScopeTests(_ErrorAssertions):
         for ref, account_uuid, rowid in cases:
             with self.subTest(ref=ref):
                 scopes = self._resolve(_config((account_uuid, (ref,)),))
-                self.assertIn(rowid, [mailbox.rowid for mailbox in scopes[0].mailboxes])
+                self.assertIn(rowid, [mailbox["id"] for mailbox in scopes[0].mailboxes])
 
     def test_unknown_mailbox_reports_valid_folders(self) -> None:
         error = self._resolve_error(_config((ICLOUD_LABEL, ("Missing",)),))
@@ -594,7 +635,7 @@ class ResolveScopeTests(_ErrorAssertions):
         )
         self.assertEqual(len(scopes), 1)
         self.assertEqual(
-            [mailbox.name for mailbox in scopes[0].mailboxes],
+            [mailbox["name"] for mailbox in scopes[0].mailboxes],
             ["INBOX", "All Mail", "Important"],
         )
 
@@ -619,7 +660,7 @@ class ResolveScopeTests(_ErrorAssertions):
 
     def _resolve_error(self, config: Config) -> MailqueryError:
         with self.assertRaises(MailqueryError) as context:
-            resolve_scope(config, self.store, self.labels)
+            resolve_scope(config, self.backend)
         return context.exception
 
 
@@ -659,18 +700,18 @@ class FixtureScopeResolutionTests(unittest.TestCase):
         store = self._open_store()
         labels = self._open_labels()
         self.assertTrue(labels.available)
-        scopes = resolve_scope(load_config(self.fx.home), store, labels)
+        scopes = resolve_scope(load_config(self.fx.home), AppleMailBackend(store, labels))
         by_uuid = {scope.account_uuid: scope for scope in scopes}
         self.assertEqual(set(by_uuid), {ACCOUNT_ICLOUD, ACCOUNT_GMAIL, ACCOUNT_LOCAL})
         icloud = by_uuid[ACCOUNT_ICLOUD]
         self.assertEqual(icloud.account_label, ICLOUD_LABEL)
         self.assertEqual(icloud.account_email, "fixture@icloud.com")
         self.assertEqual(
-            [mailbox.name for mailbox in icloud.mailboxes],
+            [mailbox["name"] for mailbox in icloud.mailboxes],
             ["INBOX", "Facturas", "Archivo"],
         )
-        self.assertTrue(icloud.mailboxes[0].is_inbox)
-        self.assertEqual([mailbox.name for mailbox in by_uuid[ACCOUNT_GMAIL].mailboxes], ["INBOX"])
+        self.assertTrue(icloud.mailboxes[0]["is_inbox"])
+        self.assertEqual([mailbox["name"] for mailbox in by_uuid[ACCOUNT_GMAIL].mailboxes], ["INBOX"])
         self.assertEqual(by_uuid[ACCOUNT_LOCAL].account_label, LOCAL_LABEL)
 
     def test_fixture_resolves_uuid_without_account_labels(self) -> None:
@@ -681,11 +722,43 @@ class FixtureScopeResolutionTests(unittest.TestCase):
             home=self.fx.home,
             scopes=(ScopeEntry(key=ACCOUNT_ICLOUD), ScopeEntry(key=ACCOUNT_GMAIL)),
         )
-        scopes = resolve_scope(config, store, labels)
+        scopes = resolve_scope(config, AppleMailBackend(store, labels))
         self.assertEqual([scope.account_uuid for scope in scopes], [ACCOUNT_ICLOUD, ACCOUNT_GMAIL])
         self.assertEqual(scopes[0].account_label, ACCOUNT_ICLOUD)
         self.assertIsNone(scopes[0].account_email)
-        self.assertTrue(scopes[0].mailboxes[0].is_inbox)
+        self.assertTrue(scopes[0].mailboxes[0]["is_inbox"])
+
+    def _backend_with_extra_labels(self) -> AppleMailBackend:
+        # The accounts database knows accounts that have no folders in the store.
+        store = self._open_store()
+        return AppleMailBackend(store, _fake_labels())
+
+    def test_label_of_an_account_without_folders_is_unknown_and_lists_every_label(self) -> None:
+        backend = self._backend_with_extra_labels()
+        with self.assertRaises(MailqueryError) as context:
+            resolve_scope(_config((MISSING_LABEL, ()),), backend)
+        error = context.exception
+        self.assertEqual(error.code, "E_CONFIG_ACCOUNT_UNKNOWN")
+        self.assertIn(MISSING_LABEL, error.hint)
+        self.assertIn(ICLOUD_ALT_LABEL, error.hint)
+        self.assertIn(GMAIL_LABEL, error.hint)
+
+    def test_shared_email_is_ambiguous_across_every_label_entry(self) -> None:
+        # ICLOUD_ALT has no folders in the store, yet it still makes the email ambiguous.
+        backend = self._backend_with_extra_labels()
+        with self.assertRaises(MailqueryError) as context:
+            resolve_scope(_config(("fixture@icloud.com", ()),), backend)
+        error = context.exception
+        self.assertEqual(error.code, "E_ACCOUNT_AMBIGUOUS")
+        self.assertIn(ICLOUD_LABEL, error.hint)
+        self.assertIn(ICLOUD_ALT_LABEL, error.hint)
+        self.assertIn(ACCOUNT_ICLOUD_ALT, error.hint)
+
+    def test_uuid_of_an_account_without_folders_is_unknown(self) -> None:
+        backend = self._backend_with_extra_labels()
+        with self.assertRaises(MailqueryError) as context:
+            resolve_scope(_config((ACCOUNT_MISSING, ()),), backend)
+        self.assertEqual(context.exception.code, "E_CONFIG_ACCOUNT_UNKNOWN")
 
 
 if __name__ == "__main__":

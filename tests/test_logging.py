@@ -220,10 +220,10 @@ class ContentTests(unittest.TestCase):
             f"uid {self.UID} snippet {self.BODY}"
         )
 
-        def failing_search(store, config, labels, filters):
+        def failing_search(backend, config, filters):
             # Labels are unavailable: resolving a label logs a warning.
-            labels.label_for(ACCOUNT_ICLOUD)
-            labels.label_for(ACCOUNT_GMAIL)
+            backend.labels.label_for(ACCOUNT_ICLOUD)
+            backend.labels.label_for(ACCOUNT_GMAIL)
             raise MailqueryError(
                 "E_SCAN_TOO_LARGE", message, f"hint {self.TERM}", log_message="the scan was too large"
             )
