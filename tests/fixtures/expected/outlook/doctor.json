@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "command": "doctor",
+  "checks": [
+    {
+      "name": "python",
+      "ok": true,
+      "detail": "<PYTHON>"
+    },
+    {
+      "name": "home",
+      "ok": true,
+      "detail": "<HOME>"
+    },
+    {
+      "name": "pywin32",
+      "ok": true,
+      "detail": "win32com importable"
+    },
+    {
+      "name": "outlook",
+      "ok": true,
+      "detail": "classic Outlook 16.0.0.20430 running (attached with GetActiveObject)"
+    },
+    {
+      "name": "stores",
+      "ok": true,
+      "detail": "1 candidate(s): Exchange (ana.perez@example.com) [Exchange]; 1 excluded: Exchange shared (Soporte) [shared_mailbox]"
+    },
+    {
+      "name": "readonly_strategy",
+      "ok": true,
+      "detail": "com_readonly: read-only whitelist proxy active, attached with GetActiveObject (Outlook is never launched), pywin32 cache confined to <ROOT>/.mailquery/tmp/gen_py"
+    },
+    {
+      "name": "object_model_guard",
+      "ok": true,
+      "detail": "no Outlook security policy decides; active antivirus: Fake Defender"
+    },
+    {
+      "name": "config",
+      "ok": true,
+      "detail": "ana.perez@example.com → Exchange (ana.perez@example.com) (D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10): INBOX; W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox"
+    },
+    {
+      "name": "state",
+      "ok": true,
+      "detail": "no state yet; the next new run is a first run and emits the messages received in the last 10min before the newest message"
+    },
+    {
+      "name": "lock",
+      "ok": true,
+      "detail": "available: <ROOT>/.mailquery/locks/mailquery.lock"
+    }
+  ],
+  "warnings": []
+}

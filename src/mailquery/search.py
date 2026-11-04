@@ -181,6 +181,7 @@ def run_search(
     pagination.
     """
     started = time.perf_counter()
+    opened_before = _items_opened(backend)
     accounts = _accounts_by_uuid(backend)
     mailbox_map = _mailbox_map(backend)
 
@@ -188,6 +189,8 @@ def run_search(
     resolved = _resolved_scope(config, backend, excluded)
     text_terms = _filter_terms(filters.text)
     mode = "text" if text_terms else "metadata"
+    opens_recipients = _recipients_open_items(backend)
+    content_flags = _content_flags(filters, opens_recipients)
     scope_warnings = _scope_warnings(backend, excluded)
 
     include = _resolve_include_mailboxes(backend, resolved, filters.include_mailboxes)
@@ -199,8 +202,8 @@ def run_search(
     if not allowed_ids:
         return _empty_search_result(mode, started, scope_warnings)
 
-    if text_terms:
-        _require_bounded_scan(resolved, include, filters)
+    if content_flags:
+        _require_bounded_scan(resolved, include, filters, content_flags, opens_recipients)
 
     warnings: list[str] = list(scope_warnings)
 
@@ -213,22 +216,26 @@ def run_search(
         has_attachments=filters.has_attachments,
         order="desc",
     )
-    rows = _apply_pattern_filters(rows, filters, backend)
+    # On Windows --to/--cc open every candidate: they are applied after the
+    # max_scan check and the candidates are counted before them (RF-17).
+    rows = _apply_pattern_filters(rows, filters, backend, recipients=not opens_recipients)
     candidates = len(rows)
     messages_read = 0
 
-    if text_terms:
+    if content_flags:
         max_scan = _effective_max_scan(config)
         if candidates > max_scan:
-            raise MailqueryError(
-                "E_SCAN_TOO_LARGE",
-                f"--text would read {candidates} messages, above the configured "
-                f"maximum of {max_scan}",
-                "narrow the query with --since, --until, --from, --to, --cc or "
-                "--subject, or raise [search].max_scan (maximum 50000)",
-            )
-        rows, scan_warnings, messages_read = _scan_bodies(backend, rows, text_terms)
+            raise _scan_too_large(content_flags, candidates, max_scan, opens_recipients)
+    recipient_terms = (
+        (_filter_terms(filters.to), _filter_terms(filters.cc)) if opens_recipients else ((), ())
+    )
+    if text_terms:
+        rows, scan_warnings, messages_read = _scan_bodies(
+            backend, rows, text_terms, recipient_terms
+        )
         warnings.extend(scan_warnings)
+    elif any(recipient_terms):
+        rows = _filter_recipients(rows, *recipient_terms, backend)
 
     label_map = backend.membership([row["uid"] for row in rows])
     duplicate_counts = backend.duplicate_counts(allowed_ids)
@@ -253,6 +260,8 @@ def run_search(
     )
     warnings.extend(body_warnings)
     messages_read += page_reads
+    if opened_before is not None:
+        messages_read = _items_opened(backend) - opened_before
 
     return {
         "count": len(messages),
@@ -289,6 +298,7 @@ def run_new(
     writes state.
     """
     started = time.perf_counter()
+    opened_before = _items_opened(backend)
     now = float(clock()) if clock is not None else time.time()
     accounts = _accounts_by_uuid(backend)
     mailbox_map = _mailbox_map(backend)
@@ -376,6 +386,8 @@ def run_new(
     )
     warnings.extend(body_warnings)
     warnings.extend(first_run_warnings)
+    if opened_before is not None:
+        page_reads = _items_opened(backend) - opened_before
 
     if peek or not page:
         current_payload = previous_payload
@@ -724,28 +736,105 @@ def _find_reference_outside_scope(
     return None
 
 
+def _recipients_open_items(backend: "MailBackend") -> bool:
+    """Whether evaluating ``--to``/``--cc`` opens every item (Outlook; RF-17)."""
+    return bool(getattr(backend, "recipients_open_items", False))
+
+
+def _items_opened(backend: "MailBackend") -> int | None:
+    """Items the backend opened so far (Outlook), or ``None`` (Apple Mail).
+
+    With it, ``scan.messages_read`` is the number of items opened (RF-17);
+    without it, the bodies read (``_was_read``).
+    """
+    opened = getattr(backend, "items_opened", None)
+    return None if opened is None else int(opened)
+
+
+def _content_flags(filters: Filters, opens_recipients: bool) -> tuple[str, ...]:
+    """Flags that force reading message content: ``--text``, and ``--to``/``--cc``
+    where the recipients are read from each item (RF-17)."""
+    flags: list[str] = []
+    if _filter_terms(filters.text):
+        flags.append("--text")
+    if opens_recipients:
+        if _filter_terms(filters.to):
+            flags.append("--to")
+        if _filter_terms(filters.cc):
+            flags.append("--cc")
+    return tuple(flags)
+
+
+def _flag_names(flags: Sequence[str]) -> str:
+    if len(flags) == 1:
+        return flags[0]
+    return ", ".join(flags[:-1]) + " and " + flags[-1]
+
+
 def _require_bounded_scan(
-    resolved: Sequence[Any], include: Sequence["MailboxRow"], filters: Filters
+    resolved: Sequence[Any],
+    include: Sequence["MailboxRow"],
+    filters: Filters,
+    content_flags: Sequence[str] = ("--text",),
+    opens_recipients: bool = False,
 ) -> None:
-    """Reject ``--text`` queries without a narrowing filter (RF-17)."""
+    """Reject content-reading queries without a narrowing filter (RF-17).
+
+    Validated once for every flag in ``content_flags``. Where ``--to``/``--cc``
+    open every item they do not narrow, and the error names the flags that
+    force reading content and lists only the filters that narrow.
+    """
     has_filter = bool(
         filters.since is not None
         or filters.until is not None
         or _filter_terms(filters.subject, split=True)
         or _filter_terms(filters.from_)
-        or _filter_terms(filters.to)
-        or _filter_terms(filters.cc)
+        or (
+            not opens_recipients
+            and (_filter_terms(filters.to) or _filter_terms(filters.cc))
+        )
     )
     has_extra_folder = any(
         not mailbox["is_inbox"] for mailbox in _scope_mailboxes(resolved)
     ) or any(not mailbox["is_inbox"] for mailbox in include)
     if has_filter or has_extra_folder:
         return
+    if not opens_recipients:
+        raise MailqueryError(
+            "E_UNBOUNDED_SCAN",
+            "--text without a narrowing filter would read every message in the scope",
+            "add --since, --until, --from, --to, --cc, --subject or "
+            "--include-mailbox (for example: mailquery search --text invoice --since 30d)",
+        )
+    example = (
+        "mailquery search --text invoice --since 30d" if "--text" in content_flags else "--since 30d"
+    )
     raise MailqueryError(
         "E_UNBOUNDED_SCAN",
-        "--text without a narrowing filter would read every message in the scope",
-        "add --since, --until, --from, --to, --cc, --subject or "
-        "--include-mailbox (for example: mailquery search --text invoice --since 30d)",
+        f"{_flag_names(content_flags)} without a narrowing filter would read every "
+        "message in the scope",
+        f"add --since, --until, --from, --subject or --include-mailbox (for example: {example})",
+    )
+
+
+def _scan_too_large(
+    content_flags: Sequence[str], candidates: int, max_scan: int, opens_recipients: bool
+) -> MailqueryError:
+    """``E_SCAN_TOO_LARGE``; the hint lists only the filters that narrow (RF-17)."""
+    if not opens_recipients:
+        return MailqueryError(
+            "E_SCAN_TOO_LARGE",
+            f"--text would read {candidates} messages, above the configured "
+            f"maximum of {max_scan}",
+            "narrow the query with --since, --until, --from, --to, --cc or "
+            "--subject, or raise [search].max_scan (maximum 50000)",
+        )
+    return MailqueryError(
+        "E_SCAN_TOO_LARGE",
+        f"{_flag_names(content_flags)} would read {candidates} messages, above the "
+        f"configured maximum of {max_scan}",
+        "narrow the query with --since, --until, --from or --subject, or raise "
+        "[search].max_scan (maximum 50000)",
     )
 
 
@@ -767,14 +856,19 @@ def _apply_pattern_filters(
     rows: list[dict],
     filters: Filters,
     backend: "MailBackend",
+    *,
+    recipients: bool = True,
 ) -> list[dict]:
-    """Apply the wildcard/substring filters (accent- and case-insensitive)."""
+    """Apply the wildcard/substring filters (accent- and case-insensitive).
+
+    Without ``recipients`` the ``--to``/``--cc`` filters are left to the caller.
+    """
     if not rows:
         return []
     subject_terms = _filter_terms(filters.subject, split=True)
     from_terms = _filter_terms(filters.from_)
-    to_terms = _filter_terms(filters.to)
-    cc_terms = _filter_terms(filters.cc)
+    to_terms = _filter_terms(filters.to) if recipients else ()
+    cc_terms = _filter_terms(filters.cc) if recipients else ()
 
     if subject_terms:
         rows = [
@@ -789,23 +883,36 @@ def _apply_pattern_filters(
             if _terms_match_any(from_terms, [_sender_haystack(row)])
         ]
     if rows and (to_terms or cc_terms):
-        recipients = backend.recipients([row["uid"] for row in rows])
-        if to_terms:
-            rows = [
-                row
-                for row in rows
-                if _terms_match_any(
-                    to_terms, _recipient_haystacks(recipients, row["uid"], "to")
-                )
-            ]
-        if rows and cc_terms:
-            rows = [
-                row
-                for row in rows
-                if _terms_match_any(
-                    cc_terms, _recipient_haystacks(recipients, row["uid"], "cc")
-                )
-            ]
+        rows = _filter_recipients(rows, to_terms, cc_terms, backend)
+    return rows
+
+
+def _filter_recipients(
+    rows: list[dict],
+    to_terms: Sequence[str],
+    cc_terms: Sequence[str],
+    backend: "MailBackend",
+) -> list[dict]:
+    """Keep the rows whose To and Cc match ``to_terms`` and ``cc_terms``."""
+    if not rows:
+        return []
+    recipients = backend.recipients([row["uid"] for row in rows])
+    if to_terms:
+        rows = [
+            row
+            for row in rows
+            if _terms_match_any(
+                to_terms, _recipient_haystacks(recipients, row["uid"], "to")
+            )
+        ]
+    if rows and cc_terms:
+        rows = [
+            row
+            for row in rows
+            if _terms_match_any(
+                cc_terms, _recipient_haystacks(recipients, row["uid"], "cc")
+            )
+        ]
     return rows
 
 
@@ -813,13 +920,22 @@ def _scan_bodies(
     backend: "MailBackend",
     rows: list[dict],
     terms: Sequence[str],
+    recipient_terms: tuple[Sequence[str], Sequence[str]] = ((), ()),
 ) -> tuple[list[dict], list[str], int]:
-    """Bounded ``--text`` scan: read the candidate rows in order and match."""
+    """Bounded ``--text`` scan: read the candidate rows in order and match.
+
+    With ``recipient_terms`` (``--to``, ``--cc`` where they open each item),
+    each row's recipients are checked first and its body is read only if they
+    match, so the item is opened once.
+    """
     matched: list[dict] = []
     warnings: list[str] = []
     messages_read = 0
+    load = _body_loader(backend)
     for row in rows:
-        body = backend.load_body(row)
+        if any(recipient_terms) and not _filter_recipients([row], *recipient_terms, backend):
+            continue
+        body = load(row)
         warnings.extend(body["warnings"])
         if _was_read(body):
             messages_read += 1
@@ -1085,7 +1201,7 @@ def _body_fields(
     backend: "MailBackend", row: dict
 ) -> tuple[str, dict, "BodyRow"]:
     """Return ``(snippet, body, loaded)`` for a message."""
-    loaded = backend.load_body(row)
+    loaded = _body_loader(backend)(row)
     body_text = loaded["body_text"] or ""
     snippet = output.make_snippet(body_text) if body_text else ""
     fields = {
@@ -1095,6 +1211,16 @@ def _body_fields(
         "truncated": _snippet_truncated(body_text),
     }
     return snippet, fields, loaded
+
+
+def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
+    """``load_body``, or the backend's body-only ``load_snippet`` when it has one.
+
+    ``search``/``new`` use only the body; ``show`` always calls ``load_body``
+    (attachments and headers; PRD 19).
+    """
+    loader = getattr(backend, "load_snippet", None)
+    return loader if callable(loader) else backend.load_body
 
 
 def _body_from_cached(row: dict) -> tuple[str, dict]:
