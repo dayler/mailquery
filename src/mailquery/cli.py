@@ -43,6 +43,7 @@ from mailquery.logging_setup import get_logger, setup_logging
 from mailquery.output import configure_streams, now_iso, write_json
 from mailquery.search import (
     Filters,
+    _store_excluded_warning,
     parse_relative_time,
     run_mailboxes,
     run_new,
@@ -55,6 +56,8 @@ COMMANDS = ("doctor", "mailboxes", "search", "new", "show")
 # Backend check that the resolution of the ``[scope]`` blocks depends on, by
 # backend name (PRD 12.8; annex A.7 and B.8).
 _RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
+#: Mail client named by the doctor text report, by backend name.
+_CLIENT_NAMES = {"apple_mail": "Apple Mail", "outlook": "Outlook"}
 
 _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
@@ -744,13 +747,60 @@ def _run_doctor(
     level, max_size_mb = _doctor_log_settings(home_path, log_level)
     logger = _best_effort_logger(home_path, level, max_size_mb)
     selected = None
+    run = _DoctorRun(home_path)
+    client = _CLIENT_NAMES["apple_mail"]
     try:
         selected = _make_backend(home_path, mail_root, accounts_db, backend)
-        checks = _collect_doctor_checks(home_path, selected)
+        client = _CLIENT_NAMES.get(str(getattr(selected, "name", "")), client)
+        _bind_command(selected, "doctor")
+        _bind_doctor_timeout(selected, run, json_output, logger, client)
+        checks = _collect_doctor_checks(home_path, selected, run)
     except Exception as exc:  # noqa: BLE001 - doctor never raises
         checks = [{"name": "doctor", "ok": False, "detail": error_detail(exc)}]
     finally:
         _close_backend(selected)
+    _emit_doctor_report(checks, json_output, logger, client)
+    return 0
+
+
+def _bind_doctor_timeout(
+    backend: Any, run: "_DoctorRun", json_output: bool, logger: Any, client: str
+) -> None:
+    """D-03 in ``doctor`` (Outlook): on a COM timeout, complete the report and exit 0.
+
+    The hook runs in the watchdog thread while the main thread is blocked in
+    COM: it completes the checks per PRD 12.8 (the running check with the
+    timeout text, its dependents ``not evaluated``), writes the report in the
+    ``checks[]`` order, flushes and ends the process with ``os._exit(0)``.
+    """
+    bind = getattr(backend, "bind_doctor_timeout", None)
+    if not callable(bind):
+        return
+
+    def finish(backend_checks: list[dict] | None, detail: str) -> None:
+        try:
+            checks = run.after_timeout(backend, backend_checks, detail)
+            _emit_doctor_report(checks, json_output, logger, client)
+        finally:
+            for stream in (sys.stdout, sys.stderr):
+                try:
+                    stream.flush()
+                except Exception:  # noqa: BLE001 - best effort before os._exit
+                    pass
+            for handler in logging.getLogger("mailquery").handlers:
+                try:
+                    handler.flush()
+                except Exception:  # noqa: BLE001 - best effort before os._exit
+                    pass
+            os._exit(0)
+
+    bind(finish)
+
+
+def _emit_doctor_report(
+    checks: list[dict], json_output: bool, logger: Any, client: str
+) -> None:
+    """Write the doctor payload (JSON or text report) and log the end line."""
     payload = {
         "ok": True,
         "command": "doctor",
@@ -761,7 +811,7 @@ def _run_doctor(
     if json_output:
         write_json(payload)
     else:
-        sys.stdout.write(_render_doctor_report(payload) + "\n")
+        sys.stdout.write(_render_doctor_report(payload, client=client) + "\n")
         sys.stdout.flush()
     if logger is not None:
         passed = sum(1 for check in checks if check.get("ok"))
@@ -770,10 +820,9 @@ def _run_doctor(
             passed,
             len(checks),
         )
-    return 0
 
 
-def _render_doctor_report(payload: dict) -> str:
+def _render_doctor_report(payload: dict, *, client: str = "Apple Mail") -> str:
     """Render the doctor payload as a human-readable report in help style."""
     checks = [check for check in payload.get("checks") or [] if isinstance(check, dict)]
     warnings = [str(warning) for warning in payload.get("warnings") or []]
@@ -812,7 +861,7 @@ def _render_doctor_report(payload: dict) -> str:
         [
             "",
             "Notes:",
-            "  This report is read-only with respect to Apple Mail.",
+            f"  This report is read-only with respect to {client}.",
             "  mailquery writes only its own logs and temporaries under ~/.mailquery.",
             "  Use `mailquery doctor --json` for the machine-readable payload.",
         ]
@@ -820,16 +869,63 @@ def _render_doctor_report(payload: dict) -> str:
     return "\n".join(lines)
 
 
-def _collect_doctor_checks(home_path: Path, backend: Any) -> list[dict]:
-    """Common checks plus ``backend.doctor_checks()``, in the order of PRD 12.8."""
-    checks: list[dict] = []
+class _DoctorRun:
+    """Progress of one ``doctor`` run, shared with the D-03 timeout hook.
 
-    def record(name: str, ok: bool, detail: str) -> None:
-        checks.append({"name": name, "ok": bool(ok), "detail": str(detail)})
+    ``checks`` holds the finished common checks by name, ``backend_checks`` the
+    backend's once they are done and ``config`` the parsed ``config.toml``.
+    """
+
+    def __init__(self, home_path: Path) -> None:
+        self.home_path = home_path
+        self.checks: dict[str, dict] = {}
+        self.backend_checks: list[dict] | None = None
+        self.config: Config | None = None
+        self.config_error: Exception | None = None
+
+    def record(self, name: str, ok: bool, detail: str) -> None:
+        self.checks[name] = {"name": name, "ok": bool(ok), "detail": str(detail)}
+
+    def ordered(self) -> list[dict]:
+        """Common checks around the backend's, in the order of PRD 12.8."""
+        result = [self.checks[name] for name in ("python", "home") if name in self.checks]
+        result.extend(self.backend_checks or [])
+        result.extend(
+            self.checks[name] for name in ("config", "state", "lock") if name in self.checks
+        )
+        return result
+
+    def after_timeout(
+        self, backend: Any, backend_checks: list[dict] | None, detail: str
+    ) -> list[dict]:
+        """The report after a COM timeout (PRD 12.8), without calling the mail client again.
+
+        With ``backend_checks`` the timeout hit a backend check: the ``config``
+        resolution then depends on a failed check and is ``not evaluated``.
+        Without them it hit the ``config`` resolution, which takes ``detail``.
+        """
+        if backend_checks is not None:
+            self.backend_checks = [dict(check) for check in backend_checks]
+            _record_config_check(self, backend)
+        else:
+            self.record("config", False, detail)
+        return self.ordered()
+
+
+def _collect_doctor_checks(
+    home_path: Path, backend: Any, run: _DoctorRun | None = None
+) -> list[dict]:
+    """Common checks plus ``backend.doctor_checks()``, in the order of PRD 12.8.
+
+    Evaluation order (D-03): the checks that never call the mail client first
+    (``python``, ``home``, ``config`` syntax, ``state``, ``lock``), then the
+    backend checks and last the ``config`` resolution.
+    """
+    run = run if run is not None else _DoctorRun(home_path)
 
     # python -----------------------------------------------------------------
     version_text = ".".join(str(part) for part in sys.version_info[:3])
-    record("python", sys.version_info >= (3, 11), version_text)
+    run.record("python", sys.version_info >= (3, 11), version_text)
 
     # home -------------------------------------------------------------------
     try:
@@ -855,30 +951,88 @@ def _collect_doctor_checks(home_path: Path, backend: Any) -> list[dict]:
             except OSError as exc:
                 problems.append(f"not writable: {exc.strerror or exc}")
         if problems:
-            record("home", False, "; ".join(problems))
+            run.record("home", False, "; ".join(problems))
         elif windows:
-            record("home", True, f"{home_path} (writable)")
+            run.record("home", True, f"{home_path} (writable)")
         else:
-            record("home", True, f"{home_path} (mode 0700)")
+            run.record("home", True, f"{home_path} (mode 0700)")
     except OSError as exc:
-        record("home", False, f"cannot create {home_path}: {exc.strerror or exc}")
+        run.record("home", False, f"cannot create {home_path}: {exc.strerror or exc}")
+
+    # config syntax (always validated; reported by the config check) -----------
+    try:
+        run.config = load_config(home_path)
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        run.config_error = exc
+
+    # state ------------------------------------------------------------------
+    try:
+        state = StateStore(home_path, backend.check_state_uid).load()
+        if state.cursor is None:
+            lookback = run.config.new.lookback if run.config is not None else DEFAULT_LOOKBACK
+            run.record(
+                "state",
+                True,
+                "no state yet; the next new run is a first run and emits the messages "
+                f"received in the last {lookback} before the newest message",
+            )
+        else:
+            run.record(
+                "state",
+                True,
+                "cursor last_date_received={} last_uid={}".format(
+                    state.cursor.last_date_received,
+                    state.cursor.last_uid,
+                ),
+            )
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        run.record("state", False, error_detail(exc))
+
+    # lock -------------------------------------------------------------------
+    lock_path = home_path / "locks" / _LOCK_FILENAME
+    try:
+        lock = RunLock(home_path)
+        lock.acquire()
+        try:
+            run.record("lock", True, f"available: {lock_path}")
+        finally:
+            lock.release()
+    except MailqueryError as exc:
+        if exc.code == "E_LOCKED":
+            run.record("lock", False, f"held by another mailquery process: {lock_path}")
+        else:
+            run.record("lock", False, error_detail(exc))
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        run.record("lock", False, error_detail(exc))
 
     # backend checks (store/pywin32, ..., accounts_db/object_model_guard) ------
     try:
         backend_checks = [dict(check) for check in backend.doctor_checks()]
     except Exception as exc:  # noqa: BLE001 - diagnostics only
         backend_checks = [{"name": "backend", "ok": False, "detail": error_detail(exc)}]
-    checks.extend(backend_checks)
-    by_name = {str(check.get("name")): check for check in backend_checks}
+    run.backend_checks = backend_checks
 
-    # config -----------------------------------------------------------------
-    # The syntax is always validated; the resolution of the blocks depends on a
-    # check of the backend (annex A.7 / B.8).
+    # config resolution --------------------------------------------------------
+    _record_config_check(run, backend)
+    return run.ordered()
+
+
+def _record_config_check(run: _DoctorRun, backend: Any) -> None:
+    """``config``: syntax plus the resolution of the ``[scope]`` blocks (PRD 12.8, RF-25).
+
+    The resolution depends on a check of the backend (annex A.7 / B.8); when
+    that check failed, the mail client is not called. A declared account that
+    resolves to an excluded store (Outlook) adds ``W_STORE_EXCLUDED`` to the
+    detail, which keeps ``ok=true`` (PRD 15.3).
+    """
+    by_name = {str(check.get("name")): check for check in run.backend_checks or []}
     dependency = _RESOLUTION_DEPENDENCY.get(str(getattr(backend, "name", "")))
     dependency_ok = dependency is None or bool(by_name.get(dependency, {}).get("ok"))
     try:
-        config = load_config(home_path)
-        config_path = home_path / "config.toml"
+        if run.config_error is not None:
+            raise run.config_error
+        config = run.config if run.config is not None else load_config(run.home_path)
+        config_path = run.home_path / "config.toml"
         if not config.has_scopes:
             if config_path.is_file():
                 prefix = "config.toml exists but declares no [scope.*] blocks"
@@ -912,16 +1066,19 @@ def _collect_doctor_checks(home_path: Path, backend: Any) -> list[dict]:
                     f"{prefix}; 0 account block(s) declared; available accounts: unknown "
                     "(Accounts4.sqlite unavailable)"
                 )
-            record("config", True, detail)
+            run.record("config", True, detail)
         else:
             problems = []
             lines: list[str] = []
+            excluded: list[dict] = []
             if not dependency_ok:
                 problems.append(f"not evaluated: {dependency} failed")
             else:
                 for entry in config.scopes:
                     try:
-                        resolved = resolve_scope(replace(config, scopes=(entry,)), backend)
+                        resolved = resolve_scope(
+                            replace(config, scopes=(entry,)), backend, excluded=excluded
+                        )
                     except MailqueryError as exc:
                         hint = f" (hint: {exc.hint})" if exc.hint else ""
                         problems.append(f"{entry.key}: {exc.code}: {exc.message}{hint}")
@@ -936,60 +1093,17 @@ def _collect_doctor_checks(home_path: Path, backend: Any) -> list[dict]:
                             if not mailbox["is_inbox"]
                         ]
                         lines.append(
-                            f"{entry.key} \u2192 {scope.account_label} ({scope.account_uuid}): "
+                            f"{entry.key} → {scope.account_label} ({scope.account_uuid}): "
                             + ", ".join(["INBOX"] + folders)
                         )
+            # W_STORE_EXCLUDED of each declared excluded store, once (PRD 15.3).
+            lines.extend(_store_excluded_warning(entry) for entry in excluded)
             if problems:
-                record("config", False, "; ".join(problems))
+                run.record("config", False, "; ".join(problems))
             else:
-                record("config", True, "; ".join(lines))
+                run.record("config", True, "; ".join(lines))
     except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("config", False, error_detail(exc))
-
-    # state ------------------------------------------------------------------
-    try:
-        state = StateStore(home_path, backend.check_state_uid).load()
-        if state.cursor is None:
-            try:
-                lookback = load_config(home_path).new.lookback
-            except Exception:  # noqa: BLE001 - config problems are reported by `config`
-                lookback = DEFAULT_LOOKBACK
-            record(
-                "state",
-                True,
-                "no state yet; the next new run is a first run and emits the messages "
-                f"received in the last {lookback} before the newest message",
-            )
-        else:
-            record(
-                "state",
-                True,
-                "cursor last_date_received={} last_uid={}".format(
-                    state.cursor.last_date_received,
-                    state.cursor.last_uid,
-                ),
-            )
-    except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("state", False, error_detail(exc))
-
-    # lock -------------------------------------------------------------------
-    lock_path = home_path / "locks" / _LOCK_FILENAME
-    try:
-        lock = RunLock(home_path)
-        lock.acquire()
-        try:
-            record("lock", True, f"available: {lock_path}")
-        finally:
-            lock.release()
-    except MailqueryError as exc:
-        if exc.code == "E_LOCKED":
-            record("lock", False, f"held by another mailquery process: {lock_path}")
-        else:
-            record("lock", False, error_detail(exc))
-    except Exception as exc:  # noqa: BLE001 - diagnostics only
-        record("lock", False, error_detail(exc))
-
-    return checks
+        run.record("config", False, error_detail(exc))
 
 
 # --------------------------------------------------------------------------- #

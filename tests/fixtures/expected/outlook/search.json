@@ -129,7 +129,7 @@
   "scan": {
     "mode": "metadata",
     "candidates": 3,
-    "messages_read": 2
+    "messages_read": 3
   },
   "warnings": [
     "W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox",
