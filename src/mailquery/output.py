@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from html.parser import HTMLParser
 
 # Fixed product values (PRD 15.6).
@@ -154,10 +154,16 @@ def make_snippet(body_text: str, max_chars: int = SNIPPET_CHARS) -> str:
     return text[: max_chars - 1].rstrip() + "\u2026"
 
 
+#: Zone of :func:`iso_timestamp`; ``None`` is the system zone. Test seam only: on
+#: Windows there is no ``TZ``/``tzset`` to change it (plan 7.5).
+LOCAL_ZONE: tzinfo | None = None
+
+
 def iso_timestamp(epoch_seconds: float | int | None) -> str | None:
     """Convert Unix seconds to local ISO 8601 (``2026-11-01T22:54:09-04:00``).
 
     ``None``, values <= 0 and values the platform cannot represent give ``None``.
+    The local zone is :data:`LOCAL_ZONE` (the system zone by default).
     """
     if epoch_seconds is None:
         return None
@@ -170,7 +176,7 @@ def iso_timestamp(epoch_seconds: float | int | None) -> str | None:
     try:
         # Through an aware UTC value: a naive local conversion fails on Windows
         # for dates whose local time falls before 1970 (epoch 1 with UTC-4).
-        moment = datetime.fromtimestamp(value, tz=timezone.utc).astimezone()
+        moment = datetime.fromtimestamp(value, tz=timezone.utc).astimezone(LOCAL_ZONE)
         return moment.isoformat(timespec="seconds")
     except (OverflowError, OSError, ValueError):
         # Unrepresentable on this platform (for example 1e20): null (PRD 17).
