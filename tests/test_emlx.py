@@ -4,7 +4,7 @@ Everything runs against the synthetic fixture built by
 ``tests/fixtures/make_fixtures.py``; the real ``~/Library/Mail`` store is never
 touched. ``resolve_path`` is exercised through a minimal fake store, so this
 module does not depend on ``mailquery.store``; one canary test uses the real
-store and skips while it is still a stub.
+store.
 """
 
 from __future__ import annotations
@@ -314,7 +314,7 @@ class ParseEmlxTests(EmlxTestCase):
         self.assertEqual(result.body_text, "")
         self.assertEqual(result.headers, {name: "" for name in HEADER_NAMES})
         self.assertEqual(len(result.warnings), 1)
-        self.assertTrue(result.warnings[0].startswith("W_EMLX_UNREADABLE:"))
+        self.assertTrue(result.warnings[0].startswith("W_BODY_UNREADABLE:"))
 
     def test_parse_partial_flag_from_file_name(self) -> None:
         result = parse_emlx(self.tmp / "missing.partial.emlx")
@@ -419,7 +419,7 @@ class ParseEmlxTests(EmlxTestCase):
         self.assertEqual(result.body_text, "")
         self.assertTrue(result.warnings)
         self.assertTrue(
-            all(warning.startswith("W_EMLX_UNREADABLE:") for warning in result.warnings)
+            all(warning.startswith("W_BODY_UNREADABLE:") for warning in result.warnings)
         )
 
     def test_parse_smime_signed_is_unreadable(self) -> None:
@@ -447,7 +447,7 @@ class ParseEmlxTests(EmlxTestCase):
         self.assertFalse(result.readable)
         self.assertEqual(result.body_text, "")
         self.assertTrue(result.warnings)
-        self.assertTrue(result.warnings[0].startswith("W_EMLX_UNREADABLE:"))
+        self.assertTrue(result.warnings[0].startswith("W_BODY_UNREADABLE:"))
 
     def test_parse_does_not_write_the_file(self) -> None:
         path = self.resolved(830)
@@ -494,8 +494,7 @@ class HtmlToTextTests(unittest.TestCase):
 class RealStoreIntegrationTests(unittest.TestCase):
     """Canary: ``resolve_path`` against the real ``EnvelopeStore``.
 
-    Skips while ``store.py`` is still a stub (implemented in parallel by
-    store-dev) and starts running automatically once it exists.
+    Runs on every OS (no skips, plan D-07).
     """
 
     @classmethod
@@ -504,23 +503,15 @@ class RealStoreIntegrationTests(unittest.TestCase):
 
         cls.fx = build_store()
         cls._tmpdir = tempfile.TemporaryDirectory(prefix="mailquery-test-emlx-store-")
-        try:
-            cls.store = store_module.open_store(
-                mail_root=cls.fx.mail_root, tmp_root=Path(cls._tmpdir.name)
-            )
-        except NotImplementedError:
-            cls.store = None
+        cls.store = store_module.open_store(
+            mail_root=cls.fx.mail_root, tmp_root=Path(cls._tmpdir.name)
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
-        if getattr(cls, "store", None) is not None:
-            cls.store.close()
+        cls.store.close()
         cls._tmpdir.cleanup()
         cls.fx.cleanup()
-
-    def setUp(self) -> None:
-        if self.store is None:
-            self.skipTest("store.py is not implemented yet (parallel work)")
 
     def test_resolve_path_uses_real_store_metadata(self) -> None:
         inbox = next(
@@ -543,8 +534,7 @@ class RealStoreIntegrationTests(unittest.TestCase):
             for mailbox in self.store.mailboxes
             if mailbox.rowid == MAILBOX_ICLOUD_FACTURAS
         ]
-        if not mailboxes:  # pragma: no cover - fixture always has Facturas
-            self.skipTest("Facturas mailbox not exposed by the store")
+        self.assertTrue(mailboxes, "fixture always has Facturas")
         path = resolve_path(self.store, mailboxes[0], 79658)
         self.assertIsNotNone(path)
         self.assertTrue(path.name.endswith(".partial.emlx"))

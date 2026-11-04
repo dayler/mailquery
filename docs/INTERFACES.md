@@ -64,8 +64,11 @@ Reglas globales:
   python3 -m unittest tests.test_store -v          # un módulo
   ```
 
-- **No ejecutar comandos git** (ramas, commits, merges, push): los gestiona el
-  Lead. Tampoco ejecutar comandos que escriban en `~/.mailquery` real ni en
+- **Git (D-01):** el orquestador crea la rama de cada fase y hace los commits;
+  los subagentes que corren en paralelo trabajan en su propio worktree y el
+  orquestador integra su trabajo en la rama de la fase. Los merges a `develop`
+  y los tags los hace o autoriza el dueño tras la revisión del planificador.
+- No ejecutar comandos que escriban en `~/.mailquery` real ni en
   `~/Library/Mail`.
 - Cada persona escriba **solo** los archivos de su tarea. Si necesita cambiar
   una firma pública o el JSON, avisar al Lead antes de tocarla.
@@ -160,7 +163,7 @@ plano preferente, HTML→texto (`html_to_text`), nombres de adjuntos; corrupto �
 `LastRun(command, at)`, `AppState(schema=1, updated_at="", last_run=None,
 cursor=None, emitted_uids=())`.
 `StateStore(home)` con `.path`, `.load()`, `.save(state)`, `.record_new(state,
-emitted, command="new")`; `RunLock(home)` context manager (`acquire/release`).
+emitted, lookback_seconds, command="new")`; `RunLock(home)` context manager (`acquire/release`).
 `state.json` 0600, escritura `tmp + fsync + os.replace`; corrupción →
 `E_STATE_CORRUPT`; anillo máximo 1.000 uids; sin PII.
 
@@ -180,8 +183,9 @@ min/h/d, 1 min–1 día (para `[new].lookback`).
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
 `wildcard_to_regex(pattern)`, `matches(pattern, text)`,
 `run_search(store, config, labels, filters)`,
-`run_new(store, config, labels, state_store, *, peek=False, limit=None)`,
-`run_show(store, labels, uid)`,
+`run_new(store, config, labels, state_store, *, peek=False, limit=None, clock=None)`,
+`parse_uid(raw)` (valida el uid de `show`; `cli` la llama antes del home),
+`run_show(store, config, labels, uid)`,
 `run_mailboxes(store, config, labels)`.
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
 añade `cli`). Semántica de fechas: `--since` incluye, `--until` excluye.

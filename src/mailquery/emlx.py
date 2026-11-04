@@ -27,7 +27,7 @@ HEADER_NAMES: tuple[str, ...] = ("From", "To", "Cc", "Subject", "Date", "Message
 #: Warning codes shared with the CLI JSON contract (INTERFACES section 4).
 W_EMLX_MISSING = "W_EMLX_MISSING"
 W_EMLX_CORRUPT = "W_EMLX_CORRUPT"
-W_EMLX_UNREADABLE = "W_EMLX_UNREADABLE"
+W_BODY_UNREADABLE = "W_BODY_UNREADABLE"
 W_HTML_NO_TEXT = "W_HTML_NO_TEXT"
 
 #: Suffixes tried by the O(1) formula, in priority order.
@@ -142,7 +142,7 @@ def parse_emlx(path: Path) -> EmlxMessage:
         return _unparsed(
             path,
             partial,
-            (_warning(W_EMLX_UNREADABLE, f"cannot read .emlx file ({detail})"),),
+            (_warning(W_BODY_UNREADABLE, f"cannot read .emlx file ({detail})"),),
             available=False,
         )
 
@@ -179,7 +179,7 @@ def parse_emlx(path: Path) -> EmlxMessage:
     if smime is not None:
         _add_warning(
             warnings,
-            W_EMLX_UNREADABLE,
+            W_BODY_UNREADABLE,
             f"S/MIME {smime} content is not supported",
         )
         return EmlxMessage(
@@ -460,14 +460,14 @@ def _smime_kind(message: Message) -> str | None:
         return "encrypted"
     if content_type == "multipart/signed":
         return "signed"
-    if "pkcs7" in content_type or "pkcs7" in raw_content_type:
-        return "signed"
     try:
         smime_type = message.get_param("smime-type")
     except Exception:  # pragma: no cover - corrupt Content-Type parameters
         smime_type = None
     if smime_type:
         return "encrypted" if "enveloped" in str(smime_type).lower() else "signed"
+    if "pkcs7" in content_type or "pkcs7" in raw_content_type:
+        return "signed"
     return None
 
 

@@ -114,5 +114,6 @@
       "included": false
     }
   ],
+  "excluded_stores": [],
   "warnings": []
 }

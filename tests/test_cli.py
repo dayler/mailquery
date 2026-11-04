@@ -10,11 +10,17 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import platform
+import subprocess
+import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import mailquery
 from mailquery import cli as cli_mod
 from mailquery.errors import MailqueryError
 from mailquery.search import Filters
@@ -24,6 +30,7 @@ from tests.fixtures.make_fixtures import (
     ICLOUD_LABEL,
     build_store,
     write_config,
+    write_state,
 )
 
 _DEFAULT = object()
@@ -35,6 +42,7 @@ FORBIDDEN_FLAGS = (
     "--verbose",
     "--no-color",
     "--timeout",
+    "--backend",
 )
 
 
@@ -105,10 +113,14 @@ class _CliTestCase(unittest.TestCase):
         return code, stdout.getvalue(), stderr.getvalue()
 
     def json_object(self, stdout: str) -> dict:
-        lines = stdout.splitlines()
-        self.assertEqual(len(lines), 1, f"expected one stdout line, got {lines!r}")
-        self.assertFalse(lines[0].startswith(" "), "JSON object must be compact")
-        return json.loads(lines[0])
+        self.assertTrue(stdout.endswith("}\n"), f"expected one JSON object + LF: {stdout!r}")
+        parsed = json.loads(stdout)
+        self.assertEqual(
+            stdout,
+            json.dumps(parsed, ensure_ascii=False, indent=2) + "\n",
+            "JSON object must be formatted (2-space indent)",
+        )
+        return parsed
 
     def assert_error(
         self,
@@ -161,11 +173,14 @@ class HelpContractTests(_CliTestCase):
                 len(line), self.HELP_MAX_WIDTH, f"help line is too long: {line!r}"
             )
 
-    def test_global_help_is_formatted_text_and_exits_zero(self) -> None:
+    def test_ut_cli_06_01_global_help_is_formatted_text_and_exits_zero(self) -> None:
+        """UT-CLI-06.01: root --help has the PRD 12.7 sections, both clients, <= 100 columns, no ANSI."""
         unused_home = self.fx.root / "unused-home"
         code, stdout, stderr = self.run_cli(["--help"], home=unused_home)
         self.assertEqual(code, 0)
         self.assertIn("usage: mailquery", stdout)
+        self.assertIn("Apple Mail", stdout)
+        self.assertIn("Outlook", stdout)
         for section in (
             "Commands:",
             "Global options:",
@@ -184,7 +199,8 @@ class HelpContractTests(_CliTestCase):
         self.assertEqual(stderr, "")
         self.assertFalse(unused_home.exists(), "--help must not touch the filesystem")
 
-    def test_subcommand_help_is_formatted_for_every_command(self) -> None:
+    def test_ut_cli_06_02_subcommand_help_is_formatted_for_every_command(self) -> None:
+        """UT-CLI-06.02: <command> --help for the 5 commands has Options, Examples and Notes."""
         expected_flags = {
             "doctor": ("--json",),
             "mailboxes": (),
@@ -212,10 +228,95 @@ class HelpContractTests(_CliTestCase):
                 self.assertIn(f"usage: mailquery {command}", stdout)
                 self.assertIn("Options:", stdout)
                 self.assertIn("Examples:", stdout)
+                self.assertIn("Notes:", stdout)
                 for flag in flags:
                     self.assertIn(flag, stdout)
                 self.assert_human_readable(stdout)
                 self.assertEqual(stderr, "")
+
+    def help_text(self, command: str | None) -> str:
+        argv = ["--help"] if command is None else [command, "--help"]
+        code, stdout, stderr = self.run_cli(argv)
+        self.assertEqual((code, stderr), (0, ""))
+        return stdout
+
+    def test_ut_cli_06_03_root_help_lists_the_exit_codes_including_6(self) -> None:
+        """UT-CLI-06.03: the root help lists exit codes 0, 2, 3, 4, 5 and 6."""
+        stdout = self.help_text(None)
+        exit_codes = stdout[stdout.index("Exit codes:") :]
+        for fragment in (
+            "0 ok",
+            "2 usage or config error",
+            "3 environment error",
+            "4 rejected query",
+            "5 busy or transient error",
+            "6 mail client not running",
+        ):
+            self.assertIn(fragment, exit_codes)
+        self.assertIn("this help,", stdout)
+        self.assertIn("UTF-8", stdout)
+
+    def test_ut_cli_06_04_new_help_describes_the_first_run(self) -> None:
+        """UT-CLI-06.04: the help of ``new`` describes the first run of PRD 12.3 (no "baseline")."""
+        stdout = self.help_text("new")
+        flat = " ".join(stdout.split())
+        for fragment in (
+            "first run",
+            "W_FIRST_RUN",
+            "[new].lookback",
+            "newest message",
+            "oldest first",
+            "--limit",
+            "--peek",
+        ):
+            self.assertIn(fragment, flat)
+        for command in (None, "doctor", "mailboxes", "search", "new", "show"):
+            with self.subTest(command=command):
+                self.assertNotIn("baseline", self.help_text(command).lower())
+
+    def test_ut_cli_06_05_search_help_describes_terms_and_text_narrowing(self) -> None:
+        """UT-CLI-06.05: the help of ``search`` describes PRD 12.2 terms and the RF-17 narrowing."""
+        stdout = self.help_text("search")
+        flat = " ".join(stdout.split())
+        for fragment in (
+            "--subject: words separated by spaces are AND",
+            "--text, --from, --to and --cc: the whole value is one pattern",
+            "Repeating a flag is AND",
+            "--text needs a narrowing filter",
+            "E_UNBOUNDED_SCAN",
+            "E_SCAN_TOO_LARGE",
+            "does not narrow",
+            "--to and --cc narrow on macOS but not on Windows",
+        ):
+            self.assertIn(fragment, flat)
+        self.assertNotIn("split on spaces into AND terms", flat)
+
+    def test_ut_cli_06_06_every_help_example_parses(self) -> None:
+        """UT-CLI-06.06: each example of the 6 helps passes ``parse_args``."""
+        import re
+        import shlex
+
+        parser = cli_mod.build_parser()
+        seen = 0
+        for command in (None, "doctor", "mailboxes", "search", "new", "show"):
+            stdout = self.help_text(command)
+            in_examples = False
+            for line in stdout.splitlines():
+                if line.rstrip() == "Examples:":
+                    in_examples = True
+                    continue
+                if not in_examples:
+                    continue
+                if not line.strip():
+                    in_examples = False
+                    continue
+                example = re.split(r"\s{2,}", line.strip())[0]
+                with self.subTest(command=command, example=example):
+                    argv = shlex.split(example)
+                    self.assertEqual(argv[0], "mailquery")
+                    parser.parse_args(argv[1:])
+                    seen += 1
+        self.assertGreaterEqual(seen, 15)
 
     def test_subcommand_help_has_specific_examples(self) -> None:
         examples = {
@@ -255,7 +356,8 @@ class HelpContractTests(_CliTestCase):
     def test_missing_command_returns_usage_json(self) -> None:
         self.assert_error(2, self.run_cli([]), "E_USAGE")
 
-    def test_all_forbidden_flags_are_rejected(self) -> None:
+    def test_ut_cli_04_01_all_forbidden_flags_are_rejected(self) -> None:
+        """UT-CLI-04.01: each nonexistent option is E_USAGE, exit 2."""
         for flag in FORBIDDEN_FLAGS:
             with self.subTest(flag=flag):
                 exit_code, stdout, stderr = self.run_cli(["search", flag, "value"])
@@ -264,9 +366,50 @@ class HelpContractTests(_CliTestCase):
                 self.assertEqual(payload["error"]["code"], "E_USAGE")
                 self.assertIn("E_USAGE", stderr)
 
-    def test_show_requires_integer_uid(self) -> None:
+    def test_ut_cli_07_01_show_requires_an_integer_uid(self) -> None:
+        """UT-CLI-07.01: ``show abc`` is E_USAGE "invalid uid ...: expected an integer"."""
         self.assert_error(2, self.run_cli(["show"]), "E_USAGE")
-        self.assert_error(2, self.run_cli(["show", "not-a-uid"]), "E_USAGE")
+        payload = self.assert_error(
+            2, self.run_cli(["show", "abc"]), "E_USAGE", "show"
+        )
+        self.assertIn("invalid uid", payload["error"]["message"])
+        self.assertIn("expected an integer", payload["error"]["message"])
+        self.assertIn("'abc'", payload["error"]["message"])
+
+    def test_ut_cli_07_02_invalid_uid_is_rejected_before_home_config_and_store(self) -> None:
+        """UT-CLI-07.02: a bad uid creates no home, reads no config and opens no store."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-uid-") as tmp:
+            missing_home = Path(tmp) / "home"
+            missing_root = Path(tmp) / "Mail"
+            self.assert_error(
+                2,
+                self.run_cli(
+                    ["show", "abc"], home=missing_home, mail_root=missing_root
+                ),
+                "E_USAGE",
+                "show",
+            )
+            self.assertFalse(missing_home.exists())
+
+            # An existing home with a broken config: still E_USAGE, nothing created.
+            broken_home = Path(tmp) / "broken-home"
+            write_config(broken_home, "[search]\nnot_a_key = 1\n")
+            self.assert_error(
+                2,
+                self.run_cli(["show", "abc"], home=broken_home, mail_root=missing_root),
+                "E_USAGE",
+                "show",
+            )
+            self.assertEqual(
+                sorted(path.name for path in broken_home.iterdir()), ["config.toml"]
+            )
+
+    def test_ut_cli_07_03_uid_zero_is_an_integer_that_is_not_found(self) -> None:
+        """UT-CLI-07.03: ``show 0`` is an integer: E_USAGE "was not found"."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        payload = self.assert_error(2, self.run_cli(["show", "0"]), "E_USAGE", "show")
+        self.assertIn("was not found", payload["error"]["message"])
+        self.assertNotIn("invalid uid", payload["error"]["message"])
 
     def test_invalid_log_level_returns_usage_json(self) -> None:
         payload = self.assert_error(
@@ -275,6 +418,158 @@ class HelpContractTests(_CliTestCase):
             "E_USAGE",
         )
         self.assertIn("invalid choice", payload["error"]["message"])
+
+
+class VersionTests(_CliTestCase):
+    """UT-CLI-01..03: global ``-v``/``--version`` (RF-31, PRD 12.9)."""
+
+    def expected_line(self, backend: str, platform_text: str) -> str:
+        return (
+            f"mailquery {mailquery.__version__} (backend {backend}; "
+            f"Python {platform.python_version()}; {platform_text})\n"
+        )
+
+    def patched(
+        self,
+        *,
+        plat: str,
+        system="Linux",
+        release="6.1",
+        version="1",
+        mac="",
+        machine="x86_64",
+    ) -> None:
+        patchers = [
+            mock.patch.object(sys, "platform", plat),
+            mock.patch("platform.system", return_value=system),
+            mock.patch("platform.release", return_value=release),
+            mock.patch("platform.version", return_value=version),
+            mock.patch("platform.machine", return_value=machine),
+            mock.patch("platform.mac_ver", return_value=(mac, ("", "", ""), machine)),
+        ]
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def real_platform_text(self) -> str:
+        if sys.platform == "win32":
+            return f"Windows {platform.version()} {platform.machine()}"
+        if sys.platform == "darwin":
+            return f"macOS {platform.mac_ver()[0]} {platform.machine()}"
+        return f"{platform.system()} {platform.release()} {platform.machine()}"
+
+    def test_ut_cli_01_01_version_flag_prints_exact_line(self) -> None:
+        """UT-CLI-01.01: --version prints the exact line; exit 0."""
+        backend = "outlook" if sys.platform == "win32" else "apple_mail"
+        code, stdout, stderr = self.run_cli(["--version"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, self.expected_line(backend, self.real_platform_text()))
+        self.assertEqual(stderr, "")
+
+    def test_ut_cli_01_02_short_flag_prints_same_line(self) -> None:
+        """UT-CLI-01.02: -v prints the same line as --version."""
+        short = self.run_cli(["-v"])
+        self.assertEqual(short[0], 0)
+        self.assertEqual(short, self.run_cli(["--version"]))
+
+    def test_ut_cli_01_03_macos_platform_text(self) -> None:
+        """UT-CLI-01.03: patched macOS platform renders macOS <ver> <arch>."""
+        self.patched(plat="darwin", system="Darwin", mac="14.5", machine="arm64")
+        code, stdout, _ = self.run_cli(["--version"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, self.expected_line("apple_mail", "macOS 14.5 arm64"))
+
+    def test_ut_cli_01_04_windows_platform_text(self) -> None:
+        """UT-CLI-01.04: patched Windows platform renders Windows <ver> <arch>."""
+        self.patched(
+            plat="win32", system="Windows", release="11", version="10.0.26200", machine="AMD64"
+        )
+        code, stdout, _ = self.run_cli(["--version"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, self.expected_line("outlook", "Windows 10.0.26200 AMD64"))
+
+    def test_ut_cli_01_05_other_platform_text(self) -> None:
+        """UT-CLI-01.05: other platforms render <system> <release> <arch>."""
+        self.patched(plat="linux", system="Linux", release="6.1.0", machine="x86_64")
+        code, stdout, _ = self.run_cli(["--version"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, self.expected_line("apple_mail", "Linux 6.1.0 x86_64"))
+
+    def test_ut_cli_01_06_backend_follows_sys_platform(self) -> None:
+        """UT-CLI-01.06: win32 -> outlook; darwin and linux -> apple_mail."""
+        for plat, backend in (
+            ("win32", "outlook"),
+            ("darwin", "apple_mail"),
+            ("linux", "apple_mail"),
+        ):
+            with self.subTest(plat=plat):
+                with mock.patch.object(sys, "platform", plat):
+                    _, stdout, _ = self.run_cli(["--version"])
+                self.assertIn(f"(backend {backend};", stdout)
+
+    def test_ut_cli_02_01_missing_home_is_not_created(self) -> None:
+        """UT-CLI-02.01: a missing home is not created."""
+        home = self.fx.root / "no-such-home"
+        code, stdout, _ = self.run_cli(["--version"], home=home)
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.startswith("mailquery "))
+        self.assertFalse(home.exists())
+
+    def test_ut_cli_02_02_broken_config_is_not_read(self) -> None:
+        """UT-CLI-02.02: a broken config.toml is not read; exit 0."""
+        write_config(self.fx.home, "this is = = not toml\n")
+        with mock.patch.object(
+            cli_mod, "load_config", side_effect=AssertionError("config read")
+        ):
+            code, stdout, stderr = self.run_cli(["--version"])
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.startswith("mailquery "))
+        self.assertEqual(stderr, "")
+
+    def test_ut_cli_02_03_no_log_and_no_lock(self) -> None:
+        """UT-CLI-02.03: no log is written and the lock is not taken."""
+        before = sorted(str(p) for p in self.fx.home.rglob("*"))
+        with mock.patch.object(
+            cli_mod, "RunLock", side_effect=AssertionError("lock")
+        ), mock.patch.object(cli_mod, "setup_logging", side_effect=AssertionError("log")):
+            code, _, _ = self.run_cli(["-v"])
+        self.assertEqual(code, 0)
+        self.assertEqual(before, sorted(str(p) for p in self.fx.home.rglob("*")))
+        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
+
+    def test_ut_cli_02_04_win32_without_pywin32_does_not_import_win32com(self) -> None:
+        """UT-CLI-02.04: patched win32 without pywin32/Outlook works; win32com not imported."""
+        self.patched(
+            plat="win32", system="Windows", release="11", version="10.0.26200", machine="AMD64"
+        )
+        blocked = {"win32com": None, "win32com.client": None, "pythoncom": None}
+        with mock.patch.dict(sys.modules, blocked):
+            code, stdout, _ = self.run_cli(["--version"])
+            self.assertEqual(code, 0)
+            self.assertIn("(backend outlook;", stdout)
+            # None entries block imports: they must still be untouched (never imported).
+            self.assertIsNone(sys.modules["win32com"])
+
+    def test_ut_cli_03_01_version_after_subcommand_is_usage_error(self) -> None:
+        """UT-CLI-03.01: search -v is E_USAGE, exit 2."""
+        self.assert_error(2, self.run_cli(["search", "-v"]), "E_USAGE", "search")
+
+    def test_ut_cli_03_02_log_level_with_version_writes_no_log(self) -> None:
+        """UT-CLI-03.02: --log-level debug -v shows the version and writes no log."""
+        code, stdout, _ = self.run_cli(["--log-level", "debug", "-v"])
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.startswith("mailquery "))
+        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
+
+    def test_ut_cli_03_03_first_of_version_and_help_wins(self) -> None:
+        """UT-CLI-03.03: -v -h prints the version; -h -v prints help; both exit 0."""
+        code, stdout, _ = self.run_cli(["-v", "-h"])
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.startswith("mailquery "))
+        self.assertNotIn("usage:", stdout)
+        code, stdout, _ = self.run_cli(["-h", "-v"])
+        self.assertEqual(code, 0)
+        self.assertIn("usage: mailquery", stdout)
 
 
 # --------------------------------------------------------------------------- #
@@ -403,13 +698,13 @@ class SuccessContractTests(_CliTestCase):
         with mock.patch.object(cli_mod, "_execute", return_value=payload):
             exit_code, stdout, stderr = self.run_cli(["mailboxes"])
         self.assertEqual(exit_code, 0)
-        line = stdout.strip()
-        parsed = json.loads(line)
+        parsed = json.loads(stdout)
         self.assertEqual(
-            line,
-            json.dumps(parsed, ensure_ascii=False, separators=(",", ":")),
+            stdout,
+            json.dumps(parsed, ensure_ascii=False, indent=2) + "\n",
         )
-        self.assertEqual(stdout.count("\n"), 1)
+        self.assertGreater(stdout.count("\n"), 1)
+        self.assertFalse(stdout.endswith("\n\n"))
         self.assertEqual(stderr, "")
 
     def test_warnings_are_preserved(self) -> None:
@@ -424,7 +719,8 @@ class SuccessContractTests(_CliTestCase):
         rendered = self.json_object(stdout)
         self.assertEqual(rendered["warnings"], ["W_NO_ACCOUNTS: no accounts declared in config.toml"])
 
-    def test_debug_log_goes_to_file_not_stdout(self) -> None:
+    def test_ut_log_03_04_debug_log_goes_to_file_not_stdout_with_end_event(self) -> None:
+        """UT-LOG-03.04: event=end with exit_code and counts; the log never reaches stdout."""
         payload = self.success_payload()
         with mock.patch.object(cli_mod, "_execute", return_value=payload):
             exit_code, stdout, stderr = self.run_cli(["--log-level", "debug", "search"])
@@ -436,7 +732,7 @@ class SuccessContractTests(_CliTestCase):
         self.assertTrue(log_path.is_file())
         log_text = log_path.read_text(encoding="utf-8")
         self.assertIn("event=start command=search", log_text)
-        self.assertIn("event=end command=search exit_code=0", log_text)
+        self.assertIn("event=end command=search exit_code=0 count=0 truncated=False", log_text)
 
 
 # --------------------------------------------------------------------------- #
@@ -445,12 +741,15 @@ class SuccessContractTests(_CliTestCase):
 
 
 class ErrorContractTests(_CliTestCase):
-    def test_error_codes_map_to_documented_exit_codes(self) -> None:
+    def test_ut_cli_09_01_error_codes_map_to_documented_exit_codes(self) -> None:
+        """UT-CLI-09.01: each of the 23 E_* codes maps to its exit code (PRD 12.6)."""
         cases = (
             ("E_USAGE", 2),
             ("E_CONFIG_INVALID", 2),
             ("E_CONFIG_ACCOUNT_UNKNOWN", 2),
             ("E_ACCOUNT_AMBIGUOUS", 2),
+            ("E_ACCOUNT_LABELS_UNAVAILABLE", 2),
+            ("E_ACCOUNT_NOT_IN_SCOPE", 2),
             ("E_MAILBOX_NOT_FOUND", 2),
             ("E_BAD_TIME", 2),
             ("E_BAD_FILTER", 2),
@@ -458,12 +757,18 @@ class ErrorContractTests(_CliTestCase):
             ("E_SCHEMA_UNSUPPORTED", 3),
             ("E_PERMISSION", 3),
             ("E_STATE_CORRUPT", 3),
+            ("E_CLIENT_UNSUPPORTED", 3),
+            ("E_DEPENDENCY_MISSING", 3),
+            ("E_CLIENT_TIMEOUT", 3),
             ("E_UNBOUNDED_SCAN", 4),
             ("E_SCAN_TOO_LARGE", 4),
             ("E_LOCKED", 5),
             ("E_DB_BUSY", 5),
+            ("E_CLIENT_BUSY", 5),
+            ("E_OUTLOOK_NOT_RUNNING", 6),
             ("E_INTERNAL", 1),
         )
+        self.assertEqual(len(cases), 23)
         for code, expected_exit in cases:
             with self.subTest(code=code):
                 error = MailqueryError(code, f"failure {code}", "do something useful")
@@ -477,7 +782,7 @@ class ErrorContractTests(_CliTestCase):
                 self.assertEqual(payload["error"]["message"], f"failure {code}")
                 self.assertEqual(payload["error"]["hint"], "do something useful")
                 self.assertIn(code, stderr)
-                self.assertEqual(stdout.count("\n"), 1)
+                self.assertTrue(stdout.endswith("}\n"))
 
     def test_unexpected_exception_becomes_internal_error_with_traceback_in_log(self) -> None:
         with mock.patch.object(cli_mod, "_execute", side_effect=RuntimeError("boom")):
@@ -519,11 +824,8 @@ class ErrorContractTests(_CliTestCase):
     def test_lock_busy_against_a_real_flock_exits_5(self) -> None:
         from mailquery.state import RunLock as RealRunLock
 
-        try:
-            holder = RealRunLock(self.fx.home)
-            holder.acquire()
-        except NotImplementedError:
-            self.skipTest("state.RunLock is not implemented yet")
+        holder = RealRunLock(self.fx.home)
+        holder.acquire()
         self.addCleanup(holder.release)
         exit_code, stdout, _ = self.run_cli(["search"])
         self.assertEqual(exit_code, 5)
@@ -635,7 +937,10 @@ class DispatchTests(_CliTestCase):
             exit_code, stdout, _ = self.run_cli(["show", "83143"])
         self.assertEqual(exit_code, 0)
         run_mock.assert_called_once()
-        self.assertEqual(run_mock.call_args.args[2], 83143)
+        # run_show(store, config, labels, uid): B-01 gives it the config.
+        _, call_config, _, call_uid = run_mock.call_args.args
+        self.assertEqual(call_config.home, self.fx.home)
+        self.assertEqual(call_uid, 83143)
         self.assertEqual(self.json_object(stdout)["message"], {"uid": 83143})
 
     def test_new_dispatch_peek_and_limit(self) -> None:
@@ -671,10 +976,11 @@ class DispatchTests(_CliTestCase):
 
 
 class LoggingConfigTests(_CliTestCase):
-    def test_log_level_flag_overrides_config(self) -> None:
+    def test_ut_cli_05_01_log_level_flag_overrides_config(self) -> None:
+        """UT-CLI-05.01: --log-level debug overrides [logging].level."""
         write_config(
             self.fx.home,
-            '[logging]\nlevel = "debug"\nretention_days = 14\n',
+            '[logging]\nlevel = "debug"\nmax_size_mb = 14\n',
         )
         payload = self.success_payload()
         with (
@@ -695,6 +1001,17 @@ class LoggingConfigTests(_CliTestCase):
                 (self.fx.home, "error", 14),
             )
 
+    def test_ut_cli_05_02_log_level_after_the_subcommand_is_a_usage_error(self) -> None:
+        """UT-CLI-05.02: --log-level after the subcommand => E_USAGE (global option only)."""
+        for argv in (
+            ["search", "--log-level", "debug"],
+            ["mailboxes", "--log-level", "debug"],
+            ["new", "--log-level=debug"],
+        ):
+            with self.subTest(argv=argv):
+                self.assert_error(2, self.run_cli(argv), "E_USAGE")
+        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
+
     def test_defaults_when_no_config_and_no_flag(self) -> None:
         payload = self.success_payload()
         with (
@@ -703,7 +1020,7 @@ class LoggingConfigTests(_CliTestCase):
         ):
             exit_code, _, _ = self.run_cli(["search"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(setup_mock.call_args.args, (self.fx.home, "info", 7))
+        self.assertEqual(setup_mock.call_args.args, (self.fx.home, "info", 10))
 
 
 # --------------------------------------------------------------------------- #
@@ -820,13 +1137,129 @@ class DoctorTests(_CliTestCase):
         self.assertTrue(by_name["home"]["ok"])
         self.assertTrue(by_name["config"]["ok"])
 
-    def test_doctor_tolerates_a_broken_store(self) -> None:
+    def test_ut_cli_10_01_broken_store_marks_dependants_not_evaluated(self) -> None:
+        """UT-CLI-10.01: store fails => envelope_index/schema/readonly_strategy/config not evaluated."""
+        write_config(self.fx.home)
         payload = self._doctor(mail_root=self.fx.root / "missing-mail")
         by_name = {check["name"]: check for check in payload["checks"]}
         self.assertFalse(by_name["store"]["ok"])
+        self.assertIn("E_STORE_NOT_FOUND", by_name["store"]["detail"])
         self.assertFalse(by_name["envelope_index"]["ok"])
+        self.assertEqual(by_name["envelope_index"]["detail"], "not evaluated: store failed")
+        for name in ("schema", "readonly_strategy"):
+            self.assertFalse(by_name[name]["ok"])
+            self.assertEqual(by_name[name]["detail"], "not evaluated: envelope_index failed")
+        self.assertFalse(by_name["config"]["ok"])
+        self.assertEqual(by_name["config"]["detail"], "not evaluated: schema failed")
+        for name in ("python", "home", "accounts_db", "state", "lock"):
+            self.assertTrue(by_name[name]["ok"], by_name[name])
+            self.assertFalse(by_name[name]["detail"].startswith("not evaluated"))
+
+    def test_ut_cli_10_02_broken_store_without_blocks_config_is_ok_and_unknown(self) -> None:
+        """UT-CLI-10.02: store fails, no blocks => config ok=true, accounts unknown (schema failed)."""
+        payload = self._doctor(mail_root=self.fx.root / "missing-mail")
+        config = next(check for check in payload["checks"] if check["name"] == "config")
+        self.assertTrue(config["ok"])
+        self.assertIn(
+            "0 account block(s) declared; available accounts: unknown (schema failed)",
+            config["detail"],
+        )
+
+    def test_ut_cli_10_03_envelope_index_failure_blocks_schema_and_strategy(self) -> None:
+        """UT-CLI-10.03: envelope_index fails with store ok => schema/readonly_strategy not evaluated."""
+        error = MailqueryError("E_PERMISSION", "Envelope Index is not readable", "grant access")
+        with mock.patch.object(cli_mod, "probe_envelope_index", side_effect=error):
+            payload = self._doctor()
+        by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(by_name["store"]["ok"])
+        self.assertFalse(by_name["envelope_index"]["ok"])
+        self.assertIn("E_PERMISSION", by_name["envelope_index"]["detail"])
+        for name in ("schema", "readonly_strategy"):
+            self.assertFalse(by_name[name]["ok"])
+            self.assertEqual(by_name[name]["detail"], "not evaluated: envelope_index failed")
+
+    def test_ut_cli_10_04_schema_failure_blocks_resolution_but_not_syntax(self) -> None:
+        """UT-CLI-10.04: schema fails => block resolution not evaluated; invalid syntax still reported."""
+        write_config(self.fx.home)
+        with mock.patch.object(cli_mod, "open_store", side_effect=RuntimeError("kaboom")):
+            payload = self._doctor()
+            by_name = {check["name"]: check for check in payload["checks"]}
+            self.assertTrue(by_name["envelope_index"]["ok"])
+            self.assertFalse(by_name["schema"]["ok"])
+            self.assertFalse(by_name["config"]["ok"])
+            self.assertEqual(by_name["config"]["detail"], "not evaluated: schema failed")
+
+            write_config(self.fx.home, "unknown_key = 1\n")
+            payload = self._doctor()
+        by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertFalse(by_name["config"]["ok"])
+        self.assertIn("E_CONFIG_INVALID", by_name["config"]["detail"])
+
+    def test_ut_cli_10_05_no_blocks_and_accounts_db_down_reports_unavailable(self) -> None:
+        """UT-CLI-10.05: no blocks, dependency ok, accounts_db down => Accounts4.sqlite unavailable."""
+        payload = self._doctor(accounts_db=self.fx.root / "missing-accounts.sqlite")
+        by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(by_name["schema"]["ok"])
+        self.assertFalse(by_name["accounts_db"]["ok"])
+        self.assertTrue(by_name["config"]["ok"])
+        self.assertIn(
+            "available accounts: unknown (Accounts4.sqlite unavailable)",
+            by_name["config"]["detail"],
+        )
+
+    def test_ut_cli_11_01_state_without_cursor_explains_first_run(self) -> None:
+        """UT-CLI-11.01: lookback = "15min" and no state.json => the section 12.8 detail."""
+        write_config(self.fx.home, '[new]\nlookback = "15min"\n')
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertEqual(
+            state["detail"],
+            "no state yet; the next new run is a first run and emits the messages "
+            "received in the last 15min before the newest message",
+        )
+
+    def test_ut_cli_11_02_state_with_cursor_reports_it(self) -> None:
+        """UT-CLI-11.02: with a cursor => cursor last_date_received=<n> last_uid=<n>."""
+        write_state(
+            self.fx.home,
+            {
+                "schema": 1,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": 42,
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": [],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertEqual(state["detail"], "cursor last_date_received=1700000000 last_uid=42")
+
+    def test_ut_cli_12_01_envelope_index_with_shm_opens_live_ro(self) -> None:
+        """UT-CLI-12.01: -shm present => the live database is opened; strategy live_ro."""
+        fx = build_store(extended=True)
+        self.addCleanup(fx.cleanup)
+        payload = self._doctor(home=fx.home, mail_root=fx.mail_root, accounts_db=fx.accounts_db)
+        by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertTrue(by_name["envelope_index"]["ok"], by_name["envelope_index"])
+        self.assertTrue(by_name["readonly_strategy"]["ok"])
+        self.assertTrue(by_name["readonly_strategy"]["detail"].startswith("live_ro:"))
+
+    def test_ut_cli_12_02_unreadable_envelope_index_fails(self) -> None:
+        """UT-CLI-12.02: base unreadable (permission, mocked on every OS) => ok=false."""
+        # File modes/ACLs are not reliable across OSes and users (D-07): make the
+        # open of the base itself fail with a permission error, on every OS.
+        with mock.patch("mailquery.store.shutil.copy2", side_effect=PermissionError("denied")):
+            payload = self._doctor()
+        by_name = {check["name"]: check for check in payload["checks"]}
+        self.assertFalse(by_name["envelope_index"]["ok"])
+        self.assertIn("E_PERMISSION", by_name["envelope_index"]["detail"])
         self.assertFalse(by_name["schema"]["ok"])
-        self.assertFalse(by_name["readonly_strategy"]["ok"])
 
     def test_doctor_tolerates_unexpected_store_errors(self) -> None:
         with (
@@ -851,9 +1284,10 @@ class DoctorTests(_CliTestCase):
         ):
             payload = self._doctor()
         by_name = {check["name"]: check for check in payload["checks"]}
+        # The cause stays in the first failing check; dependants are not evaluated.
+        self.assertIn("E_PERMISSION", by_name["store"]["detail"])
         self.assertFalse(by_name["envelope_index"]["ok"])
-        self.assertIn("E_PERMISSION", by_name["envelope_index"]["detail"])
-        self.assertNotIn("E_STORE_NOT_FOUND", by_name["envelope_index"]["detail"])
+        self.assertEqual(by_name["envelope_index"]["detail"], "not evaluated: store failed")
 
     def test_doctor_reports_invalid_config_but_exits_zero(self) -> None:
         write_config(self.fx.home, "unknown_key = 1\n")
@@ -868,16 +1302,48 @@ class DoctorTests(_CliTestCase):
         payload = self._doctor(home=broken_home)
         by_name = {check["name"]: check for check in payload["checks"]}
         self.assertFalse(by_name["home"]["ok"])
-        self.assertFalse(by_name["config"]["ok"])
+        if sys.platform != "win32":
+            # On Windows reading "<file>/config.toml" is "not found", so the
+            # config check legitimately passes there (D-07).
+            self.assertFalse(by_name["config"]["ok"])
+
+    def _home_check(self, home: Path) -> dict:
+        checks = cli_mod._collect_doctor_checks(home, self.fx.mail_root, self.fx.accounts_db)
+        return next(check for check in checks if check["name"] == "home")
+
+    def test_ut_cli_13_01_home_with_mode_0755_fails(self) -> None:
+        """UT-CLI-13.01: POSIX home 0755 => home ok=false (Windows: writable => ok)."""
+        home = self.fx.root / "home-0755"
+        home.mkdir()
+        if sys.platform != "win32":
+            home.chmod(0o755)
+        # Skip the self-repairing chmod so the doctor sees the real mode.
+        with mock.patch.object(cli_mod, "ensure_app_home"):
+            for name in cli_mod.APP_HOME_SUBDIRS:
+                (home / name).mkdir(mode=0o700, exist_ok=True)
+            check = self._home_check(home)
+        if sys.platform != "win32":
+            self.assertFalse(check["ok"])
+            self.assertIn("mode=0o755", check["detail"])
+        else:
+            self.assertTrue(check["ok"], check["detail"])
+
+    def test_ut_cli_13_02_win32_probe_file_permission_error_fails(self) -> None:
+        """UT-CLI-13.02: win32 patched, probe file creation raises PermissionError => ok=false."""
+        home = self.fx.root / "home-win32"
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(Path, "write_bytes", side_effect=PermissionError("denied")),
+        ):
+            check = self._home_check(home)
+        self.assertFalse(check["ok"])
+        self.assertIn("not writable", check["detail"])
 
     def test_doctor_reports_lock_contention_but_exits_zero(self) -> None:
         from mailquery.state import RunLock as RealRunLock
 
-        try:
-            holder = RealRunLock(self.fx.home)
-            holder.acquire()
-        except NotImplementedError:
-            self.skipTest("state.RunLock is not implemented yet")
+        holder = RealRunLock(self.fx.home)
+        holder.acquire()
         self.addCleanup(holder.release)
         payload = self._doctor()
         by_name = {check["name"]: check for check in payload["checks"]}
@@ -896,10 +1362,7 @@ class EndToEndContractTests(_CliTestCase):
     def _require_store(self) -> None:
         from mailquery.store import open_store
 
-        try:
-            store = open_store(self.fx.mail_root, tmp_root=self.fx.root / "tmp")
-        except NotImplementedError as exc:
-            self.skipTest(f"store.py dependency not implemented yet: {exc}")
+        store = open_store(self.fx.mail_root, tmp_root=self.fx.root / "tmp")
         try:
             store.close()
         except Exception:  # noqa: BLE001 - best effort cleanup
@@ -908,10 +1371,7 @@ class EndToEndContractTests(_CliTestCase):
     def _require_time_parser(self) -> None:
         from mailquery.search import parse_relative_time
 
-        try:
-            parse_relative_time("7d")
-        except NotImplementedError as exc:
-            self.skipTest(f"search.py dependency not implemented yet: {exc}")
+        parse_relative_time("7d")
 
     def test_no_declared_accounts_returns_warning_and_zero(self) -> None:
         self._require_store()
@@ -988,3 +1448,98 @@ class EndToEndContractTests(_CliTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------- #
+# UTF-8 and LF on stdout/stderr (RF-32, PRD 20), through a real pipe
+# --------------------------------------------------------------------------- #
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Runs ``cli.main`` inside the subprocess pointed at the synthetic store; the
+# modes that need non-ASCII output replace ``_execute`` (the store is ASCII-only).
+_LAUNCHER = r"""
+import sys
+from pathlib import Path
+from unittest import mock
+from mailquery import cli
+from mailquery.errors import MailqueryError
+
+mode, root = sys.argv[1], Path(sys.argv[2])
+kwargs = dict(home=root / "home", mail_root=root / "Mail",
+              accounts_db=root / "Library" / "Accounts" / "Accounts4.sqlite")
+argv = sys.argv[3:]
+if mode == "ok":
+    payload = {"messages": [{"subject": "Año á \U0001f600"}], "warnings": []}
+    with mock.patch.object(cli, "_execute", return_value=payload):
+        code = cli.main(argv, **kwargs)
+elif mode == "error":
+    error = MailqueryError("E_USAGE", "carpeta ñandú \U0001f600", "pista á")
+    with mock.patch.object(cli, "_execute", side_effect=error):
+        code = cli.main(argv, **kwargs)
+else:
+    code = cli.main(argv, **kwargs)
+sys.exit(code)
+"""
+
+_SUBJECT = "Año á \U0001f600"
+_ERROR_MESSAGE = "carpeta ñandú \U0001f600"
+
+
+class PipeEncodingTests(unittest.TestCase):
+    """Subprocess with pipes, cp1252 and ``PYTHONUTF8=0`` (plan 7.1 isolation)."""
+
+    def setUp(self) -> None:
+        self.fx = build_store()
+        self.addCleanup(self.fx.cleanup)
+
+    def run_launcher(self, mode: str, *argv: str) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env["HOME"] = env["USERPROFILE"] = str(self.fx.home)
+        env["PYTHONPATH"] = os.pathsep.join([str(_REPO_ROOT / "src"), str(_REPO_ROOT)])
+        env["PYTHONUTF8"] = "0"
+        env["PYTHONIOENCODING"] = "cp1252"
+        return subprocess.run(
+            [sys.executable, "-B", "-c", _LAUNCHER, mode, str(self.fx.root), *argv],
+            capture_output=True,
+            env=env,
+            cwd=str(_REPO_ROOT),
+            timeout=120,
+        )
+
+    def test_ut_cli_08_01_non_ascii_json_is_utf8_bytes_on_stdout(self) -> None:
+        """UT-CLI-08.01: JSON with non-ASCII text is written as UTF-8 bytes."""
+        result = self.run_launcher("ok", "search")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(_SUBJECT.encode("utf-8"), result.stdout)
+        payload = json.loads(result.stdout.decode("utf-8"))
+        self.assertEqual(payload["messages"][0]["subject"], _SUBJECT)
+
+    def test_ut_cli_08_02_error_json_and_stderr_summary_are_utf8(self) -> None:
+        """UT-CLI-08.02: error JSON on stdout and the stderr summary are UTF-8."""
+        result = self.run_launcher("error", "search")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(_ERROR_MESSAGE.encode("utf-8"), result.stdout)
+        self.assertIn(
+            f"mailquery: E_USAGE: {_ERROR_MESSAGE}\n".encode("utf-8"), result.stderr
+        )
+        self.assertIn("mailquery: hint: pista á\n".encode("utf-8"), result.stderr)
+
+    def test_ut_cli_08_03_no_crlf_in_stdout_or_stderr(self) -> None:
+        """UT-CLI-08.03: no CR LF in stdout or stderr (data, errors, help, doctor)."""
+        runs = (
+            ("ok", "search"),
+            ("error", "search"),
+            ("plain", "--help"),
+            ("plain", "search", "--help"),
+            ("plain", "doctor"),
+            ("plain", "doctor", "--json"),
+            ("plain", "--version"),
+            ("plain", "-v"),
+        )
+        for run in runs:
+            with self.subTest(run=run):
+                result = self.run_launcher(*run)
+                self.assertTrue(result.stdout, result.stderr)
+                self.assertNotIn(b"\r", result.stdout)
+                self.assertNotIn(b"\r", result.stderr)

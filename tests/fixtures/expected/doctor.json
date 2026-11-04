@@ -10,7 +10,7 @@
     {
       "name": "home",
       "ok": true,
-      "detail": "<ROOT>/home (mode 0700)"
+      "detail": "<HOME>"
     },
     {
       "name": "store",
@@ -40,12 +40,12 @@
     {
       "name": "config",
       "ok": true,
-      "detail": "3 account block(s): iCloud (fixture@icloud.com), Gmail (fixture@gmail.com), On My Device"
+      "detail": "iCloud (fixture@icloud.com) → iCloud (fixture@icloud.com) (AAAAAAAA-0000-4000-8000-000000000001): INBOX, Facturas, Archivo; Gmail (fixture@gmail.com) → Gmail (fixture@gmail.com) (BBBBBBBB-0000-4000-8000-000000000002): INBOX; On My Device → On My Device (CCCCCCCC-0000-4000-8000-000000000003): INBOX"
     },
     {
       "name": "state",
       "ok": true,
-      "detail": "no cursor yet (the first `new` run baselines)"
+      "detail": "no state yet; the next new run is a first run and emits the messages received in the last 10min before the newest message"
     },
     {
       "name": "lock",
