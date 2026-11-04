@@ -1,10 +1,10 @@
 # PRD — mailquery
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes (DeepSeek u otro similar): **Apple Mail en macOS** y **Outlook clásico en Windows**.
-**Versión del documento:** 1.1 (núcleo común a ambas plataformas + anexos por backend; amplía el producto a Windows + Outlook clásico).
-**Fecha:** 2026-11-03.
+**Versión del documento:** 1.2 (núcleo común a ambas plataformas + anexos por backend; amplía el producto a Windows + Outlook clásico).
+**Fecha:** 2026-11-04.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** v0.13 aprobado e implementado (macOS + Apple Mail). v1.0 **aprobado** por el dueño del producto el 2026-11-03, tras el spike técnico de Outlook (W1, §B.11). v1.1 completa §23.3 y aclara puntos que la v1.0 dejaba abiertos, sin ampliar el alcance.
+**Estado:** v0.13 aprobado e implementado (macOS + Apple Mail). v1.0 **aprobado** por el dueño del producto el 2026-11-03, tras el spike técnico de Outlook (§B.11). v1.1 completa §23.3 y aclara puntos que la v1.0 dejaba abiertos, sin ampliar el alcance. v1.2 ajusta el documento al estándar de un PRD: retira la planificación, la implementación y la estrategia de pruebas, y conserva la arquitectura (no hay TRD).
 
 | Versión | Cambios |
 |---------|---------|
@@ -23,6 +23,7 @@
 | 0.13 | Cuando no hay cuentas declaradas, el chequeo `config` de `doctor` lista las cuentas disponibles (`0 account block(s) declared; available: …`) sin activarlas, manteniendo `ok=true` y el warning `W_NO_ACCOUNTS` en los comandos de datos. |
 | **1.0** | **Cambio de alcance: soporte de Windows + Outlook clásico sin perder macOS + Apple Mail.** El PRD pasa a ser el núcleo común (CLI, contrato JSON, configuración, cursor, errores, invariante I-1 generalizado) y lo específico de cada cliente se traslada a anexos: [`docs/backends/apple-mail.md`](backends/apple-mail.md) (contenido de Apple Mail de la v0.13; sus únicos cambios están en §23.3) y [`docs/backends/outlook-windows.md`](backends/outlook-windows.md). Nuevos: interfaz de backend (ADR-10), Outlook vía COM (ADR-11), `uid` string en Windows (ADR-12), sin lanzar Outlook y exit 6 `E_OUTLOOK_NOT_RUNNING` (ADR-13), `pywin32` solo en Windows (ADR-14), stores locales de cuentas + PST (ADR-15). Flag global `-v`/`--version` (RF-31, §12.9). Correcciones de paridad que **cambian macOS** (§23.3): `show` limitado a las cuentas declaradas, la primera corrida de `new` emite la ventana de lookback, `[new].lookback` aplica de inmediato, `W_EMLX_UNREADABLE` pasa a `W_BODY_UNREADABLE`, `mailboxes` añade `excluded_stores`, la salida es siempre UTF-8 y JSON formateado, y los logs rotan por tamaño (`max_size_mb` sustituye a `retention_days`). |
 | **1.1** | Sin ampliar el alcance: completa §23.3 con todos los cambios de macOS que el PRD exige, resuelve las contradicciones y ambigüedades de tres revisiones independientes y elimina redundancias (cada regla tiene una sola sección dueña). Decisiones del dueño del producto: §22. |
+| **1.2** | Sin cambiar el producto, ajusta el documento al estándar de un PRD, con la arquitectura como excepción porque no hay TRD. Retira las fases de ejecución y su orden (pertenecen al plan); la implementación (operaciones del backend y flujos internos de §9, mecanismo de escritura de RF-23, modo desarrollo, comandos de instalación); y la estrategia de pruebas (§20 pasa a criterios de aceptación; RNF-10 a mantenibilidad). El orden de resultados de `search` pasa a §12.2. §23 queda con la definición de terminado de 2.0.0. |
 
 ---
 
@@ -74,11 +75,11 @@ Entregar una herramienta local, simple y auditable, que permita a un harness de 
 |----|----------|-----------------|
 | O1 | Leer correos nuevos de forma incremental | `mailquery new` devuelve cada mensaje una sola vez, sin duplicados ni omisiones dentro del alcance configurado |
 | O2 | Buscar por asunto, contenido, remitente, destinatarios, fechas, carpeta y estado | `mailquery search` con filtros combinables y JSON estable |
-| O3 | Garantizar solo lectura | Invariante I-1 verificado por backend (§4): en macOS ningún archivo del store cambia; en Windows ningún miembro COM fuera de la lista blanca se invoca |
+| O3 | Garantizar solo lectura | Invariante I-1 (§4) cumplido según el criterio de aceptación de cada backend (§A.10, §B.10) |
 | O4 | Integrarse con el harness | JSON en `stdout`, logs aparte, códigos de salida estables, ejecución no interactiva, `-h/--help` |
-| O5 | Mantener simplicidad | Sin demonio, sin scheduler, sin base de datos de mensajes; biblioteca estándar en macOS; en Windows solo `pywin32` (declarada en `pyproject.toml`) |
+| O5 | Mantener simplicidad | Sin demonio, sin scheduler, sin base de datos de mensajes; biblioteca estándar en macOS; en Windows solo `pywin32` (ADR-14) |
 | O6 | Ser predecible y observable | `doctor` diagnostica el entorno; cada ejecución deja un log con duración, conteos y errores |
-| O7 | Paridad entre plataformas | Todo lo que `mailquery` hace con macOS + Apple Mail funciona de forma equivalente con Windows + Outlook clásico: mismos comandos, flags, configuración, catálogo de warnings (§12.10), códigos de error y forma del JSON; las únicas diferencias son las declaradas en §12.5 y en el anexo B, y los únicos cambios en macOS son los de §23.3 |
+| O7 | Paridad entre plataformas | Todo lo que `mailquery` hace con macOS + Apple Mail funciona de forma equivalente con Windows + Outlook clásico: mismos comandos, flags, configuración, catálogo de warnings (§12.10), códigos de error y forma del JSON; las únicas diferencias son las declaradas en §12.5 y en el anexo B; cambios en macOS: RNF-11 |
 
 ### 3.3 No objetivos
 
@@ -87,7 +88,7 @@ Entregar una herramienta local, simple y auditable, que permita a un harness de 
 - No descargar adjuntos ni disparar descargas desde el servidor (IMAP, Exchange ni otras).
 - No lanzar el cliente de correo (ni Mail.app ni Outlook).
 - No crear reglas, buzones inteligentes ni cambiar preferencias del cliente.
-- No construir una copia local de los correos (sin índice FTS en v1).
+- No construir una copia local de los correos (sin índice FTS, §23.1).
 - No programar tareas: el harness decide cuándo invocar la herramienta (operación bajo demanda).
 - No soportar otros clientes: ni el **nuevo Outlook** (`olk`), ni Outlook en la web, ni Outlook para Mac, ni Thunderbird u otros. Linux no tiene backend de datos (solo desarrollo/CI).
 - No incluir interfaz gráfica, servidor HTTP ni demonio.
@@ -103,18 +104,14 @@ Cada backend concreta el invariante con los mecanismos que su plataforma permite
 | Aspecto | Apple Mail (macOS) | Outlook clásico (Windows) |
 |---------|--------------------|---------------------------|
 | Tipo de garantía | **Estructural**: el sistema abre los archivos en solo lectura | **En capas**: el OOM es de lectura y escritura, así que la garantía la impone un proxy de lista blanca en tiempo de ejecución |
-| Acceso a datos | Bases SQLite y `.emlx` abiertos en solo lectura; copia a `~/.mailquery/tmp` si Mail está cerrado | Conexión solo a un Outlook ya abierto; todo objeto COM pasa por un proxy de solo lectura con lista blanca |
-| Sin lanzar el cliente | No usa AppleScript ni lanza Mail.app | Si Outlook está cerrado ⇒ `E_OUTLOOK_NOT_RUNNING` (exit 6) |
-| Sin red | No abre IMAP/SMTP | Solo stores locales (Exchange en caché, IMAP local, PST); items con solo cabeceras ⇒ cuerpo no disponible, nunca se pide su descarga |
-| Verificación | §A.10 | §B.10 |
+| Criterio de aceptación | §A.10 | §B.10 |
 | `doctor` | `readonly_strategy` = `live_ro` / `copy_ro` | `readonly_strategy` = `com_readonly` + `object_model_guard` |
 | Detalle | [§A.2](backends/apple-mail.md#a2-cómo-se-cumple-el-invariante-i-1-en-macos) | [§B.2](backends/outlook-windows.md#b2-cómo-se-cumple-el-invariante-i-1-en-windows) |
 
 Reglas comunes a ambos backends:
 
-1. Toda escritura del proyecto se confina a `~/.mailquery` (estado, logs, locks y temporales).
-2. Solo se leen identificadores y nombres visibles de cuentas; **nunca** credenciales, contraseñas ni tokens.
-3. Ningún módulo fuera del backend accede al almacén del cliente: el resto del código solo ve el modelo común (§11.1).
+1. Solo se leen identificadores y nombres visibles de cuentas; **nunca** credenciales, contraseñas ni tokens.
+2. Ningún módulo fuera del backend accede al almacén del cliente: el resto del código solo ve el modelo común (§11.1).
 
 ---
 
@@ -147,10 +144,10 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-25 aplican
 |----|-----------|-----------|
 | RF-01 | `mailquery new` devuelve los mensajes recibidos desde la última ejecución exitosa usando un cursor persistente `(last_date_received, last_uid)` con ventana de solape (*lookback* configurable) y anillo de uids emitidos. Primera corrida y lookback: §12.3. | M |
 | RF-02 | `mailquery new --peek` devuelve los nuevos sin avanzar el cursor. | M |
-| RF-03 | `mailquery mailboxes` lista cuentas y carpetas con `account` = `{uuid, label, email}` (etiqueta legible resuelta en solo lectura), `name`, `path`, `url`, total de mensajes, no leídos e `included` (true si la cuenta está declarada; dentro de ella, INBOX siempre y las carpetas de `mailbox_list`). | M |
+| RF-03 | `mailquery mailboxes` lista cuentas y carpetas con `account` = `{uuid, label, email}` (etiqueta legible resuelta en solo lectura), `name`, `path`, `url`, total de mensajes, no leídos e `included` (true si la cuenta está declarada; dentro de ella, INBOX siempre y las carpetas de `mailbox_list`); `accounts[]` incluye `declared` (true si la cuenta está declarada). | M |
 | RF-04 | `mailquery show <uid>` devuelve metadatos, cabeceras seleccionadas, cuerpo en texto, nombres de adjuntos, `partial` y origen (`source`), sin modificar nada. Solo encuentra mensajes de las **cuentas declaradas** (resolución: §12.4). | M |
 | RF-05 | Un mensaje sin cuerpo legible en local no rompe la consulta: se entrega con `body.available=false` o `body.readable=false` y un warning con el motivo concreto. Los mensajes S/MIME (cifrados o solo firmados) no se leen en ninguna plataforma. Casos y warnings: §12.5 y §12.10. | M |
-| RF-06 | Nunca se dispara una descarga para obtener un cuerpo o adjunto (macOS: `.partial.emlx` se lee tal cual y se marca `partial=true`; Windows: un item con solo cabeceras se reporta sin cuerpo y nunca se descarga). | M |
+| RF-06 | Nunca se dispara una descarga para obtener un cuerpo o adjunto (casos: §12.5, §A.3, §B.2). | M |
 | RF-07 | Resultados deduplicados por identificador global del mensaje (el mismo correo puede existir en varias cuentas/carpetas): canónico = copia de INBOX; si no, carpeta normal; si no, buzón agregado; el JSON reporta `duplicate_count`. Un mensaje sin identificador global (vacío o ausente) es único: no se agrupa con otros y su `duplicate_count` es 1. Clave por backend: §A.5.3 y §B.4. | M |
 
 ### 6.2 Búsqueda
@@ -164,8 +161,8 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-25 aplican
 | RF-12 | `--since` y `--until` con fechas ISO 8601 y relativos: `30min`, `24h`, `7d`, `1w`, `2w`, `1mo`, `2mo`, `6mo`, `1y`, `today`, `yesterday`, `now`. | M |
 | RF-13 | `--unread`, `--flagged`, `--has-attachments`: filtros de estado. | M |
 | RF-14 | `--include-mailbox`: lista (repetible o separada por comas) de carpetas a incluir en esa ejecución, además de las configuradas. Deben pertenecer a cuentas **declaradas**; no activan una cuenta. | S |
-| RF-15 | Paginación simple: `--limit` (defaults configurables en `[search]`/`[new]`; máx. 200 en `search` y 500 en `new`), `truncated` y `hint` para refinar; sin `--offset`. | M |
-| RF-16 | Cada mensaje incluye `snippet` (200 caracteres) leyendo solo el cuerpo de la página devuelta. | S |
+| RF-15 | Paginación simple: `--limit` (default configurable, §15.1; máx. 200 en `search` y 500 en `new`), `truncated` y `hint` para refinar; sin `--offset`. | M |
+| RF-16 | Cada mensaje incluye `snippet` (longitud: §15.6) leyendo solo el cuerpo de la página devuelta. | S |
 | RF-17 | `--text` exige al menos un filtro de acotamiento (fecha, remitente, destinatario, asunto o carpeta) y un máximo de candidatos (`[search].max_scan`, §15.1). Cuenta como "carpeta" una carpeta distinta de INBOX en `mailbox_list` o en `--include-mailbox`; un filtro con valor vacío no acota. Los candidatos son los mensajes del alcance que quedan tras los filtros de fecha, estado, `--subject` y `--from` (y en macOS también `--to`/`--cc`); `scan.candidates` reporta ese número. Si no hay acotamiento: `E_UNBOUNDED_SCAN`; si se supera el máximo: `E_SCAN_TOO_LARGE`. Nunca resultados parciales silenciosos. En Windows la regla se extiende a `--to`/`--cc` (abrir cada item es necesario para evaluarlos), que en esa plataforma no cuentan como acotamiento; con `--text` y `--to`/`--cc` a la vez, la validación se hace una sola vez. El mensaje de error nombra el flag que obliga a leer el contenido y el hint lista solo los filtros que acotan en esa plataforma. Sin `--text`, `scan.mode` es `metadata` y `scan.messages_read` cuenta los items abiertos. | M |
 
 ### 6.3 Integración y operación
@@ -177,7 +174,7 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-25 aplican
 | RF-20 | Logs en texto plano en `~/.mailquery/logs/mailquery.log`, con rotación por tamaño y sin contenido de correos (§14). | M |
 | RF-21 | Configuración por `~/.mailquery/config.toml` (opcional y mínimo). Sin variables de entorno ni flags de ruta. | M |
 | RF-22 | Lock de ejecución para evitar corridas concurrentes; si está ocupado, salir con código 5. | S |
-| RF-23 | Cursor atómico: escritura `tmp` + `fsync` + `rename`; nunca dejar el estado corrupto. | M |
+| RF-23 | Cursor atómico: una escritura interrumpida nunca deja el estado corrupto; el estado previo queda intacto. | M |
 | RF-24 | Errores también en JSON (`ok: false`, `code`, `message`, `hint`) con el código de salida correspondiente. | M |
 | RF-25 | `mailquery doctor` muestra por defecto un informe de texto human-readable con los chequeos y el detalle de cualquier fallo, e incluye la **resolución real** de cada bloque `[scope]` y su `mailbox_list` (cuentas declaradas, etiquetas/email/UUID y carpetas existentes) además de la resolubilidad de etiquetas de cuenta; `--json` conserva el payload máquina con la lista de chequeos. Los chequeos de entorno dependen del backend (§12.8). | M |
 
@@ -202,16 +199,16 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-25 aplican
 | ID | Requisito |
 |----|-----------|
 | RNF-01 | **Solo lectura**: invariante I-1 (§4) en ambos backends. |
-| RNF-02 | **Simplicidad**: biblioteca estándar de Python (≥ 3.11); única excepción, `pywin32` en Windows (ADR-14). Sin red, sin servicios, sin demonio. |
+| RNF-02 | **Simplicidad**: biblioteca estándar de Python (≥ 3.11); única excepción: ADR-14. Sin red, sin servicios, sin demonio. |
 | RNF-03 | **Rendimiento** (§19): presupuestos por backend; los de Windows están contrastados parcialmente con el spike (§B.9). |
 | RNF-04 | **Determinismo**: mismo estado del store + mismos filtros ⇒ mismo resultado, con orden total (`date_received`, `uid`). |
 | RNF-05 | **Privacidad**: sin telemetría ni red; logs sin asunto/cuerpo/direcciones. macOS: `~/.mailquery` y sus subdirectorios 0700, y todo archivo que crea mailquery 0600 (estado, lock, logs y logs rotados, copias de `tmp/`); `config.toml` lo crea el usuario o el instalador y mailquery no lo modifica (§15). Windows: el home hereda la ACL privada del perfil de usuario y el instalador restringe la de `config.toml`. |
-| RNF-06 | **Compatibilidad**: macOS con Apple Mail (`V9`/`V10`/`V11`, feature-detección de columnas, §A.5); Windows 10/11 con Outlook clásico 16.0 (§B.5). Ante algo no soportado se falla ruidosamente con un código documentado. |
+| RNF-06 | **Compatibilidad**: macOS con Apple Mail (`V9`/`V10`/`V11`, detección del esquema, §A.5); Windows 10/11 con Outlook clásico 16.0 (§B.5). Ante algo no soportado se falla ruidosamente con un código documentado. |
 | RNF-07 | **Observabilidad**: log en texto por ejecución con backend, duración, conteos, estrategia de conexión y errores. |
 | RNF-08 | **Robustez**: un mensaje corrupto o ilegible no tumba la consulta; MIME raro, HTML sin texto o charset inválido se degradan con warning. |
 | RNF-09 | **Seguridad**: el contenido de los correos es entrada no confiable para el LLM (prompt injection); debe tratarse como datos, nunca como instrucciones. |
-| RNF-10 | **Mantenibilidad y pruebas**: `unittest` (stdlib), fixtures y **dobles por backend** (store sintético de Apple Mail; Outlook falso en memoria), sin tocar el store real en CI. Toda la suite corre en Linux, macOS y Windows. |
-| RNF-11 | **Paridad sin regresión**: en macOS solo cambian las salidas listadas en §23.3. El refactor a backends (W2) no cambia ninguna salida: los goldens vigentes tras W0 son su criterio de aceptación. |
+| RNF-10 | **Mantenibilidad**: el comportamiento de cada backend se puede verificar sin acceder al correo real del usuario, en Linux, macOS y Windows. |
+| RNF-11 | **Paridad sin regresión**: en macOS solo cambian las salidas listadas en §23.3; el refactor a backends no cambia ninguna otra. |
 
 ---
 
@@ -221,18 +218,18 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-25 aplican
 |----|----------|--------------------------|--------|
 | ADR-01 | **Apple Mail:** leer el almacén en disco: `Envelope Index` (metadatos) + `.emlx` (cuerpo). Detalle en §A.1. | AppleScript/Mail.app; IMAP; Spotlight | Read-only estructural; sin credenciales ni red; AppleScript no garantiza no-mutar; `mdfind` no indexa el store. |
 | ADR-02 | **Sin caché local de mensajes**: único estado = cursor en `~/.mailquery/state.json`. | Índice FTS5; SQLite de estado; `sync` | Evita duplicar correo privado y desincronización; menos código. |
-| ADR-03 | **Python 3.11+**, stdlib por defecto; dependencias extra declaradas en `pyproject.toml` (ADR-14). | Node/Go/Rust; dependencias PyPI sin declarar | Cero fricción de instalación con `pipx`; `sqlite3`, `email`, `plistlib`, `tomllib`, `msvcrt` incluidos. |
+| ADR-03 | **Python 3.11+**, stdlib por defecto; única dependencia extra: ADR-14. | Node/Go/Rust; otras dependencias de PyPI | Cero fricción de instalación con `pipx`. |
 | ADR-04 | **JSON-only**: datos en `stdout`, logs a archivo, errores JSON; excepciones en texto: RF-18. | Tabla/texto/markdown; `--format` | Un solo contrato para el harness, sin flags de presentación. |
 | ADR-05 | **Proceso de un solo disparo, bajo demanda**. | Daemon, watcher, scheduler interno | El harness decide cuándo ejecutar; el arranque es barato. |
 | ADR-06 | **Alcance = solo cuentas declaradas en `[scope.*]`** (reglas: §15). | Leer todas las cuentas automáticamente (modelo anterior); excluir ruido; buscar en todas las carpetas | Control explícito de qué cuentas se leen: evita procesar cuentas no deseadas y mantiene el estado mínimo. |
 | ADR-07 | **Cursor global** por fecha de recepción + lookback + anillo de uids. | Cursor por carpeta; set "visto" permanente | Simple y exacto en la práctica; estado mínimo (§18). |
 | ADR-08 | **Despliegue con `pipx install .`** (comando `mailquery` en PATH) en ambas plataformas. | Scripts sueltos, Homebrew, /usr/local con sudo, MSI | Instalación/actualización/desinstalación de un paso, con venv aislado y dependencias declaradas. |
 | ADR-09 | **Apple Mail:** etiquetas de cuenta desde `~/Library/Accounts/Accounts4.sqlite` en solo lectura; UUID como fallback. Detalle en §A.5.2. | Solo UUID; alias manual | Legibilidad sin trabajo manual. |
-| ADR-10 | **Interfaz de backend** (§9.3): el núcleo (CLI, config, filtros, dedupe, cursor, salida) es común y cada cliente implementa la misma interfaz. Un único PRD con anexos por backend. | Fork por plataforma; dos PRDs; `if sys.platform` repartidos por el código | Un solo contrato y una sola lógica de negocio; el riesgo de regresión en macOS queda acotado al adaptador. |
+| ADR-10 | **Interfaz de backend**: el núcleo (CLI, config, filtros, dedupe, cursor, salida) es común y cada cliente implementa la misma interfaz. Un único PRD con anexos por backend. | Fork por plataforma; dos PRDs; `if sys.platform` repartidos por el código | Un solo contrato y una sola lógica de negocio; el riesgo de regresión en macOS queda acotado al adaptador. |
 | ADR-11 | **Outlook vía Outlook Object Model (COM)**, solo stores locales. Detalle en §B.1. | Parsear `.ost`/`.pst`; Microsoft Graph/EWS; MAPI de terceros; Windows Search | Única API local soportada; los OST son propietarios y están bloqueados; Graph exige red y OAuth. |
 | ADR-12 | **`uid` con tipo por plataforma**: entero en macOS (sin cambios), string `EntryID` en Windows; el harness lo trata como token opaco. | Campo `id` nuevo en ambas (rompe macOS); entero sintético (colisiones, sin vuelta atrás para `show`) | Conserva intacto el contrato de macOS y evita un mapa local de ids (que sería una base de datos propia). |
-| ADR-13 | **No lanzar Outlook**: solo `GetActiveObject`; si está cerrado, `E_OUTLOOK_NOT_RUNNING` con exit **6** dedicado. | Lanzarlo con `Dispatch`; lanzarlo solo con un flag | Equivalente a "no lanza Mail.app": sin efectos laterales ni sincronización disparada por la herramienta; el harness puede distinguir este caso del resto de errores de entorno. |
-| ADR-14 | **`pywin32`** como única dependencia, solo en Windows (marcador de entorno). | `comtypes`; IDispatch propio con `ctypes` | Estándar de facto con wheels oficiales; IDispatch propio sería mucho código frágil; macOS sigue sin dependencias. |
+| ADR-13 | **No lanzar Outlook**: solo se conecta a un Outlook ya abierto; si está cerrado, `E_OUTLOOK_NOT_RUNNING` con exit **6** dedicado. | Lanzarlo si está cerrado; lanzarlo solo con un flag | Equivalente a "no lanza Mail.app": sin efectos laterales ni sincronización disparada por la herramienta; el harness puede distinguir este caso del resto de errores de entorno. |
+| ADR-14 | **`pywin32`** como única dependencia, solo en Windows. | `comtypes`; acceso COM propio | Estándar de facto con distribución oficial; un acceso COM propio sería mucho código frágil; macOS sigue sin dependencias. |
 | ADR-15 | **Alcance de stores en Outlook = stores locales de las cuentas del perfil (incluidas EAS) + PST en disco local**; el resto se excluye y se reporta con ruta y motivo (RF-34). Detalle en §B.3. | Solo Exchange; todo el perfil | Todo lo incluido es local (sin red); los excluidos irían al servidor en cada lectura. |
 | ADR-16 | **Paridad funcional estricta**: lo que `mailquery` hace con macOS + Apple Mail debe hacerse de forma equivalente con Windows + Outlook clásico, ni más ni menos. Cuando el comportamiento actual de macOS es incorrecto respecto a esa paridad o a lo decidido por el dueño del producto, se corrige en esta versión (§23.3). | Mantener macOS congelado | Un único contrato real para el harness. |
 
@@ -251,18 +248,18 @@ flowchart LR
     CLI --> OUT[output.py]
     CLI --> STT[state.py]
     CLI --> SEL[backends/__init__.py<br/>selección por plataforma]
-    SR --> IF[[MailBackend<br/>backends/base.py]]
+    SR --> IF[[Interfaz de backend<br/>backends/base.py]]
     CFG --> IF
     SEL --> AM[backends/apple_mail.py]
     SEL --> OL[backends/outlook.py]
     AM -.implementa.-> IF
     OL -.implementa.-> IF
     AM --> ST[store.py / emlx.py / accounts.py]
-    ST -->|sqlite3 mode=ro| EI[(Envelope Index)]
-    ST -->|open rb| EM[.emlx]
-    ST -->|sqlite3 mode=ro| ADS[(Accounts4.sqlite)]
-    OL --> COM[backends/outlook_com.py<br/>ReadOnlyCom + lista blanca]
-    COM -->|GetActiveObject| OUTLOOK[(Outlook clásico en ejecución)]
+    ST -->|solo lectura| EI[(Envelope Index)]
+    ST -->|solo lectura| EM[.emlx]
+    ST -->|solo lectura| ADS[(Accounts4.sqlite)]
+    OL --> COM[backends/outlook_com.py<br/>proxy de solo lectura con lista blanca]
+    COM -->|sin lanzar Outlook| OUTLOOK[(Outlook clásico en ejecución)]
     STT -->|atómico| STATE[(~/.mailquery/state.json)]
     LOG -->|texto, rotación por tamaño| LOGF[(~/.mailquery/logs/mailquery.log)]
 ```
@@ -277,59 +274,17 @@ flowchart LR
 | `state.py` | Cursor, anillo de uids, lock no bloqueante (POSIX y Windows), escritura atómica. | Guardar contenido de correos. |
 | `output.py` | Serializar JSON estable, snippets, truncados, sanitización de caracteres de control. | Escribir logs. |
 | `logging_setup.py` | Logger en texto con rotación por tamaño; formato log4j; redacción. | Escribir en `stdout`. |
-| `errors.py` | Jerarquía `MailqueryError` con `code`, `exit_code`, `hint`. | — |
-| `backends/__init__.py` | `get_backend(...)`: selección por plataforma (RF-26) y parámetros de test. | Importar `win32com` en macOS/Linux. |
-| `backends/base.py` | Interfaz `MailBackend` y tipos del modelo común (§9.3, §11.1). | Depender de un cliente concreto. |
-| `backends/apple_mail.py` | Adaptador sobre `store.py`, `emlx.py` y `accounts.py`; contiene el SQL que hoy está en `search.py`. El adaptador no añade comportamiento propio. | Cambiar el contrato de macOS más allá de §23.3. |
-| `store.py`, `emlx.py`, `accounts.py` | Acceso read-only al store de Apple Mail (§A.3–§A.5). Solo cambian por §23.3 (W0); el refactor W2 no les cambia el comportamiento. | Ser importados por el backend Outlook. |
+| `errors.py` | Errores del producto con `code`, código de salida y `hint` (§12.6). | — |
+| `backends/__init__.py` | Selección del backend por plataforma (RF-26). | Importar `win32com` en macOS/Linux. |
+| `backends/base.py` | Interfaz de backend y tipos del modelo común (§11.1). | Depender de un cliente concreto. |
+| `backends/apple_mail.py` | Adaptador sobre `store.py`, `emlx.py` y `accounts.py`; contiene las consultas de búsqueda de Apple Mail. El adaptador no añade comportamiento propio. | Cambiar el contrato de macOS (RNF-11). |
+| `store.py`, `emlx.py`, `accounts.py` | Acceso read-only al store de Apple Mail (§A.3–§A.5). | Ser importados por el backend Outlook. |
 | `backends/outlook.py` | Traducción Outlook → modelo común (§B.4), alcance de stores (§B.3), chequeos de `doctor` (§B.8). | Usar objetos COM sin el proxy. |
-| `backends/outlook_com.py` | Único módulo que importa `win32com`; conexión sin lanzamiento, proxy `ReadOnlyCom` con lista blanca (§B.2), reintento ante rechazo transitorio. | Exponer el objeto COM crudo. |
+| `backends/outlook_com.py` | Único módulo que importa `win32com`; conexión sin lanzamiento, proxy de solo lectura con lista blanca (§B.2), reintento ante rechazo transitorio. | Exponer el objeto COM crudo. |
 
-La reorganización detallada de firmas se fijará en `docs/INTERFACES.md` en la fase W2 (§23); este PRD manda sobre él.
+La reorganización detallada de firmas se documenta en `docs/INTERFACES.md`; este PRD manda sobre él.
 
-### 9.3 Interfaz de backend (contrato conceptual)
-
-Todo backend implementa la misma interfaz; `search.py` y `config.py` solo dependen de ella.
-
-| Operación | Devuelve | Notas |
-|-----------|----------|-------|
-| `name` / `describe()` | `"apple_mail"` / `"outlook"` y datos de versión para logs y `doctor` | — |
-| `accounts()` | Cuentas candidatas `{uuid, label, email, local}` | Base de la resolución de `[scope]` (§15.2). |
-| `labels_available` | bool | En Outlook siempre `true`. |
-| `mailboxes()` | Carpetas `{id, account_uuid, name, path, url, is_inbox, is_aggregate, total, unread}` | Contadores = items buscables, sin borrados (recalculados en Apple Mail; §B.4 en Outlook). |
-| `excluded_stores()` | `[{label, path, reason}]` | Siempre `[]` en Apple Mail; §B.3 en Outlook. |
-| `resolve_mailbox(account_uuid, ref)` | Carpeta o `None` | `ref` = nombre, path, URL o alias `INBOX`, case-insensitive. |
-| `query(mailbox_ids, since, until, unread, flagged, has_attachments, order)` | Filas de metadatos del modelo común | Orden total `(date_received, uid)`. |
-| `membership(uids)` | Carpetas a las que pertenece cada uid | Para dedupe y para `mailbox` del resultado (etiquetas Gmail en Apple Mail; trivial en Outlook). |
-| `duplicate_counts(mailbox_ids)` | Copias por clave global de mensaje | Para `duplicate_count`. |
-| `recipients(uids)` / `attachment_names(uid)` | Destinatarios y nombres de adjuntos | Para la página devuelta y, si hay `--to`/`--cc`, para los candidatos (en Outlook acotados por RF-17). |
-| `find_message(uid)` | Fila del mensaje y su carpeta, o `None` | Para `show`; el núcleo comprueba después que la cuenta esté declarada (RF-04). |
-| `load_body(row)` | `{available, readable, partial, headers, body_text, attachments, source, warnings}` | Nunca dispara descargas; S/MIME ⇒ `readable=false` sin leer el contenido. |
-| `parse_uid(text)` | uid del tipo del backend o `E_USAGE` | Entero en Apple Mail; hex en mayúsculas en Outlook. |
-| `doctor_checks()` | Lista de chequeos de entorno del backend | Los comunes los añade `cli.py`. |
-| `close()` | — | Libera conexión SQLite o referencias COM. |
-
-### 9.4 Flujo `search` (metadatos)
-
-1. Cargar config y validar flags.
-2. Obtener el backend de la plataforma y abrirlo en solo lectura (Apple Mail: detectar versión, verificar fingerprint, `mode=ro` o copia; Outlook: `GetActiveObject` + proxy + stores locales).
-3. Resolver alcance: cuentas declaradas en config (INBOX de cada una) + carpetas de config + `--include-mailbox`; validar que existan y que la cuenta esté declarada.
-4. `backend.query(...)` con filtros de fecha y estado; ordenar por `date_received DESC, uid DESC`.
-5. Aplicar en el núcleo los filtros de patrón (`--subject`, `--from`, `--to`, `--cc`) con la misma semántica en ambas plataformas. En Windows, si hay `--to`/`--cc`, antes se valida el acotamiento y `max_scan` (RF-17).
-6. Deduplicar antes de paginar con prioridad INBOX > carpeta normal > buzón agregado, reportando `duplicate_count`.
-7. Paginar y armar mensajes (remitente, destinatarios, flags, fechas, adjuntos).
-8. Añadir `snippet` (solo la página) con `backend.load_body`.
-9. Serializar JSON; log de la ejecución.
-
-### 9.5 Flujo `search --text` (contenido)
-
-1. Validar acotamiento (RF-17) y contar candidatos.
-2. Si `candidatos > max_scan` ⇒ `E_SCAN_TOO_LARGE` (sin resultados parciales).
-3. Leer cada cuerpo con `backend.load_body` (Apple Mail: ruta O(1) al `.emlx`; Outlook: `GetItemFromID` + `DownloadState`).
-4. Comparar con comodines/subcadena (case-insensitive) sobre el texto; recolectar coincidencias en orden.
-5. Reportar conteos de escaneo, truncar a `--limit` y marcar `truncated`.
-
-### 9.6 Detalles específicos de cada backend
+### 9.3 Detalles específicos de cada backend
 
 - Apple Mail: localización de los `.emlx` (§A.3), conexión SQLite y WAL (§A.4), modelo de datos de origen (§A.5).
 - Outlook: proxy de solo lectura (§B.2), alcance de stores (§B.3), correspondencia con el modelo común, filtros y `show` (§B.4).
@@ -344,7 +299,7 @@ Todo backend implementa la misma interfaz; `search.py` y `config.py` solo depend
 mailquery/
 ├── README.md                       # instalación, permisos, ejemplos, --help
 ├── LICENSE
-├── pyproject.toml                  # console script `mailquery`; pywin32 solo en Windows
+├── pyproject.toml                  # comando `mailquery` y dependencias (ADR-14)
 ├── docs/
 │   ├── PRD.md                      # este documento (núcleo común)
 │   ├── INTERFACES.md               # contratos de implementación entre módulos
@@ -358,18 +313,14 @@ mailquery/
 │   ├── __init__.py, __main__.py
 │   ├── cli.py, config.py, search.py, state.py
 │   ├── output.py, logging_setup.py, errors.py
-│   ├── store.py, emlx.py, accounts.py      # acceso Apple Mail (solo cambios de §23.3)
+│   ├── store.py, emlx.py, accounts.py      # acceso Apple Mail
 │   └── backends/
 │       ├── __init__.py             # selección por plataforma
-│       ├── base.py                 # interfaz MailBackend + modelo común
+│       ├── base.py                 # interfaz de backend + modelo común
 │       ├── apple_mail.py           # adaptador Apple Mail
 │       ├── outlook.py              # backend Outlook
-│       └── outlook_com.py          # único import de win32com; ReadOnlyCom
-└── tests/
-    ├── fixtures/                   # store sintético Apple Mail + goldens
-    ├── fakes/outlook.py            # Outlook falso en memoria
-    ├── mocks/
-    └── test_*.py                   # incluye test_readonly.py (bloqueante, por backend)
+│       └── outlook_com.py          # único import de win32com; proxy de solo lectura
+└── tests/                          # pruebas
 ```
 
 ### 10.2 Home de la aplicación (runtime, **no** en el repo)
@@ -383,7 +334,7 @@ mailquery/
 └── logs/mailquery.log              # texto plano, rotación por tamaño (+ 5 rotados)
 ```
 
-Reglas: **ninguna escritura fuera de `~/.mailquery`** (I-1); no hay base de datos propia. Permisos: RNF-05.
+Reglas: I-1 y ADR-02. Permisos: RNF-05.
 
 ---
 
@@ -395,14 +346,14 @@ Lo que el núcleo y el JSON conocen; cada backend lo rellena (correspondencias e
 
 | Entidad | Campos | Notas |
 |---------|--------|-------|
-| Cuenta | `uuid`, `label`, `email`, `local` | `uuid` con forma de UUID en ambos backends (en Outlook, el `PR_RECORD_KEY` del store, §B.4). |
+| Cuenta | `uuid`, `label`, `email`, `local` | `uuid` con forma de UUID en ambos backends (en Outlook, §B.4); `local` = cuenta sin servidor (p. ej. `On My Device`, un PST). |
 | Carpeta | `id` interno, `account_uuid`, `name`, `path`, `url`, `is_inbox`, `is_aggregate`, `total`, `unread` | `id` no se expone en el JSON. |
 | Mensaje (fila) | `uid`, `message_id`, clave global de dedupe, `subject`, remitente `{name, address}`, `date_sent`, `date_received` (epoch), carpeta, `is_read`, `is_flagged`, `has_attachments`, `size_bytes` | `uid`: `int` (Apple Mail) o `str` (Outlook). |
-| Cuerpo | `available`, `readable`, `partial`, `headers`, `body_text`, `attachments[{name}]`, `source{emlx_path, partial}`, `warnings` | Outlook: `partial=false`, `emlx_path=null`. |
+| Cuerpo | `available`, `readable`, `partial`, `headers`, `body_text`, `attachments[{name}]`, `source{emlx_path, partial}`, `warnings` | Valores por plataforma: §12.5. |
 
 ### 11.2 Estado local: `~/.mailquery/state.json`
 
-Sin base de datos. Solo un JSON atómico, con el mismo esquema en ambas plataformas:
+Un único JSON atómico (ADR-02), con el mismo esquema en ambas plataformas:
 
 ```json
 {
@@ -421,7 +372,7 @@ En Windows, `last_uid` y los elementos de `emitted_uids` son strings (`EntryID`)
 - Escritura atómica (RF-23); permisos: RNF-05.
 - Nunca contiene cuerpos, asuntos, direcciones ni rutas.
 - `cursor` ausente o `null` ⇒ no hay cursor guardado (primera corrida, §12.3).
-- Es estado corrupto: un JSON inválido; un campo conocido con tipo o valor inválido (`schema` ≠ 1, `updated_at` o `last_run` mal formados, `cursor` que no es objeto ni `null`, `last_date_received` que no es entero ≥ 0, `lookback_seconds` que no es entero ≥ 1, `emitted_uids` que no es lista); un `cursor` objeto sin `last_date_received` y `last_uid` válidos; o un uid inválido. Uid válido: en macOS, entero ≥ 1; en Windows, string no vacío de dígitos hexadecimales en mayúsculas (`^[0-9A-F]+$`). Cualquier otro valor o tipo (incluidos uids del otro backend) es inválido.
+- Es estado corrupto: un JSON inválido; un campo conocido con tipo o valor inválido (`schema` ≠ 1, `updated_at` o `last_run` mal formados, `cursor` que no es objeto ni `null`, `last_date_received` que no es entero ≥ 0, `lookback_seconds` que no es entero ≥ 1, `emitted_uids` que no es lista); un `cursor` objeto sin `last_date_received` y `last_uid` válidos; o un uid inválido. Uid válido: en macOS, entero ≥ 1; en Windows, el formato de §12.4. Cualquier otro valor o tipo (incluidos uids del otro backend) es inválido.
 - Si está corrupto, `new` falla con `E_STATE_CORRUPT` (exit 3) y un hint que sugiere renombrarlo y avisa de que la siguiente corrida será una primera corrida (§12.3). `search`/`show`/`mailboxes` no se ven afectadas; `doctor` lo reporta en el chequeo `state` con `ok=false`.
 
 ### 11.3 Fuentes de cada backend
@@ -433,7 +384,7 @@ En Windows, `last_uid` y los elementos de `emitted_uids` son strings (`EntryID`)
 
 ## 12. CLI
 
-Invocación instalada: `mailquery <comando> [opciones]`. También `python3 -m mailquery` (macOS) o `python -m mailquery` (Windows) desde el repo. Comandos, opciones y semántica son idénticos en ambas plataformas.
+Invocación: `mailquery <comando> [opciones]`. Comandos, opciones y semántica son idénticos en ambas plataformas.
 
 | Comando | Descripción | Salida |
 |---------|-------------|--------|
@@ -448,8 +399,8 @@ Invocación instalada: `mailquery <comando> [opciones]`. También `python3 -m ma
 | Opción | Descripción |
 |--------|-------------|
 | `-h`, `--help` | Muestra uso, comandos, opciones y banderas; termina con código 0. Disponible también por comando (`mailquery search --help`). |
-| `-v`, `--version` | Muestra la versión de la app y el entorno en una línea de texto; termina con código 0 (§12.9). Solo como opción global: `mailquery search -v` ⇒ `E_USAGE` (exit 2). |
-| `--log-level {error,warning,info,debug}` | Nivel de log; sobreescribe `[logging].level` (default `info`). |
+| `-v`, `--version` | Muestra la versión de la app y el entorno en una línea de texto; termina con código 0 (§12.9). |
+| `--log-level {error,warning,info,debug}` | Nivel de log de esta ejecución (§15.1). |
 
 No existen `--format`, `--config`, `--home`, `--quiet`, `--verbose`, `--no-color`, `--timeout` ni `--backend`. `-v` significa `--version`, no *verbose*.
 
@@ -463,7 +414,7 @@ No existen `--format`, `--config`, `--home`, `--quiet`, `--verbose`, `--no-color
 | `--since TIEMPO`, `--until TIEMPO` | Fecha de recepción (incluye `since`, excluye `until`). |
 | `--unread`, `--flagged`, `--has-attachments` | Filtros de estado. |
 | `--include-mailbox LISTA` | Carpetas extra a incluir en esta ejecución (repetible o coma-separada; nombre, `path` o URL; `INBOX` como alias). Deben pertenecer a una cuenta **declarada** en config. |
-| `--limit N` | Máximo de resultados (default `[search].default_limit` = 20, máx. 200). |
+| `--limit N` | Máximo de resultados (default: §15.1; máximo: RF-15). |
 
 Semántica de comodines: `*` = cualquier secuencia, `?` = un carácter; sin comodines se busca como subcadena. Siempre insensible a mayúsculas y acentos (`Factura` = `factura` = `fáctura`).
 
@@ -471,12 +422,14 @@ Términos: en `--subject`, los términos separados por espacios son AND, tengan 
 
 Alcance: RF-08 y §15.
 
+Orden de `messages[]`: `date_received` descendente y, a igualdad, `uid` descendente. La deduplicación (RF-07) se aplica antes de `--limit`.
+
 ### 12.3 `new`
 
 | Opción | Descripción |
 |--------|-------------|
 | `--peek` | Devuelve los nuevos sin avanzar el cursor. |
-| `--limit N` | Máximo de mensajes de esta corrida (default `[new].default_limit` = 100, máx. 500); el cursor avanza hasta el último emitido. |
+| `--limit N` | Máximo de mensajes de esta corrida (default: §15.1; máximo: RF-15); el cursor avanza hasta el último emitido. |
 
 `new` usa el alcance configurado (§15), sin filtros por carpeta: el cursor es global. Si se añade una cuenta o carpeta a la config, sus correos históricos no se emiten por `new`; para eso se usa `search`.
 
@@ -489,13 +442,13 @@ Alcance: RF-08 y §15.
 5. Si el alcance no tiene mensajes con fecha válida y no futura, `count: 0` y no se escribe estado.
 6. `W_FIRST_RUN` va siempre al final de `warnings`; antes van los warnings de alcance de cualquier corrida (`W_NO_ACCOUNTS`, `W_STORE_EXCLUDED`, `W_ACCOUNT_LABELS_UNAVAILABLE`, §12.10).
 
-Si `--limit` es menor que el número de mensajes de la ventana, se emiten los `--limit` más recientes de la ventana, en orden ascendente. En el texto de `W_FIRST_RUN` y en el chequeo `state` de `doctor`, `<lookback>` se muestra tal como está escrito en `[new].lookback` (default `10min`).
+Si `--limit` es menor que el número de mensajes de la ventana, se emiten los `--limit` más recientes de la ventana, en orden ascendente. En el texto de `W_FIRST_RUN` y en el chequeo `state` de `doctor`, `<lookback>` se muestra tal como está escrito en `[new].lookback` (§15.1).
 
 Los mensajes con fecha de recepción nula, ≤ 0 o no representable no entran en la ventana de `new` (ni en la primera corrida ni en las siguientes) y no mueven el cursor; siguen visibles en `search` y `show` con `date_received: null` (§17). Los mensajes con fecha de recepción posterior al momento de la corrida tampoco entran ni mueven el cursor (tampoco cuentan como "el más reciente" de la primera corrida); entran en la primera corrida de `new` en la que su fecha ya no sea futura, y siguen visibles en `search` y `show` con su fecha.
 
 **Lookback:** cada corrida usa el `[new].lookback` de la config actual; un cambio en la config aplica en la siguiente corrida.
 
-Se acepta que **algunos** mensajes puedan re-emitirse (estado borrado, cambio de lookback, rebuild del índice en macOS, mensaje movido en Windows); el harness puede deduplicar por `message_id` si lo necesita (§18).
+Re-emisiones puntuales aceptadas: §18.
 
 ### 12.4 `show`
 
@@ -504,7 +457,7 @@ mailquery show 83143                    # macOS: uid entero
 mailquery show 00000000A1B2C3D4…        # Windows: uid = EntryID hexadecimal
 ```
 
-Devuelve `{"ok", "command", "generated_at", "message", "warnings"}`. `message` tiene, en este orden: `uid`, `message_id`, `subject`, `from`, `to`, `cc`, `date_sent`, `date_received`, `mailbox`, `is_read`, `is_flagged`, `has_attachments`, `size_bytes` (mismos valores que en `search`, §12.5), `headers` (From, To, Cc, Subject, Date, Message-ID), `body_text` (truncado a 20.000 caracteres), `body_truncated` (true si se truncó, con `W_BODY_TRUNCATED`), `attachments: [{"name": "..."}]`, `partial`, `readable` (mismo significado que `body.readable`, §12.5) y `source: {"emlx_path": "..." | null, "partial": bool}`. Si el cuerpo no está disponible o no es legible, `body_text` es `""` y el warning indica el motivo (§12.5).
+Devuelve `{"ok", "command", "generated_at", "message", "warnings"}`. `message` tiene, en este orden: `uid`, `message_id`, `subject`, `from`, `to`, `cc`, `date_sent`, `date_received`, `mailbox`, `is_read`, `is_flagged`, `has_attachments`, `size_bytes` (mismos valores que en `search`, §12.5), `headers` (From, To, Cc, Subject, Date, Message-ID), `body_text` (truncado según §15.6), `body_truncated` (true si se truncó, con `W_BODY_TRUNCATED`), `attachments: [{"name": "..."}]`, `partial`, `readable` (mismo significado que `body.readable`, §12.5) y `source: {"emlx_path": "..." | null, "partial": bool}`. Si el cuerpo no está disponible o no es legible, `body_text` es `""` y el warning indica el motivo (§12.5).
 
 El formato del uid se valida antes de crear `~/.mailquery`, leer la config o abrir el cliente de correo: un uid inválido da `E_USAGE` aunque el cliente no esté disponible.
 
@@ -559,7 +512,7 @@ Un objeto por ejecución, con la misma forma en ambas plataformas y siempre **fo
 }
 ```
 
-`hint` es `null` salvo cuando `truncated` es `true` (RF-15). `body.truncated` indica que el `snippet` se cortó en 200 caracteres (RF-16).
+`hint` es `null` salvo cuando `truncated` es `true` (RF-15). `body.truncated` indica que el `snippet` se cortó (RF-16). Campos de `scan`: RF-17.
 
 Valores de `body` en `search`/`new`:
 
@@ -581,15 +534,13 @@ Diferencias por plataforma (todas documentadas; ningún campo se omite):
 | Campo | macOS (Apple Mail) | Windows (Outlook) |
 |-------|--------------------|-------------------|
 | `uid` | entero (`83143`) | string hex (`"00000000A1B2…"`) |
-| Fechas (`date_sent`, `date_received`, `generated_at`) | ISO 8601 con el offset local del sistema | igual que macOS (Outlook las da en UTC y se convierten al offset local) |
+| Fechas (`date_sent`, `date_received`, `generated_at`) | ISO 8601 con el offset local del sistema | igual que macOS (§B.4) |
 | `mailbox.url` | `imap://…`, `local://…` | `outlook://<account-uuid>/<path>` |
-| `mailbox.name` / `mailbox.path` | nombre y path del store (`INBOX`, `[Gmail]/All Mail`) | la bandeja de entrada siempre como `INBOX` (también como prefijo: `INBOX/Facturas`); el resto con su nombre real |
+| `mailbox.name` / `mailbox.path` | nombre y path del store (`INBOX`, `[Gmail]/All Mail`) | la bandeja de entrada siempre como `INBOX`; el resto con su nombre real (§B.4) |
 | `account.label` | `iCloud (…)`, `Gmail (…)`, `On My Device` | `Exchange (…)`, `IMAP (…)`, `POP3 (…)`, `EAS (…)`, `PST (…)` (§B.3) |
 | `body.partial`, `source.partial` | según `.partial.emlx` | siempre `false` |
 | `source.emlx_path` | ruta absoluta | `null` |
 | `mailboxes.excluded_stores` | siempre `[]` | stores excluidos con etiqueta, ruta y motivo (§B.3) |
-
-**Regla para el harness:** tratar `uid` como token opaco y devolverlo tal cual a `show`; no hacer aritmética ni asumir su tipo.
 
 `new` añade `"cursor": {"previous": {...}, "current": {...}}`. `mailboxes` tiene estructura propia (`accounts[]`/`mailboxes[]`/`excluded_stores[]`):
 
@@ -622,9 +573,9 @@ Los warnings son strings con código `W_*` (p. ej. `W_NO_ACCOUNTS: no accounts a
 | 5 | Ocupado/transitorio | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` *(nuevo)* |
 | 6 *(nuevo)* | Cliente de correo no disponible | `E_OUTLOOK_NOT_RUNNING` |
 
-Qué códigos usa cada backend: §A.8 y §B.7. Los existentes no cambian de exit en macOS. Errores de `show`: §12.4.
+Errores específicos de cada backend: §A.8 y §B.7. Los existentes no cambian de exit en macOS. Errores de `show`: §12.4.
 
-Cuando el Outlook clásico no está disponible, la detección sigue este orden: (1) no es posible importar `pywin32` ⇒ `E_DEPENDENCY_MISSING`; (2) Outlook clásico no está registrado en COM o su versión es < 16.0 ⇒ `E_CLIENT_UNSUPPORTED`; (3) está registrado pero no hay una instancia en ejecución accesible ⇒ `E_OUTLOOK_NOT_RUNNING` (exit 6).
+Cuando el Outlook clásico no está disponible, la detección sigue este orden: (1) `pywin32` no está disponible ⇒ `E_DEPENDENCY_MISSING`; (2) Outlook clásico no está registrado en COM o su versión es < 16.0 ⇒ `E_CLIENT_UNSUPPORTED`; (3) está registrado pero no hay una instancia en ejecución accesible ⇒ `E_OUTLOOK_NOT_RUNNING` (exit 6).
 
 Cada error debe incluir un `hint` accionable (p. ej. "añade --since 7d", "concede Acceso total al disco a la app del harness", "abre Outlook clásico con el mismo usuario y sin elevar", "revisa `mailquery mailboxes`").
 
@@ -633,7 +584,7 @@ Cada error debe incluir un `hint` accionable (p. ej. "añade --since 7d", "conce
 La ayuda es texto para humanos (excepción de RF-18), está en inglés y se
 organiza por secciones y ejemplos. Aplica a `mailquery --help` y a
 `mailquery <comando> --help` de los cinco comandos, sin colores para que la
-salida sea estable en pipes y tests. Es la misma en ambas plataformas y ningún
+salida sea estable en pipes. Es la misma en ambas plataformas y ningún
 texto de ayuda puede contradecir este PRD.
 
 Ejemplo ilustrativo de salida (raíz; ancho de 100 columnas):
@@ -688,7 +639,7 @@ acotamiento obligatorio de `--text`).
 Reglas comunes:
 
 - `python`, `config`, `state` y `lock` tienen la misma semántica en ambos backends.
-- `config` valida la existencia y sintaxis de `config.toml`, la resolución de cada bloque `[scope]` y su `mailbox_list`, y lista las cuentas disponibles si no hay ninguna declarada (RF-25). La sintaxis se valida siempre; la resolución depende de un chequeo del backend (§A.7, §B.8) y, si ese chequeo falló, sale como `not evaluated: <chequeo> failed`. Sin bloques declarados y con esa dependencia fallida, `config` sale con `ok=true` y `0 account block(s) declared; available accounts: unknown (<chequeo> failed)`. En macOS, si esa dependencia está bien pero `accounts_db` falló, el detalle es `available accounts: unknown (Accounts4.sqlite unavailable)`, como hoy.
+- `config` valida la existencia y sintaxis de `config.toml`, la resolución de cada bloque `[scope]` y su `mailbox_list`, y lista las cuentas disponibles si no hay ninguna declarada (RF-25). La sintaxis se valida siempre; la resolución depende de un chequeo del backend (§A.7, §B.8) y, si ese chequeo falló, sale como `not evaluated: <chequeo> failed`. Sin bloques declarados y con esa dependencia fallida, `config` sale con `ok=true` y `0 account block(s) declared; available accounts: unknown (<chequeo> failed)`. En macOS, si esa dependencia está bien pero `accounts_db` falló, el detalle es `available accounts: unknown (Accounts4.sqlite unavailable)`, como en 1.x.
 - `home` valida en macOS que el home existe con modo `0700`; en Windows, que existe y es escribible por el usuario.
 - Sin cursor guardado, `state` sale con `ok=true` y el detalle `no state yet; the next new run is a first run and emits the messages received in the last <lookback> before the newest message`.
 - Un chequeo que no se puede evaluar sale con `ok=false` y `detail` = `not evaluated: <motivo>`: `<chequeo del que depende> failed` si depende de otro que falló (dependencias: §A.7, §B.8), o la causa concreta si no (p. ej. `not evaluated: SecurityCenter2 unavailable`, §B.6).
@@ -718,11 +669,10 @@ Formato: `mailquery <versión> (backend <backend>; Python <x.y.z>; <plataforma>)
 
 Reglas:
 
-- Sin efectos: no crea `~/.mailquery`, no escribe en el log, no toma el lock, no lee `config.toml`, no importa `pywin32` y no accede al cliente de correo. Funciona aunque Outlook esté cerrado o falte FDA.
+- Sin efectos: no crea `~/.mailquery`, no escribe en el log, no toma el lock, no lee `config.toml`, no necesita `pywin32` y no accede al cliente de correo. Funciona aunque Outlook esté cerrado o falte FDA.
 - Solo como opción global (antes del subcomando). Con un subcomando, `-v`/`--version` es un argumento no reconocido ⇒ `E_USAGE` (exit 2).
 - Puede combinarse con otras opciones globales: `mailquery --log-level debug -v` muestra la versión (y no escribe log).
 - Con `-h` y `-v` a la vez gana la primera que aparece: `-v -h` muestra la versión y `-h -v` la ayuda; ambos exit 0.
-- Se implementa en la fase W0 (§23.2).
 
 ### 12.10 Catálogo de warnings
 
@@ -733,10 +683,10 @@ Los warnings son strings `"W_CODIGO: detalle"`; el detalle es en inglés y siemp
 | `W_NO_ACCOUNTS` | ambas | No hay cuentas declaradas válidas: `search`/`new` devuelven `count: 0`; también en `mailboxes`. |
 | `W_FIRST_RUN` | ambas | Primera corrida de `new`: no hay cursor guardado (§12.3). |
 | `W_RESULTS_TRUNCATED` | ambas | Hay más resultados que `--limit`. |
-| `W_BODY_TRUNCATED` | ambas | `show` truncó el cuerpo a 20.000 caracteres. |
+| `W_BODY_TRUNCATED` | ambas | `show` truncó el cuerpo (§15.6). |
 | `W_HTML_NO_TEXT` | ambas | El cuerpo HTML no produjo texto. |
 | `W_BODY_UNREADABLE` | ambas | El cuerpo no se puede leer; el detalle dice por qué (archivo o item que no se puede abrir, mensaje sin carpeta). Para S/MIME, en ambas plataformas, el texto es `W_BODY_UNREADABLE: S/MIME encrypted content is not supported` o `W_BODY_UNREADABLE: S/MIME signed content is not supported`. **Sustituye a `W_EMLX_UNREADABLE`** en todos sus usos. |
-| `W_ATTACHMENTS_UNAVAILABLE` | ambas | En `show`, solo si el cuerpo no se pudo leer **y** el mensaje tiene adjuntos; sin adjuntos no se emite. macOS: "tiene adjuntos" = el `Envelope Index` tiene nombres de adjuntos para el mensaje, y `attachments` lista esos nombres (como hoy). Windows: "tiene adjuntos" = `has_attachments` (se lee sin abrir el item), y `attachments` es `[]` porque los nombres no se pueden leer sin abrirlo (§B.4). Diferencia documentada: en Windows un S/MIME siempre trae un adjunto técnico (`smime.p7m`), así que `has_attachments` no indica adjuntos reales; para S/MIME, `attachments` es `[]` y este warning no se emite. |
+| `W_ATTACHMENTS_UNAVAILABLE` | ambas | En `show`, solo si el cuerpo no se pudo leer **y** el mensaje tiene adjuntos; sin adjuntos no se emite. macOS: "tiene adjuntos" = el `Envelope Index` tiene nombres de adjuntos para el mensaje, y `attachments` lista esos nombres (como en 1.x). Windows: "tiene adjuntos" = `has_attachments` (se lee sin abrir el item), y `attachments` es `[]` porque los nombres no se pueden leer sin abrirlo (§B.4). Diferencia documentada: en Windows un S/MIME siempre trae un adjunto técnico (`smime.p7m`), así que `has_attachments` no indica adjuntos reales; para S/MIME, `attachments` es `[]` y este warning no se emite. |
 | `W_ACCOUNT_LABELS_UNAVAILABLE` | macOS | `Accounts4.sqlite` no está disponible; solo funcionan los UUID. |
 | `W_EMLX_MISSING` | macOS | No existe el `.emlx` del mensaje (`body.available=false`). |
 | `W_EMLX_CORRUPT` | macOS | El `.emlx` está corrupto. |
@@ -753,53 +703,25 @@ Los warnings son strings `"W_CODIGO: detalle"`; el detalle es en inglés y siemp
 |-----------|-------|---------|
 | Sistema | macOS con Apple Mail (store `V9`/`V10`/`V11`; `V10` validada) | Windows 10/11 x64 con Outlook clásico 16.0 en ejecución (§B.5) |
 | Python | ≥ 3.11 (el intérprete que use `pipx`) | ≥ 3.11 (el intérprete que use `pipx`) |
-| `pipx` | `brew install pipx && pipx ensurepath` | `python -m pip install --user pipx && python -m pipx ensurepath` |
-| Dependencias de runtime | Ninguna | `pywin32` (la instala `pipx` automáticamente) |
+| `pipx` | Instalado (instrucciones en el README) | Instalado (instrucciones en el README) |
+| Dependencias de runtime | Ninguna | La de ADR-14 (la instala `pipx`) |
 | Permisos | **Acceso total al disco (FDA)** para la app que ejecuta la CLI (§A.6) | Misma sesión y mismo nivel de integridad que Outlook (sin elevar); Object Model Guard sin avisos (§B.6) |
 
 ### 13.2 Instalación
 
-```bash
-# desde la raíz del repo (macOS, Linux o Windows)
-pipx install .
-mailquery --help
-mailquery doctor                      # crea ~/.mailquery y valida el entorno
-```
-
-Los instaladores `scripts/install.sh` (macOS/Linux) y `scripts/install.ps1` / `install.bat` (Windows) automatizan `pipx` y siembran `config.toml` desde `docs/config.example.toml` si no existe.
+Se instala con `pipx install .` desde la raíz del repositorio en ambas plataformas (ADR-08); el primer `mailquery doctor` crea `~/.mailquery` y valida el entorno. Los instaladores `scripts/install.sh` (macOS/Linux) y `scripts/install.ps1` / `install.bat` (Windows) automatizan `pipx` y siembran `config.toml` desde `docs/config.example.toml` si no existe.
 
 Al terminar, `install.ps1` comprueba que `pywin32` quedó instalado y que `mailquery -v` muestra `backend outlook`; si la comprobación falla, muestra el problema con el hint `pipx reinstall mailquery` y termina con un código distinto de 0.
 
 Después de instalar, declara al menos una cuenta en `~/.mailquery/config.toml` (§15).
 
-`pyproject.toml` declara el comando `mailquery` y la dependencia de ADR-14 (`pywin32; sys_platform == "win32"`).
-
 ### 13.3 Actualización y desinstalación
 
-```bash
-git pull
-pipx reinstall mailquery        # reinstala desde el repo actualizado
+Se actualiza con `pipx reinstall mailquery` tras actualizar el repositorio y se desinstala con `pipx uninstall mailquery`. Desinstalar no borra `~/.mailquery` (estado, logs y configuración); el usuario puede borrarlo a mano o, en Windows, con `scripts\install.ps1 -Uninstall -Purge`.
 
-pipx uninstall mailquery        # desinstala el comando
-rm -rf ~/.mailquery             # opcional: borra estado, logs y configuración
-```
+### 13.4 Notas de permisos
 
-En Windows, el borrado opcional del home es `Remove-Item -Recurse -Force $HOME\.mailquery` (o `scripts\install.ps1 -Uninstall -Purge`).
-
-### 13.4 Modo desarrollo (sin instalar)
-
-```bash
-python3 -m mailquery doctor              # macOS/Linux
-python -m mailquery doctor               # Windows (requiere pywin32 en ese intérprete)
-```
-
-Ambos modos comparten el mismo código y el mismo home `~/.mailquery`.
-
-### 13.5 Notas de permisos
-
-- macOS: FDA para la app que lanza el proceso, no para el venv de pipx (§A.6).
-- Windows: no ejecutar el harness elevado ni como servicio; Outlook y `mailquery` deben compartir sesión y nivel de integridad (§B.5).
-- En ambos casos, verificar con `mailquery doctor` tras actualizar el intérprete, el sistema o el cliente.
+Permisos: §A.6 (macOS) y §B.5 (Windows). En ambos casos, verificar con `mailquery doctor` tras actualizar el intérprete, el sistema o el cliente.
 
 ---
 
@@ -816,11 +738,10 @@ Formato (estilo log4j):
 2026-11-02 02:15:00,427 INFO  mailquery.cli run=abc123 event=end exit_code=0 count=1
 ```
 
-- Niveles: `error`, `warning`, `info` (default), `debug`; se configuran en `[logging].level` y `--log-level` los sobreescribe.
+- Niveles: `error`, `warning`, `info`, `debug` (§15.1).
 - Se registran: comando, backend, estrategia de conexión, versión del store o del cliente, conteos, duración, número de warnings y sus códigos `W_*` (sin el detalle), y errores (`code` + mensaje).
 - **Nunca** se registran asuntos, cuerpos, direcciones, nombres de personas, carpetas o cuentas, etiquetas de cuenta, rutas, términos de búsqueda ni identificadores de mensajes o stores (uids, `EntryID`, `StoreID`); si el mensaje de un error los contiene, se omiten al escribirlo en el log.
 - Un error inesperado (`E_INTERNAL`) registra además su traceback.
-- Los errores humanos también se resumen en `stderr`; el log guarda el detalle técnico.
 
 ---
 
@@ -844,7 +765,7 @@ Formato (estilo log4j):
 |-----------|------|-------------|---------|-----------------|---------|----------|
 | `[logging]` | tabla TOML | No | — | — | `[logging]` | Sección de logging. |
 | `logging.level` | string | No | `"info"` | `error`, `warning`, `info`, `debug` | `"debug"` | Nivel mínimo del log; `--log-level` lo sobreescribe. |
-| `logging.max_size_mb` | entero | No | `10` | 1–1024 | `50` | Tamaño en MB a partir del cual se rota el log; se conservan 5 archivos rotados (§15.6). |
+| `logging.max_size_mb` | entero | No | `10` | 1–1024 | `50` | Tamaño en MB a partir del cual se rota el log; se conservan 5 archivos rotados (§14). |
 | `[search]` | tabla TOML | No | — | — | `[search]` | Defaults de búsqueda. |
 | `search.default_limit` | entero | No | `20` | 1–200 | `50` | Límite por defecto de `search`; `--limit` lo sobreescribe. |
 | `search.max_scan` | entero | No | `5000` | 100–50000 | `10000` | Candidatos máximos al escanear contenido (`--text`). |
@@ -870,8 +791,6 @@ Origen de etiquetas y UUID: en macOS, `Accounts4.sqlite` en solo lectura (§A.5.
 
 Si las etiquetas no están disponibles (solo puede ocurrir en macOS), las etiquetas/emails no se resuelven: solo funciona el UUID y `doctor` lo advierte.
 
-En Windows, el UUID sale del `PR_RECORD_KEY` del store (§B.4).
-
 **Errores de sintaxis frecuentes:** el `@` y los puntos no son válidos en claves TOML sin comillas, y los bloques de cuenta siempre cuelgan de `[scope]`:
 
 ```text
@@ -893,12 +812,11 @@ En Windows, el UUID sale del `PR_RECORD_KEY` del store (§B.4).
 - Cuenta inexistente ⇒ `E_CONFIG_ACCOUNT_UNKNOWN` (exit 2).
 - Etiqueta/email que coincide con más de una cuenta ⇒ `E_ACCOUNT_AMBIGUOUS` (exit 2) con la lista `label (uuid)` para desambiguar.
 - Etiqueta/email sin base de cuentas disponible ⇒ `E_ACCOUNT_LABELS_UNAVAILABLE` (exit 2; usar el UUID que muestra `mailboxes`).
-- Una referencia de `mailbox_list` se resuelve dentro de la cuenta de su bloque. Una de `--include-mailbox` se prueba en las cuentas declaradas, en el orden de sus bloques en `config.toml`, y se usa la primera que la resuelve (así, `--include-mailbox INBOX` es la bandeja de la primera cuenta declarada). Si no la resuelve ninguna, `E_MAILBOX_NOT_FOUND` lista las carpetas de todas las cuentas declaradas.
+- Una referencia de `mailbox_list` se resuelve dentro de la cuenta de su bloque. Una de `--include-mailbox` se prueba en las cuentas declaradas, en el orden de sus bloques en `config.toml`, y se usa la primera que la resuelve (así, `--include-mailbox INBOX` es la bandeja de la primera cuenta declarada). Si no la resuelve ninguna: `E_ACCOUNT_NOT_IN_SCOPE` (exit 2; hint: declarar la cuenta en `config.toml`) si la resuelve una cuenta no declarada; si no, `E_MAILBOX_NOT_FOUND` con las carpetas de todas las cuentas declaradas.
 - Dentro de una cuenta, la referencia se resuelve sin distinguir mayúsculas: `INBOX` es siempre la bandeja de entrada de la cuenta; si no, una coincidencia exacta de `path` o URL gana a una de nombre; si varias carpetas coinciden por nombre, se usa la primera en el orden de `mailboxes[]` (macOS: orden del catálogo de carpetas de Mail; Windows: stores en el orden del perfil y, dentro de cada uno, carpetas en recorrido en profundidad en el orden en que Outlook las enumera).
 - Carpeta de `mailbox_list` (o de `--include-mailbox`) que no existe en esa cuenta ⇒ `E_MAILBOX_NOT_FOUND` (exit 2) con la lista de carpetas válidas.
 - Tipo incorrecto (p. ej. `mailbox_list = "Facturas"` en lugar de un array) o clave desconocida ⇒ `E_CONFIG_INVALID` (exit 2). La clave retirada `[logging].retention_days` es una clave desconocida más, con el hint `retention_days was replaced by max_size_mb`.
 - Valor fuera de rango (p. ej. `default_limit = 0` o `max_size_mb = 0`) o nivel/duración inválidos ⇒ `E_CONFIG_INVALID` (exit 2), con el rango válido en el `hint`.
-- Cuenta usada en `--include-mailbox` que no está declarada en config ⇒ `E_ACCOUNT_NOT_IN_SCOPE` (exit 2; hint: declarar la cuenta en `config.toml`).
 - Cuenta declarada que resuelve a un store excluido (solo Windows, §B.3) ⇒ warning `W_STORE_EXCLUDED: <etiqueta> at <ruta> is excluded: <reason>` (sin ` at <ruta>` si `path` es `null`); la cuenta no se lee. Aparece en `warnings` de `search`, `new`, `show` y `mailboxes`, y en el `detail` del chequeo `config` de `doctor`, que sigue con `ok=true`. Si todas las cuentas declaradas están excluidas, `search`/`new` devuelven `count: 0` con `W_STORE_EXCLUDED` y `W_NO_ACCOUNTS`. Las claves de `[scope]` resuelven contra las cuentas candidatas **y** las excluidas, para poder reportarlas en vez de dar `E_CONFIG_ACCOUNT_UNKNOWN`.
 - Sin bloques `[scope.*]` válidos (o sin `config.toml`) ⇒ `W_NO_ACCOUNTS` (warning, no error): `search`/`new` devuelven `count: 0`; `mailboxes` marca `included: false`; `doctor` lista las cuentas disponibles (§12.8).
 - `mailquery doctor` reporta todos estos casos con los valores válidos.
@@ -923,9 +841,9 @@ mailbox_list = ["INBOX/Facturas"]
 
 ### 15.5 Archivo completo (todas las propiedades)
 
-Estos archivos muestran **todo** lo que se puede configurar hoy, con las tres formas de identificar una cuenta. Las secciones `[logging]`, `[search]` y `[new]` son idénticas en ambas plataformas; cambian solo las cuentas. Cada equipo tiene su propio `config.toml`: en un archivo solo resuelven las cuentas del backend de ese equipo (una cuenta de otro backend ⇒ `E_CONFIG_ACCOUNT_UNKNOWN`). Son válidos tal cual, sustituyendo etiquetas y carpetas por las tuyas.
+El ejemplo de macOS muestra **todo** lo que se puede configurar hoy, con las tres formas de identificar una cuenta. Las secciones `[logging]`, `[search]` y `[new]` son idénticas en ambas plataformas; para Windows solo se muestran los bloques de cuenta. Cada equipo tiene su propio `config.toml`: en un archivo solo resuelven las cuentas del backend de ese equipo (una cuenta de otro backend ⇒ `E_CONFIG_ACCOUNT_UNKNOWN`). Son válidos tal cual, sustituyendo etiquetas y carpetas por las tuyas.
 
-**macOS (Apple Mail):**
+**macOS (Apple Mail)**, archivo completo:
 
 ```toml
 # ============================================================================
@@ -977,33 +895,11 @@ mailbox_list = ["Recovered Messages (ADayler@gmail.com)"]
 # ----------------------------------------------------------------------------
 ```
 
-**Windows (Outlook clásico):**
+**Windows (Outlook clásico)**, bloques de cuenta:
 
 ```toml
-# ============================================================================
-# ~/.mailquery/config.toml — EJEMPLO COMPLETO (Windows + Outlook clásico)
-# ============================================================================
-# Este archivo es OPCIONAL: sin él no se observa ninguna cuenta.
-# Solo se leen las cuentas declaradas aquí; las demás quedan excluidas.
-# Dentro de cada cuenta declarada, INBOX se incluye SIEMPRE.
-# Claves desconocidas ⇒ E_CONFIG_INVALID (exit 2).
-# ============================================================================
-
-# El namespace `scope` es obligatorio en las claves, pero no hace falta
-# escribir [scope] por separado: [scope."..."] crea la tabla padre implícita.
-
-# --- Valores globales -------------------------------------------------------
-[logging]
-level = "info"                 # error | warning | info | debug
-max_size_mb = 10               # 1..1024; rota al superar este tamaño (5 rotados)
-
-[search]
-default_limit = 20             # 1..200
-max_scan = 5000                # 100..50000
-
-[new]
-default_limit = 100            # 1..500
-lookback = "10min"             # 1min..1d
+# ~/.mailquery/config.toml — Windows + Outlook clásico: solo cambian las cuentas
+# ([logging], [search] y [new] como en el ejemplo de macOS).
 
 # --- Cuentas observadas (declararlas es lo que las activa) -----------------
 # Cuenta Exchange en modo caché: INBOX (la bandeja de entrada, sea cual sea el
@@ -1034,7 +930,7 @@ mailbox_list = ["Proyectos/2025"]
 
 ### 15.6 Valores fijos (no configurables)
 
-Los valores configurables están en §15.1. Estos son los que se mantienen fijos en el producto para no abrir combinaciones que rompan el contrato; si alguna tarea necesita otro valor, se evalúa como propiedad documentada y con test.
+Los valores configurables están en §15.1. Estos son los que se mantienen fijos en el producto para no abrir combinaciones que rompan el contrato; si alguna tarea necesita otro valor, se evalúa como una propiedad documentada nueva.
 
 | Aspecto | Valor fijo | Nota |
 |---------|-----------|------|
@@ -1064,7 +960,7 @@ Los valores configurables están en §15.1. Estos son los que se mantienen fijos
 - Cero red, telemetría o analytics.
 - Permisos de `~/.mailquery`: RNF-05.
 - El estado no guarda contenido de correos (§11.2); los logs tampoco (§14).
-- Las fuentes de cuentas (`Accounts4.sqlite`, cuentas del perfil de Outlook) se leen solo para identificadores, proveedor y email visible; nunca credenciales ni tokens.
+- Las fuentes de cuentas (`Accounts4.sqlite`, cuentas del perfil de Outlook) se leen solo para identificadores, proveedor y email visible (§4, regla 1).
 - Nunca se versiona correo en el repositorio.
 
 ### 16.3 Prompt injection
@@ -1079,8 +975,6 @@ Comunes a ambos backends (los específicos están en §A.8 y §B.7; los de confi
 
 | Situación | Comportamiento |
 |-----------|----------------|
-| Mensaje sin cuerpo legible en local (incluido S/MIME) | `body.available=false` (o `readable=false`) + warning con el motivo; la consulta continúa. |
-| Mensaje sin identificador global | Es único: `duplicate_count = 1`. |
 | Fecha inválida o futura | Se ordena por lo que informe el cliente; se reporta ISO 8601. Una fecha nula, ≤ 0 o no representable se reporta como `null` y la consulta continúa. `new` ignora los mensajes con fecha nula, no representable o futura (§12.3). |
 | Cero resultados | Exit 0 con `count: 0` (no es error). |
 | Lock ocupado | `E_LOCKED`, exit 5. |
@@ -1123,7 +1017,7 @@ Por tanto, el re-procesamiento **solo** aparece si una tarea consulta por estado
 
 ## 19. Rendimiento
 
-Presupuestos p95 por backend. Los de macOS están validados (mediciones en §A.9); los de Windows están contrastados parcialmente con el spike W1 (§B.9).
+Presupuestos p95 por backend. Los de macOS están validados (mediciones en §A.9); los de Windows están contrastados parcialmente con el spike (§B.9).
 
 | Operación | Apple Mail (macOS) | Outlook (Windows) |
 |-----------|--------------------|--------------------------------|
@@ -1134,17 +1028,15 @@ Presupuestos p95 por backend. Los de macOS están validados (mediciones en §A.9
 | `show` | < 150 ms | < 500 ms |
 | `search --text` acotado (≤ 500 candidatos) | < 3 s | < 10 s |
 
-El acotamiento obligatorio de `--text` y el máximo de candidatos `[search].max_scan` (RF-17) aplican igual en ambos.
-
 ---
 
-## 20. Testing
+## 20. Criterios de aceptación
 
-Pruebas con `unittest` (stdlib), sin tocar el store real en CI, con **dobles por backend** (store sintético de Apple Mail; Outlook falso en memoria). Toda la suite corre en Linux, macOS y Windows.
+El producto cumple en ambas plataformas:
 
-- **Solo lectura (bloqueante en CI):** por backend, como se describe en §A.10 (hashes y `mtime` del store de prueba) y §B.10 (proxy de lista blanca sobre el Outlook falso).
-- **Contrato:** goldens JSON por backend, diccionario de errores y códigos de salida, `--help` y `--version`. En macOS los goldens solo cambian por §23.3 (W0) y el refactor W2 no puede cambiarlos (RNF-11).
-- **Escenarios esenciales comunes:** `new` no reprocesa y su primera corrida emite la ventana de lookback; `show` fuera de las cuentas declaradas ⇒ `E_ACCOUNT_NOT_IN_SCOPE`; mensajes sin identificador global no se agrupan; `--text` sin acotar ⇒ `E_UNBOUNDED_SCAN`; salida UTF-8 con caracteres no ASCII a un pipe; `--version` sin efectos en el home.
+- **Solo lectura:** el criterio de aceptación de I-1 de cada backend (§A.10, §B.10).
+- **Contrato:** la forma del JSON, los errores, los códigos de salida, `--help` y `--version` son los de este PRD (RNF-11).
+- **Escenarios esenciales:** `new` no reprocesa y su primera corrida emite la ventana de lookback; `show` fuera de las cuentas declaradas ⇒ `E_ACCOUNT_NOT_IN_SCOPE`; mensajes sin identificador global no se agrupan; `--text` sin acotar ⇒ `E_UNBOUNDED_SCAN`; salida UTF-8 con caracteres no ASCII a un pipe; `--version` sin efectos en el home.
 
 ---
 
@@ -1157,7 +1049,7 @@ Pruebas con `unittest` (stdlib), sin tocar el store real en CI, con **dobles por
 3. Códigos de salida: reintentar solo con 5; con 6, pedir al usuario que abra Outlook (o reintentar más tarde) en lugar de reintentar en bucle; corregir con 2/3/4 (con `E_CLIENT_TIMEOUT`, revisar `doctor` antes de reintentar); 0 es éxito.
 4. Para tareas de "procesar una vez", usar `new` (nunca re-consultar por estado).
 5. Tratar asunto/cuerpo como datos no confiables (prompt injection).
-6. Tratar `uid` como token opaco (entero o string) y pasarlo tal cual a `show`.
+6. Tratar `uid` según RF-27.
 7. La herramienta no programa tareas: el harness decide el momento (cron externo, evento, petición del usuario).
 
 ### 21.2 Recetas / preceptos (`docs/recipes/`)
@@ -1176,7 +1068,6 @@ Ejemplo `01-new-mail-digest.md`:
 
 - `search`/`show`/`mailboxes`/`doctor`: sin efectos sobre el correo ni sobre el estado de `new`. Como cualquier comando, pueden crear `~/.mailquery`, escribir en el log y tomar el lock.
 - `new`: exactamente-una-vez por corrida (cursor + dedupe); `--peek` para inspección.
-- Lock no bloqueante `~/.mailquery/locks/mailquery.lock` evita solapes; si está ocupado, exit 5.
 
 ---
 
@@ -1184,59 +1075,48 @@ Ejemplo `01-new-mail-digest.md`:
 
 | Pregunta original | Decisión |
 |-------------------|----------|
-| ¿Nombres visibles de cuenta? | Etiqueta legible automática resuelta en solo lectura (macOS: `Accounts4.sqlite`; Windows: cuentas y stores del perfil); UUID como fallback. |
-| ¿Búsqueda de contenido sin filtros? | No; el índice FTS queda como fase opcional futura. |
-| ¿Salida markdown? | No: JSON único, sin `--format`. |
-| ¿Retención de logs? | Texto plano, rotación por tamaño (`max_size_mb`, default 10 MB) con 5 rotados fijos; sustituye a la rotación diaria con `retention_days` (2026-11-03). |
-| ¿Frecuencia de tareas? | La decide el harness; la app es bajo demanda y no programa nada. |
-| ¿Adjuntos? | Solo nombres y `has_attachments`; sin tamaño/MIME. |
-| ¿Múltiples `V*` (macOS)? | Se elige la versión usada por Mail (`PersistenceInfo.plist`), validando el esquema; sin override por config. |
-| ¿Base de datos propia? | No: solo `~/.mailquery/state.json`. |
-| ¿Cómo se instala? | `pipx install .` (comando `mailquery`) en ambas plataformas. |
-| ¿Encabezado `[scope]` explícito? | No: `[scope."<cuenta>"]` crea la tabla padre implícitamente; el namespace `scope` se conserva. |
-| ¿Cómo se "observa" una cuenta? | Solo si está declarada con un bloque `[scope."<cuenta>"]`; las cuentas no declaradas quedan excluidas. Dentro de una cuenta declarada, INBOX siempre. |
-| ¿Qué pasa si no hay cuentas declaradas? | No se observa ninguna: `search`/`new` devuelven `count: 0` con warning `W_NO_ACCOUNTS`; `mailboxes`/`doctor` lo indican. |
-| ¿Config ampliada? | `[logging]` (level, max_size_mb), `[search]` (default_limit, max_scan) y `[new]` (default_limit, lookback); los flags de CLI tienen prioridad. |
-| **¿Un PRD nuevo para Windows?** (2026-11-03) | No: un único PRD v1.0 como núcleo común + anexos por backend (ADR-10). |
-| **¿Cómo se identifica un mensaje de Outlook?** (2026-11-03) | `uid` string (`EntryID`) en Windows; entero sin cambios en macOS (ADR-12). |
-| **¿Qué pasa si Outlook está cerrado?** (2026-11-03) | Error `E_OUTLOOK_NOT_RUNNING` con exit 6; nunca se lanza (ADR-13). |
-| **¿Qué dependencia COM?** (2026-11-03) | `pywin32`, solo en Windows (ADR-14). |
-| **¿Qué stores de Outlook?** (2026-11-03) | Stores locales de las cuentas del perfil + PST; sin compartidos ni carpetas públicas (ADR-15). |
-| **¿Nuevo Outlook (`olk`)?** (2026-11-03) | Fuera de alcance: no tiene COM ni store local (§3.3). |
-| **¿Cómo se consulta la versión?** (2026-11-03) | Opción global `-v`/`--version`: una línea de texto con versión, backend, Python y plataforma; exit 0; sin efectos; con `-h`, gana la primera; se implementa en W0 (RF-31, §12.9). |
-| **Revisión de la v1.0: datos y búsqueda** (2026-11-03) | Mensaje sin identificador global ⇒ único (RF-07); `--to`/`--cc` acotados solo en Windows (RF-17); S/MIME cifrado o firmado ilegible en ambas, con motivo (RF-05); `W_EMLX_UNREADABLE` ⇒ `W_BODY_UNREADABLE` (§12.10); UTF-8 siempre (RF-32). |
-| **Revisión de la v1.0: `show` y `new`** (2026-11-03) | `show` solo en cuentas declaradas, en cualquier carpeta, también en macOS; ítem que no es correo ⇒ no encontrado (§12.4). La primera corrida de `new` emite la ventana; el lookback aplica de inmediato; se aceptan re-emisiones puntuales (§12.3, §18). |
-| **Revisión de la v1.0: Outlook** (2026-11-03) | Timeout COM de 30 s con `E_CLIENT_TIMEOUT` (RF-33); EAS dentro del alcance; PST en red excluidos; stores excluidos reportados con ruta y motivo (§B.3); bandeja como `INBOX` (§B.4); carpetas internas ocultas (§B.3); contadores = items buscables (§B.4); orden de detección del cliente (§12.6); caché de `pywin32` dentro de `~/.mailquery` (§B.2); `doctor home` en Windows = existe y escribible (§12.8); criterio de `object_model_guard` (§B.6). |
-| **Revisión del implementador** (2026-11-03) | Un timeout de Outlook dentro de `doctor` no aborta (§12.8). `show` de un uid de un store excluido ⇒ `E_ACCOUNT_NOT_IN_SCOPE` solo si el store se identifica sin leer sus items; si no, "not found"; la prueba A2 confirmó que se identifica por el `PR_RECORD_KEY` (§12.4, §B.4, §B.11). §23.3 recoge todos los cambios de macOS. |
-| **Tercera revisión independiente** (2026-11-03) | En Windows se pueden leer propiedades de nivel store de cualquier store del perfil, nunca sus items fuera de los locales; un store ilegible se reporta con `reason` `unavailable` y el resto sigue (§4, §B.3). `show` resuelve `[scope]` y falla como `search` (§12.4). El log registra número y códigos de los warnings, sin detalle (§14). Fin de línea LF en ambas (RF-32). Resolución de referencias de carpeta (§15.3). `new` ignora los mensajes con fecha futura (§12.3). |
-| **Revisión final** (2026-11-03) | En Outlook: la dirección SMTP sale solo del item, sin consultar la libreta de direcciones (`address: ""` si falta); marcado = marcado y no completado; los adjuntos ocultos no cuentan; `account.uuid` = `PR_RECORD_KEY` del store (§B.4). |
+| ¿Nombres visibles de cuenta? | Etiqueta legible resuelta en solo lectura; UUID como fallback (§15.2). |
+| ¿Búsqueda de contenido sin filtros? | No (§23.1). |
+| ¿Salida markdown? | No: solo JSON (ADR-04). |
+| ¿Retención de logs? | Rotación por tamaño en lugar de diaria (§14; 2026-11-03). |
+| ¿Frecuencia de tareas? | La decide el harness (ADR-05). |
+| ¿Adjuntos? | Solo nombres y `has_attachments`, sin tamaño ni MIME (RF-04). |
+| ¿Múltiples `V*` (macOS)? | La versión que usa Mail, sin override (§A.3). |
+| ¿Base de datos propia? | No (ADR-02). |
+| ¿Cómo se instala? | Con `pipx` en ambas plataformas (ADR-08). |
+| ¿Encabezado `[scope]` explícito? | No hace falta (§15.1). |
+| ¿Cómo se "observa" una cuenta? | Solo si está declarada (ADR-06, §15). |
+| ¿Qué pasa si no hay cuentas declaradas? | No se observa ninguna (§15.3). |
+| ¿Config ampliada? | Secciones `[logging]`, `[search]` y `[new]` (§15.1). |
+| **¿Un PRD nuevo para Windows?** (2026-11-03) | No: un PRD con anexos por backend (ADR-10). |
+| **¿Cómo se identifica un mensaje de Outlook?** (2026-11-03) | `uid` string (ADR-12). |
+| **¿Qué pasa si Outlook está cerrado?** (2026-11-03) | Error con exit 6, sin lanzarlo (ADR-13). |
+| **¿Qué dependencia COM?** (2026-11-03) | `pywin32` (ADR-14). |
+| **¿Qué stores de Outlook?** (2026-11-03) | Locales de las cuentas del perfil + PST (ADR-15). |
+| **¿Nuevo Outlook (`olk`)?** (2026-11-03) | Fuera de alcance (§3.3). |
+| **¿Cómo se consulta la versión?** (2026-11-03) | Opción global `-v`/`--version` (RF-31, §12.9). |
+| **Revisión de la v1.0: datos y búsqueda** (2026-11-03) | Mensaje sin identificador global, acotamiento de `--to`/`--cc` en Windows, S/MIME, `W_BODY_UNREADABLE` y UTF-8 (RF-07, RF-17, RF-05, §12.10, RF-32). |
+| **Revisión de la v1.0: `show` y `new`** (2026-11-03) | `show` solo en cuentas declaradas; primera corrida y lookback de `new`; re-emisiones aceptadas (§12.4, §12.3, §18). |
+| **Revisión de la v1.0: Outlook** (2026-11-03) | Timeout, alcance y exclusión de stores, `INBOX`, carpetas ocultas, contadores, detección del cliente, caché de `pywin32`, `home` y `object_model_guard` (RF-33, §B.3, §B.4, §12.6, §B.2, §12.8, §B.6). |
+| **Revisión del implementador** (2026-11-03) | Timeout dentro de `doctor`, `show` de un store excluido y cambios de macOS completos (§12.8, §12.4, §B.4, §23.3). |
+| **Tercera revisión independiente** (2026-11-03) | Propiedades de nivel store y `unavailable`, `[scope]` en `show`, warnings en el log, LF, resolución de carpetas y fechas futuras en `new` (§4, §B.3, §12.4, §14, RF-32, §15.3, §12.3). |
+| **Revisión final** (2026-11-03) | Direcciones, marcado, adjuntos ocultos y `account.uuid` en Outlook (§B.4). |
 
 ---
 
-## 23. Roadmap y criterios de aceptación
+## 23. Versiones y definición de terminado
 
-### 23.1 v1 (macOS + Apple Mail) — completado
+### 23.1 v1 (macOS + Apple Mail)
 
-Fases F0 (fundaciones), F1 (lectura: `mailboxes`, `search`, `new`, `show`), F2 (contenido: `--text`, comodines, fechas relativas, snippets) y F3 (pulido: recetas, README, `--include-mailbox`) completadas. F4 (índice FTS local para contenido sin filtros) es opcional y requeriría un ADR nuevo.
+Implementada y validada (PRD v0.13). La búsqueda de contenido sin filtros (índice FTS local) queda fuera del alcance y requeriría un ADR nuevo.
 
 ### 23.2 Versión 2.0.0 (Windows + Outlook clásico)
 
-| Fase | Alcance | Criterio de aceptación |
-|------|---------|------------------------|
-| W0 — Portabilidad y paridad | Suite portable a Windows (lock, permisos NTFS) y en CI; `-v`/`--version`; salida UTF-8; cambios de macOS de §23.3 | Suite verde en Linux, macOS y Windows; en macOS solo cambian las salidas de §23.3 |
-| W1 — Spike Outlook | Responder P-1…P-13 contra el Outlook del host de referencia | Ejecutado el 2026-11-03 (§B.11), incluido P-4; lo no provocable en el host queda como riesgo residual cubierto por tests con el fake |
-| W2 — Interfaz de backend | Extraer la interfaz (§9.3) y el adaptador Apple Mail; actualizar `docs/INTERFACES.md` | Goldens y test read-only de macOS idénticos |
-| W3 — Outlook: lectura | `mailboxes`, `search` metadatos y `show` tras el proxy de solo lectura | CU-03/CU-04/CU-05/CU-06 en Windows; test read-only de Outlook en verde |
-| W4 — Outlook: completo | `new`, `--text`, `doctor`, errores y warnings nuevos, exit 6 | CU-01/CU-02/CU-07 en Windows |
-| W5 — Pulido | README, recetas, `config.example.toml`, instaladores, `pyproject.toml`, versión del paquete | Instalación limpia con `pipx` en Windows; `doctor` verde con una cuenta declarada |
-
-Orden: W0 → W2 → W3 → W4 → W5, cada fase con la suite en verde antes de la siguiente. El dueño del producto aprobó el PRD tras el spike, antes de cualquier cambio de código.
-
-**Definición de terminado (2.0.0):** los 5 comandos funcionando en ambas plataformas con el mismo contrato (salvo las diferencias de §12.5), `pipx install .` funcionando en ambas, `doctor` verde en ambas con al menos una cuenta declarada, suite completa (unitarios, dobles, contrato, read-only) en verde en la matriz de CI, goldens de macOS iguales a los de W0, y una corrida real en Windows que produzca un resumen de correo nuevo sin que cambie el contador de no leídos de ninguna carpeta del alcance.
+**Definición de terminado (2.0.0):** los 5 comandos funcionando en ambas plataformas con el mismo contrato (salvo las diferencias de §12.5), `pipx install .` funcionando en ambas, `doctor` verde en ambas con al menos una cuenta declarada, RNF-11, los criterios de aceptación de §20, y una corrida real en Windows que produzca un resumen de correo nuevo sin que cambie el contador de no leídos de ninguna carpeta del alcance.
 
 ### 23.3 Cambios de comportamiento en macOS (únicos)
 
-Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo lo demás debe quedar idéntico:
+Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás debe quedar idéntico:
 
 | Cambio | Antes (1.x, PRD v0.13) | Después (2.0.0) |
 |--------|---------------|----------------|
@@ -1248,7 +1128,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo l
 | `mailboxes` | Sin `excluded_stores` | `excluded_stores: []` |
 | Codificación de salida | La del sistema | UTF-8 siempre |
 | Formato del JSON | Compacto, en una línea (`{"ok":true,…}`) | Formateado con indentación de 2 espacios en todas las salidas JSON (§12.5) |
-| Rotación de logs | Diaria, `[logging].retention_days` (default 7) | Por tamaño, `[logging].max_size_mb` (default 10 MB, 5 rotados); un `config.toml` con `retention_days` ⇒ `E_CONFIG_INVALID` con hint `retention_days was replaced by max_size_mb` |
+| Rotación de logs | Diaria, `[logging].retention_days` (default 7) | Por tamaño, `[logging].max_size_mb` (default 10 MB, 5 rotados); un `config.toml` con `retention_days` ⇒ `E_CONFIG_INVALID` con el hint de §15.3 |
 | Ayuda y versión | Sin `-v`; descripción "Apple Mail"; exit codes hasta 5; las ayudas de los subcomandos describen la primera corrida como baseline, los términos de filtro y el acotamiento de `--text` con las reglas anteriores | `-v`/`--version`; descripción multiplataforma; exit 6; la ayuda de la raíz y de cada subcomando sin contradicciones con este PRD (§12.7) |
 | `body` en `search`/`new` | `{available, partial, truncated}`; un S/MIME sale con `available=true` y sin marca | `{available, readable, partial, truncated}` con la tabla de §12.5 (RF-05, §11.1) |
 | Fecha nula, ≤ 0 o no representable | Una fecha no representable aborta la consulta con `E_INTERNAL` | `null` y la consulta continúa (RNF-08, §17); `new` ignora esos mensajes (§12.3) |
@@ -1256,18 +1136,18 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo l
 | Resolución de referencias de carpeta | Primera carpeta cuyo nombre, path o URL coincide, en el orden del catálogo | `INBOX` siempre la bandeja de entrada; una coincidencia exacta de path o URL gana a una de nombre (§15.3) |
 | Términos de filtro | `--subject` con comodines no se parte en AND; `--text`/`--from`/`--to`/`--cc` se parten por espacios | `--subject` siempre AND por espacios; los demás, un único patrón (§12.2) |
 | Primera corrida con `--limit` menor que la ventana | — | Los `--limit` más recientes, en orden ascendente (§12.3) |
-| `doctor` | Sin `not evaluated`; `config` solo lista las claves; `envelope_index` solo comprueba permisos; `state` sin cursor no explica la primera corrida | `not evaluated: <chequeo> failed` según las dependencias de §A.7; `config` muestra la resolución real de cada bloque y, sin bloques y con su dependencia fallida, `available accounts: unknown (<chequeo> failed)`; `envelope_index` abre la base con la estrategia de §A.4 (`live_ro`/`copy_ro`); `state` sin cursor con el detalle `no state yet; the next new run is a first run and emits the messages received in the last <lookback> before the newest message` (§12.8, RF-25, §A.7) |
+| `doctor` | Sin `not evaluated`; `config` solo lista las claves; `envelope_index` solo comprueba permisos; `state` sin cursor no explica la primera corrida | `not evaluated: <chequeo> failed` según las dependencias de §A.7; `config` muestra la resolución real de cada bloque y, sin bloques y con su dependencia fallida, `available accounts: unknown (<chequeo> failed)`; `envelope_index` abre la base con la estrategia de §A.4 (`live_ro`/`copy_ro`); `state` sin cursor con el detalle de §12.8 (RF-25, §A.7) |
 | Hint de `E_STATE_CORRUPT` | Dice que la siguiente corrida es una línea base y no emite nada | Dice que la siguiente corrida es una primera corrida y emite la ventana de lookback (§11.2, §12.3, §17) |
 | Errores y warnings en el log | Errores: solo el `code`; warnings: solo su número | Errores: `code` + mensaje; warnings: número y códigos `W_*`; siempre con la redacción de §14 |
 | Permisos de archivos | Los logs rotados y las copias temporales del `Envelope Index` no se fuerzan a 0600 (la copia hereda el modo del original) | 0600 en todos los archivos que crea mailquery, incluidos los logs rotados y las copias de `tmp/` (RNF-05) |
-| Formato del uid en `show` | Lo valida el parser de argumentos: `E_USAGE` con el mensaje de `argparse` (`invalid int value`) | Lo valida el backend (`parse_uid`, §9.3): `E_USAGE` con el mensaje `invalid uid …: expected an integer` (§12.4) |
+| Formato del uid en `show` | `E_USAGE` con el mensaje genérico `invalid int value …` | `E_USAGE` con el mensaje `invalid uid …: expected an integer` (§12.4) |
 | Warnings | `W_ACCOUNT_LABELS_UNAVAILABLE` solo en `mailboxes`; S/MIME con `W_EMLX_CORRUPT` espurio y sin `W_ATTACHMENTS_UNAVAILABLE` | `W_ACCOUNT_LABELS_UNAVAILABLE` también en `search`/`new`/`show` (§A.5.2); S/MIME solo con `W_BODY_UNREADABLE`, y `W_ATTACHMENTS_UNAVAILABLE` en `show` si el `Envelope Index` tiene adjuntos para el mensaje (§12.10) |
 | Estado (`state.json`) | Acepta uid 0 y un cursor que es un objeto vacío | uids ≥ 1; `cursor` ausente o `null` = primera corrida; un objeto sin campos válidos es `E_STATE_CORRUPT` (§11.2) |
 | Correcciones de conformidad | `--text` con un filtro vacío pasa sin acotar; `--include-mailbox` inexistente no lista carpetas; catálogo bloqueado ⇒ `E_INTERNAL`; disco lleno ⇒ exit 3; log sin `backend=` y con `.` en los milisegundos | `E_UNBOUNDED_SCAN` (RF-17); hint con las carpetas válidas (§15.3); `E_DB_BUSY` tras un reintento (§A.4); exit 1 con el cursor intacto (§17); formato de §14 con `backend=` |
 
 ### 23.4 Versión del paquete
 
-`2.0.0` (mayor): los cambios de §23.3 son incompatibles para un harness que ya consume la 1.x en macOS. `mailquery.__version__` y `[project].version` de `pyproject.toml` se actualizan juntos en W5.
+`2.0.0` (mayor): los cambios de §23.3 son incompatibles para un harness que ya consume la 1.x en macOS.
 
 ---
 
@@ -1275,15 +1155,15 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo l
 
 | Riesgo | Prob. | Impacto | Mitigación |
 |--------|-------|---------|------------|
-| Esquema del `Envelope Index` cambia entre versiones de macOS (incluso dentro de V10) | Alta | Alto | Fingerprint de columnas con feature-detección; fallo ruidoso; `doctor`. |
+| Esquema del `Envelope Index` cambia entre versiones de macOS (incluso dentro de V10) | Alta | Alto | Detección del esquema; fallo ruidoso (`E_SCHEMA_UNSUPPORTED`); `doctor`. |
 | TCC/FDA bloquea la lectura (permiso por identidad de binario) | Media | Alto | `doctor` preflight; ejecutar desde app con FDA; doc de re-concesión. |
-| **Regresión en macOS por el refactor a backends** | Media | Alto | W2 aislado y sin cambios funcionales; goldens y test read-only de macOS como criterio bloqueante. |
-| **Una lectura modifica Outlook** (el OOM permite escribir) | Baja | Alto | Proxy de solo lectura con lista blanca en producción; test bloqueante con el mismo proxy. |
+| **Regresión en macOS por el refactor a backends** | Media | Alto | Refactor sin cambios funcionales; RNF-11 y criterios de aceptación de §20. |
+| **Una lectura modifica Outlook** (el OOM permite escribir) | Baja | Alto | Proxy de solo lectura con lista blanca (§B.2) y criterio de aceptación de §B.10. |
 | **Object Model Guard muestra un aviso y bloquea al harness** | Media | Alto | Chequeo `object_model_guard` en `doctor`; timeout de 30 s (RF-33) para no colgar al harness. El caso "sin antivirus" no se pudo provocar en el spike (P-3). |
 | **Outlook cerrado o en otra sesión/nivel de integridad** | Alta | Medio | `E_OUTLOOK_NOT_RUNNING` (exit 6) con hint; regla del harness (§21.1). |
 | **Lectura que dispara red o descargas en Outlook** | Baja | Alto | Carpetas e items solo de stores locales; items con solo cabeceras sin cuerpo; de los stores no locales solo se leen propiedades de nivel store, y uno que no se puede leer queda `unavailable` sin bloquear al resto (§4, §B.3). |
 | **Rendimiento de Outlook en `--text`, `--to` y `--cc`** | Media | Medio | Acotamiento obligatorio y `max_scan`; medición en el spike (P-6). |
-| **Re-emisiones puntuales de `new`** (estado borrado, lookback ampliado, rebuild del índice en macOS, mensaje movido en Windows) | Media | Bajo | Cursor por fecha; aceptado por el dueño del producto; el harness puede deduplicar por `message_id`. |
+| **Re-emisiones puntuales de `new`** (estado borrado, lookback ampliado, rebuild del índice en macOS, mensaje movido en Windows) | Media | Bajo | §18. |
 | **`pywin32` no funciona en el venv de pipx** | Baja | Medio | Spike P-4 superado en un venv aislado; `E_DEPENDENCY_MISSING` con hint; chequeo `pywin32`. |
 | **Microsoft retira Outlook clásico en favor del nuevo Outlook** | Media | Alto (largo plazo) | Fuera de control; el backend queda aislado tras la interfaz; un futuro backend Graph requeriría revisar I-1 y un ADR nuevo. |
 | Escaneo de contenido costoso | Alta | Medio | Acotamiento obligatorio + límite de candidatos `[search].max_scan`. |
@@ -1297,8 +1177,8 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto (fase W0); todo l
 
 ### Anexos por backend (documentos aparte)
 
-- **Anexo A — Backend Apple Mail (macOS):** [`docs/backends/apple-mail.md`](backends/apple-mail.md). Invariante I-1 en macOS, localización de los `.emlx`, SQLite read-only y WAL, reglas del `Envelope Index` y `Accounts4.sqlite`, FDA, chequeos de `doctor`, casos límite, mediciones y verificación de solo lectura.
-- **Anexo B — Backend Outlook clásico (Windows):** [`docs/backends/outlook-windows.md`](backends/outlook-windows.md). Alternativas evaluadas, invariante I-1 en Windows, alcance de stores, correspondencia con el modelo común, requisitos de entorno, Object Model Guard, errores y warnings, chequeos de `doctor`, rendimiento, verificación de solo lectura y resumen del spike W1.
+- **Anexo A — Backend Apple Mail (macOS):** [`docs/backends/apple-mail.md`](backends/apple-mail.md). Invariante I-1 en macOS, localización de los `.emlx`, SQLite read-only y WAL, reglas del `Envelope Index` y `Accounts4.sqlite`, FDA, chequeos de `doctor`, casos límite, mediciones y criterio de aceptación de solo lectura.
+- **Anexo B — Backend Outlook clásico (Windows):** [`docs/backends/outlook-windows.md`](backends/outlook-windows.md). Alternativas evaluadas, invariante I-1 en Windows, alcance de stores, correspondencia con el modelo común, requisitos de entorno, Object Model Guard, errores y warnings, chequeos de `doctor`, rendimiento, criterio de aceptación de solo lectura y resumen del spike.
 
 ### Anexo C — Ejemplos de invocación
 
@@ -1334,7 +1214,7 @@ mailquery show 00000000A1B2C3D4…      # Windows
 
 ### Anexo D — Glosario
 
-- **Backend:** implementación de la interfaz `MailBackend` para un cliente de correo concreto (Apple Mail u Outlook clásico).
+- **Backend:** implementación de la interfaz de backend (§9.2) para un cliente de correo concreto (Apple Mail u Outlook clásico).
 - **Cursor:** marca de agua `(fecha de recepción, uid)` que da a `new` su semántica de procesamiento único.
 - **Alcance:** cuentas declaradas en config y carpetas que se leen (INBOX siempre dentro de cada cuenta declarada); si no hay cuentas declaradas, el alcance está vacío.
 - **Snippet:** extracto de 200 caracteres del cuerpo incluido en los resultados.
