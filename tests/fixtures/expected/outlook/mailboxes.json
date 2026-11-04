@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "command": "mailboxes",
+  "accounts": [
+    {
+      "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
+      "label": "Exchange (ana.perez@example.com)",
+      "email": "ana.perez@example.com",
+      "declared": true
+    }
+  ],
+  "mailboxes": [
+    {
+      "account": {
+        "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
+        "label": "Exchange (ana.perez@example.com)",
+        "email": "ana.perez@example.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX",
+      "total": 3,
+      "unread": 2,
+      "included": true
+    },
+    {
+      "account": {
+        "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
+        "label": "Exchange (ana.perez@example.com)",
+        "email": "ana.perez@example.com"
+      },
+      "name": "Deleted Items",
+      "path": "Deleted Items",
+      "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/Deleted%20Items",
+      "total": 0,
+      "unread": 0,
+      "included": false
+    },
+    {
+      "account": {
+        "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
+        "label": "Exchange (ana.perez@example.com)",
+        "email": "ana.perez@example.com"
+      },
+      "name": "Sent Items",
+      "path": "Sent Items",
+      "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/Sent%20Items",
+      "total": 0,
+      "unread": 0,
+      "included": false
+    }
+  ],
+  "excluded_stores": [
+    {
+      "label": "Exchange shared (Soporte)",
+      "path": null,
+      "reason": "shared_mailbox"
+    }
+  ],
+  "warnings": [
+    "W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox"
+  ]
+}

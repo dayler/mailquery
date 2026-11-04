@@ -18,6 +18,7 @@ import stat
 import sys
 import textwrap
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -475,6 +476,13 @@ def _make_backend(
     )
 
 
+def _bind_command(backend: Any, command: str) -> None:
+    """Tell a backend which command runs (Outlook's D-03 watchdog reports it on a timeout)."""
+    bind = getattr(backend, "bind_command", None)
+    if callable(bind):
+        bind(command)
+
+
 def _close_backend(backend: Any) -> None:
     """Release the backend; closing must never mask the result."""
     if backend is None:
@@ -534,6 +542,7 @@ def _run_command(
     selected = None
     try:
         selected = _make_backend(home_path, mail_root, accounts_db, backend)
+        _bind_command(selected, command)
         logger.info("event=start command=%s backend=%s", command, selected.name)
         payload = _execute(args, config, home_path, selected)
         if not isinstance(payload, dict):
@@ -881,7 +890,11 @@ def _collect_doctor_checks(home_path: Path, backend: Any) -> list[dict]:
                     f"({dependency} failed)"
                 )
             elif backend.labels_available:
-                accounts = [a for a in backend.accounts() if a.get("labelled", True)]
+                accounts = [
+                    a
+                    for a in backend.accounts()
+                    if a.get("labelled", True) and a.get("excluded") is None
+                ]
                 if accounts:
                     available = ", ".join(account["label"] for account in accounts)
                     detail = (
@@ -999,12 +1012,23 @@ def _log_error(logger: Any, command: str, error: MailqueryError) -> None:
     # Never log message/hint: they may contain account emails, folders or paths.
     # ``log_message`` is the text without that data (PRD 14); fall back to the
     # plain message only when the error carries no sanitized variant.
-    logger.error(
-        "event=error command=%s code=%s message=%s",
-        command,
-        error.code,
-        error.log_message if error.log_message is not None else error.message,
-    )
+    text = error.log_message if error.log_message is not None else error.message
+    if error.code == "E_INTERNAL" and error.__traceback__ is not None:
+        # PRD 14: an E_INTERNAL (a COM failure included) also logs its traceback.
+        # Only the frames and the exception type: the message is already sanitized above.
+        frames = "".join(traceback.format_tb(error.__traceback__)).rstrip("\n")
+        kind = f"{type(error).__module__}.{type(error).__qualname__}"
+        logger.error(
+            "event=error command=%s code=%s message=%s\n"
+            "Traceback (most recent call last):\n%s\n%s",
+            command,
+            error.code,
+            text,
+            frames,
+            kind,
+        )
+        return
+    logger.error("event=error command=%s code=%s message=%s", command, error.code, text)
 
 
 def _warning_code(warning: Any) -> str:

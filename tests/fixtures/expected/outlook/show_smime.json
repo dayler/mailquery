@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "command": "show",
+  "message": {
+    "uid": "00000000D70DBCF61C2A4B6E9A51E0C3B2A49F102A23144FBF3CECBF032362EE04671C3F49DA6653B0DAD7EDFB5AEA461C7879CB1190EF1571A1560D93A10BF171B2A3D17639",
+    "message_id": "<contrato-7@example.com>",
+    "subject": "Contrato confidencial",
+    "from": {
+      "name": "Legal",
+      "address": "legal@example.com"
+    },
+    "to": [
+      {
+        "name": "Ana Pérez",
+        "address": "ana.perez@example.com"
+      }
+    ],
+    "cc": [],
+    "date_sent": "<ISO>",
+    "date_received": "<ISO>",
+    "mailbox": {
+      "account": {
+        "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
+        "label": "Exchange (ana.perez@example.com)",
+        "email": "ana.perez@example.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX"
+    },
+    "is_read": false,
+    "is_flagged": false,
+    "has_attachments": true,
+    "size_bytes": 95104,
+    "headers": {
+      "From": "Legal <legal@example.com>",
+      "To": "Ana Pérez <ana.perez@example.com>",
+      "Cc": "",
+      "Subject": "Contrato confidencial",
+      "Date": "<ISO>",
+      "Message-ID": "<contrato-7@example.com>"
+    },
+    "body_text": "",
+    "body_truncated": false,
+    "attachments": [],
+    "partial": false,
+    "readable": false,
+    "source": {
+      "emlx_path": null,
+      "partial": false
+    }
+  },
+  "warnings": [
+    "W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox",
+    "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
+  ]
+}

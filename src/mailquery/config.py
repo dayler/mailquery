@@ -412,10 +412,32 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
 # --------------------------------------------------------------------------- #
 
 
-def resolve_scope(config: Config, backend: "MailBackend") -> list[ResolvedScope]:
+def listed_mailboxes(backend: "MailBackend") -> list["MailboxRow"]:
+    """The backend's folders when only their identity matters (scope, display, hints).
+
+    A backend whose ``total``/``unread`` cost a table scan per folder (Outlook)
+    offers ``mailboxes_without_counters()``: the same rows without counting.
+    Only the ``mailboxes`` command needs the counters (PRD 19, annex B.9);
+    other backends answer with ``mailboxes()``.
+    """
+    without_counters = getattr(backend, "mailboxes_without_counters", None)
+    if callable(without_counters):
+        return list(without_counters())
+    return list(backend.mailboxes())
+
+
+def resolve_scope(
+    config: Config,
+    backend: "MailBackend",
+    excluded: list[dict[str, Any]] | None = None,
+) -> list[ResolvedScope]:
     """Resolve declared accounts and their mailbox list against the backend.
 
     INBOX is always included first; ``mailbox_list`` entries are additive.
+    A key that resolves to an excluded store (Outlook account row with an
+    ``excluded`` entry, PRD 15.3) is not read and is left out of the result;
+    its ``{label, path, reason}`` entry is appended once to ``excluded`` when
+    the caller passes a list (for ``W_STORE_EXCLUDED``).
     Raises E_CONFIG_ACCOUNT_UNKNOWN, E_ACCOUNT_AMBIGUOUS,
     E_ACCOUNT_LABELS_UNAVAILABLE or E_MAILBOX_NOT_FOUND.
     """
@@ -424,12 +446,18 @@ def resolve_scope(config: Config, backend: "MailBackend") -> list[ResolvedScope]
 
     accounts = list(backend.accounts())
     labels_available = bool(backend.labels_available)
-    backend_mailboxes = list(backend.mailboxes())
+    backend_mailboxes = listed_mailboxes(backend)
 
     declared_order: list[str] = []
     declared_refs: dict[str, list[str]] = {}
     for entry in config.scopes:
-        account_uuid = _resolve_account(entry.key, accounts, labels_available)
+        account = _resolve_account(entry.key, accounts, labels_available)
+        excluded_store = account.get("excluded")
+        if excluded_store is not None:
+            if excluded is not None and excluded_store not in excluded:
+                excluded.append(excluded_store)
+            continue
+        account_uuid = account["uuid"]
         if account_uuid not in declared_refs:
             declared_order.append(account_uuid)
             declared_refs[account_uuid] = []
@@ -473,18 +501,26 @@ def _resolve_account(
     key: str,
     accounts: Sequence["AccountRow"],
     labels_available: bool,
-) -> str:
-    """Resolve one config key: label -> unique email -> UUID/prefix (PRD 15.2)."""
+) -> "AccountRow":
+    """Resolve one config key: label -> unique email -> UUID/prefix (PRD 15.2).
+
+    Returns the matched account row; it may be an excluded store (Outlook row
+    with ``excluded``, PRD 15.3), which the caller reports instead of reading.
+    """
     key_folded = key.casefold()
     # UUID matching uses the accounts that have folders; label and email
-    # matching and the "known accounts" lists use every label entry.
+    # matching and the "known accounts" lists use every label entry. An
+    # unreadable excluded store has no uuid and resolves by label only.
     in_store = [
         account
         for account in accounts
-        if account.get("store_index", 0) is not None
+        if account.get("store_index", 0) is not None and account["uuid"]
     ]
     in_store.sort(key=lambda account: account.get("store_index", 0) or 0)
     account_uuids = [account["uuid"] for account in in_store]
+    by_uuid: dict[str, "AccountRow"] = {}
+    for account in in_store:
+        by_uuid.setdefault(account["uuid"], account)
     entries: list["AccountRow"] = (
         [account for account in accounts if account.get("labelled", True)]
         if labels_available
@@ -506,15 +542,15 @@ def _resolve_account(
     if len(candidates) > 1:
         raise _ambiguous_account(key, [(entry["label"], entry["uuid"]) for entry in candidates])
     if candidates:
-        account_uuid = candidates[0]["uuid"]
-        if account_uuid in account_uuids:
-            return account_uuid
+        account = candidates[0]
+        if account.get("excluded") is not None or account["uuid"] in account_uuids:
+            return account
         raise _unknown_account(key, entries)
 
     if _UUID_RE.match(key):
         for account_uuid in account_uuids:
             if account_uuid.casefold() == key_folded:
-                return account_uuid
+                return by_uuid[account_uuid]
 
     if len(key) >= MIN_UUID_PREFIX:
         prefixed = [
@@ -523,7 +559,7 @@ def _resolve_account(
             if account_uuid.casefold().startswith(key_folded)
         ]
         if len(prefixed) == 1:
-            return prefixed[0]
+            return by_uuid[prefixed[0]]
         if len(prefixed) > 1:
             labels = {account["uuid"]: account["label"] for account in accounts}
             raise _ambiguous_account(
@@ -559,6 +595,8 @@ def _ambiguous_account(
 
 
 def _unknown_account(key: str, entries: Sequence["AccountRow"]) -> MailqueryError:
+    # Excluded stores (Outlook) are never offered as accounts to declare.
+    entries = [entry for entry in entries if entry.get("excluded") is None]
     if entries:
         known = ", ".join(_format_account(entry["label"], entry["uuid"]) for entry in entries)
         hint = f"declare an existing account; known accounts: {known}"
@@ -575,7 +613,9 @@ def _unknown_account(key: str, entries: Sequence["AccountRow"]) -> MailqueryErro
     )
 
 
-def _format_account(label: str | None, account_uuid: str) -> str:
+def _format_account(label: str | None, account_uuid: str | None) -> str:
+    if account_uuid is None:  # an unreadable excluded store (Outlook)
+        return label or ""
     if label and label != account_uuid:
         return f"{label} ({account_uuid})"
     return account_uuid
@@ -617,7 +657,7 @@ def include_mailbox_not_found(
     The hint lists the folders of every declared account.
     """
     accounts = {account["uuid"]: account for account in backend.accounts()}
-    backend_mailboxes = list(backend.mailboxes())
+    backend_mailboxes = listed_mailboxes(backend)
     parts: list[str] = []
     for account_uuid in account_uuids:
         account_mailboxes = [
