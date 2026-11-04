@@ -24,6 +24,7 @@ from unittest import mock
 
 from mailquery import emlx, output, search
 from mailquery.accounts import AccountLabels
+from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.config import (
     Config,
     LoggingConfig,
@@ -290,6 +291,7 @@ class SearchFixtureTest(unittest.TestCase):
         self.labels = AccountLabels(
             self.fx.accounts_db, tmp_dir=self.fx.home / "tmp"
         )
+        self.backend = AppleMailBackend(self.store, self.labels)
         self.config = load_config(self.fx.home)
 
     # -- helpers ----------------------------------------------------------- #
@@ -303,7 +305,7 @@ class SearchFixtureTest(unittest.TestCase):
         path = self.fx.home / "state.json"
         path.unlink(missing_ok=True)
         self.addCleanup(lambda: path.unlink(missing_ok=True))
-        return StateStore(self.fx.home)
+        return StateStore(self.fx.home, AppleMailBackend.check_state_uid)
 
     def seed_state(
         self,
@@ -345,7 +347,7 @@ class SearchFixtureTest(unittest.TestCase):
 
     def run_search(self, **filters: object) -> dict:
         return search.run_search(
-            self.store, self.config, self.labels, search.Filters(**filters)
+            self.backend, self.config, search.Filters(**filters)
         )
 
     @staticmethod
@@ -831,9 +833,8 @@ class SearchTextTest(SearchFixtureTest):
         )
         with self.assertRaises(MailqueryError) as context:
             search.run_search(
-                self.store,
+                self.backend,
                 config,
-                self.labels,
                 search.Filters(
                     text=("invoice",), since=search.parse_relative_time("1y")
                 ),
@@ -854,7 +855,7 @@ class NewTest(SearchFixtureTest):
 
     def run_new(self, state: StateStore, **kwargs: object) -> dict:
         return search.run_new(
-            self.store, self.config, self.labels, state, **kwargs
+            self.backend, self.config, state, **kwargs
         )
 
     FIRST_RUN_10MIN = (
@@ -890,7 +891,7 @@ class NewTest(SearchFixtureTest):
         self.addCleanup(store.close)
         labels = AccountLabels(fx.accounts_db, tmp_dir=fx.home / "tmp")
         result = search.run_new(
-            store, load_config(fx.home), labels, StateStore(fx.home)
+            AppleMailBackend(store, labels), load_config(fx.home), StateStore(fx.home, AppleMailBackend.check_state_uid)
         )
         self.assertEqual(self.uids(result), [83170])
         self.assertEqual(result["count"], 1)
@@ -1096,9 +1097,8 @@ class NewDatesTest(ExtendedSearchFixtureTest):
     def run_new(self, state: StateStore, now: float | None = None, **kwargs: object) -> dict:
         moment = self.fx.now.timestamp() if now is None else now
         return search.run_new(
-            self.store,
+            self.backend,
             self.config,
-            self.labels,
             state,
             clock=lambda: moment,
             **kwargs,
@@ -1195,9 +1195,7 @@ class NewDatesTest(ExtendedSearchFixtureTest):
         self.assertIsNotNone(expected)
         listed = self.message_by_uid(self.run_search(limit=200), UID_DATE_FUTURE)
         self.assertEqual(listed["date_received"], expected)
-        shown = search.run_show(
-            self.store, self.config, self.labels, UID_DATE_FUTURE
-        )
+        shown = search.run_show(self.backend, self.config, UID_DATE_FUTURE)
         self.assertEqual(shown["message"]["date_received"], expected)
 
 
@@ -1233,7 +1231,7 @@ class ShowTest(SearchFixtureTest):
     ]
 
     def show(self, uid: int) -> dict:
-        return search.run_show(self.store, self.config, self.labels, uid)
+        return search.run_show(self.backend, self.config, uid)
 
     def test_ut_sr_11_01_declared_account_folder_in_scope_returns_the_fields_in_order(self) -> None:
         """UT-SR-11.01: a uid of a declared account in an in-scope folder succeeds."""
@@ -1382,7 +1380,7 @@ class ShowTest(SearchFixtureTest):
             with self.subTest(length=length):
                 message = dataclasses.replace(fx.message(83143), body="a" * length)
                 make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
-                result = search.run_show(store, config, labels, 83143)
+                result = search.run_show(AppleMailBackend(store, labels), config, 83143)
                 shown = result["message"]
                 self.assertEqual(len(shown["body_text"]), 20_000)
                 self.assertIs(shown["body_truncated"], truncated)
@@ -1398,7 +1396,7 @@ class ShowExtendedTest(ExtendedSearchFixtureTest):
     def test_ut_sr_11_05_deleted_message_is_not_found(self) -> None:
         """UT-SR-11.05: the uid of a deleted message is E_USAGE "was not found"."""
         with self.assertRaises(MailqueryError) as context:
-            search.run_show(self.store, self.config, self.labels, UID_DELETED)
+            search.run_show(self.backend, self.config, UID_DELETED)
         self.assertEqual(context.exception.code, "E_USAGE")
         self.assertIn("was not found", context.exception.message)
 
@@ -1422,7 +1420,7 @@ class MailboxesTest(SearchFixtureTest):
     }
 
     def mailboxes(self) -> dict:
-        return search.run_mailboxes(self.store, self.config, self.labels)
+        return search.run_mailboxes(self.backend, self.config)
 
     def test_result_shape(self) -> None:
         result = self.mailboxes()
@@ -1514,7 +1512,9 @@ class MailboxesTest(SearchFixtureTest):
             self.fx.root / "missing-accounts.sqlite",
             tmp_dir=self.fx.home / "tmp",
         )
-        result = search.run_mailboxes(self.store, self.config, labels)
+        result = search.run_mailboxes(
+            AppleMailBackend(self.store, labels), self.config
+        )
         self.assertEqual(
             warning_codes(result["warnings"]),
             ["W_NO_ACCOUNTS", "W_ACCOUNT_LABELS_UNAVAILABLE"],
@@ -1573,16 +1573,15 @@ class SearchBodyTest(SearchFixtureTest):
 
     def test_ut_sr_05_03_message_without_mailbox_is_unavailable_and_unreadable(self) -> None:
         """UT-SR-05.03: a message without a folder gives false/false/false."""
-        snippet, body, parsed, path, warnings = search._body_fields(
-            self.store, None, 83143
-        )
+        row = {"uid": 83143, "mailbox_id": 0}
+        snippet, body, loaded = search._body_fields(self.backend, row)
         self.assertEqual(snippet, "")
         self.assertEqual(
             body,
             {"available": False, "readable": False, "partial": False, "truncated": False},
         )
-        self.assertIsNone(parsed)
-        self.assertEqual(warning_codes(warnings), ["W_BODY_UNREADABLE"])
+        self.assertIsNone(loaded["source"]["emlx_path"])
+        self.assertEqual(warning_codes(loaded["warnings"]), ["W_BODY_UNREADABLE"])
 
     def test_ut_sr_05_04_recoverable_corrupt_emlx_is_readable_with_corrupt_warning(self) -> None:
         """UT-SR-05.04: a recoverable corrupt .emlx gives true/true/false + W_EMLX_CORRUPT."""
@@ -1602,7 +1601,8 @@ class SearchBodyTest(SearchFixtureTest):
             b"Recovered body.\r\n"
         )
         result = search.run_search(
-            store, config, labels, search.Filters(subject=(message.subject,))
+            AppleMailBackend(store, labels), config,
+            search.Filters(subject=(message.subject,)),
         )
         self.assertEqual(
             result["messages"][0]["body"],
@@ -1618,7 +1618,9 @@ class SearchBodyTest(SearchFixtureTest):
                 message = dataclasses.replace(fx.message(83143), body="a" * length)
                 make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
                 result = search.run_search(
-                    store, config, labels, search.Filters(subject=self.SHARED)
+                    AppleMailBackend(store, labels),
+                    config,
+                    search.Filters(subject=self.SHARED),
                 )
                 body = result["messages"][0]["body"]
                 self.assertIs(body["truncated"], truncated)
@@ -1635,7 +1637,8 @@ class SearchBodyTest(SearchFixtureTest):
         )
         make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
         result = search.run_search(
-            store, config, labels, search.Filters(subject=(message.subject,))
+            AppleMailBackend(store, labels), config,
+            search.Filters(subject=(message.subject,)),
         )
         found = [m for m in result["messages"] if m["uid"] == 83200]
         self.assertEqual(len(found), 1)
@@ -1684,6 +1687,7 @@ class LabelsUnavailableTest(SearchFixtureTest):
         super().setUp()
         with accounts_db_unavailable() as missing:
             self.labels = AccountLabels(missing, tmp_dir=self.fx.home / "tmp")
+        self.backend = AppleMailBackend(self.store, self.labels)
         # Labels are unavailable, so the scope is declared by UUID.
         self.use_config(f'[scope."{ACCOUNT_ICLOUD}"]\n')
 
@@ -1695,13 +1699,13 @@ class LabelsUnavailableTest(SearchFixtureTest):
 
     def test_ut_sr_06_02_show_warns_that_labels_are_unavailable(self) -> None:
         """UT-SR-06.02: show carries W_ACCOUNT_LABELS_UNAVAILABLE."""
-        result = search.run_show(self.store, self.config, self.labels, 83143)
+        result = search.run_show(self.backend, self.config, 83143)
         self.assertEqual(result["warnings"], [search.LABELS_UNAVAILABLE_WARNING])
 
     def test_ut_sr_06_03_first_run_of_new_warns_labels_before_first_run(self) -> None:
         """UT-SR-06.03: first new run: labels warning first of the scope ones, W_FIRST_RUN last."""
         result = search.run_new(
-            self.store, self.config, self.labels, self.fresh_state(), peek=True
+            self.backend, self.config, self.fresh_state(), peek=True
         )
         codes = warning_codes(result["warnings"])
         self.assertEqual(codes[0], "W_ACCOUNT_LABELS_UNAVAILABLE")
@@ -1713,7 +1717,7 @@ class ShowAttachmentsUnreadableTest(ExtendedSearchFixtureTest):
     """``show`` attachments when the body cannot be read (UT-SR-12)."""
 
     def show(self, uid: int) -> dict:
-        return search.run_show(self.store, self.config, self.labels, uid)
+        return search.run_show(self.backend, self.config, uid)
 
     def test_ut_sr_12_01_missing_emlx_takes_names_from_the_index_and_warns(self) -> None:
         """UT-SR-12.01: absent .emlx with index attachments: index names + W_ATTACHMENTS_UNAVAILABLE."""
@@ -1833,9 +1837,9 @@ class InboxDefinitionTest(ExtendedSearchFixtureTest):
         self.assertFalse(self.mailbox(20).is_inbox)
         self.assertFalse(self.mailbox(23).is_inbox)
         self.use_config(ICLOUD_ONLY)
-        resolved = search._resolved_scope(self.config, self.store, self.labels)
+        resolved = search._resolved_scope(self.config, self.backend)
         self.assertEqual(
-            [mailbox.rowid for mailbox in resolved[0].mailboxes], [1]
+            [mailbox["id"] for mailbox in resolved[0].mailboxes], [1]
         )
         result = self.run_search(subject=("Proyectos inbox item",))
         self.assertEqual(self.uids(result), [])
@@ -1900,11 +1904,11 @@ class FolderReferenceTest(ExtendedSearchFixtureTest):
         for config, expected in ((gmail_first, 5), (icloud_first, 1)):
             with self.subTest(expected=expected):
                 self.use_config(config)
-                resolved = search._resolved_scope(self.config, self.store, self.labels)
+                resolved = search._resolved_scope(self.config, self.backend)
                 selected = search._resolve_include_mailboxes(
-                    self.store, resolved, ("INBOX",)
+                    self.backend, resolved, ("INBOX",)
                 )
-                self.assertEqual([mailbox.rowid for mailbox in selected], [expected])
+                self.assertEqual([mailbox["id"] for mailbox in selected], [expected])
 
     def test_ut_sr_16_03_exact_path_or_url_beats_a_name_match(self) -> None:
         """UT-SR-16.03: an exact path or URL wins over another folder's name."""

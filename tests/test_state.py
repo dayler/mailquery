@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from datetime import timedelta
@@ -17,6 +18,8 @@ from pathlib import Path
 from unittest import mock
 
 from mailquery.errors import MailqueryError
+from mailquery.backends.apple_mail import AppleMailBackend
+from mailquery.backends.base import StateUidError
 from mailquery.state import (
     MAX_EMITTED_UIDS,
     STATE_SCHEMA,
@@ -35,7 +38,7 @@ class StateStoreTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
         self.addCleanup(self._tmp.cleanup)
         self.home = Path(self._tmp.name) / "home"
-        self.store = StateStore(self.home)
+        self.store = StateStore(self.home, AppleMailBackend.check_state_uid)
 
     def test_path_is_state_json_under_home(self) -> None:
         self.assertEqual(self.store.path, self.home / "state.json")
@@ -76,7 +79,7 @@ class StateStoreTest(unittest.TestCase):
 
     def test_creating_state_in_nested_missing_home(self) -> None:
         nested = Path(self._tmp.name) / "a" / "b" / "home"
-        StateStore(nested).save(AppState())
+        StateStore(nested, AppleMailBackend.check_state_uid).save(AppState())
         self.assertTrue((nested / "state.json").is_file())
 
     def test_save_overwrites_previous_content(self) -> None:
@@ -211,6 +214,39 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, "E_STATE_CORRUPT")
         self.assertEqual(caught.exception.exit_code, 3)
 
+    def _corrupt_message(self, payload: dict) -> str:
+        self.home.mkdir(parents=True, exist_ok=True)
+        self.store.path.write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaises(MailqueryError) as caught:
+            self.store.load()
+        return caught.exception.message
+
+    def test_macos_non_integer_last_uid_message_is_the_w0_text(self) -> None:
+        message = self._corrupt_message(
+            {"schema": 1, "cursor": {"last_date_received": 100, "last_uid": "83143"}}
+        )
+        self.assertEqual(
+            message,
+            "state.json is corrupt: 'cursor' must hold integer "
+            "'last_date_received' and 'last_uid'",
+        )
+
+    def test_macos_last_uid_below_one_message_is_the_w0_text(self) -> None:
+        message = self._corrupt_message(
+            {"schema": 1, "cursor": {"last_date_received": 100, "last_uid": 0}}
+        )
+        self.assertEqual(
+            message,
+            "state.json is corrupt: 'cursor.last_uid' must be a uid (an integer >= 1)",
+        )
+
+    def test_macos_invalid_emitted_uid_message_is_the_w0_text(self) -> None:
+        message = self._corrupt_message({"schema": 1, "emitted_uids": [5, 0]})
+        self.assertEqual(
+            message,
+            "state.json is corrupt: 'emitted_uids' must be a list of uids (integers >= 1)",
+        )
+
     def test_ut_st_02_01_empty_cursor_object_is_corrupt(self) -> None:
         """UT-ST-02.01: ``cursor: {}`` is E_STATE_CORRUPT."""
         self._assert_state_corrupt({"schema": 1, "cursor": {}})
@@ -319,7 +355,7 @@ class RecordNewTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
         self.addCleanup(self._tmp.cleanup)
         self.home = Path(self._tmp.name) / "home"
-        self.store = StateStore(self.home)
+        self.store = StateStore(self.home, AppleMailBackend.check_state_uid)
 
     def test_record_new_does_not_persist_by_itself(self) -> None:
         # The caller (search.run_new) owns persistence so --peek can skip it.
@@ -388,6 +424,27 @@ class RecordNewTest(unittest.TestCase):
         state = AppState(emitted_uids=(1, 2, 3))
         new_state = self.store.record_new(state, [(400, 2)], 600)
         self.assertEqual(new_state.emitted_uids, (1, 3, 2))
+
+    def test_record_new_treats_uids_as_opaque_strings(self) -> None:
+        # W4 readiness: a backend with string uids (Outlook) round-trips through the store.
+        def check_hex(uid: object) -> None:
+            if not isinstance(uid, str) or re.fullmatch(r"[0-9A-F]+", uid) is None:
+                raise StateUidError("bad cursor uid", "bad ring uid")
+
+        store = StateStore(self.home, check_hex)
+        new_state = store.record_new(AppState(), [(100, "00AB"), (100, "00AC")], 600)
+        self.assertEqual(new_state.cursor.last_uid, "00AC")
+        self.assertEqual(new_state.emitted_uids, ("00AB", "00AC"))
+        store.save(new_state)
+        self.assertEqual(store.load(), new_state)
+
+    def test_boolean_uid_is_corrupt_on_macos(self) -> None:
+        # PRD 11.2: bool is not an integer uid.
+        self.home.mkdir(parents=True)
+        self.store.path.write_text(json.dumps({"schema": 1, "emitted_uids": [True]}), encoding="utf-8")
+        with self.assertRaises(MailqueryError) as caught:
+            self.store.load()
+        self.assertEqual(caught.exception.code, "E_STATE_CORRUPT")
 
     def test_ring_longer_than_max_is_trimmed_on_load(self) -> None:
         self.home.mkdir(parents=True)
@@ -498,29 +555,29 @@ class PeekThroughRunNewTest(unittest.TestCase):
         labels = AccountLabels(db_path=fx.accounts_db, tmp_dir=fx.home / "tmp")
         config = load_config(fx.home)
         self.addCleanup(store.close)
-        return fx, store, config, labels, StateStore(fx.home)
+        return fx, store, config, labels, StateStore(fx.home, AppleMailBackend.check_state_uid)
 
     def test_peek_does_not_advance_then_normal_run_does(self) -> None:
         from mailquery.search import run_new
 
         fx, store, config, labels, state_store = self._pipeline()
 
-        peeked = run_new(store, config, labels, state_store, peek=True)
+        peeked = run_new(AppleMailBackend(store, labels), config, state_store, peek=True)
 
         self.assertEqual(
             {message["uid"] for message in peeked["messages"]},
             {83143, 83150, 83160, 83170},
         )
-        after_peek = StateStore(fx.home).load()
+        after_peek = StateStore(fx.home, AppleMailBackend.check_state_uid).load()
         self.assertEqual(after_peek.cursor.last_uid, 1)
 
-        emitted = run_new(store, config, labels, state_store)
-        again = run_new(store, config, labels, state_store)
+        emitted = run_new(AppleMailBackend(store, labels), config, state_store)
+        again = run_new(AppleMailBackend(store, labels), config, state_store)
         self.assertEqual(
             {message["uid"] for message in emitted["messages"]},
             {83143, 83150, 83160, 83170},
         )
-        after_run = StateStore(fx.home).load()
+        after_run = StateStore(fx.home, AppleMailBackend.check_state_uid).load()
         self.assertEqual(after_run.cursor.last_uid, 83170)
         self.assertEqual(set(after_run.emitted_uids), {83143, 83150, 83160, 83170})
 
