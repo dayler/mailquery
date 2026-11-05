@@ -10,6 +10,12 @@ mail installation:
 ``<root>/home``                                  app home (~/.mailquery equivalent)
 
 Nothing here touches the real ``~/Library/Mail`` or ``~/Library/Accounts``.
+
+The fixture data deliberately includes localized, non-English content: German and
+Spanish Outlook folder names (``tests/fakes/outlook.py``), accented subjects and
+``Facturación ñ``-style folder names. They are test vectors for Outlook localization,
+accent-insensitive matching and percent-encoded URLs, not user-facing language; do not
+translate them without replacing that coverage.
 """
 
 from __future__ import annotations
