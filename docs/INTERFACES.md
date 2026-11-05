@@ -1,12 +1,10 @@
 # Interfaz interna y reglas de trabajo — mailquery 2.0.0
 
 Documento de coordinación para el equipo de implementación y guía de
-desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) (v1.x) y manda
-sobre este documento, junto con los anexos por backend
-([`docs/backends/apple-mail.md`](backends/apple-mail.md) y
-[`docs/backends/outlook-windows.md`](backends/outlook-windows.md)); aquí se
-fijan los contratos concretos entre módulos, el layout del repositorio y las
-reglas de trabajo (pruebas, fixtures, goldens, git, CI).
+desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) y manda sobre
+este documento, junto con sus anexos (§24); aquí se fijan los contratos
+concretos entre módulos, el layout del repositorio y las reglas de trabajo
+(pruebas, fixtures, goldens, git, CI).
 
 ## 1. Layout del repositorio (layout `src/`)
 

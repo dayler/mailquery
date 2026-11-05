@@ -41,8 +41,8 @@ que un solo pico hace fallar `mailboxes`; con n = 20 (`show`) es la segunda más
   Con 44 carpetas y 148.054 mensajes el costo ronda 170–200 ms.
 - `show` abre el mensaje: cabeceras + cuerpo `.emlx` + nombres de adjuntos.
 - El presupuesto de 150 ms viene del spike de macOS (anexo A.9, citado en
-  [`Walkthrough-w5-polish.md`](Walkthrough-w5-polish.md) §3), validado «en proceso»; es
-  probable que se midiera con menos cuentas y mensajes.
+  [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3), validado
+  «en proceso»; es probable que se midiera con menos cuentas y mensajes.
 - Hipótesis sin verificar: las mediciones de arriba se tomaron dentro del sandbox del
   harness, que puede añadir latencia de I/O; falta la medición sin sandbox en la
   Terminal del dueño.
@@ -72,5 +72,5 @@ contadores intactos.
 - [`tests/test_smoke.py`](../tests/test_smoke.py) — SMOKE-NEW.07.
 - [`src/mailquery/search.py`](../src/mailquery/search.py) — `run_mailboxes`.
 - [`src/mailquery/cli.py`](../src/mailquery/cli.py) — `duration_ms` de `event=end`.
-- [`Walkthrough-w5-polish.md`](Walkthrough-w5-polish.md) §3 — medición de rendimiento en
-  Windows.
+- [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3 —
+  medición de rendimiento en Windows.
