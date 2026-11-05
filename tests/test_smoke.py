@@ -4,7 +4,8 @@ These are the only tests that read the installed Outlook / Apple Mail (PRD 13.2,
 annex B.10). They install the package with ``pipx`` into temporary pipx dirs, run the
 installed ``mailquery`` with a temporary HOME/USERPROFILE and skip (never fail) where
 they do not apply: Linux, Windows without classic Outlook running, macOS without an
-Apple Mail store (V9/V10/V11) under ``~/Library/Mail``.
+Apple Mail store (V9/V10/V11) under ``~/Library/Mail`` or with no account that exposes
+an included mailbox.
 """
 
 import json
@@ -149,14 +150,29 @@ class SmokeTest(unittest.TestCase):
         if cls.install.returncode != 0:
             return  # SMOKE-INSTALL.01 reports it; the other cases fail on the missing exe
         # The first run in a fresh HOME builds the pywin32 cache (slow): not measured.
+        # The first account of the client is not always a usable scope (macOS lists
+        # "On My Device" first and it has no INBOX): declare accounts in order until one
+        # exposes an included mailbox, so the SMOKE-NEW cases never run on empty data.
+        cls.first_account = None
         rc, out, _, _ = cls._run(["mailboxes"])
-        accounts = json.loads(out)["accounts"] if rc == 0 else []
-        cls.first_account = accounts[0]["label"] if accounts else None
-        if cls.first_account:
+        if rc != 0:
+            return  # leave first_account None: the SMOKE cases surface the CLI error
+        for account in json.loads(out)["accounts"]:
             cfg = cls.home / ".mailquery"
             cfg.mkdir(exist_ok=True)
-            label = json.dumps(cls.first_account, ensure_ascii=False)
+            label = json.dumps(account["label"], ensure_ascii=False)
             (cfg / "config.toml").write_text(f"[scope.{label}]\n", encoding="utf-8")
+            rc, out, _, _ = cls._run(["mailboxes"])
+            if rc != 0:
+                return  # a scope that errors must surface, not be skipped
+            if any(m["included"] for m in json.loads(out)["mailboxes"]):
+                cls.first_account = account["label"]
+                break
+        else:
+            raise unittest.SkipTest(
+                "no account exposes an included mailbox "
+                "(declare one in ~/.mailquery/config.toml)"
+            )
 
     @classmethod
     def _run(cls, args, record=None):
