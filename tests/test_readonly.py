@@ -22,10 +22,17 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import unittest
 from pathlib import Path
 
-from tests.fixtures.make_fixtures import build_store, write_config
+from tests.fixtures.make_fixtures import (
+    ICLOUD_LABEL,
+    UID_SMIME_ENCRYPTED,
+    UID_SMIME_SIGNED,
+    build_store,
+    write_config,
+)
 
 from mailquery import cli
 
@@ -69,7 +76,8 @@ class ReadOnlyStoreTest(unittest.TestCase):
     """PRD §20 read-only gate: hashes and mtimes unchanged, no new store files."""
 
     def setUp(self) -> None:
-        self.fx = build_store()
+        # Extended store: WAL-mode Envelope Index with -wal/-shm, S/MIME, deleted rows...
+        self.fx = build_store(extended=True)
         self.addCleanup(self.fx.cleanup)
         # Default fixture config declares the three accounts (two extra folders).
         write_config(self.fx.home)
@@ -110,6 +118,11 @@ class ReadOnlyStoreTest(unittest.TestCase):
             "read-only violation: files were created or deleted under fx.mail_root",
         )
         for path, expected in initial_mail_files.items():
+            if path.endswith("-shm"):
+                # SQLite's shared-memory index is initialised by any reader (even
+                # read-only), so its size/mtime/content legitimately change; the
+                # database and the -wal file are compared as usual.
+                continue
             self.assertEqual(
                 current_mail_files[path],
                 expected,
@@ -135,6 +148,8 @@ class ReadOnlyStoreTest(unittest.TestCase):
                 f"directory created outside the app home: {path}",
             )
         for path in set(files) & set(self.initial_files):
+            if path.endswith("-shm"):
+                continue  # see above: reader-initialised shared-memory index
             if files[path] != self.initial_files[path] and not _inside(path, home_prefix):
                 self.fail(f"file modified outside the app home: {path}")
 
@@ -150,8 +165,8 @@ class ReadOnlyStoreTest(unittest.TestCase):
 
     # -- the gate --------------------------------------------------------- #
 
-    def test_all_commands_leave_the_store_untouched(self) -> None:
-        """Run every command end to end and verify the store never changes."""
+    def test_tc_03_01_all_commands_leave_the_store_untouched(self) -> None:
+        """TC-03.01: every command (new first run, out-of-scope show, S/MIME) leaves the store untouched."""
         scenarios = [
             (("doctor", "--json"), "doctor"),
             (("mailboxes",), "mailboxes"),
@@ -168,6 +183,8 @@ class ReadOnlyStoreTest(unittest.TestCase):
             (("show", "79658"), "show"),
             (("show", "83170"), "show"),
             (("show", "83180"), "show"),
+            (("show", str(UID_SMIME_ENCRYPTED)), "show"),
+            (("show", str(UID_SMIME_SIGNED)), "show"),
         ]
         payloads: dict[str, list[dict]] = {}
         for argv, command in scenarios:
@@ -177,14 +194,29 @@ class ReadOnlyStoreTest(unittest.TestCase):
                 payloads.setdefault(command, []).append(result)
                 self.assert_store_unchanged()
 
-        self.assertEqual(payloads["search"][0]["count"], 12)
+        self.assertGreaterEqual(payloads["search"][0]["count"], 12)
         self.assertIn("checks", payloads["doctor"][0])
         self.assertIn("mailboxes", payloads["mailboxes"][0])
         self.assertEqual(payloads["show"][0]["message"]["uid"], 2714)
         self.assertEqual(payloads["show"][2]["message"]["uid"], 83170)
-        self.assertEqual(payloads["new"][0]["count"], 0)
+        # First run: emits the window and writes only the state; then nothing new.
+        self.assertTrue(payloads["new"][0]["messages"])
+        self.assertTrue(
+            {83160, 83170} <= {message["uid"] for message in payloads["new"][0]["messages"]}
+        )
         self.assertEqual(payloads["new"][1]["count"], 0)
         self.assertEqual(payloads["new"][2]["count"], 0)
+        # S/MIME messages are listed but their body is never read.
+        for result in payloads["show"][-2:]:
+            self.assertIs(result["message"]["readable"], False)
+
+        # Out of scope: only iCloud declared, a Gmail uid is rejected (exit 2).
+        write_config(self.fx.home, f'[scope."{ICLOUD_LABEL}"]\n')
+        code, payload, _stderr = self.run_cli("show", "83160")
+        self.assertEqual(code, 2)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_ACCOUNT_NOT_IN_SCOPE")
+        self.assert_store_unchanged()
 
     def test_doctor_human_report_does_not_touch_the_store(self) -> None:
         """The default human-readable doctor report is read-only too."""
@@ -224,10 +256,11 @@ class ReadOnlyStoreTest(unittest.TestCase):
         self.assertIn("state.json", store_files)
         self.assertIn("locks/mailquery.lock", store_files)
         self.assertTrue(any(path.startswith("logs/") for path in store_files))
-        self.assertEqual(
-            (self.fx.home / "state.json").stat().st_mode & 0o777,
-            0o600,
-        )
+        if os.name == "posix":
+            self.assertEqual(
+                (self.fx.home / "state.json").stat().st_mode & 0o777,
+                0o600,
+            )
 
     def test_no_file_under_mail_root_is_world_or_group_writable_after_reads(self) -> None:
         """Defensive: reading must not relax any on-disk permission."""

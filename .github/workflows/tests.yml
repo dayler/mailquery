@@ -11,21 +11,25 @@ permissions:
 
 jobs:
   unittest:
-    name: unittest (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: unittest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install pywin32 (Windows only)
+        if: runner.os == 'Windows'
+        run: python -m pip install pywin32
       - name: Run unit, contract, integration and read-only tests
         # tests/test_readonly.py is blocking: it fails if any store file
         # changes or if the tool writes outside ~/.mailquery.
-        run: python3 -m unittest discover -s tests -t . -v
+        run: python -m unittest discover -s tests -t . -v
 
   install-scripts:
     name: install scripts (${{ matrix.os }})
@@ -71,6 +75,16 @@ jobs:
         shell: bash
         run: shellcheck --severity=error scripts/install.sh
 
+      - name: Validate and dry-run skills/install.sh
+        if: matrix.kind == 'sh'
+        shell: bash
+        run: |
+          sh -n skills/install.sh
+          sh skills/install.sh --help > /dev/null
+          sh skills/install.sh --dry-run --harness dsh --scope project
+          sh skills/install.sh --dry-run --path "$RUNNER_TEMP/mq-skills-test"
+          shellcheck --severity=error skills/install.sh
+
       - name: Validate and dry-run scripts/install.ps1
         if: matrix.kind == 'ps1'
         shell: pwsh
@@ -84,4 +98,18 @@ jobs:
           }
           ./scripts/install.ps1 -DryRun -NoConfig
           ./scripts/install.ps1 -PrintConfig > $null
+
+      - name: Validate and dry-run skills/install.ps1
+        if: matrix.kind == 'ps1'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "skills/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          ./skills/install.ps1 -Help | Out-Null
+          ./skills/install.ps1 -Path "$env:TEMP\mq-skills-test" -DryRun
 

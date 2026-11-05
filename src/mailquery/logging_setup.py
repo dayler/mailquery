@@ -1,4 +1,4 @@
-"""Logging setup: plain text, daily rotation, never in ``stdout``.
+"""Logging setup: plain text, rotation by size, never in ``stdout``.
 
 ``stdout`` is reserved for the JSON contract; every diagnostic goes to
 ``~/.mailquery/logs/mailquery.log`` (PRD 14). The format is log4j-like and
@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
-from logging.handlers import TimedRotatingFileHandler
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-5s %(name)s run=%(run_id)s %(message)s"
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+# ``asctime`` without a date format renders ``YYYY-MM-DD HH:MM:SS,mmm`` (PRD 14).
+LOG_FORMAT = "%(asctime)s %(levelname)-5s %(name)s run=%(run_id)s %(message)s"
+
+BACKUP_COUNT = 5  # rotated files kept (PRD 14, fixed)
+DEFAULT_MAX_SIZE_MB = 10
 
 LEVELS: dict[str, int] = {
     "error": logging.ERROR,
@@ -41,12 +43,24 @@ def _close_handlers(logger: logging.Logger) -> None:
             pass
 
 
-def setup_logging(home: Path, level: str = "info", retention_days: int = 7) -> str:
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    """Rotating handler whose current and rotated files are 0600 on POSIX."""
+
+    def _open(self):  # noqa: D401 - logging.FileHandler hook
+        stream = super()._open()
+        try:
+            os.chmod(self.baseFilename, 0o600)
+        except OSError:  # pragma: no cover - best effort on foreign filesystems
+            pass
+        return stream
+
+
+def setup_logging(home: Path, level: str = "info", max_size_mb: int = DEFAULT_MAX_SIZE_MB) -> str:
     """Configure the ``mailquery`` logger and return the run id.
 
-    The log directory is created with mode 0700 and the log file with mode
-    0600. Rotation happens at local midnight and keeps ``retention_days``
-    backups.
+    The log directory is created with mode 0700 and the log files with mode
+    0600. The file rotates when it exceeds ``max_size_mb`` and keeps
+    ``BACKUP_COUNT`` rotated files.
     """
     global _current_run_id
 
@@ -60,24 +74,20 @@ def setup_logging(home: Path, level: str = "info", retention_days: int = 7) -> s
     logger.setLevel(LEVELS.get(level, logging.INFO))
     logger.propagate = False
 
-    handler = TimedRotatingFileHandler(
+    handler = _PrivateRotatingFileHandler(
         log_path,
-        when="midnight",
-        backupCount=int(retention_days),
+        maxBytes=int(max_size_mb) * 1024 * 1024,
+        backupCount=BACKUP_COUNT,
         encoding="utf-8",
         delay=False,
-        utc=False,
     )
-    handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logger.addHandler(handler)
 
-    try:
-        os.chmod(log_path, 0o600)
-    except OSError:  # pragma: no cover - best effort on foreign filesystems
-        pass
+    import uuid  # lazy: only needed once per run
 
     _current_run_id = uuid.uuid4().hex[:12]
-    logger.debug("logging initialized level=%s retention_days=%s", level, retention_days)
+    logger.debug("logging initialized level=%s max_size_mb=%s", level, max_size_mb)
     return _current_run_id
 
 

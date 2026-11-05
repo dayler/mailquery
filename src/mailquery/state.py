@@ -8,16 +8,23 @@ with mode 0600, and the file never contains subjects, bodies or addresses.
 
 from __future__ import annotations
 
-import fcntl
+import errno
 import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
+from mailquery.backends.base import StateUidError, Uid
 from mailquery.errors import MailqueryError
 from mailquery.output import now_iso
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 MAX_EMITTED_UIDS = 1000
 STATE_SCHEMA = 1
@@ -33,7 +40,7 @@ class Cursor:
     """Watermark for ``mailquery new``."""
 
     last_date_received: int
-    last_uid: int
+    last_uid: Uid
     lookback_seconds: int = DEFAULT_LOOKBACK_SECONDS
 
 
@@ -49,7 +56,13 @@ class AppState:
     updated_at: str = ""
     last_run: LastRun | None = None
     cursor: Cursor | None = None
-    emitted_uids: tuple[int, ...] = ()
+    emitted_uids: tuple[Uid, ...] = ()
+
+
+# A uid validator is the backend's ``check_state_uid`` (PRD 11.2, D-05): it returns
+# ``None`` for a valid ``state.json`` uid and raises ``StateUidError`` carrying
+# the backend's own ``E_STATE_CORRUPT`` details otherwise.
+UidValidator = Callable[[object], None]
 
 
 class _MissingFile(Exception):
@@ -63,11 +76,14 @@ class StateStore:
     with unknown keys (they are ignored), but it is strict about the file being
     a JSON object with schema ``1`` and about the types of the known fields: a
     damaged state must fail loudly with ``E_STATE_CORRUPT`` (PRD 11.2) instead
-    of silently re-baselining and re-emitting a window of mail.
+    of silently re-baselining and re-emitting a window of mail. The uids
+    (``cursor.last_uid`` and ``emitted_uids``) are validated by ``validate_uid``,
+    the backend's rule (D-05); they are otherwise opaque (``int`` or ``str``).
     """
 
-    def __init__(self, home: Path) -> None:
+    def __init__(self, home: Path, validate_uid: UidValidator) -> None:
         self._home = Path(home)
+        self._validate_uid = validate_uid
 
     @property
     def home(self) -> Path:
@@ -92,6 +108,7 @@ class StateStore:
                 f"cannot read state file: {path}",
                 "check that ~/.mailquery is readable by the current user "
                 "(it must be mode 0700 and owned by the invoking account)",
+                "cannot read the state file",
             ) from exc
         except OSError as exc:
             raise _corrupt(f"cannot read {path} ({exc.strerror or exc})") from exc
@@ -103,7 +120,7 @@ class StateStore:
 
         if not isinstance(payload, dict):
             raise _corrupt("the top-level value must be a JSON object")
-        return _state_from_payload(payload)
+        return _state_from_payload(payload, self._validate_uid)
 
     def save(self, state: AppState) -> None:
         """Atomically persist ``state`` as 0600 JSON."""
@@ -117,15 +134,19 @@ class StateStore:
                 "E_PERMISSION",
                 f"cannot create the application home: {directory}",
                 "check the permissions of the parent directory",
+                "cannot create the application home",
             ) from exc
 
         data = json.dumps(_state_to_payload(state), ensure_ascii=False, indent=2) + "\n"
         tmp_path = self._write_temp(directory, data)
         try:
             os.replace(tmp_path, path)
-        except OSError:
+        except OSError as exc:
             _unlink_quietly(tmp_path)
-            raise
+            mapped = _write_error(exc, directory)
+            if mapped is None:
+                raise
+            raise mapped from exc
         _fsync_dir(directory)
 
     @staticmethod
@@ -134,10 +155,13 @@ class StateStore:
         try:
             fd, tmp_name = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=directory)
         except OSError as exc:
+            if exc.errno == errno.ENOSPC:
+                raise _write_error(exc, directory) from exc
             raise MailqueryError(
                 "E_PERMISSION",
                 f"cannot create a temporary state file in {directory}",
                 "check that ~/.mailquery is writable by the current user",
+                "cannot create a temporary state file",
             ) from exc
         tmp_path = Path(tmp_name)
         try:
@@ -146,6 +170,12 @@ class StateStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.chmod(tmp_path, 0o600)
+        except OSError as exc:
+            _unlink_quietly(tmp_path)
+            mapped = _write_error(exc, directory)
+            if mapped is None:
+                raise
+            raise mapped from exc
         except BaseException:
             _unlink_quietly(tmp_path)
             raise
@@ -154,33 +184,41 @@ class StateStore:
     def record_new(
         self,
         state: AppState,
-        emitted: Sequence[tuple[int, int]],
+        emitted: Sequence[tuple[int, Uid]],
+        lookback_seconds: int,
         command: str = "new",
     ) -> AppState:
         """Advance the cursor and the emitted-uid ring, returning the new state.
 
         ``emitted`` holds ``(date_received, uid)`` pairs for the messages this
         run emits. The cursor only ever moves forward (a Mail index rebuild may
-        change uids but never the dates, PRD 18); the previous
-        ``lookback_seconds`` is preserved, and the emitted uids are appended to
-        the ring in chronological order (newest last) capped at 1.000 entries.
+        change uids but never the dates, PRD 18); ``lookback_seconds`` is the
+        lookback of the current config (PRD 12.3) and is the one stored in the
+        cursor, and the emitted uids are appended to the ring in chronological
+        order (newest last) capped at 1.000 entries.
 
         This method does **not** persist the new state: the caller
         (``search.run_new``) saves it only when the run is not ``--peek``, so a
         peek can never advance the cursor (PRD 12.3, 18).
         """
-        pairs = [(int(date), int(uid)) for date, uid in emitted]
+        pairs = [(int(date), uid) for date, uid in emitted]
         previous = state.cursor
-        previous_lookback = previous.lookback_seconds if previous is not None else DEFAULT_LOOKBACK_SECONDS
+        lookback = int(lookback_seconds)
 
         cursor = previous
+        if previous is not None and previous.lookback_seconds != lookback:
+            cursor = Cursor(
+                last_date_received=previous.last_date_received,
+                last_uid=previous.last_uid,
+                lookback_seconds=lookback,
+            )
         if pairs:
             newest = max(pairs, key=lambda pair: (pair[0], pair[1]))
             if previous is None or newest > (previous.last_date_received, previous.last_uid):
                 cursor = Cursor(
                     last_date_received=newest[0],
                     last_uid=newest[1],
-                    lookback_seconds=previous_lookback,
+                    lookback_seconds=lookback,
                 )
 
         ring = _advance_ring(state.emitted_uids, pairs)
@@ -194,8 +232,50 @@ class StateStore:
         )
 
 
+def _write_error(exc: OSError, directory: Path) -> MailqueryError | None:
+    """Map a failed state write (PRD 17): ENOSPC is internal, EACCES/EPERM a permission error.
+
+    Returns ``None`` for any other I/O error, which keeps its current handling.
+    The previous ``state.json`` is never touched by a failed write.
+    """
+    if exc.errno == errno.ENOSPC:
+        return MailqueryError(
+            "E_INTERNAL",
+            f"no space left on the device to write the state file in {directory}",
+            "free disk space and retry; the previous cursor was not changed",
+            "no space left on the device to write the state file",
+        )
+    if exc.errno in (errno.EACCES, errno.EPERM):
+        return MailqueryError(
+            "E_PERMISSION",
+            f"cannot write the state file in {directory}: {exc.strerror or exc}",
+            "check that ~/.mailquery is writable by the current user",
+            "cannot write the state file",
+        )
+    return None
+
+
+def _lock_fd(fd: int) -> None:
+    """Take a non-blocking exclusive lock on ``fd``; raise ``OSError`` if held."""
+    if sys.platform == "win32":
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_fd(fd: int) -> None:
+    if sys.platform == "win32":
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 class RunLock:
-    """Non-blocking ``fcntl.flock`` lock under ``~/.mailquery/locks``.
+    """Non-blocking lock under ``~/.mailquery/locks``.
+
+    Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows.
 
     Every invocation takes the lock before touching the store so two harness
     calls cannot overlap (PRD 21.3). A contended lock raises ``E_LOCKED``
@@ -224,13 +304,14 @@ class RunLock:
                 "E_PERMISSION",
                 f"cannot open the run lock: {path}",
                 "check that ~/.mailquery is writable by the current user",
+                "cannot open the run lock",
             ) from exc
         try:
             os.chmod(path, 0o600)
         except OSError:  # pragma: no cover - best effort on foreign filesystems
             pass
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_fd(fd)
         except OSError as exc:
             os.close(fd)
             raise MailqueryError(
@@ -247,7 +328,7 @@ class RunLock:
             return
         self._fd = None
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _unlock_fd(fd)
         finally:
             os.close(fd)
 
@@ -287,7 +368,7 @@ def _state_to_payload(state: AppState) -> dict:
     }
 
 
-def _state_from_payload(payload: dict) -> AppState:
+def _state_from_payload(payload: dict, validate_uid: UidValidator) -> AppState:
     """Build ``AppState`` from raw JSON, raising E_STATE_CORRUPT on bad types."""
     schema = payload.get("schema", STATE_SCHEMA)
     if schema != STATE_SCHEMA or isinstance(schema, bool):
@@ -300,8 +381,8 @@ def _state_from_payload(payload: dict) -> AppState:
         raise _corrupt("'updated_at' must be a string")
 
     last_run = _last_run_from_payload(payload.get("last_run"))
-    cursor = _cursor_from_payload(payload.get("cursor"))
-    emitted_uids = _ring_from_payload(payload.get("emitted_uids", []))
+    cursor = _cursor_from_payload(payload.get("cursor"), validate_uid)
+    emitted_uids = _ring_from_payload(payload.get("emitted_uids", []), validate_uid)
 
     return AppState(
         schema=STATE_SCHEMA,
@@ -324,18 +405,24 @@ def _last_run_from_payload(value: object) -> LastRun | None:
     return LastRun(command=command, at=at)
 
 
-def _cursor_from_payload(value: object) -> Cursor | None:
+def _cursor_from_payload(value: object, validate_uid: UidValidator) -> Cursor | None:
     if value is None:
         return None
     if not isinstance(value, dict):
         raise _corrupt("'cursor' must be an object")
-    date = value.get("last_date_received", 0)
-    uid = value.get("last_uid", 0)
+    date = value.get("last_date_received")
+    uid = value.get("last_uid")
     lookback = value.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
-    if not _is_int(date) or not _is_int(uid) or not _is_int(lookback):
-        raise _corrupt("'cursor' fields must be integers")
-    if date < 0 or uid < 0:
-        raise _corrupt("'cursor' fields must not be negative")
+    if not _is_int(date) or not _is_int(lookback):
+        raise _corrupt(
+            "'cursor' must hold integer 'last_date_received' and 'last_uid'"
+        )
+    if date < 0:
+        raise _corrupt("'cursor.last_date_received' must not be negative")
+    try:
+        validate_uid(uid)
+    except StateUidError as exc:
+        raise _corrupt(exc.cursor_detail) from exc
     if lookback < 1:
         raise _corrupt("'cursor.lookback_seconds' must be positive")
     return Cursor(
@@ -345,27 +432,28 @@ def _cursor_from_payload(value: object) -> Cursor | None:
     )
 
 
-def _ring_from_payload(value: object) -> tuple[int, ...]:
+def _ring_from_payload(value: object, validate_uid: UidValidator) -> tuple[Uid, ...]:
     if value is None:
         return ()
     if not isinstance(value, list):
         raise _corrupt("'emitted_uids' must be a list of integers")
-    uids: list[int] = []
+    uids: list[Uid] = []
     for item in value:
-        if not _is_int(item) or item < 0:
-            raise _corrupt("'emitted_uids' must be a list of non-negative integers")
+        try:
+            validate_uid(item)
+        except StateUidError as exc:
+            raise _corrupt(exc.ring_detail) from exc
         uids.append(item)
     return tuple(uids[-MAX_EMITTED_UIDS:])
 
 
 def _advance_ring(
-    current: Sequence[int],
-    pairs: Sequence[tuple[int, int]],
-) -> tuple[int, ...]:
+    current: Sequence[Uid],
+    pairs: Sequence[tuple[int, Uid]],
+) -> tuple[Uid, ...]:
     """Append emitted uids in chronological order, caps the ring at 1.000."""
-    ring = [int(uid) for uid in current]
+    ring = list(current)
     for _, uid in sorted(pairs, key=lambda pair: (pair[0], pair[1])):
-        uid = int(uid)
         if uid in ring:
             ring.remove(uid)
         ring.append(uid)
@@ -382,9 +470,10 @@ def _corrupt(detail: str) -> MailqueryError:
     return MailqueryError(
         "E_STATE_CORRUPT",
         f"state.json is corrupt: {detail}",
-        "rename ~/.mailquery/state.json (for example to state.json.bak) to "
-        "re-baseline: the next 'mailquery new' creates a fresh state and, on "
-        "its first run, emits nothing",
+        "rename ~/.mailquery/state.json (for example to state.json.bak): the "
+        "next 'mailquery new' is a first run that emits the messages of the "
+        "lookback window",
+        "state.json is corrupt",
     )
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -24,8 +25,10 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 
 from mailquery import cli
+from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.state import StateStore
 from tests.fixtures.make_fixtures import (
     ACCOUNT_GMAIL,
@@ -85,7 +88,7 @@ MESSAGE_FIELDS = {
     "snippet",
     "body",
 }
-BODY_FIELDS = {"available", "partial", "truncated"}
+BODY_FIELDS = {"available", "readable", "partial", "truncated"}
 MAILBOX_FIELDS = {"account", "name", "path", "url"}
 ACCOUNT_FIELDS = {"uuid", "label", "email"}
 
@@ -109,6 +112,8 @@ def _normalize(value: object, root: Path) -> object:
     if isinstance(value, dict):
         if value.get("name") == "python" and "detail" in value:
             value = {**value, "detail": "<PYTHON>"}
+        if value.get("name") == "home" and "detail" in value:
+            value = {**value, "detail": "<HOME>"}
         return {
             key: _normalize(item, root)
             for key, item in value.items()
@@ -119,10 +124,48 @@ def _normalize(value: object, root: Path) -> object:
     if isinstance(value, str):
         text = ISO_RE.sub("<ISO>", value)
         text = EMAIL_DATE_RE.sub("<EMAIL_DATE>", text)
-        return text.replace(str(root), "<ROOT>")
+        text = text.replace(str(root), "<ROOT>")
+        # Goldens use "/" on every OS: normalize separators after the root swap.
+        return text.replace("\\", "/")
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) >= 1_000_000_000:
         return "<EPOCH>"
     return value
+
+
+def _assert_golden(case: unittest.TestCase, name: str, payload: dict, root: Path) -> None:
+    """Compare a normalized payload with ``EXPECTED_DIR / name`` (or rewrite it)."""
+    normalized = _normalize(payload, root)
+    path = EXPECTED_DIR / name
+    if os.environ.get("MAILQUERY_UPDATE_GOLDENS") == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return
+    case.assertTrue(
+        path.is_file(),
+        f"missing golden {path}; run with MAILQUERY_UPDATE_GOLDENS=1",
+    )
+    expected = json.loads(path.read_text(encoding="utf-8"))
+    case.assertEqual(normalized, expected, f"golden mismatch: {path.name}")
+
+
+def _close_log_handlers() -> None:
+    """Release the log file ``cli.main`` leaves open (Windows cannot delete it)."""
+    logger = logging.getLogger("mailquery")
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()
+
+
+@contextlib.contextmanager
+def _closing_log_handlers():
+    try:
+        yield
+    finally:
+        _close_log_handlers()
 
 
 def _insert_candidate_messages(fx, count: int = 130) -> None:
@@ -174,6 +217,7 @@ class IntegrationBase(unittest.TestCase):
     def setUp(self) -> None:
         self.fx = build_store()
         self.addCleanup(self.fx.cleanup)
+        self.addCleanup(_close_log_handlers)
         if self.config_text is not None:
             write_config(self.fx.home, self.config_text)
 
@@ -287,21 +331,7 @@ class IntegrationBase(unittest.TestCase):
     # -- goldens ---------------------------------------------------------- #
 
     def assert_golden(self, name: str, payload: dict) -> None:
-        normalized = _normalize(payload, self.fx.root)
-        path = EXPECTED_DIR / name
-        if os.environ.get("MAILQUERY_UPDATE_GOLDENS") == "1":
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            return
-        self.assertTrue(
-            path.is_file(),
-            f"missing golden {path}; run with MAILQUERY_UPDATE_GOLDENS=1",
-        )
-        expected = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(normalized, expected, f"golden mismatch: {path.name}")
+        _assert_golden(self, name, payload, self.fx.root)
 
 
 # --------------------------------------------------------------------------- #
@@ -310,7 +340,8 @@ class IntegrationBase(unittest.TestCase):
 
 
 class DoctorTest(IntegrationBase):
-    def test_doctor_reports_all_documented_checks(self) -> None:
+    def test_tc_01_01_doctor_reports_all_documented_checks(self) -> None:
+        """TC-01.01: doctor reports every documented check (golden)."""
         payload = self.run_ok("doctor", "--json")
         self.assertEqual(payload["command"], "doctor")
         checks = payload["checks"]
@@ -362,7 +393,8 @@ class DoctorTest(IntegrationBase):
 
 
 class MailboxesTest(IntegrationBase):
-    def test_mailboxes_accounts_counters_and_included_flags(self) -> None:
+    def test_tc_01_02_mailboxes_accounts_counters_and_included_flags(self) -> None:
+        """TC-01.02: mailboxes, accounts, counters and included flags (golden)."""
         payload = self.run_ok("mailboxes")
         self.assertEqual(payload["command"], "mailboxes")
         self.assertTrue({"accounts", "mailboxes"} <= set(payload))
@@ -411,7 +443,8 @@ class MailboxesTest(IntegrationBase):
 
 
 class SearchTest(IntegrationBase):
-    def test_search_default_returns_all_distinct_messages(self) -> None:
+    def test_tc_01_03_search_default_returns_all_distinct_messages(self) -> None:
+        """TC-01.03: default search returns all distinct messages (golden)."""
         payload = self.run_ok("search")
         self.assertEqual(payload["command"], "search")
         self.assertTrue({"count", "truncated", "messages", "scan"} <= set(payload))
@@ -440,7 +473,10 @@ class SearchTest(IntegrationBase):
         self.assertIs(invoice["has_attachments"], True)
         self.assertEqual(invoice["size_bytes"], 123456)
         self.assertEqual(invoice["snippet"], "Please find the invoice attached.")
-        self.assertEqual(invoice["body"], {"available": True, "partial": False, "truncated": False})
+        self.assertEqual(
+            invoice["body"],
+            {"available": True, "readable": True, "partial": False, "truncated": False},
+        )
         self.assertEqual(invoice["duplicate_count"], 1)
         self.assertEqual(invoice["message_id"], "<invoice-2714@fixture.example>")
 
@@ -486,7 +522,8 @@ class SearchTest(IntegrationBase):
         self.assertIsInstance(scan["duration_ms"], int)
         self.assert_golden("search_default.json", payload)
 
-    def test_search_with_all_mail_dedupes_to_inbox_canonical(self) -> None:
+    def test_tc_01_04_search_with_all_mail_dedupes_to_inbox_canonical(self) -> None:
+        """TC-01.04: All Mail search dedupes to the INBOX canonical (golden)."""
         self.configure(ALL_MAIL_CONFIG)
         payload = self.run_ok("search")
         self.assertEqual(payload["count"], 12)
@@ -562,7 +599,7 @@ class NewTest(IntegrationBase):
     def _seed_cursor(self, hours: int = 2) -> dict:
         cursor = {
             "last_date_received": int((self.fx.now - timedelta(hours=hours)).timestamp()),
-            "last_uid": 0,
+            "last_uid": 1,
             "lookback_seconds": 600,
         }
         write_state(
@@ -577,13 +614,22 @@ class NewTest(IntegrationBase):
         )
         return cursor
 
-    def test_first_run_baselines_without_emitting(self) -> None:
-        self.assertFalse(StateStore(self.fx.home).path.exists())
+    def test_tc_01_05_first_run_emits_the_lookback_window(self) -> None:
+        """TC-01.05: first run of ``new`` emits the [D - lookback, D] window (golden)."""
+        self.assertFalse(StateStore(self.fx.home, AppleMailBackend.check_state_uid).path.exists())
         payload = self.run_ok("new")
         self.assertEqual(payload["command"], "new")
-        self.assertEqual(payload["count"], 0)
-        self.assertEqual(payload["messages"], [])
-        self.assert_warning(payload, "W_FIRST_RUN")
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(
+            [message["uid"] for message in payload["messages"]], [83160, 83170]
+        )
+        for message in payload["messages"]:
+            self.assert_message_shape(message)
+        self.assertEqual(
+            payload["warnings"][-1],
+            "W_FIRST_RUN: first run: emitted the messages received in the last "
+            "10min before the newest message",
+        )
 
         expected_date = int((self.fx.now - timedelta(minutes=15)).timestamp())
         cursor = payload["cursor"]
@@ -592,15 +638,20 @@ class NewTest(IntegrationBase):
         self.assertEqual(cursor["current"]["last_date_received"], expected_date)
         self.assertEqual(cursor["current"]["lookback_seconds"], 600)
 
-        state = StateStore(self.fx.home).load()
+        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
         self.assertIsNotNone(state.cursor)
         assert state.cursor is not None
         self.assertEqual(state.cursor.last_uid, 83170)
         self.assertEqual(state.cursor.last_date_received, expected_date)
+        self.assertEqual(state.emitted_uids, (83160, 83170))
         self.assertEqual(state.last_run.command, "new")
         self.assert_golden("new_first_run.json", payload)
 
-    def test_seeded_run_emits_new_messages_and_advances_cursor(self) -> None:
+        # The window was emitted once: the next run has nothing new.
+        self.assertEqual(self.run_ok("new")["count"], 0)
+
+    def test_tc_01_06_seeded_run_emits_new_messages_and_advances_cursor(self) -> None:
+        """TC-01.06: a seeded run emits the new messages (golden)."""
         seeded = self._seed_cursor()
         payload = self.run_ok("new")
         self.assertEqual(payload["count"], 4)
@@ -620,7 +671,7 @@ class NewTest(IntegrationBase):
         )
         self.assertEqual(cursor["current"]["lookback_seconds"], 600)
 
-        state = StateStore(self.fx.home).load()
+        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
         assert state.cursor is not None
         self.assertEqual(state.cursor.last_uid, 83170)
         self.assertEqual(set(state.emitted_uids), {83143, 83150, 83160, 83170})
@@ -639,9 +690,9 @@ class NewTest(IntegrationBase):
             [message["uid"] for message in peeked["messages"]],
             [83143, 83150, 83160, 83170],
         )
-        state = StateStore(self.fx.home).load()
+        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
         assert state.cursor is not None
-        self.assertEqual(state.cursor.last_uid, 0)
+        self.assertEqual(state.cursor.last_uid, 1)
         self.assertEqual(state.emitted_uids, ())
 
         # A real run after the peek still emits the same window.
@@ -658,7 +709,8 @@ class NewTest(IntegrationBase):
 
 
 class ShowTest(IntegrationBase):
-    def test_show_text_message_with_attachment(self) -> None:
+    def test_tc_01_07_show_text_message_with_attachment(self) -> None:
+        """TC-01.07: show of a text message with attachment (golden)."""
         payload = self.run_ok("show", "2714")
         self.assertEqual(payload["command"], "show")
         message = payload["message"]
@@ -684,10 +736,11 @@ class ShowTest(IntegrationBase):
         self.assertIs(message["partial"], False)
         self.assertIs(message["readable"], True)
         self.assertIs(message["source"]["partial"], False)
-        self.assertTrue(message["source"]["emlx_path"].endswith("/2714.emlx"))
+        self.assertEqual(Path(message["source"]["emlx_path"]).name, "2714.emlx")
         self.assert_golden("show_2714.json", payload)
 
-    def test_show_missing_emlx(self) -> None:
+    def test_tc_01_08_show_missing_emlx(self) -> None:
+        """TC-01.08: show with a missing .emlx (golden)."""
         payload = self.run_ok("show", "83170")
         message = payload["message"]
         self.assertEqual(message["uid"], 83170)
@@ -700,7 +753,8 @@ class ShowTest(IntegrationBase):
         self.assert_warning(payload, "W_EMLX_MISSING")
         self.assert_golden("show_83170.json", payload)
 
-    def test_show_corrupt_emlx(self) -> None:
+    def test_tc_01_09_show_corrupt_emlx(self) -> None:
+        """TC-01.09: show with a corrupt .emlx (golden)."""
         payload = self.run_ok("show", "83180")
         message = payload["message"]
         self.assertEqual(message["uid"], 83180)
@@ -718,6 +772,415 @@ class ShowTest(IntegrationBase):
         self.assertIs(message["readable"], True)
         self.assertIn("Adjuntamos la factura de septiembre.", message["body_text"])
         self.assertEqual([attachment["name"] for attachment in message["attachments"]], ["factura-79658.pdf"])
+
+
+class ExtendedGoldenTest(IntegrationBase):
+    """Goldens that need the extended fixture store (only ``setUp`` differs)."""
+
+    def setUp(self) -> None:
+        self.fx = build_store(extended=True)
+        self.addCleanup(self.fx.cleanup)
+        self.addCleanup(_close_log_handlers)
+        write_config(self.fx.home, self.config_text)
+
+    def test_tc_01_10_show_smime_encrypted(self) -> None:
+        """TC-01.10: show of the encrypted S/MIME message with attachment rows (golden)."""
+        payload = self.run_ok("show", "90110")
+        message = payload["message"]
+        self.assertEqual(message["uid"], 90110)
+        self.assertIs(message["has_attachments"], True)
+        self.assert_golden("show_smime_encrypted.json", payload)
+
+    def test_tc_01_11_show_not_in_scope_error(self) -> None:
+        """TC-01.11: show of a uid in an undeclared account (golden)."""
+        self.configure(ICLOUD_ONLY_CONFIG)
+        payload = self.run_error(
+            "show", "83160", expected_exit=2, expected_code="E_ACCOUNT_NOT_IN_SCOPE"
+        )
+        self.assert_golden("show_not_in_scope_error.json", payload)
+
+
+# --------------------------------------------------------------------------- #
+# TC-02 — Outlook goldens (RF-30, PRD 12.5) over the in-memory fake
+# --------------------------------------------------------------------------- #
+
+#: Golden profile config: the cached Exchange account and the excluded shared
+#: mailbox, both declared (the latter reports W_STORE_EXCLUDED, PRD 15.3).
+OUTLOOK_GOLDEN_CONFIG = (
+    '[scope."ana.perez@example.com"]\n'
+    '[scope."Exchange shared (Soporte)"]\n'
+)
+OUTLOOK_STORE_EXCLUDED = "W_STORE_EXCLUDED: Exchange shared (Soporte) is excluded: shared_mailbox"
+
+
+class OutlookGoldenTest(unittest.TestCase):
+    """``cli.main`` with the Outlook backend over ``FakeOutlook.default()`` (TC-02 profile).
+
+    The local zone is injected (fixed UTC-04:00) so the converted dates do not
+    depend on the host zone.
+    """
+
+    def setUp(self) -> None:
+        from mailquery import output
+        from tests.fakes import outlook as fake_outlook
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(_close_log_handlers)
+        self.root = Path(tmp.name)
+        self.home = self.root / ".mailquery"
+        self.home.mkdir()
+        (self.home / "config.toml").write_text(OUTLOOK_GOLDEN_CONFIG, encoding="utf-8")
+        self.fake = fake_outlook.FakeOutlook.default()
+        zone = fake_outlook.FakeZone.fixed(-4)
+        patcher = mock.patch.object(output, "LOCAL_ZONE", zone)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_ok(self, *args: str) -> dict:
+        from mailquery.backends import get_backend
+
+        backend = get_backend(
+            platform="win32",
+            outlook_app=self.fake,
+            registry=self.fake.registry,
+            security_center=self.fake.security_center,
+            tmp_root=self.home / "tmp",
+        )
+        self.addCleanup(backend.close)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = cli.main(list(args), home=self.home, backend=backend)
+        self.assertEqual(code, 0, stdout.getvalue() + stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertIs(payload["ok"], True)
+        self.assertRegex(payload["generated_at"], ISO_EXACT_RE)
+        self.assertEqual(self.fake.mutations.total, 0)
+        return payload
+
+    def show(self, key: str) -> dict:
+        payload = self.run_ok("show", self.fake.item(key).entry_id)
+        self.assertEqual(payload["message"]["uid"], self.fake.item(key).entry_id)
+        return payload
+
+    def test_tc_02_01_mailboxes(self) -> None:
+        """TC-02.01: mailboxes of the golden profile (golden)."""
+        payload = self.run_ok("mailboxes")
+        self.assertEqual(
+            payload["excluded_stores"],
+            [{"label": "Exchange shared (Soporte)", "path": None, "reason": "shared_mailbox"}],
+        )
+        self.assertEqual(payload["warnings"], [OUTLOOK_STORE_EXCLUDED])
+        inbox = payload["mailboxes"][0]
+        self.assertEqual(
+            (inbox["path"], inbox["total"], inbox["unread"], inbox["included"]),
+            ("INBOX", 3, 2, True),
+        )
+        _assert_golden(self, "outlook/mailboxes.json", payload, self.root)
+
+    def test_tc_02_02_search(self) -> None:
+        """TC-02.02: search of the golden profile (golden)."""
+        payload = self.run_ok("search")
+        self.assertEqual(
+            [message["uid"] for message in payload["messages"]],
+            [self.fake.item(key).entry_id for key in ("normal", "header_only", "smime_encrypted")],
+        )
+        normal = payload["messages"][0]
+        self.assertEqual(normal["date_received"], "2026-11-02T09:54:09-04:00")
+        self.assertEqual(normal["date_sent"], "2026-11-02T09:54:03-04:00")
+        self.assertEqual(payload["warnings"][0], OUTLOOK_STORE_EXCLUDED)
+        _assert_golden(self, "outlook/search.json", payload, self.root)
+
+    def test_tc_02_03_show(self) -> None:
+        """TC-02.03: show of the normal message with an attachment (golden)."""
+        payload = self.show("normal")
+        message = payload["message"]
+        self.assertEqual(message["attachments"], [{"name": "factura-2026-10.pdf"}])
+        self.assertEqual(message["date_received"], "2026-11-02T09:54:09-04:00")
+        self.assertIs(message["readable"], True)
+        _assert_golden(self, "outlook/show.json", payload, self.root)
+
+    def test_tc_02_04_show_header_only(self) -> None:
+        """TC-02.04: show of a header-only item: no body, W_BODY_NOT_LOCAL (golden)."""
+        payload = self.show("header_only")
+        message = payload["message"]
+        self.assertEqual((message["readable"], message["body_text"]), (False, ""))
+        self.assertTrue(payload["warnings"][1].startswith("W_BODY_NOT_LOCAL: "))
+        _assert_golden(self, "outlook/show_header_only.json", payload, self.root)
+
+    def test_tc_02_05_show_smime(self) -> None:
+        """TC-02.05: show of an S/MIME encrypted item: unreadable, no attachments (golden)."""
+        payload = self.show("smime_encrypted")
+        message = payload["message"]
+        self.assertEqual((message["readable"], message["attachments"]), (False, []))
+        self.assertIn(
+            "W_BODY_UNREADABLE: S/MIME encrypted content is not supported", payload["warnings"]
+        )
+        _assert_golden(self, "outlook/show_smime.json", payload, self.root)
+
+    def test_tc_02_06_new_first_run(self) -> None:
+        """TC-02.06: first run of ``new``: the [D - lookback, D] window, hex uids (golden)."""
+        from mailquery.backends.outlook import OutlookBackend
+
+        normal = self.fake.item("normal").entry_id
+        payload = self.run_ok("new")
+        self.assertEqual([message["uid"] for message in payload["messages"]], [normal])
+        self.assertEqual(
+            payload["warnings"],
+            [
+                OUTLOOK_STORE_EXCLUDED,
+                "W_FIRST_RUN: first run: emitted the messages received in the last "
+                "10min before the newest message",
+            ],
+        )
+        self.assertIsNone(payload["cursor"]["previous"])
+        self.assertEqual(payload["cursor"]["current"]["last_uid"], normal)
+        state = StateStore(self.home, OutlookBackend.check_state_uid).load()
+        self.assertEqual(state.emitted_uids, (normal,))
+        _assert_golden(self, "outlook/new_first_run.json", payload, self.root)
+
+    def test_tc_02_07_doctor(self) -> None:
+        """TC-02.07: ``doctor --json`` of the golden profile: every check passes (golden)."""
+        payload = self.run_ok("doctor", "--json")
+        checks = payload["checks"]
+        self.assertEqual(
+            [check["name"] for check in checks],
+            [
+                "python", "home", "pywin32", "outlook", "stores", "readonly_strategy",
+                "object_model_guard", "config", "state", "lock",
+            ],
+        )
+        for check in checks:
+            self.assertIs(check["ok"], True, check)
+        by_name = {check["name"]: check for check in checks}
+        self.assertIn(OUTLOOK_STORE_EXCLUDED, by_name["config"]["detail"])
+        self.assertIn(str(self.home / "tmp" / "gen_py"), by_name["readonly_strategy"]["detail"])
+        _assert_golden(self, "outlook/doctor.json", payload, self.root)
+
+
+# --------------------------------------------------------------------------- #
+# TC-04 / TC-05 — recipes and JSON shape on both backends (PRD 21.2, RF-30)
+# --------------------------------------------------------------------------- #
+
+RECIPES_DIR = Path(__file__).resolve().parents[1] / "docs" / "recipes"
+#: Outlook config of TC-04/TC-05 over ``FakeOutlook.item_matrix()``: the Exchange
+#: account with ``INBOX/Facturas``, which holds a message of the last month.
+OUTLOOK_ITEMS_CONFIG = '[scope."ana@example.com"]\nmailbox_list = ["INBOX/Facturas"]\n'
+
+
+def _recipe_commands(name: str) -> list[list[str]]:
+    """Each line that starts with ``mailquery`` inside a code block of the recipe (plan 7.4).
+
+    Fenced blocks may be indented (inside a list). The shell comment that
+    follows a command is dropped and the quotes are resolved as a shell would.
+    """
+    import shlex
+
+    commands: list[list[str]] = []
+    inside = False
+    for line in (RECIPES_DIR / name).read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            inside = not inside
+            continue
+        if inside and (stripped == "mailquery" or stripped.startswith("mailquery ")):
+            commands.append(shlex.split(stripped, comments=True)[1:])
+    return commands
+
+
+def _key_paths(value: object, prefix: str = "") -> set[str]:
+    """Recursive set of JSON keys (``a.b``, list elements as ``a[]``), values ignored."""
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{prefix}.{key}"
+            paths.add(path)
+            paths |= _key_paths(item, path)
+    elif isinstance(value, list):
+        for item in value:
+            paths |= _key_paths(item, f"{prefix}[]")
+    return paths
+
+
+class _BothBackendsCase(unittest.TestCase):
+    """``cli.main`` on Apple Mail (fixture store) and on Outlook (in-memory fake).
+
+    Apple Mail runs over ``build_store()`` with ``DEFAULT_CONFIG``; Outlook over
+    ``outlook_fake()`` (``FakeOutlook.item_matrix()`` by default) with
+    ``OUTLOOK_ITEMS_CONFIG``, each in its own temporary home.
+    """
+
+    def setUp(self) -> None:
+        from mailquery.backends import outlook_com
+
+        self.fx = build_store()
+        self.addCleanup(self.fx.cleanup)
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(_close_log_handlers)  # before the cleanups above (Windows)
+        self.outlook_home = Path(tmp.name) / ".mailquery"
+        self.outlook_home.mkdir()
+        (self.outlook_home / "config.toml").write_text(OUTLOOK_ITEMS_CONFIG, encoding="utf-8")
+        self.fake = self.outlook_fake()
+        patcher = mock.patch.object(outlook_com, "get_drive_type", self.fake.drive_type)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def outlook_fake(self):
+        from tests.fakes import outlook as fake_outlook
+
+        return fake_outlook.FakeOutlook.item_matrix()
+
+    @staticmethod
+    def _capture(call) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = call()
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def run_backend(self, backend: str, *args: str) -> tuple[int, dict, str]:
+        """Run ``mailquery <args>`` on ``"apple_mail"`` or ``"outlook"``: (exit, JSON, stderr)."""
+        if backend == "apple_mail":
+            code, stdout, stderr = self._capture(
+                lambda: cli.main(
+                    list(args),
+                    home=self.fx.home,
+                    mail_root=self.fx.mail_root,
+                    accounts_db=self.fx.accounts_db,
+                )
+            )
+        else:
+            from mailquery.backends import get_backend
+
+            instance = get_backend(
+                platform="win32",
+                outlook_app=self.fake,
+                registry=self.fake.registry,
+                security_center=self.fake.security_center,
+                tmp_root=self.outlook_home / "tmp",
+            )
+            self.addCleanup(instance.close)
+            code, stdout, stderr = self._capture(
+                lambda: cli.main(list(args), home=self.outlook_home, backend=instance)
+            )
+        self.assertTrue(stdout.strip(), f"{backend} {args}: no JSON on stdout; stderr={stderr}")
+        return code, json.loads(stdout), stderr
+
+    def run_both_ok(self, *args: str) -> dict[str, dict]:
+        """``args`` on both backends, each with exit 0: ``{backend: payload}``."""
+        payloads = {}
+        for backend in ("apple_mail", "outlook"):
+            code, payload, stderr = self.run_backend(backend, *args)
+            self.assertEqual(code, 0, f"{backend} {args}: {payload} {stderr}")
+            payloads[backend] = payload
+        return payloads
+
+
+class RecipeCommandTest(_BothBackendsCase):
+    """TC-04 (PRD 21.2): every recipe command runs with exit 0 on both backends."""
+
+    def assert_recipe(self, name: str, uid_command: tuple[str, ...]) -> None:
+        commands = _recipe_commands(name)
+        self.assertTrue(commands, f"no mailquery command in {name}")
+        for backend in ("apple_mail", "outlook"):
+            code, payload, stderr = self.run_backend(backend, *uid_command)
+            self.assertEqual(code, 0, f"{backend} {uid_command}: {payload} {stderr}")
+            self.assertTrue(payload["messages"], f"{backend} {uid_command}: no message for <uid>")
+            uid = str(payload["messages"][0]["uid"])
+            for command in commands:
+                argv = [uid if arg == "<uid>" else arg for arg in command]
+                with self.subTest(backend=backend, command=" ".join(command)):
+                    code, payload, stderr = self.run_backend(backend, *argv)
+                    self.assertEqual(code, 0, f"{payload} {stderr}")
+                    self.assertIs(payload["ok"], True)
+
+    def test_tc_04_01_new_mail_digest_commands_exit_0_on_both_backends(self) -> None:
+        """TC-04.01: each command of 01-new-mail-digest.md exits 0 (<uid> from `new --peek`)."""
+        self.assert_recipe("01-new-mail-digest.md", ("new", "--peek"))
+
+    def test_tc_04_02_search_invoices_commands_exit_0_on_both_backends(self) -> None:
+        """TC-04.02: each command of 02-search-invoices.md exits 0 (<uid> from `search --since 1mo`)."""
+        self.assert_recipe("02-search-invoices.md", ("search", "--since", "1mo"))
+
+
+class JsonShapeParityTest(_BothBackendsCase):
+    """TC-05 (RF-30): the same recursive set of JSON keys on both backends.
+
+    The Outlook profile adds to ``item_matrix`` a message with To, Cc and a
+    visible attachment (the counterpart of Apple Mail's uid 2714), so that the
+    lists of both payloads have elements whose keys can be compared.
+    """
+
+    def outlook_fake(self):
+        from tests.fakes import outlook as fake_outlook
+
+        fake = fake_outlook.FakeOutlook.item_matrix()
+        inbox = fake.store("exchange").inbox
+        assert inbox is not None
+        inbox.add_message(
+            "complete",
+            subject="Factura completa",
+            sender=("Proveedor", "ventas@proveedor.example"),
+            to=[("Ana", "ana@example.com")],
+            cc=[("Copia", "copia@example.com")],
+            body="Adjuntamos la factura.\r\n",
+            attachments=[fake_outlook.AttachmentSpec("factura.pdf")],
+        )
+        return fake
+
+    def assert_same_keys(self, payloads: dict[str, dict]) -> None:
+        apple, outlook = (_key_paths(payloads[name]) for name in ("apple_mail", "outlook"))
+        self.assertTrue(apple)
+        self.assertEqual(
+            (sorted(apple - outlook), sorted(outlook - apple)),
+            ([], []),
+            "keys only on Apple Mail / only on Outlook",
+        )
+
+    def test_tc_05_01_search(self) -> None:
+        """TC-05.01: `search` has the same recursive keys on both backends."""
+        payloads = self.run_both_ok("search", "--limit", "200")
+        for payload in payloads.values():
+            self.assertTrue(any(message["cc"] for message in payload["messages"]))
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_02_new(self) -> None:
+        """TC-05.02: `new` (first run) has the same recursive keys on both backends."""
+        payloads = self.run_both_ok("new")
+        for payload in payloads.values():
+            self.assertTrue(payload["messages"])
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_03_show(self) -> None:
+        """TC-05.03: `show` (message with To, Cc and an attachment) has the same keys."""
+        payloads = {}
+        for backend, uid in (
+            ("apple_mail", "2714"),
+            ("outlook", self.fake.item("complete").entry_id),
+        ):
+            code, payload, stderr = self.run_backend(backend, "show", uid)
+            self.assertEqual(code, 0, f"{backend}: {payload} {stderr}")
+            self.assertTrue(payload["message"]["cc"] and payload["message"]["attachments"])
+            payloads[backend] = payload
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_04_mailboxes(self) -> None:
+        """TC-05.04: `mailboxes` has the same recursive keys on both backends."""
+        self.assert_same_keys(self.run_both_ok("mailboxes"))
+
+    def test_tc_05_05_error(self) -> None:
+        """TC-05.05: an error has the same recursive keys on both backends."""
+        payloads = {}
+        for backend in ("apple_mail", "outlook"):
+            code, payload, _stderr = self.run_backend(backend, "search", "--since", "banana")
+            self.assertEqual((code, payload["error"]["code"]), (2, "E_BAD_TIME"))
+            payloads[backend] = payload
+        self.assert_same_keys(payloads)
+
+    def test_tc_05_06_doctor_json(self) -> None:
+        """TC-05.06: `doctor --json` has the same recursive keys on both backends."""
+        self.assert_same_keys(self.run_both_ok("doctor", "--json"))
 
 
 # --------------------------------------------------------------------------- #
@@ -746,7 +1209,7 @@ class ErrorContractTest(IntegrationBase):
         self.run_error("search", expected_exit=2, expected_code="E_CONFIG_INVALID")
 
     def test_missing_store_is_exit_3(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="mailquery-nostore-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="mailquery-nostore-") as tmp, _closing_log_handlers():
             empty_root = Path(tmp) / "Mail"
             empty_root.mkdir()
             empty_home = Path(tmp) / "home"
@@ -775,12 +1238,15 @@ class ErrorContractTest(IntegrationBase):
             self.assertIs(checks["store"]["ok"], False)
             self.assertIs(checks["schema"]["ok"], False)
 
-    def test_corrupt_state_blocks_new_but_not_search(self) -> None:
+    def test_ut_st_04_02_corrupt_state_blocks_new_but_not_the_other_commands(self) -> None:
+        """UT-ST-04.02: with a corrupt state ``new`` fails; search, show and mailboxes work."""
         (self.fx.home / "state.json").write_text("{this is not json", encoding="utf-8")
-        self.run_error("new", expected_exit=3, expected_code="E_STATE_CORRUPT")
+        error = self.run_error("new", expected_exit=3, expected_code="E_STATE_CORRUPT")
+        self.assertIn("first run", error["error"]["hint"])
         # search/show/mailboxes/doctor are unaffected by a damaged state file.
         self.run_ok("search")
         self.run_ok("show", "2714")
+        self.run_ok("mailboxes")
         code, payload, _stderr = self.run_cli("doctor", "--json")
         self.assertEqual(code, 0)
         assert payload is not None
@@ -846,6 +1312,65 @@ class ErrorContractTest(IntegrationBase):
         assert payload is not None
         checks = {check["name"]: check for check in payload["checks"]}
         self.assertIs(checks["schema"]["ok"], False)
+
+
+# --------------------------------------------------------------------------- #
+# TC-07 — user documentation (PRD 21.2, 23.3)
+# --------------------------------------------------------------------------- #
+
+DOCS_ROOT = Path(__file__).resolve().parents[1]
+#: Terms the 1.x documentation used and the 2.0.0 contract retired (TC-07.01-.04).
+_FORBIDDEN_DOC_TERMS = (
+    re.compile(r"baseline", re.IGNORECASE),
+    re.compile(r"retention_days(?! was replaced by max_size_mb)"),
+    re.compile(r"W_EMLX_UNREADABLE"),
+    re.compile(r"only runs on macOS", re.IGNORECASE),
+    re.compile(r"solo macOS", re.IGNORECASE),
+)
+
+
+class UserDocumentationTest(unittest.TestCase):
+    """TC-07: the user documentation has no 1.x leftovers and the recipes cover exits 3, 5, 6."""
+
+    def assert_clean(self, label: str, text: str) -> None:
+        for pattern in _FORBIDDEN_DOC_TERMS:
+            match = pattern.search(text)
+            self.assertIsNone(match, f"{label} contains {match.group(0)!r}" if match else "")
+
+    def test_tc_07_01_readme_has_no_retired_terms(self) -> None:
+        """TC-07.01: README.md without baseline, retention_days (but the hint), W_EMLX_UNREADABLE, macOS-only."""
+        self.assert_clean("README.md", (DOCS_ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_tc_07_02_recipes_have_no_retired_terms(self) -> None:
+        """TC-07.02: the recipes without the retired terms."""
+        recipes = sorted(RECIPES_DIR.glob("*.md"))
+        self.assertEqual(len(recipes), 2)
+        for recipe in recipes:
+            self.assert_clean(recipe.name, recipe.read_text(encoding="utf-8"))
+
+    def test_tc_07_03_config_example_has_no_retired_terms(self) -> None:
+        """TC-07.03: docs/config.example.toml without the retired terms."""
+        path = DOCS_ROOT / "docs" / "config.example.toml"
+        self.assert_clean(path.name, path.read_text(encoding="utf-8"))
+
+    def test_tc_07_04_help_has_no_retired_terms(self) -> None:
+        """TC-07.04: the --help output of the root and of the 5 commands without the retired terms."""
+        for argv in (["--help"], *([command, "--help"] for command in ("doctor", "mailboxes", "search", "new", "show"))):
+            with self.subTest(argv=argv):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                    code = cli.main(argv)
+                self.assertEqual(code, 0)
+                self.assertTrue(stdout.getvalue().strip())
+                self.assert_clean(" ".join(argv), stdout.getvalue())
+
+    def test_tc_07_05_each_recipe_mentions_exits_3_5_and_6(self) -> None:
+        """TC-07.05: every recipe handles the exit codes 3, 5 and 6."""
+        for recipe in sorted(RECIPES_DIR.glob("*.md")):
+            text = recipe.read_text(encoding="utf-8")
+            for code in ("3", "5", "6"):
+                with self.subTest(recipe=recipe.name, exit=code):
+                    self.assertIsNotNone(re.search(rf"exit {code}(?!\d)|`{code}`", text), f"no mention of exit {code}")
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs

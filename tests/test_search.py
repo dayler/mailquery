@@ -16,11 +16,15 @@ Every path is a fixture path: the tests never read ``~/Library/Mail``,
 
 from __future__ import annotations
 
+import dataclasses
+import sqlite3
 import unittest
 from datetime import datetime, timedelta
+from unittest import mock
 
-from mailquery import search
+from mailquery import emlx, output, search
 from mailquery.accounts import AccountLabels
+from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.config import (
     Config,
     LoggingConfig,
@@ -32,6 +36,7 @@ from mailquery.config import (
 from mailquery.errors import MailqueryError
 from mailquery.state import StateStore
 from mailquery.store import open_store
+from tests.fixtures import make_fixtures
 from tests.fixtures.make_fixtures import (
     ACCOUNT_GMAIL,
     ACCOUNT_ICLOUD,
@@ -39,12 +44,22 @@ from tests.fixtures.make_fixtures import (
     DEFAULT_CONFIG,
     GMAIL_LABEL,
     ICLOUD_LABEL,
+    LOCAL_LABEL,
     MAILBOX_URLS,
+    UID_DATE_FUTURE,
+    UID_DATE_HUGE,
+    UID_DATE_NULL,
+    UID_DATE_ZERO,
+    UID_DELETED,
+    UID_MISSING_EMLX_ATTACH,
+    UID_SMIME_ENCRYPTED,
+    UID_SMIME_SIGNED,
     FixturePaths,
     build_store,
     write_config,
     write_state,
 )
+from tests.mocks import accounts_db_unavailable
 
 ICLOUD_ONLY = f'[scope."{ICLOUD_LABEL}"]\n'
 
@@ -179,41 +194,74 @@ class PureHelpersTest(unittest.TestCase):
         self.assertEqual(search.wildcard_to_regex("plain"), "plain")
         self.assertEqual(search.wildcard_to_regex(""), "")
 
-    def test_matches_substring_and_case_insensitive(self) -> None:
+    def test_ut_sr_01_01_substring_without_wildcards(self) -> None:
+        """UT-SR-01.01: a value without wildcards is matched as a substring."""
         self.assertTrue(search.matches("invoice", "Invoice 2026-10"))
-        self.assertTrue(search.matches("INVOICE", "invoice 2026-10"))
         self.assertFalse(search.matches("invoice", "Factura septiembre"))
         self.assertTrue(search.matches("", "anything"))
 
-    def test_matches_wildcards(self) -> None:
+    def test_ut_sr_01_02_star_wildcard_matches_any_sequence(self) -> None:
+        """UT-SR-01.02: ``*factura*`` matches any sequence around the word."""
         self.assertTrue(search.matches("*factura*", "La Factura de septiembre"))
-        self.assertTrue(search.matches("f?ctura", "factura"))
-        self.assertFalse(search.matches("f?ctura", "fctura"))
         self.assertTrue(search.matches("*2026-10*", "Invoice 2026-10"))
         self.assertFalse(search.matches("*2026-11*", "Invoice 2026-10"))
 
-    def test_matches_is_accent_insensitive(self) -> None:
-        self.assertTrue(search.matches("informacion", "Información mensual"))
-        self.assertTrue(search.matches("INFORMACIÓN", "informacion mensual"))
+    def test_ut_sr_01_03_pattern_is_not_anchored(self) -> None:
+        """UT-SR-01.03: ``factura*`` matches anywhere in the text (no anchor)."""
+        self.assertTrue(search.matches("factura*", "La factura de septiembre"))
+        self.assertTrue(search.matches("factura*", "Adjuntamos la factura"))
+        self.assertTrue(search.matches("*factura", "factura de septiembre"))
+
+    def test_ut_sr_01_04_question_mark_matches_one_character(self) -> None:
+        """UT-SR-01.04: ``?actura`` matches exactly one character."""
+        self.assertTrue(search.matches("?actura", "Factura"))
+        self.assertTrue(search.matches("f?ctura", "factura"))
+        self.assertFalse(search.matches("f?ctura", "fctura"))
+
+    def test_ut_sr_01_05_match_is_case_insensitive(self) -> None:
+        """UT-SR-01.05: ``FACTURA`` matches ``factura``."""
+        self.assertTrue(search.matches("FACTURA", "la factura"))
+        self.assertTrue(search.matches("INVOICE", "invoice 2026-10"))
         self.assertTrue(search.matches("septiembre", "Septiembre"))
 
-    def test_matches_treats_regex_characters_literally(self) -> None:
+    def test_ut_sr_01_06_match_is_accent_insensitive(self) -> None:
+        """UT-SR-01.06: ``fáctura`` matches ``factura`` (and the other way round)."""
+        self.assertTrue(search.matches("fáctura", "factura"))
+        self.assertTrue(search.matches("informacion", "Información mensual"))
+        self.assertTrue(search.matches("INFORMACIÓN", "informacion mensual"))
+
+    def test_ut_sr_01_07_regex_characters_are_literals(self) -> None:
+        """UT-SR-01.07: ``[``, ``.`` and ``(`` are literal characters."""
         self.assertTrue(search.matches("a.b", "a.b"))
         self.assertFalse(search.matches("a.b", "axb"))
         self.assertTrue(search.matches("invoice (2026)", "invoice (2026)"))
         self.assertFalse(search.matches("invoice (2026)", "invoice 2026"))
+        self.assertTrue(search.matches("a[b", "xa[by"))
+        self.assertFalse(search.matches("a[b", "ab"))
 
-    def test_filter_terms_mixed_semantics(self) -> None:
+    def test_filter_terms_follow_the_two_rules_of_the_prd(self) -> None:
+        # --subject: terms split on spaces, with or without wildcards (PRD 12.2).
         self.assertEqual(
-            search._filter_terms(("invoice 2026",)), ("invoice", "2026")
+            search._filter_terms(("invoice 2026",), split=True), ("invoice", "2026")
         )
         self.assertEqual(
-            search._filter_terms(("*invoice 2026*",)), ("*invoice 2026*",)
+            search._filter_terms(("*invoice 2026*",), split=True),
+            ("*invoice", "2026*"),
         )
         self.assertEqual(
-            search._filter_terms(("  a  b ", "*x*")), ("a", "b", "*x*")
+            search._filter_terms(("  a  b ", "*x*"), split=True), ("a", "b", "*x*")
         )
+        # --text/--from/--to/--cc: the whole value is one pattern.
+        self.assertEqual(
+            search._filter_terms(("invoice 2026",)), ("invoice 2026",)
+        )
+        self.assertEqual(
+            search._filter_terms(("*invoice 2026*", " a  b ")),
+            ("*invoice 2026*", "a  b"),
+        )
+        # Empty values never narrow anything.
         self.assertEqual(search._filter_terms(("", "   ")), ())
+        self.assertEqual(search._filter_terms(("", "   "), split=True), ())
 
 
 # --------------------------------------------------------------------------- #
@@ -228,10 +276,7 @@ class SearchFixtureTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        try:
-            cls.fx = build_store()
-        except NotImplementedError as exc:  # pragma: no cover - transitional
-            raise unittest.SkipTest(f"dependency module is still a stub: {exc}")
+        cls.fx = build_store()
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -246,6 +291,7 @@ class SearchFixtureTest(unittest.TestCase):
         self.labels = AccountLabels(
             self.fx.accounts_db, tmp_dir=self.fx.home / "tmp"
         )
+        self.backend = AppleMailBackend(self.store, self.labels)
         self.config = load_config(self.fx.home)
 
     # -- helpers ----------------------------------------------------------- #
@@ -259,18 +305,20 @@ class SearchFixtureTest(unittest.TestCase):
         path = self.fx.home / "state.json"
         path.unlink(missing_ok=True)
         self.addCleanup(lambda: path.unlink(missing_ok=True))
-        return StateStore(self.fx.home)
+        return StateStore(self.fx.home, AppleMailBackend.check_state_uid)
 
     def seed_state(
         self,
         *,
         age: timedelta = timedelta(hours=2),
-        last_uid: int = 0,
+        last_uid: int = 1,
         lookback_seconds: int = 600,
         emitted_uids: tuple[int, ...] = (),
+        last_date_received: int | None = None,
     ) -> StateStore:
         state = self.fresh_state()
-        last_date_received = int((self.fx.now - age).timestamp())
+        if last_date_received is None:
+            last_date_received = int((self.fx.now - age).timestamp())
         write_state(
             self.fx.home,
             {
@@ -287,9 +335,19 @@ class SearchFixtureTest(unittest.TestCase):
         )
         return state
 
+    def use_lookback(self, text: str, seconds: int) -> Config:
+        """Replace ``[new].lookback`` of the loaded config (no file involved)."""
+        self.config = dataclasses.replace(
+            self.config,
+            new=dataclasses.replace(
+                self.config.new, lookback=text, lookback_seconds=seconds
+            ),
+        )
+        return self.config
+
     def run_search(self, **filters: object) -> dict:
         return search.run_search(
-            self.store, self.config, self.labels, search.Filters(**filters)
+            self.backend, self.config, search.Filters(**filters)
         )
 
     @staticmethod
@@ -301,6 +359,14 @@ class SearchFixtureTest(unittest.TestCase):
             if message["uid"] == uid:
                 return message
         raise AssertionError(f"uid {uid} not in result: {self.uids(result)}")
+
+
+class ExtendedSearchFixtureTest(SearchFixtureTest):
+    """Same base, over ``build_store(extended=True)`` (only ``setUpClass`` changes)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.fx = build_store(extended=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -386,6 +452,23 @@ class SearchMetadataTest(SearchFixtureTest):
         self.assertEqual(
             self.uids(self.run_search(subject=("invoice", "2026"))), [2714]
         )
+
+    def test_ut_sr_02_01_subject_terms_with_wildcards_are_and(self) -> None:
+        """UT-SR-02.01: --subject "*a* *b*" => a AND b, in any order."""
+        self.assertEqual(self.uids(self.run_search(subject=("*inv* *2026*",))), [2714])
+        self.assertEqual(self.uids(self.run_search(subject=("*2026* *inv*",))), [2714])
+        self.assertEqual(self.uids(self.run_search(subject=("*inv* *2025*",))), [])
+        self.assertEqual(self.uids(self.run_search(subject=("2026 invoice",))), [2714])
+
+    def test_ut_sr_02_03_from_to_cc_value_is_one_pattern(self) -> None:
+        """UT-SR-02.03: --from/--to/--cc "Team Billing" does not match "Billing Team"."""
+        # Words in the same order as the display value match as one pattern.
+        self.assertEqual(self.uids(self.run_search(from_=("Billing Team",))), [2714])
+        self.assertEqual(self.uids(self.run_search(cc=("Finance <finance",))), [2714])
+        # Words in another order do not (they used to be split into AND terms).
+        self.assertEqual(self.uids(self.run_search(from_=("Team Billing",))), [])
+        self.assertEqual(self.uids(self.run_search(to=("User Fixture",))), [])
+        self.assertEqual(self.uids(self.run_search(cc=("fixture finance",))), [])
 
     def test_from_to_cc_filters(self) -> None:
         self.assertEqual(
@@ -477,7 +560,7 @@ class SearchMetadataTest(SearchFixtureTest):
         self.assertIn("Duplicate body from the inbox.", shared["snippet"])
         self.assertEqual(
             shared["body"],
-            {"available": True, "partial": False, "truncated": False},
+            {"available": True, "readable": True, "partial": False, "truncated": False},
         )
 
         partial = self.message_by_uid(
@@ -527,11 +610,26 @@ class SearchMetadataTest(SearchFixtureTest):
                     self.message_by_uid(result, 83143)["duplicate_count"], 2
                 )
 
-    def test_include_mailbox_unknown_folder(self) -> None:
+    def test_ut_sr_04_01_unknown_include_mailbox_lists_the_folders_of_declared_accounts(self) -> None:
+        """UT-SR-04.01: unknown folder => E_MAILBOX_NOT_FOUND, hint lists all declared accounts' folders."""
         with self.assertRaises(MailqueryError) as context:
             self.run_search(include_mailboxes=("Nope",))
         self.assertEqual(context.exception.code, "E_MAILBOX_NOT_FOUND")
         self.assertEqual(context.exception.exit_code, 2)
+        self.assertIn("Nope", context.exception.message)
+        hint = context.exception.hint
+        # Default config declares the three accounts: their folders are all listed.
+        for folder in ("INBOX", "Facturas", "Archivo", "[Gmail]/All Mail", "Recovered Messages"):
+            self.assertIn(folder, hint)
+
+        # Only declared accounts are listed.
+        self.use_config(ICLOUD_ONLY)
+        with self.assertRaises(MailqueryError) as context:
+            self.run_search(include_mailboxes=("Nope",))
+        self.assertEqual(context.exception.code, "E_MAILBOX_NOT_FOUND")
+        self.assertIn("Facturas", context.exception.hint)
+        self.assertNotIn("Recovered Messages", context.exception.hint)
+        self.assertNotIn("[Gmail]/All Mail", context.exception.hint)
 
     def test_include_mailbox_outside_declared_accounts(self) -> None:
         self.use_config(ICLOUD_ONLY)
@@ -583,13 +681,60 @@ class SearchMetadataTest(SearchFixtureTest):
 class SearchTextTest(SearchFixtureTest):
     """Bounded content scans (RF-17): validation, matching and counters."""
 
-    def test_text_requires_narrowing_filter(self) -> None:
-        self.use_config(ICLOUD_ONLY)
+    def assert_unbounded(self, **filters: object) -> MailqueryError:
         with self.assertRaises(MailqueryError) as context:
-            self.run_search(text=("invoice",))
+            self.run_search(**filters)
         self.assertEqual(context.exception.code, "E_UNBOUNDED_SCAN")
         self.assertEqual(context.exception.exit_code, 4)
-        self.assertTrue(context.exception.hint)
+        return context.exception
+
+    def test_ut_sr_03_01_text_without_narrowing_filter_is_unbounded(self) -> None:
+        """UT-SR-03.01: --text x alone => E_UNBOUNDED_SCAN naming --text, hint lists the narrowing filters."""
+        self.use_config(ICLOUD_ONLY)
+        error = self.assert_unbounded(text=("invoice",))
+        self.assertIn("--text", error.message)
+        for option in (
+            "--since",
+            "--until",
+            "--from",
+            "--to",
+            "--cc",
+            "--subject",
+            "--include-mailbox",
+        ):
+            self.assertIn(option, error.hint)
+
+    def test_ut_sr_03_02_empty_filter_value_does_not_narrow_text(self) -> None:
+        """UT-SR-03.02: --text x --from "" => E_UNBOUNDED_SCAN."""
+        self.use_config(ICLOUD_ONLY)
+        self.assert_unbounded(text=("x",), from_=("",))
+        self.assert_unbounded(text=("x",), subject=("  ",), to=("",), cc=("",))
+
+    def test_ut_sr_03_03_inbox_as_included_folder_does_not_narrow_text(self) -> None:
+        """UT-SR-03.03: --text x --include-mailbox INBOX => E_UNBOUNDED_SCAN."""
+        self.use_config(ICLOUD_ONLY)
+        self.assert_unbounded(text=("x",), include_mailboxes=("INBOX",))
+
+    def test_ut_sr_03_04_text_with_to_filter_runs_and_counts_candidates_after_it(self) -> None:
+        """UT-SR-03.04: --text x --to y runs; scan.candidates counts the messages after --to."""
+        self.use_config(ICLOUD_ONLY)
+        result = self.run_search(text=("invoice",), to=("me@fixture.example",))
+        self.assertEqual(self.uids(result), [2714])
+        self.assertEqual(result["scan"]["mode"], "text")
+        self.assertEqual(result["scan"]["candidates"], 8)
+        nobody = self.run_search(text=("invoice",), to=("nobody@fixture.example",))
+        self.assertEqual(nobody["count"], 0)
+        self.assertEqual(nobody["scan"]["candidates"], 0)
+
+    def test_ut_sr_03_05_candidates_equal_to_max_scan_run(self) -> None:
+        """UT-SR-03.05: candidates == max_scan => the scan runs."""
+        self.use_config(ICLOUD_ONLY)
+        self.config = dataclasses.replace(
+            self.config, search=SearchConfig(default_limit=20, max_scan=8)
+        )
+        result = self.run_search(text=("invoice",), to=("me@fixture.example",))
+        self.assertEqual(self.uids(result), [2714])
+        self.assertEqual(result["scan"]["candidates"], 8)
 
     def test_text_narrowed_by_since(self) -> None:
         result = self.run_search(
@@ -641,6 +786,16 @@ class SearchTextTest(SearchFixtureTest):
             [],
         )
 
+    def test_ut_sr_02_02_text_value_is_one_pattern_not_and_terms(self) -> None:
+        """UT-SR-02.02: --text "attached invoice" does not match "invoice attached"."""
+        since = search.parse_relative_time("1y")
+        self.assertEqual(
+            self.uids(self.run_search(text=("invoice attached",), since=since)), [2714]
+        )
+        self.assertEqual(
+            self.uids(self.run_search(text=("attached invoice",), since=since)), []
+        )
+
     def test_text_no_match_is_success(self) -> None:
         result = self.run_search(
             text=("zzz-nothing-here",), since=search.parse_relative_time("7d")
@@ -678,9 +833,8 @@ class SearchTextTest(SearchFixtureTest):
         )
         with self.assertRaises(MailqueryError) as context:
             search.run_search(
-                self.store,
+                self.backend,
                 config,
-                self.labels,
                 search.Filters(
                     text=("invoice",), since=search.parse_relative_time("1y")
                 ),
@@ -701,26 +855,103 @@ class NewTest(SearchFixtureTest):
 
     def run_new(self, state: StateStore, **kwargs: object) -> dict:
         return search.run_new(
-            self.store, self.config, self.labels, state, **kwargs
+            self.backend, self.config, state, **kwargs
         )
 
-    def test_first_run_is_a_baseline(self) -> None:
+    FIRST_RUN_10MIN = (
+        "W_FIRST_RUN: first run: emitted the messages received in the last "
+        "10min before the newest message"
+    )
+
+    def test_ut_sr_07_01_message_exactly_at_the_window_start_is_included(self) -> None:
+        """UT-SR-07.01: a message exactly at D - lookback is included."""
+        # 83170 is D (15 min old); 83160 is 20 min old, i.e. exactly D - 300 s.
+        self.use_lookback("5min", 300)
+        result = self.run_new(self.fresh_state())
+        self.assertEqual(self.uids(result), [83160, 83170])
+
+    def test_ut_sr_07_02_message_one_second_before_the_window_is_excluded(self) -> None:
+        """UT-SR-07.02: a message one second before D - lookback is excluded."""
+        self.use_lookback("299s", 299)
+        result = self.run_new(self.fresh_state())
+        self.assertEqual(self.uids(result), [83170])
+
+    def test_ut_sr_07_03_scope_with_a_single_message_emits_it(self) -> None:
+        """UT-SR-07.03: a scope with one message emits it."""
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        write_config(fx.home, DEFAULT_CONFIG)
+        connection = sqlite3.connect(fx.envelope_index)
+        try:
+            connection.execute("UPDATE messages SET deleted = 1 WHERE ROWID <> 83170")
+            connection.commit()
+        finally:
+            connection.close()
+        store = open_store(mail_root=fx.mail_root, tmp_root=fx.home / "tmp")
+        self.addCleanup(store.close)
+        labels = AccountLabels(fx.accounts_db, tmp_dir=fx.home / "tmp")
+        result = search.run_new(
+            AppleMailBackend(store, labels), load_config(fx.home), StateStore(fx.home, AppleMailBackend.check_state_uid)
+        )
+        self.assertEqual(self.uids(result), [83170])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["cursor"]["current"]["last_uid"], 83170)
+        self.assertEqual(
+            warning_codes(result["warnings"]), ["W_EMLX_MISSING", "W_FIRST_RUN"]
+        )
+
+    def test_ut_sr_07_04_limit_smaller_than_the_window_keeps_the_most_recent(self) -> None:
+        """UT-SR-07.04: --limit below the window size keeps the newest, ascending."""
+        self.use_lookback("1h", 3600)
+        full = self.run_new(self.fresh_state(), peek=True)
+        self.assertEqual(self.uids(full), [83143, 83150, 83160, 83170])
+        state = self.fresh_state()
+        result = self.run_new(state, limit=2)
+        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(result["count"], 2)
+        self.assertTrue(result["truncated"])
+        self.assertIsNotNone(result["hint"])
+        self.assertEqual(
+            warning_codes(result["warnings"]),
+            ["W_RESULTS_TRUNCATED", "W_EMLX_MISSING", "W_FIRST_RUN"],
+        )
+        self.assertIn("2 more messages", result["warnings"][0])
+        persisted = state.load()
+        self.assertEqual(persisted.cursor.last_uid, 83170)
+        self.assertEqual(persisted.emitted_uids, (83160, 83170))
+
+    def test_ut_sr_07_05_first_run_peek_emits_and_does_not_write_state(self) -> None:
+        """UT-SR-07.05: --peek on a first run emits the window and writes no state."""
+        state = self.fresh_state()
+        result = self.run_new(state, peek=True)
+        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertIsNone(result["cursor"]["previous"])
+        self.assertIsNone(result["cursor"]["current"])
+        self.assertFalse((self.fx.home / "state.json").exists())
+
+    def test_ut_sr_07_06_first_run_sets_cursor_and_ring_to_the_emitted(self) -> None:
+        """UT-SR-07.06: without --peek the cursor is the last emitted and the ring holds the uids."""
         state = self.fresh_state()
         result = self.run_new(state)
         self.assertEqual(
             set(result),
             {"count", "truncated", "hint", "messages", "scan", "cursor", "warnings"},
         )
-        self.assertEqual(result["count"], 0)
-        self.assertEqual(result["messages"], [])
+        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(result["count"], 2)
         self.assertFalse(result["truncated"])
         self.assertIsNone(result["hint"])
-        self.assertEqual(warning_codes(result["warnings"]), ["W_FIRST_RUN"])
+        self.assertEqual(result["scan"]["mode"], "metadata")
+        self.assertEqual(result["scan"]["candidates"], 2)
+        self.assertEqual(result["scan"]["messages_read"], 1)
+        self.assertEqual(
+            warning_codes(result["warnings"]), ["W_EMLX_MISSING", "W_FIRST_RUN"]
+        )
+        self.assertEqual(result["warnings"][-1], self.FIRST_RUN_10MIN)
         self.assertIsNone(result["cursor"]["previous"])
         current = result["cursor"]["current"]
         self.assertEqual(
-            set(current),
-            {"last_date_received", "last_uid", "lookback_seconds"},
+            set(current), {"last_date_received", "last_uid", "lookback_seconds"}
         )
         self.assertEqual(current["last_uid"], 83170)
         self.assertEqual(current["lookback_seconds"], 600)
@@ -728,15 +959,51 @@ class NewTest(SearchFixtureTest):
 
         persisted = state.load()
         self.assertEqual(persisted.cursor.last_uid, 83170)
-        self.assertEqual(set(persisted.emitted_uids), {83160, 83170})
+        self.assertEqual(persisted.emitted_uids, (83160, 83170))
         self.assertEqual(persisted.last_run.command, "new")
 
-    def test_first_run_peek_does_not_write_state(self) -> None:
-        state = self.fresh_state()
-        result = self.run_new(state, peek=True)
+    def test_ut_sr_07_07_declared_accounts_without_messages_emit_nothing_and_write_no_state(self) -> None:
+        """UT-SR-07.07: declared accounts without messages: count 0, W_FIRST_RUN, no state."""
+        self.use_config(f'[scope."{LOCAL_LABEL}"]\n')
+        result = self.run_new(self.fresh_state())
         self.assertEqual(result["count"], 0)
+        self.assertEqual(result["messages"], [])
+        self.assertEqual(result["warnings"], [self.FIRST_RUN_10MIN])
+        self.assertIsNone(result["cursor"]["previous"])
         self.assertIsNone(result["cursor"]["current"])
         self.assertFalse((self.fx.home / "state.json").exists())
+
+    def test_ut_sr_07_08_without_declared_accounts_warns_no_accounts_then_first_run(self) -> None:
+        """UT-SR-07.08: no accounts: W_NO_ACCOUNTS then W_FIRST_RUN, no state."""
+        self.use_config("")
+        result = self.run_new(self.fresh_state())
+        self.assertEqual(result["count"], 0)
+        self.assertIsNone(result["cursor"]["current"])
+        self.assertEqual(
+            result["warnings"], [search.NO_ACCOUNTS_WARNING, self.FIRST_RUN_10MIN]
+        )
+        self.assertFalse((self.fx.home / "state.json").exists())
+
+    def test_ut_sr_07_09_first_run_warning_shows_the_lookback_as_written(self) -> None:
+        """UT-SR-07.09: lookback = "1h" shows 1h in W_FIRST_RUN."""
+        self.use_lookback("1h", 3600)
+        result = self.run_new(self.fresh_state(), peek=True)
+        self.assertEqual(
+            result["warnings"][-1],
+            "W_FIRST_RUN: first run: emitted the messages received in the last "
+            "1h before the newest message",
+        )
+
+    def test_ut_sr_08_01_every_run_uses_the_current_config_lookback(self) -> None:
+        """UT-SR-08.01: the config lookback wins over the stored one and is stored."""
+        # Cursor 25 min old with a stored lookback of 60 s. 83150 (30 min old) is
+        # 5 min before the cursor: only the config lookback (10 min) reaches it.
+        state = self.seed_state(age=timedelta(minutes=25), lookback_seconds=60)
+        result = self.run_new(state)
+        self.assertEqual(self.uids(result), [83150, 83160, 83170])
+        self.assertEqual(result["cursor"]["previous"]["lookback_seconds"], 60)
+        self.assertEqual(result["cursor"]["current"]["lookback_seconds"], 600)
+        self.assertEqual(state.load().cursor.lookback_seconds, 600)
 
     def test_subsequent_run_emits_lookback_window(self) -> None:
         state = self.seed_state(age=timedelta(hours=2))
@@ -747,7 +1014,7 @@ class NewTest(SearchFixtureTest):
         self.assertEqual(result["scan"]["candidates"], 4)
         self.assertEqual(result["scan"]["messages_read"], 3)
         self.assertIn("W_EMLX_MISSING", warning_codes(result["warnings"]))
-        self.assertEqual(result["cursor"]["previous"]["last_uid"], 0)
+        self.assertEqual(result["cursor"]["previous"]["last_uid"], 1)
         self.assertEqual(result["cursor"]["current"]["last_uid"], 83170)
 
         persisted = state.load()
@@ -788,7 +1055,7 @@ class NewTest(SearchFixtureTest):
         self.assertEqual(
             peeked["cursor"]["previous"], peeked["cursor"]["current"]
         )
-        self.assertEqual(state.load().cursor.last_uid, 0)
+        self.assertEqual(state.load().cursor.last_uid, 1)
         # The same messages are still new for the real run.
         self.assertEqual(self.run_new(state)["count"], 4)
 
@@ -804,19 +1071,132 @@ class NewTest(SearchFixtureTest):
         self.assertEqual(self.uids(result), [83143, 83150, 83170])
         self.assertNotIn(83160, self.uids(result))
 
-    def test_new_without_accounts(self) -> None:
+    def test_new_without_accounts_and_with_a_cursor_only_warns_no_accounts(self) -> None:
         self.use_config("")
-        state = self.fresh_state()
+        state = self.seed_state()
         result = self.run_new(state)
         self.assertEqual(result["count"], 0)
-        self.assertIsNone(result["cursor"]["current"])
         self.assertEqual(warning_codes(result["warnings"]), ["W_NO_ACCOUNTS"])
 
     def test_new_limit_accepts_up_to_500(self) -> None:
         state = self.fresh_state()
         result = self.run_new(state, limit=1000)
-        self.assertEqual(result["count"], 0)
+        self.assertEqual(self.uids(result), [83160, 83170])
         self.assertIsNone(result["hint"])
+
+
+class NewDatesTest(ExtendedSearchFixtureTest):
+    """Null, zero, unrepresentable and future dates in ``new`` (PRD 12.3, 17).
+
+    The clock is injected: "now" is the moment the fixture was built, so the
+    ``now + 30 days`` message (90163) is in the future.
+    """
+
+    INVALID_UIDS = (UID_DATE_NULL, UID_DATE_ZERO, UID_DATE_HUGE)
+
+    def run_new(self, state: StateStore, now: float | None = None, **kwargs: object) -> dict:
+        moment = self.fx.now.timestamp() if now is None else now
+        return search.run_new(
+            self.backend,
+            self.config,
+            state,
+            clock=lambda: moment,
+            **kwargs,
+        )
+
+    @property
+    def future_ts(self) -> int:
+        return int((self.fx.now - self.fx.message(UID_DATE_FUTURE).age).timestamp())
+
+    def assert_cursor_is_real_newest(self, result: dict) -> None:
+        current = result["cursor"]["current"]
+        self.assertEqual(current["last_uid"], 83170)
+        self.assertLessEqual(current["last_date_received"], self.fx.now.timestamp())
+
+    def test_ut_sr_09_01_null_date_does_not_enter_the_first_run(self) -> None:
+        """UT-SR-09.01: a NULL date_received is not emitted on a first run."""
+        result = self.run_new(self.fresh_state())
+        self.assertNotIn(UID_DATE_NULL, self.uids(result))
+        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assert_cursor_is_real_newest(result)
+
+    def test_ut_sr_09_02_zero_date_does_not_enter_the_first_run(self) -> None:
+        """UT-SR-09.02: date_received 0 is not emitted on a first run."""
+        result = self.run_new(self.fresh_state())
+        self.assertNotIn(UID_DATE_ZERO, self.uids(result))
+        self.assert_cursor_is_real_newest(result)
+
+    def test_ut_sr_09_03_unrepresentable_date_does_not_enter_the_first_run(self) -> None:
+        """UT-SR-09.03: date_received 1e20 is not emitted and is not "the newest"."""
+        result = self.run_new(self.fresh_state())
+        self.assertNotIn(UID_DATE_HUGE, self.uids(result))
+        self.assert_cursor_is_real_newest(result)
+
+    def test_ut_sr_09_04_invalid_dates_do_not_enter_later_runs_nor_move_the_cursor(self) -> None:
+        """UT-SR-09.04: in later runs they are not emitted and do not move the cursor."""
+        # A cursor at epoch 1 makes every message of the scope a candidate.
+        state = self.seed_state(last_date_received=1)
+        result = self.run_new(state)
+        emitted = self.uids(result)
+        for uid in self.INVALID_UIDS + (UID_DATE_FUTURE,):
+            self.assertNotIn(uid, emitted)
+        self.assertIn(83170, emitted)
+        self.assert_cursor_is_real_newest(result)
+        self.assertEqual(state.load().cursor.last_uid, 83170)
+
+    def test_ut_sr_09_05_search_shows_invalid_dates_as_null_without_aborting(self) -> None:
+        """UT-SR-09.05: search lists them with date_received null."""
+        result = self.run_search(limit=200)
+        for uid in self.INVALID_UIDS:
+            message = self.message_by_uid(result, uid)
+            self.assertIsNone(message["date_received"])
+            self.assertIsNone(message["date_sent"])
+        self.assertIsNotNone(
+            self.message_by_uid(result, 83170)["date_received"]
+        )
+
+    def test_ut_sr_10_01_future_message_does_not_enter_the_first_run(self) -> None:
+        """UT-SR-10.01: a future message is not emitted nor "the newest" on a first run."""
+        result = self.run_new(self.fresh_state())
+        self.assertNotIn(UID_DATE_FUTURE, self.uids(result))
+        self.assert_cursor_is_real_newest(result)
+        self.assertLess(result["cursor"]["current"]["last_date_received"], self.future_ts)
+
+    def test_ut_sr_10_02_future_message_does_not_enter_later_runs_nor_move_the_cursor(self) -> None:
+        """UT-SR-10.02: in later runs it is not emitted and does not move the cursor."""
+        state = self.seed_state(age=timedelta(hours=2))
+        result = self.run_new(state)
+        self.assertNotIn(UID_DATE_FUTURE, self.uids(result))
+        self.assert_cursor_is_real_newest(result)
+        self.assertLess(state.load().cursor.last_date_received, self.future_ts)
+
+    def test_ut_sr_10_03_message_enters_once_it_is_no_longer_in_the_future(self) -> None:
+        """UT-SR-10.03: when it stops being future it is emitted in that run."""
+        state = self.fresh_state()
+        first = self.run_new(state)
+        self.assertNotIn(UID_DATE_FUTURE, self.uids(first))
+        later = self.fx.now.timestamp() + 31 * 24 * 3600
+        second = self.run_new(state, now=later)
+        self.assertEqual(self.uids(second), [UID_DATE_FUTURE])
+        self.assertEqual(second["cursor"]["current"]["last_uid"], UID_DATE_FUTURE)
+        self.assertEqual(state.load().cursor.last_date_received, self.future_ts)
+
+    def test_ut_sr_10_04_date_equal_to_the_run_time_enters(self) -> None:
+        """UT-SR-10.04: a message whose date equals the run time is emitted."""
+        result = self.run_new(self.fresh_state(), now=float(self.future_ts))
+        self.assertEqual(self.uids(result), [UID_DATE_FUTURE])
+        # One second earlier it is still in the future.
+        early = self.run_new(self.fresh_state(), now=float(self.future_ts - 1))
+        self.assertNotIn(UID_DATE_FUTURE, self.uids(early))
+
+    def test_ut_sr_10_05_search_and_show_display_the_future_date(self) -> None:
+        """UT-SR-10.05: search and show display a future message with its date."""
+        expected = output.iso_timestamp(self.future_ts)
+        self.assertIsNotNone(expected)
+        listed = self.message_by_uid(self.run_search(limit=200), UID_DATE_FUTURE)
+        self.assertEqual(listed["date_received"], expected)
+        shown = search.run_show(self.backend, self.config, UID_DATE_FUTURE)
+        self.assertEqual(shown["message"]["date_received"], expected)
 
 
 # --------------------------------------------------------------------------- #
@@ -827,13 +1207,38 @@ class NewTest(SearchFixtureTest):
 class ShowTest(SearchFixtureTest):
     """Message detail (``show``)."""
 
-    def show(self, uid: int) -> dict:
-        return search.run_show(self.store, self.labels, uid)
+    SHOW_KEYS = [
+        "uid",
+        "message_id",
+        "subject",
+        "from",
+        "to",
+        "cc",
+        "date_sent",
+        "date_received",
+        "mailbox",
+        "is_read",
+        "is_flagged",
+        "has_attachments",
+        "size_bytes",
+        "headers",
+        "body_text",
+        "body_truncated",
+        "attachments",
+        "partial",
+        "readable",
+        "source",
+    ]
 
-    def test_show_inbox_message(self) -> None:
+    def show(self, uid: int) -> dict:
+        return search.run_show(self.backend, self.config, uid)
+
+    def test_ut_sr_11_01_declared_account_folder_in_scope_returns_the_fields_in_order(self) -> None:
+        """UT-SR-11.01: a uid of a declared account in an in-scope folder succeeds."""
         result = self.show(83143)
         self.assertEqual(set(result), {"message", "warnings"})
         message = result["message"]
+        self.assertEqual(list(message), self.SHOW_KEYS)
         self.assertEqual(message["uid"], 83143)
         self.assertEqual(message["subject"], "Shared duplicate")
         self.assertEqual(
@@ -908,20 +1313,92 @@ class ShowTest(SearchFixtureTest):
         self.assertEqual(message["body_text"], "")
         self.assertIn("W_EMLX_CORRUPT", warning_codes(result["warnings"]))
 
-    def test_show_gmail_message_uses_physical_mailbox(self) -> None:
+    def test_ut_sr_11_02_declared_account_folder_outside_mailbox_list_succeeds(self) -> None:
+        """UT-SR-11.02: a uid of a declared account outside ``mailbox_list`` succeeds."""
         message = self.show(83160)["message"]
         self.assertEqual(message["mailbox"]["account"]["uuid"], ACCOUNT_GMAIL)
         self.assertEqual(message["mailbox"]["path"], "[Gmail]/All Mail")
         self.assertTrue(message["readable"])
 
-    def test_show_not_found_raises_usage_error(self) -> None:
+    def test_ut_sr_11_03_without_declared_accounts_is_not_in_scope(self) -> None:
+        """UT-SR-11.03: no declared accounts, or an undeclared account: E_ACCOUNT_NOT_IN_SCOPE."""
+        self.use_config("")
+        with self.assertRaises(MailqueryError) as context:
+            self.show(2714)
+        self.assertEqual(context.exception.code, "E_ACCOUNT_NOT_IN_SCOPE")
+        self.assertEqual(context.exception.exit_code, 2)
+        self.assertTrue(context.exception.hint)
+
+        self.use_config(ICLOUD_ONLY)  # 83160 lives in the undeclared Gmail account
+        with self.assertRaises(MailqueryError) as context:
+            self.show(83160)
+        self.assertEqual(context.exception.code, "E_ACCOUNT_NOT_IN_SCOPE")
+        self.assertTrue(context.exception.hint)
+
+    def test_ut_sr_11_04_unknown_uid_is_not_found(self) -> None:
+        """UT-SR-11.04: a uid that does not exist is E_USAGE "was not found"."""
         for uid in (99999, 12345):  # orphan .emlx (no row) and unknown uid
             with self.subTest(uid=uid):
                 with self.assertRaises(MailqueryError) as context:
                     self.show(uid)
                 self.assertEqual(context.exception.code, "E_USAGE")
                 self.assertEqual(context.exception.exit_code, 2)
+                self.assertIn("was not found", context.exception.message)
                 self.assertTrue(context.exception.hint)
+
+    def test_ut_sr_11_06_unknown_scope_account_fails_like_search(self) -> None:
+        """UT-SR-11.06: an unknown account in ``[scope]`` gives search's error."""
+        self.use_config(ICLOUD_ONLY + '\n[scope."Nobody (nobody@fixture.example)"]\n')
+        with self.assertRaises(MailqueryError) as from_search:
+            self.run_search()
+        with self.assertRaises(MailqueryError) as from_show:
+            self.show(2714)  # lives in iCloud, not in the unknown account
+        self.assertNotEqual(from_show.exception.code, "E_USAGE")
+        self.assertEqual(from_show.exception.code, from_search.exception.code)
+        self.assertEqual(from_show.exception.exit_code, from_search.exception.exit_code)
+
+    def test_ut_sr_11_07_missing_mailbox_list_folder_fails_like_search(self) -> None:
+        """UT-SR-11.07: a ``mailbox_list`` folder that does not exist is E_MAILBOX_NOT_FOUND."""
+        self.use_config(f'[scope."{ICLOUD_LABEL}"]\nmailbox_list = ["NoSuchFolder"]\n')
+        with self.assertRaises(MailqueryError) as from_search:
+            self.run_search()
+        self.assertEqual(from_search.exception.code, "E_MAILBOX_NOT_FOUND")
+        with self.assertRaises(MailqueryError) as from_show:
+            self.show(2714)  # INBOX message, not in the missing folder
+        self.assertEqual(from_show.exception.code, "E_MAILBOX_NOT_FOUND")
+
+    def test_ut_sr_11_08_body_limit_is_20000_characters(self) -> None:
+        """UT-SR-11.08: bodies of 20,000 and 20,001 characters: body_truncated false / true."""
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        write_config(fx.home, DEFAULT_CONFIG)
+        store = open_store(mail_root=fx.mail_root, tmp_root=fx.home / "tmp")
+        self.addCleanup(store.close)
+        labels = AccountLabels(fx.accounts_db, tmp_dir=fx.home / "tmp")
+        config = load_config(fx.home)
+        for length, truncated in ((20_000, False), (20_001, True)):
+            with self.subTest(length=length):
+                message = dataclasses.replace(fx.message(83143), body="a" * length)
+                make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
+                result = search.run_show(AppleMailBackend(store, labels), config, 83143)
+                shown = result["message"]
+                self.assertEqual(len(shown["body_text"]), 20_000)
+                self.assertIs(shown["body_truncated"], truncated)
+                self.assertEqual(
+                    warning_codes(result["warnings"]),
+                    ["W_BODY_TRUNCATED"] if truncated else [],
+                )
+
+
+class ShowExtendedTest(ExtendedSearchFixtureTest):
+    """``show`` over the extended store (deleted messages)."""
+
+    def test_ut_sr_11_05_deleted_message_is_not_found(self) -> None:
+        """UT-SR-11.05: the uid of a deleted message is E_USAGE "was not found"."""
+        with self.assertRaises(MailqueryError) as context:
+            search.run_show(self.backend, self.config, UID_DELETED)
+        self.assertEqual(context.exception.code, "E_USAGE")
+        self.assertIn("was not found", context.exception.message)
 
 
 # --------------------------------------------------------------------------- #
@@ -943,11 +1420,14 @@ class MailboxesTest(SearchFixtureTest):
     }
 
     def mailboxes(self) -> dict:
-        return search.run_mailboxes(self.store, self.config, self.labels)
+        return search.run_mailboxes(self.backend, self.config)
 
     def test_result_shape(self) -> None:
         result = self.mailboxes()
-        self.assertEqual(set(result), {"accounts", "mailboxes", "warnings"})
+        self.assertEqual(
+            set(result), {"accounts", "mailboxes", "excluded_stores", "warnings"}
+        )
+        self.assertEqual(result["excluded_stores"], [])
         self.assertEqual(len(result["accounts"]), 3)
         self.assertEqual(len(result["mailboxes"]), 7)
         for account in result["accounts"]:
@@ -1032,7 +1512,9 @@ class MailboxesTest(SearchFixtureTest):
             self.fx.root / "missing-accounts.sqlite",
             tmp_dir=self.fx.home / "tmp",
         )
-        result = search.run_mailboxes(self.store, self.config, labels)
+        result = search.run_mailboxes(
+            AppleMailBackend(self.store, labels), self.config
+        )
         self.assertEqual(
             warning_codes(result["warnings"]),
             ["W_NO_ACCOUNTS", "W_ACCOUNT_LABELS_UNAVAILABLE"],
@@ -1040,6 +1522,430 @@ class MailboxesTest(SearchFixtureTest):
         for account in result["accounts"]:
             self.assertEqual(account["label"], account["uuid"])
             self.assertIsNone(account["email"])
+
+
+# --------------------------------------------------------------------------- #
+# body in search / new (PRD 12.5)
+# --------------------------------------------------------------------------- #
+
+
+BODY_UNREADABLE_SMIME = "W_BODY_UNREADABLE: S/MIME {kind} content is not supported"
+
+
+class SearchBodyTest(SearchFixtureTest):
+    """``body`` object and body warnings of ``search`` (UT-SR-05)."""
+
+    SHARED = ("Shared duplicate",)  # uid 83143: a normal readable message
+
+    def isolated(self) -> tuple[FixturePaths, object, AccountLabels, Config]:
+        """A private store so a test may rewrite ``.emlx`` files."""
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        write_config(fx.home, DEFAULT_CONFIG)
+        store = open_store(mail_root=fx.mail_root, tmp_root=fx.home / "tmp")
+        self.addCleanup(store.close)
+        labels = AccountLabels(fx.accounts_db, tmp_dir=fx.home / "tmp")
+        return fx, store, labels, load_config(fx.home)
+
+    def search_shared(self) -> dict:
+        return self.run_search(subject=self.SHARED)
+
+    def test_ut_sr_05_01_unopenable_emlx_is_unavailable_and_unreadable(self) -> None:
+        """UT-SR-05.01: an .emlx that cannot be opened gives false/false/false."""
+        denied = PermissionError(1, "Operation not permitted")
+        with mock.patch("mailquery.emlx.open", side_effect=denied, create=True):
+            result = self.search_shared()
+        self.assertEqual(
+            result["messages"][0]["body"],
+            {"available": False, "readable": False, "partial": False, "truncated": False},
+        )
+        self.assertEqual(warning_codes(result["warnings"]), ["W_BODY_UNREADABLE"])
+
+    def test_ut_sr_05_02_unresolvable_path_is_unavailable_and_unreadable(self) -> None:
+        """UT-SR-05.02: a path that cannot be resolved gives false/false/false."""
+        with mock.patch("mailquery.emlx.resolve_path", side_effect=RuntimeError("boom")):
+            result = self.search_shared()
+        self.assertEqual(
+            result["messages"][0]["body"],
+            {"available": False, "readable": False, "partial": False, "truncated": False},
+        )
+        self.assertEqual(warning_codes(result["warnings"]), ["W_BODY_UNREADABLE"])
+
+    def test_ut_sr_05_03_message_without_mailbox_is_unavailable_and_unreadable(self) -> None:
+        """UT-SR-05.03: a message without a folder gives false/false/false."""
+        row = {"uid": 83143, "mailbox_id": 0}
+        snippet, body, loaded = search._body_fields(self.backend, row)
+        self.assertEqual(snippet, "")
+        self.assertEqual(
+            body,
+            {"available": False, "readable": False, "partial": False, "truncated": False},
+        )
+        self.assertIsNone(loaded["source"]["emlx_path"])
+        self.assertEqual(warning_codes(loaded["warnings"]), ["W_BODY_UNREADABLE"])
+
+    def test_ut_sr_05_04_recoverable_corrupt_emlx_is_readable_with_corrupt_warning(self) -> None:
+        """UT-SR-05.04: a recoverable corrupt .emlx gives true/true/false + W_EMLX_CORRUPT."""
+        fx, store, labels, config = self.isolated()
+        message = fx.message(83143)
+        target = None
+        for mailbox in store.mailboxes:
+            target = emlx.resolve_path(store, mailbox, 83143)
+            if target is not None:
+                break
+        self.assertIsNotNone(target)
+        target.write_bytes(
+            b"this-is-not-a-length\n"
+            b"From: Recoverable <recover@fixture.example>\r\n"
+            b"Subject: Recovered\r\n"
+            b"\r\n"
+            b"Recovered body.\r\n"
+        )
+        result = search.run_search(
+            AppleMailBackend(store, labels), config,
+            search.Filters(subject=(message.subject,)),
+        )
+        self.assertEqual(
+            result["messages"][0]["body"],
+            {"available": True, "readable": True, "partial": False, "truncated": False},
+        )
+        self.assertEqual(warning_codes(result["warnings"]), ["W_EMLX_CORRUPT"])
+
+    def test_ut_sr_05_07_snippet_truncation_boundary_is_200_characters(self) -> None:
+        """UT-SR-05.07: bodies of 200 and 201 characters: body.truncated false / true."""
+        fx, store, labels, config = self.isolated()
+        for length, truncated in ((200, False), (201, True)):
+            with self.subTest(length=length):
+                message = dataclasses.replace(fx.message(83143), body="a" * length)
+                make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
+                result = search.run_search(
+                    AppleMailBackend(store, labels),
+                    config,
+                    search.Filters(subject=self.SHARED),
+                )
+                body = result["messages"][0]["body"]
+                self.assertIs(body["truncated"], truncated)
+                self.assertTrue(body["available"])
+                self.assertTrue(body["readable"])
+
+    def test_ut_sr_05_08_html_without_text_is_readable_with_empty_snippet(self) -> None:
+        """UT-SR-05.08: HTML with no text gives true/true, empty snippet, W_HTML_NO_TEXT."""
+        fx, store, labels, config = self.isolated()
+        message = dataclasses.replace(
+            fx.message(83200),
+            body=None,
+            html="<html><head><style>p{}</style></head><body><p> </p></body></html>",
+        )
+        make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
+        result = search.run_search(
+            AppleMailBackend(store, labels), config,
+            search.Filters(subject=(message.subject,)),
+        )
+        found = [m for m in result["messages"] if m["uid"] == 83200]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["snippet"], "")
+        self.assertEqual(
+            found[0]["body"],
+            {"available": True, "readable": True, "partial": False, "truncated": False},
+        )
+        self.assertEqual(warning_codes(result["warnings"]), ["W_HTML_NO_TEXT"])
+
+
+class SearchBodySmimeTest(ExtendedSearchFixtureTest):
+    """S/MIME bodies in ``search`` (UT-SR-05.05, .06) over the extended store."""
+
+    def smime_result(self, uid: int, subject: str) -> tuple[dict, dict]:
+        result = self.run_search(subject=(subject,))
+        return self.message_by_uid(result, uid), result
+
+    def test_ut_sr_05_05_encrypted_smime_is_available_but_unreadable(self) -> None:
+        """UT-SR-05.05: encrypted S/MIME gives true/false/false and only W_BODY_UNREADABLE."""
+        message, result = self.smime_result(UID_SMIME_ENCRYPTED, "Encrypted S/MIME")
+        self.assertEqual(
+            message["body"],
+            {"available": True, "readable": False, "partial": False, "truncated": False},
+        )
+        self.assertEqual(
+            result["warnings"], [BODY_UNREADABLE_SMIME.format(kind="encrypted")]
+        )
+
+    def test_ut_sr_05_06_signed_smime_is_available_but_unreadable(self) -> None:
+        """UT-SR-05.06: signed S/MIME gives true/false/false and only W_BODY_UNREADABLE."""
+        message, result = self.smime_result(UID_SMIME_SIGNED, "Signed S/MIME")
+        self.assertEqual(
+            message["body"],
+            {"available": True, "readable": False, "partial": False, "truncated": False},
+        )
+        self.assertEqual(
+            result["warnings"], [BODY_UNREADABLE_SMIME.format(kind="signed")]
+        )
+
+
+class LabelsUnavailableTest(SearchFixtureTest):
+    """``W_ACCOUNT_LABELS_UNAVAILABLE`` in data commands (UT-SR-06)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        with accounts_db_unavailable() as missing:
+            self.labels = AccountLabels(missing, tmp_dir=self.fx.home / "tmp")
+        self.backend = AppleMailBackend(self.store, self.labels)
+        # Labels are unavailable, so the scope is declared by UUID.
+        self.use_config(f'[scope."{ACCOUNT_ICLOUD}"]\n')
+
+    def test_ut_sr_06_01_search_warns_that_labels_are_unavailable(self) -> None:
+        """UT-SR-06.01: search carries W_ACCOUNT_LABELS_UNAVAILABLE."""
+        result = self.run_search(subject=("Shared duplicate",))
+        self.assertEqual(self.uids(result), [83143])
+        self.assertEqual(result["warnings"], [search.LABELS_UNAVAILABLE_WARNING])
+
+    def test_ut_sr_06_02_show_warns_that_labels_are_unavailable(self) -> None:
+        """UT-SR-06.02: show carries W_ACCOUNT_LABELS_UNAVAILABLE."""
+        result = search.run_show(self.backend, self.config, 83143)
+        self.assertEqual(result["warnings"], [search.LABELS_UNAVAILABLE_WARNING])
+
+    def test_ut_sr_06_03_first_run_of_new_warns_labels_before_first_run(self) -> None:
+        """UT-SR-06.03: first new run: labels warning first of the scope ones, W_FIRST_RUN last."""
+        result = search.run_new(
+            self.backend, self.config, self.fresh_state(), peek=True
+        )
+        codes = warning_codes(result["warnings"])
+        self.assertEqual(codes[0], "W_ACCOUNT_LABELS_UNAVAILABLE")
+        self.assertEqual(codes[-1], "W_FIRST_RUN")
+        self.assertEqual(codes.count("W_ACCOUNT_LABELS_UNAVAILABLE"), 1)
+
+
+class ShowAttachmentsUnreadableTest(ExtendedSearchFixtureTest):
+    """``show`` attachments when the body cannot be read (UT-SR-12)."""
+
+    def show(self, uid: int) -> dict:
+        return search.run_show(self.backend, self.config, uid)
+
+    def test_ut_sr_12_01_missing_emlx_takes_names_from_the_index_and_warns(self) -> None:
+        """UT-SR-12.01: absent .emlx with index attachments: index names + W_ATTACHMENTS_UNAVAILABLE."""
+        result = self.show(UID_MISSING_EMLX_ATTACH)
+        self.assertEqual(result["message"]["attachments"], [{"name": "ghost.pdf"}])
+        self.assertEqual(
+            warning_codes(result["warnings"]),
+            ["W_EMLX_MISSING", "W_ATTACHMENTS_UNAVAILABLE"],
+        )
+        # Encrypted S/MIME has an index row: same rule, names from the index.
+        encrypted = self.show(UID_SMIME_ENCRYPTED)
+        self.assertEqual(encrypted["message"]["attachments"], [{"name": "smime.p7m"}])
+        self.assertEqual(
+            encrypted["warnings"],
+            [
+                BODY_UNREADABLE_SMIME.format(kind="encrypted"),
+                search_attachments_warning(),
+            ],
+        )
+
+    def test_ut_sr_12_02_signed_smime_without_index_row_has_no_attachments(self) -> None:
+        """UT-SR-12.02: signed S/MIME without an attachments row: [] and no warning."""
+        result = self.show(UID_SMIME_SIGNED)
+        self.assertEqual(result["message"]["attachments"], [])
+        self.assertEqual(
+            result["warnings"], [BODY_UNREADABLE_SMIME.format(kind="signed")]
+        )
+
+
+class _LockedConnection:
+    """Connection proxy whose ``execute`` fails as a locked database does.
+
+    ``failures`` is the number of ``execute`` calls that raise ``database is
+    locked`` before the real connection answers (``None`` = always).
+    """
+
+    def __init__(self, real: sqlite3.Connection, failures: int | None) -> None:
+        self._real = real
+        self.failures = failures
+        self.attempts = 0
+
+    def execute(self, sql: str, params=()):
+        self.attempts += 1
+        if self.failures is None or self.failures > 0:
+            if self.failures is not None:
+                self.failures -= 1
+            raise sqlite3.OperationalError("database is locked")
+        return self._real.execute(sql, params)
+
+    def __getattr__(self, name: str):
+        return getattr(self._real, name)
+
+
+class DatabaseLockedTest(SearchFixtureTest):
+    """UT-SR-13: queries and the folder catalog retry once on a locked database."""
+
+    def lock(self, failures: int | None) -> _LockedConnection:
+        self.store.mailboxes  # load the catalog while the database is not locked
+        proxy = _LockedConnection(self.store.connection, failures)
+        self.store.connection = proxy
+        return proxy
+
+    def test_ut_sr_13_01_query_locked_once_succeeds_after_one_retry(self) -> None:
+        """UT-SR-13.01: a query locked once succeeds after a retry at 100 ms."""
+        proxy = self.lock(1)
+        with mock.patch("time.sleep") as sleep:
+            result = self.run_search()
+        self.assertEqual(self.uids(result), DEFAULT_UIDS)
+        sleep.assert_called_once_with(0.1)
+        self.assertGreater(proxy.attempts, 1)
+
+    def test_ut_sr_13_02_persistent_lock_is_db_busy_with_hint(self) -> None:
+        """UT-SR-13.02: a persistent lock => E_DB_BUSY, exit 5, non-empty hint, one retry."""
+        proxy = self.lock(None)
+        with mock.patch("time.sleep") as sleep:
+            with self.assertRaises(MailqueryError) as context:
+                self.run_search()
+        self.assertEqual(context.exception.code, "E_DB_BUSY")
+        self.assertEqual(context.exception.exit_code, 5)
+        self.assertTrue(context.exception.hint)
+        sleep.assert_called_once_with(0.1)
+        self.assertEqual(proxy.attempts, 2)
+
+    def test_ut_sr_13_03_locked_folder_catalog_is_db_busy(self) -> None:
+        """UT-SR-13.03: the folder catalog locked => E_DB_BUSY (after one retry)."""
+        proxy = _LockedConnection(self.store.connection, None)
+        self.store.connection = proxy
+        self.store._mailboxes = None
+        with mock.patch("time.sleep") as sleep:
+            with self.assertRaises(MailqueryError) as context:
+                self.store.mailboxes
+        self.assertEqual(context.exception.code, "E_DB_BUSY")
+        self.assertEqual(context.exception.exit_code, 5)
+        self.assertTrue(context.exception.hint)
+        sleep.assert_called_once_with(0.1)
+        self.assertEqual(proxy.attempts, 2)
+
+
+class InboxDefinitionTest(ExtendedSearchFixtureTest):
+    """UT-SR-14: INBOX is the top-level ``INBOX`` folder only (PRD A.5.3)."""
+
+    def mailbox(self, rowid: int):
+        return self.store.mailbox(rowid)
+
+    def test_ut_sr_14_01_top_level_inbox_in_lowercase_is_inbox(self) -> None:
+        """UT-SR-14.01: a top-level ``inbox`` in lowercase is INBOX."""
+        from mailquery.store import _mailbox_from_row
+
+        for url in ("imap://U/inbox", "imap://U/INBOX", "imap://U/Inbox"):
+            with self.subTest(url=url):
+                row = {"rowid": 1, "url": url}
+                self.assertTrue(_mailbox_from_row(row, {}).is_inbox)
+        self.assertTrue(self.mailbox(1).is_inbox)
+
+    def test_ut_sr_14_02_nested_inbox_is_a_normal_folder(self) -> None:
+        """UT-SR-14.02: ``Proyectos/Inbox`` is not INBOX, neither in is_inbox nor in the scope."""
+        self.assertFalse(self.mailbox(20).is_inbox)
+        self.assertFalse(self.mailbox(23).is_inbox)
+        self.use_config(ICLOUD_ONLY)
+        resolved = search._resolved_scope(self.config, self.backend)
+        self.assertEqual(
+            [mailbox["id"] for mailbox in resolved[0].mailboxes], [1]
+        )
+        result = self.run_search(subject=("Proyectos inbox item",))
+        self.assertEqual(self.uids(result), [])
+
+
+class DuplicatesExtendedTest(ExtendedSearchFixtureTest):
+    """UT-SR-15: dedupe with the extended fixture."""
+
+    def test_ut_sr_15_01_normal_folder_wins_over_the_aggregate_mailbox(self) -> None:
+        """UT-SR-15.01: duplicate in a normal folder and an aggregate => the normal folder."""
+        self.use_config(DEDUPE_CONFIG)
+        result = self.run_search(subject=("Aggregate duplicate",))
+        self.assertEqual(self.uids(result), [make_fixtures.UID_DUP_FOLDER])
+        message = result["messages"][0]
+        self.assertEqual(message["duplicate_count"], 2)
+        self.assertEqual(message["mailbox"]["name"], "Facturas")
+        self.assertEqual(message["mailbox"]["account"]["uuid"], ACCOUNT_ICLOUD)
+
+    def test_ut_sr_15_02_global_message_id_zero_is_unique(self) -> None:
+        """UT-SR-15.02: global_message_id 0 => unique message, duplicate_count 1."""
+        result = self.run_search(subject=("Global id zero",))
+        self.assertEqual(self.uids(result), [make_fixtures.UID_GLOBAL_ZERO])
+        self.assertEqual(result["messages"][0]["duplicate_count"], 1)
+
+
+class FolderReferenceTest(ExtendedSearchFixtureTest):
+    """UT-SR-16: folder reference resolution (PRD 15.3, B-27)."""
+
+    def set_catalog(self, mailboxes) -> None:
+        mailboxes = tuple(mailboxes)
+        self.store._mailboxes = mailboxes
+        self.store._by_rowid = {mailbox.rowid: mailbox for mailbox in mailboxes}
+
+    def reorder(self, first: list[int], drop: tuple[int, ...] = ()) -> dict:
+        by_rowid = {mailbox.rowid: mailbox for mailbox in self.store.mailboxes}
+        rest = [
+            mailbox
+            for rowid, mailbox in by_rowid.items()
+            if rowid not in first and rowid not in drop
+        ]
+        self.set_catalog([by_rowid[rowid] for rowid in first] + rest)
+        return by_rowid
+
+    def test_ut_sr_16_01_inbox_is_always_the_account_inbox(self) -> None:
+        """UT-SR-16.01: with ``Proyectos/Inbox`` in the account, INBOX is the account inbox."""
+        self.assertEqual(self.store.resolve_mailbox(ACCOUNT_ICLOUD, "INBOX").rowid, 1)
+        self.assertEqual(self.store.resolve_mailbox(ACCOUNT_ICLOUD, "inbox").rowid, 1)
+        # Even when the nested folder comes first in the catalog.
+        self.reorder([20, 23])
+        self.assertEqual(self.store.resolve_mailbox(ACCOUNT_ICLOUD, "INBOX").rowid, 1)
+        # An account without an inbox does not resolve INBOX to another folder.
+        self.assertIsNone(self.store.resolve_mailbox(ACCOUNT_LOCAL, "INBOX"))
+
+    def test_ut_sr_16_02_include_mailbox_is_tried_in_block_order(self) -> None:
+        """UT-SR-16.02: INBOX with two declared accounts => the one of the first block."""
+        gmail_first = (
+            f'[scope."{GMAIL_LABEL}"]\n\n[scope."{ICLOUD_LABEL}"]\n'
+        )
+        icloud_first = (
+            f'[scope."{ICLOUD_LABEL}"]\n\n[scope."{GMAIL_LABEL}"]\n'
+        )
+        for config, expected in ((gmail_first, 5), (icloud_first, 1)):
+            with self.subTest(expected=expected):
+                self.use_config(config)
+                resolved = search._resolved_scope(self.config, self.backend)
+                selected = search._resolve_include_mailboxes(
+                    self.backend, resolved, ("INBOX",)
+                )
+                self.assertEqual([mailbox["id"] for mailbox in selected], [expected])
+
+    def test_ut_sr_16_03_exact_path_or_url_beats_a_name_match(self) -> None:
+        """UT-SR-16.03: an exact path or URL wins over another folder's name."""
+        # Path: "Facturas" is the path of mailbox 2 and the name of 21 and 22.
+        by_rowid = self.reorder([21, 22])
+        self.assertEqual(
+            self.store.resolve_mailbox(ACCOUNT_ICLOUD, "Facturas").rowid, 2
+        )
+        # URL: a folder whose name equals the URL of another folder comes first.
+        target = by_rowid[22]
+        decoy = dataclasses.replace(by_rowid[21], rowid=99, name=target.url)
+        self.set_catalog([decoy, *self.store.mailboxes])
+        self.assertEqual(
+            self.store.resolve_mailbox(ACCOUNT_ICLOUD, target.url).rowid, 22
+        )
+
+    def test_ut_sr_16_04_same_name_resolves_to_the_first_in_the_catalog(self) -> None:
+        """UT-SR-16.04: two folders with the same name in different paths => the first of mailboxes."""
+        self.assertEqual(
+            self.store.resolve_mailbox(ACCOUNT_ICLOUD, "Facturas").rowid, 2
+        )
+        # Without the top-level one, "Facturas" is only a name: the catalog order decides.
+        self.reorder([21, 22], drop=(2,))
+        self.assertEqual(
+            self.store.resolve_mailbox(ACCOUNT_ICLOUD, "Facturas").rowid, 21
+        )
+        self.reorder([22, 21], drop=(2,))
+        self.assertEqual(
+            self.store.resolve_mailbox(ACCOUNT_ICLOUD, "Facturas").rowid, 22
+        )
+
+
+def search_attachments_warning() -> str:
+    return (
+        "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the "
+        "envelope index; the message body could not be read"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

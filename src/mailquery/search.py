@@ -1,36 +1,35 @@
 """Search, new-mail, show and mailboxes queries (PRD 9.3, 9.4, 12).
 
-Builds the SQL filters, applies the configured scope (declared accounts only,
+Applies the configured scope (declared accounts only,
 INBOX always included), deduplicates by ``global_message_id`` with INBOX
 priority, bounds content scans (``--text``) and assembles the JSON message
 objects. This module renders no JSON: it returns plain dictionaries that the
 CLI wraps with ``ok``/``command``/``generated_at``.
 
-The ``Envelope Index`` is only ever queried through the read-only connection
-that :class:`mailquery.store.EnvelopeStore` already opened; this module never
-opens a database or a ``.emlx`` file on its own and never writes anything.
+Everything backend-specific goes through :class:`mailquery.backends.base.MailBackend`
+(PRD 9.3): this module holds no SQL and no COM, never opens a database, a
+``.emlx`` file or a mail client on its own, and never writes anything.
 """
 
 from __future__ import annotations
 
 import re
-import sqlite3
 import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
 from mailquery import config as config_module
-from mailquery import emlx, output
+from mailquery import output
+from mailquery.backends.base import ExcludedStoreError
 from mailquery.errors import MailqueryError
-from mailquery.state import MAX_EMITTED_UIDS, AppState, Cursor
+from mailquery.state import Cursor
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from mailquery.accounts import AccountLabels
+    from mailquery.backends.base import AccountRow, BodyRow, MailBackend, MailboxRow
     from mailquery.config import Config
     from mailquery.state import StateStore
-    from mailquery.store import EnvelopeStore, Mailbox
 
 # Limits fixed by the product contract (PRD 15.6).
 SEARCH_MAX_LIMIT = 200
@@ -44,28 +43,10 @@ NO_ACCOUNTS_WARNING = (
 LABELS_UNAVAILABLE_WARNING = (
     "W_ACCOUNT_LABELS_UNAVAILABLE: account labels are unavailable; UUIDs are shown instead"
 )
-FIRST_RUN_WARNING = (
-    "W_FIRST_RUN: first run baseline established; no messages were emitted"
+FIRST_RUN_WARNING_TEMPLATE = (
+    "W_FIRST_RUN: first run: emitted the messages received in the last "
+    "{lookback} before the newest message"
 )
-
-# Pattern columns used by the feature-detected SELECT; the order is fixed.
-_ROW_COLUMNS = (
-    "uid",
-    "global_message_id",
-    "subject",
-    "sender_name",
-    "sender_address",
-    "date_sent",
-    "date_received",
-    "mailbox_id",
-    "read",
-    "flagged",
-    "size",
-    "message_id",
-    "has_attachments",
-)
-
-_PLACEHOLDER_CHUNK = 500
 
 # Relative-time parsing (PRD 12.2 / RF-12).
 _RELATIVE_UNITS = {
@@ -187,9 +168,8 @@ def matches(pattern: str, text: str) -> bool:
 
 
 def run_search(
-    store: "EnvelopeStore",
+    backend: "MailBackend",
     config: "Config",
-    labels: "AccountLabels",
     filters: Filters,
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "warnings"}``.
@@ -197,35 +177,37 @@ def run_search(
     The scope is the set of accounts declared in ``config.toml`` (INBOX always
     included) plus their ``mailbox_list`` folders and the ``--include-mailbox``
     folders of this run. Metadata filters are applied first, then the optional
-    ``--text`` bounded body scan, then dedupe by ``global_message_id`` and
+    ``--text`` bounded body scan, then dedupe by the global message key and
     pagination.
     """
     started = time.perf_counter()
-    connection = _sql_connection(store)
-    tables = _table_names(connection)
-    mailbox_map = {mailbox.rowid: mailbox for mailbox in store.mailboxes}
+    opened_before = _items_opened(backend)
+    accounts = _accounts_by_uuid(backend)
 
-    resolved = _resolved_scope(config, store, labels)
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
+    mailbox_map = _mailbox_map(backend, resolved)
     text_terms = _filter_terms(filters.text)
     mode = "text" if text_terms else "metadata"
+    opens_recipients = _recipients_open_items(backend)
+    content_flags = _content_flags(filters, opens_recipients)
+    scope_warnings = _scope_warnings(backend, excluded)
 
-    include = _resolve_include_mailboxes(store, resolved, filters.include_mailboxes)
+    include = _resolve_include_mailboxes(backend, resolved, filters.include_mailboxes)
     if not resolved and not include:
-        return _empty_search_result(mode, started, [NO_ACCOUNTS_WARNING])
+        return _empty_search_result(mode, started, [NO_ACCOUNTS_WARNING, *scope_warnings])
 
     scope_mailboxes = _scope_mailboxes(resolved, include)
-    allowed_ids = frozenset(mailbox.rowid for mailbox in scope_mailboxes)
+    allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
     if not allowed_ids:
-        return _empty_search_result(mode, started, [])
+        return _empty_search_result(mode, started, scope_warnings)
 
-    if text_terms:
-        _require_bounded_scan(resolved, include, filters)
+    if content_flags:
+        _require_bounded_scan(resolved, include, filters, content_flags, opens_recipients)
 
-    warnings: list[str] = []
+    warnings: list[str] = list(scope_warnings)
 
-    rows = _fetch_rows(
-        connection,
-        tables,
+    rows = backend.query(
         sorted(allowed_ids),
         since=filters.since,
         until=filters.until,
@@ -234,29 +216,29 @@ def run_search(
         has_attachments=filters.has_attachments,
         order="desc",
     )
-    rows = _apply_pattern_filters(rows, filters, connection, tables)
+    # On Windows --to/--cc open every candidate: they are applied after the
+    # max_scan check and the candidates are counted before them (RF-17).
+    rows = _apply_pattern_filters(rows, filters, backend, recipients=not opens_recipients)
     candidates = len(rows)
     messages_read = 0
 
-    if text_terms:
+    if content_flags:
         max_scan = _effective_max_scan(config)
         if candidates > max_scan:
-            raise MailqueryError(
-                "E_SCAN_TOO_LARGE",
-                f"--text would read {candidates} messages, above the configured "
-                f"maximum of {max_scan}",
-                "narrow the query with --since, --until, --from, --to, --cc or "
-                "--subject, or raise [search].max_scan (maximum 50000)",
-            )
+            raise _scan_too_large(content_flags, candidates, max_scan, opens_recipients)
+    recipient_terms = (
+        (_filter_terms(filters.to), _filter_terms(filters.cc)) if opens_recipients else ((), ())
+    )
+    if text_terms:
         rows, scan_warnings, messages_read = _scan_bodies(
-            store, rows, mailbox_map, text_terms
+            backend, rows, text_terms, recipient_terms
         )
         warnings.extend(scan_warnings)
+    elif any(recipient_terms):
+        rows = _filter_recipients(rows, *recipient_terms, backend)
 
-    label_map = _fetch_label_mailboxes(
-        connection, tables, [row["uid"] for row in rows]
-    )
-    duplicate_counts = _fetch_duplicate_counts(connection, tables, allowed_ids)
+    label_map = backend.membership([row["uid"] for row in rows])
+    duplicate_counts = backend.duplicate_counts(allowed_ids)
     canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts)
 
     limit = _search_limit(config, filters.limit)
@@ -265,12 +247,10 @@ def run_search(
     if truncated:
         warnings.append(_truncated_warning(len(canonical) - limit))
 
-    recipients = _fetch_recipients(
-        connection, tables, [row["uid"] for row in page]
-    )
+    recipients = backend.recipients([row["uid"] for row in page])
     messages, body_warnings, page_reads = _build_messages(
-        store,
-        labels,
+        backend,
+        accounts,
         page,
         mailbox_map,
         allowed_ids,
@@ -280,6 +260,8 @@ def run_search(
     )
     warnings.extend(body_warnings)
     messages_read += page_reads
+    if opened_before is not None:
+        messages_read = _items_opened(backend) - opened_before
 
     return {
         "count": len(messages),
@@ -292,102 +274,109 @@ def run_search(
 
 
 def run_new(
-    store: "EnvelopeStore",
+    backend: "MailBackend",
     config: "Config",
-    labels: "AccountLabels",
     state_store: "StateStore",
     *,
     peek: bool = False,
     limit: int | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "cursor", "warnings"}``.
 
-    The first run (no persisted cursor) is a baseline: it emits nothing, moves
-    the cursor to the newest message of the scope, seeds the emitted-uid ring
-    with the lookback window and reports ``W_FIRST_RUN``. Later runs emit, in
-    arrival order, the messages received since ``cursor - lookback`` that are
-    not in the ring, advance the cursor to the last emitted message and append
-    the emitted uids to the ring. ``peek`` never writes state.
+    Messages with a null, non-positive or future ``date_received`` (relative to
+    ``clock``, Unix seconds, ``time.time`` by default) never enter ``new`` and
+    never move the cursor (PRD 12.3, 17).
+
+    The first run (no persisted cursor) emits, in ascending order, the messages
+    received in ``[D - lookback, D]`` (``D`` = date of the newest valid message
+    of the scope), keeps the newest ``limit`` of them and reports
+    ``W_FIRST_RUN`` last. Later runs emit, in arrival order, the messages
+    received since ``cursor - lookback`` that are not in the ring. Both use the
+    ``[new].lookback`` of the current config, advance the cursor to the last
+    emitted message and append the emitted uids to the ring. ``peek`` never
+    writes state.
     """
     started = time.perf_counter()
-    connection = _sql_connection(store)
-    tables = _table_names(connection)
-    mailbox_map = {mailbox.rowid: mailbox for mailbox in store.mailboxes}
+    opened_before = _items_opened(backend)
+    now = float(clock()) if clock is not None else time.time()
+    accounts = _accounts_by_uuid(backend)
 
-    resolved = _resolved_scope(config, store, labels)
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
+    mailbox_map = _mailbox_map(backend, resolved)
     scope_mailboxes = _scope_mailboxes(resolved)
-    allowed_ids = frozenset(mailbox.rowid for mailbox in scope_mailboxes)
+    allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
 
     app_state = state_store.load()
     previous = app_state.cursor
     previous_payload = _cursor_payload(previous)
     limit_value = _new_limit(config, limit)
-
-    if not resolved:
-        return _new_result(
-            started,
-            [NO_ACCOUNTS_WARNING],
-            previous_payload,
-            previous_payload,
-            candidates=0,
-            messages_read=0,
-        )
-    if not allowed_ids:
-        return _new_result(
-            started,
-            [],
-            previous_payload,
-            previous_payload,
-            candidates=0,
-            messages_read=0,
-        )
-
-    if previous is None:
-        return _run_new_baseline(
-            store,
-            config,
-            labels,
-            state_store,
-            connection,
-            tables,
-            mailbox_map,
-            allowed_ids,
-            app_state,
-            peek,
-            started,
-        )
-
-    threshold = int(previous.last_date_received) - int(previous.lookback_seconds)
-    rows = _fetch_rows(
-        connection,
-        tables,
-        sorted(allowed_ids),
-        since=threshold,
-        order="asc",
+    lookback_seconds = int(config.new.lookback_seconds)
+    first_run = previous is None
+    first_run_warnings = (
+        [FIRST_RUN_WARNING_TEMPLATE.format(lookback=config.new.lookback)]
+        if first_run
+        else []
     )
-    ring = {int(uid) for uid in app_state.emitted_uids}
-    rows = [row for row in rows if int(row["uid"]) not in ring]
+
+    # Scope warnings of any run come first; W_FIRST_RUN is always last.
+    scope_warnings: list[str] = [] if resolved else [NO_ACCOUNTS_WARNING]
+    scope_warnings.extend(_scope_warnings(backend, excluded))
+    if not resolved or not allowed_ids:
+        return _new_result(
+            started,
+            scope_warnings + first_run_warnings,
+            previous_payload,
+            previous_payload,
+            candidates=0,
+            messages_read=0,
+        )
+
+    ring: set = set()
+    if previous is None:
+        newest = _newest_scoped_message(backend, sorted(allowed_ids), now)
+        if newest is None:
+            return _new_result(
+                started,
+                scope_warnings + first_run_warnings,
+                None,
+                None,
+                candidates=0,
+                messages_read=0,
+            )
+        threshold = int(newest[0]) - lookback_seconds
+    else:
+        threshold = int(previous.last_date_received) - lookback_seconds
+        ring = set(app_state.emitted_uids)
+
+    rows = backend.query(sorted(allowed_ids), since=threshold, order="asc")
+    rows = [
+        row
+        for row in rows
+        if _has_valid_date(row, now) and row["uid"] not in ring
+    ]
     candidates = len(rows)
 
-    label_map = _fetch_label_mailboxes(
-        connection, tables, [row["uid"] for row in rows]
-    )
-    duplicate_counts = _fetch_duplicate_counts(connection, tables, allowed_ids)
+    label_map = backend.membership([row["uid"] for row in rows])
+    duplicate_counts = backend.duplicate_counts(allowed_ids)
     canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts)
-    canonical.sort(key=lambda row: (_date_key(row), int(row["uid"])))
+    canonical.sort(key=lambda row: (_date_key(row), row["uid"]))
 
-    page = canonical[:limit_value]
+    warnings: list[str] = list(scope_warnings)
     truncated = len(canonical) > limit_value
-    warnings: list[str] = []
+    if first_run:
+        # --limit keeps the most recent messages of the window (PRD 12.3).
+        page = canonical[-limit_value:]
+    else:
+        page = canonical[:limit_value]
     if truncated:
         warnings.append(_truncated_warning(len(canonical) - limit_value))
 
-    recipients = _fetch_recipients(
-        connection, tables, [row["uid"] for row in page]
-    )
+    recipients = backend.recipients([row["uid"] for row in page])
     messages, body_warnings, page_reads = _build_messages(
-        store,
-        labels,
+        backend,
+        accounts,
         page,
         mailbox_map,
         allowed_ids,
@@ -396,16 +385,19 @@ def run_new(
         cached_bodies=False,
     )
     warnings.extend(body_warnings)
+    warnings.extend(first_run_warnings)
+    if opened_before is not None:
+        page_reads = _items_opened(backend) - opened_before
 
-    if peek:
+    if peek or not page:
         current_payload = previous_payload
-    elif page:
-        emitted = [(_date_key(row), int(row["uid"])) for row in page]
-        new_state = state_store.record_new(app_state, emitted, command="new")
+    else:
+        emitted = [(_date_key(row), row["uid"]) for row in page]
+        new_state = state_store.record_new(
+            app_state, emitted, lookback_seconds, command="new"
+        )
         state_store.save(new_state)
         current_payload = _cursor_payload(new_state.cursor)
-    else:
-        current_payload = previous_payload
 
     return {
         "count": len(messages),
@@ -418,39 +410,56 @@ def run_new(
     }
 
 
-def run_show(store: "EnvelopeStore", labels: "AccountLabels", uid: int) -> dict:
-    """Return ``{"message", "warnings"}`` for one uid.
+def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
+    """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
-    ``show`` has no configured scope: it looks the uid up across the whole
-    store (deleted messages and orphan ``.emlx`` files are not shown). A uid
-    that cannot be found raises ``E_USAGE`` with an actionable hint, as PRD 12
-    has no specific "message not found" code.
+    ``[scope]`` is resolved exactly as ``search`` does, so a block or a
+    ``mailbox_list`` folder that does not resolve fails with the same error.
+    The message may be in any folder of a declared account (PRD 12.4); a uid in
+    an undeclared account (or with no declared accounts) raises
+    ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
+    raises ``E_USAGE`` with an actionable hint, as PRD 12 has no specific
+    "message not found" code. A uid whose store is excluded (Outlook) raises
+    ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
     """
-    connection = _sql_connection(store)
-    tables = _table_names(connection)
-    mailbox_map = {mailbox.rowid: mailbox for mailbox in store.mailboxes}
+    accounts = _accounts_by_uuid(backend)
+
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
+    declared = {_scope_account_uuid(scope) for scope in resolved}
 
     try:
-        target_uid = int(uid)
-    except (TypeError, ValueError):
-        raise _message_not_found(uid) from None
-    if target_uid < 0:
-        raise _message_not_found(uid)
+        found = backend.find_message(uid)
+    except ExcludedStoreError as exc:
+        raise _excluded_store_error(uid, exc.entry) from None
+    # A backend may word the not-found hint itself (Outlook points to excluded_stores).
+    not_found_hint = getattr(backend, "not_found_hint", None)
+    if found is None:
+        raise _message_not_found(uid, not_found_hint)
+    row, mailbox = found
+    account_uuid = mailbox["account_uuid"] if mailbox is not None else ""
+    if not account_uuid:
+        raise _message_not_found(uid, not_found_hint)
+    if account_uuid not in declared:
+        raise MailqueryError(
+            "E_ACCOUNT_NOT_IN_SCOPE",
+            f"message uid {uid} belongs to account {account_uuid!r}, "
+            "which is not declared in config.toml",
+            "only accounts declared with a [scope.<account>] block are read; "
+            "declare the account in ~/.mailquery/config.toml",
+            "the message belongs to an account that is not declared",
+        )
+    recipients = backend.recipients([uid])
+    to_list, cc_list = _recipient_lists(recipients, uid)
 
-    rows = _fetch_rows(connection, tables, (), uid=target_uid)
-    if not rows:
-        raise _message_not_found(target_uid)
-    row = rows[0]
-    mailbox = mailbox_map.get(int(row["mailbox_id"]))
-    recipients = _fetch_recipients(connection, tables, [target_uid])
-    to_list, cc_list = _recipient_lists(recipients, target_uid)
+    body = backend.load_body(row)
+    warnings = _scope_warnings(backend, excluded) + list(body["warnings"])
 
-    parsed, path, warnings = _load_emlx(store, mailbox, target_uid)
-
+    body_readable = bool(body["readable"])
     body_text = ""
     body_truncated = False
-    if parsed is not None and bool(getattr(parsed, "readable", False)):
-        cleaned = output.sanitize_text(parsed.body_text or "")
+    if body_readable:
+        cleaned = output.sanitize_text(body["body_text"] or "")
         body_truncated = len(cleaned) > output.SHOW_BODY_MAX_CHARS
         body_text = cleaned[: output.SHOW_BODY_MAX_CHARS]
         if body_truncated:
@@ -459,25 +468,35 @@ def run_show(store: "EnvelopeStore", labels: "AccountLabels", uid: int) -> dict:
                 f"{output.SHOW_BODY_MAX_CHARS} characters"
             )
 
+    # An unreadable body (S/MIME included) never contributes MIME attachment
+    # names: they come from the backend's metadata (PRD 12.10).
     attachment_names = (
-        list(getattr(parsed, "attachments", ()) or ()) if parsed is not None else []
+        [str(entry["name"]) for entry in body["attachments"]] if body_readable else []
     )
-    if not attachment_names:
-        stored_names = _fetch_attachment_names(connection, tables, target_uid)
+    # Outlook cannot read the names without the item: its hook applies the
+    # Windows rule of PRD 12.10 (``has_attachments``, S/MIME excepted).
+    unreadable_attachments = (
+        None if body_readable else getattr(backend, "unreadable_attachments", None)
+    )
+    if unreadable_attachments is not None:
+        attachment_names, attachments_warning = unreadable_attachments(row)
+        if attachments_warning:
+            warnings.append(attachments_warning)
+    elif not attachment_names:
+        stored_names = backend.attachment_names(uid)
         if stored_names:
             attachment_names = stored_names
-            if parsed is None or not bool(getattr(parsed, "readable", False)):
+            if not body_readable:
                 warnings.append(
                     "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the "
                     "envelope index; the message body could not be read"
                 )
 
-    partial = bool(getattr(parsed, "partial", False)) if parsed is not None else False
-    readable = bool(getattr(parsed, "readable", False)) if parsed is not None else False
-    headers = _show_headers(parsed, row, to_list, cc_list)
+    partial = bool(body["partial"])
+    headers = _show_headers(body["headers"], row, to_list, cc_list)
 
     message = {
-        "uid": int(row["uid"]),
+        "uid": row["uid"],
         "message_id": row.get("message_id") or "",
         "subject": row.get("subject") or "",
         "from": {
@@ -488,7 +507,7 @@ def run_show(store: "EnvelopeStore", labels: "AccountLabels", uid: int) -> dict:
         "cc": cc_list,
         "date_sent": output.iso_timestamp(row.get("date_sent")),
         "date_received": output.iso_timestamp(row.get("date_received")),
-        "mailbox": _mailbox_payload(labels, mailbox),
+        "mailbox": _mailbox_payload(accounts, mailbox),
         "is_read": bool(row.get("read")),
         "is_flagged": bool(row.get("flagged")),
         "has_attachments": bool(row.get("has_attachments")),
@@ -498,36 +517,35 @@ def run_show(store: "EnvelopeStore", labels: "AccountLabels", uid: int) -> dict:
         "body_truncated": body_truncated,
         "attachments": [{"name": str(name)} for name in attachment_names],
         "partial": partial,
-        "readable": readable,
+        "readable": body_readable,
         "source": {
-            "emlx_path": str(path) if path is not None else None,
-            "partial": partial,
+            "emlx_path": body["source"]["emlx_path"],
+            "partial": bool(body["source"]["partial"]),
         },
     }
     return {"message": message, "warnings": warnings}
 
 
-def run_mailboxes(
-    store: "EnvelopeStore", config: "Config", labels: "AccountLabels"
-) -> dict:
-    """Return ``{"accounts", "mailboxes", "warnings"}``.
+def run_mailboxes(backend: "MailBackend", config: "Config") -> dict:
+    """Return ``{"accounts", "mailboxes", "excluded_stores", "warnings"}``.
 
-    ``accounts[]`` lists the accounts present in the store with their resolved
+    ``accounts[]`` lists the accounts of the backend with their resolved
     labels and a ``declared`` flag; ``mailboxes[]`` lists every folder with the
-    recalculated totals/unread counters that :mod:`mailquery.store` already
-    computed and an ``included`` flag (declared account + INBOX + configured
-    ``mailbox_list`` folders).
+    counters the backend computed and an ``included`` flag (declared account +
+    INBOX + configured ``mailbox_list`` folders).
     """
-    resolved = _resolved_scope(config, store, labels)
+    accounts_by_uuid = _accounts_by_uuid(backend)
+    backend_mailboxes = list(backend.mailboxes())
+    excluded: list[dict] = []
+    resolved = _resolved_scope(config, backend, excluded)
     scope_mailboxes = _scope_mailboxes(resolved)
-    allowed_ids = {mailbox.rowid for mailbox in scope_mailboxes}
+    allowed_ids = {mailbox["id"] for mailbox in scope_mailboxes}
     declared_ids = {_scope_account_uuid(scope) for scope in resolved}
 
     warnings: list[str] = []
     if not resolved:
         warnings.append(NO_ACCOUNTS_WARNING)
-    if not _labels_available(labels):
-        warnings.append(LABELS_UNAVAILABLE_WARNING)
+    warnings.extend(_scope_warnings(backend, excluded))
 
     accounts: list[dict] = []
     seen_accounts: set[str] = set()
@@ -536,31 +554,71 @@ def run_mailboxes(
         if not uuid or uuid in seen_accounts:
             continue
         seen_accounts.add(uuid)
-        account = _account_payload(labels, uuid)
+        account = _account_payload(accounts_by_uuid, uuid)
         account["declared"] = True
         accounts.append(account)
-    for mailbox in store.mailboxes:
-        uuid = mailbox.account_uuid
+    for mailbox in backend_mailboxes:
+        uuid = mailbox["account_uuid"]
         if not uuid or uuid in seen_accounts:
             continue
         seen_accounts.add(uuid)
-        account = _account_payload(labels, uuid)
+        account = _account_payload(accounts_by_uuid, uuid)
         account["declared"] = uuid in declared_ids
         accounts.append(account)
 
     mailboxes = [
         {
-            "account": _account_payload(labels, mailbox.account_uuid),
-            "name": mailbox.name,
-            "path": mailbox.path,
-            "url": mailbox.url,
-            "total": int(mailbox.message_count),
-            "unread": int(mailbox.unread_count),
-            "included": mailbox.rowid in allowed_ids,
+            "account": _account_payload(accounts_by_uuid, mailbox["account_uuid"]),
+            "name": mailbox["name"],
+            "path": mailbox["path"],
+            "url": mailbox["url"],
+            "total": int(mailbox["total"]),
+            "unread": int(mailbox["unread"]),
+            "included": mailbox["id"] in allowed_ids,
         }
-        for mailbox in store.mailboxes
+        for mailbox in backend_mailboxes
     ]
-    return {"accounts": accounts, "mailboxes": mailboxes, "warnings": warnings}
+    return {
+        "accounts": accounts,
+        "mailboxes": mailboxes,
+        "excluded_stores": list(backend.excluded_stores()),
+        "warnings": warnings,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Backend access
+# --------------------------------------------------------------------------- #
+
+
+def _accounts_by_uuid(backend: "MailBackend") -> "dict[str, AccountRow]":
+    return {account["uuid"]: account for account in backend.accounts()}
+
+
+def _mailbox_map(backend: "MailBackend", resolved: Sequence[Any]) -> "dict[Any, MailboxRow]":
+    """Folders by ``id``; only the declared accounts' folders are used (scope, dedupe,
+    display), so a backend may list only those (Outlook reads no other store)."""
+    declared = list(dict.fromkeys(_scope_account_uuid(scope) for scope in resolved))
+    return {
+        mailbox["id"]: mailbox
+        for mailbox in config_module.listed_mailboxes(backend, [uuid for uuid in declared if uuid])
+    }
+
+
+def _has_valid_date(row: dict, now: float) -> bool:
+    """``0 < date_received <= now``: null, non-positive and future dates never enter ``new``."""
+    value = row.get("date_received")
+    return value is not None and 0 < value <= now
+
+
+def _newest_scoped_message(
+    backend: "MailBackend", mailbox_ids: Sequence[Any], now: float
+) -> tuple[int, Any] | None:
+    """``(date_received, uid)`` of the newest message with a valid date (PRD 12.3)."""
+    for row in backend.query(mailbox_ids, order="desc"):
+        if _has_valid_date(row, now):
+            return int(row["date_received"]), row["uid"]
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -569,10 +627,14 @@ def run_mailboxes(
 
 
 def _resolved_scope(
-    config: "Config", store: "EnvelopeStore", labels: "AccountLabels"
+    config: "Config", backend: "MailBackend", excluded: list[dict] | None = None
 ) -> list[Any]:
-    """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`."""
-    resolved = config_module.resolve_scope(config, store, labels)
+    """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`.
+
+    ``excluded`` receives the entry of each declared account that is an
+    excluded store (Outlook, PRD 15.3).
+    """
+    resolved = config_module.resolve_scope(config, backend, excluded=excluded)
     return list(resolved or ())
 
 
@@ -581,23 +643,23 @@ def _scope_account_uuid(scope: Any) -> str:
 
 
 def _scope_mailboxes(
-    resolved: Sequence[Any], extra: Iterable["Mailbox"] = ()
-) -> tuple["Mailbox", ...]:
+    resolved: Sequence[Any], extra: Iterable["MailboxRow"] = ()
+) -> tuple["MailboxRow", ...]:
     """Return the resolved mailboxes in order, without duplicates."""
-    unique: dict[int, "Mailbox"] = {}
+    unique: dict[Any, "MailboxRow"] = {}
     for scope in resolved:
         for mailbox in getattr(scope, "mailboxes", ()) or ():
-            unique.setdefault(int(mailbox.rowid), mailbox)
+            unique.setdefault(mailbox["id"], mailbox)
     for mailbox in extra:
-        unique.setdefault(int(mailbox.rowid), mailbox)
+        unique.setdefault(mailbox["id"], mailbox)
     return tuple(unique.values())
 
 
 def _resolve_include_mailboxes(
-    store: "EnvelopeStore",
+    backend: "MailBackend",
     resolved: Sequence[Any],
     references: Sequence[str],
-) -> tuple["Mailbox", ...]:
+) -> tuple["MailboxRow", ...]:
     """Resolve ``--include-mailbox`` refs inside the declared accounts.
 
     Values may be repeated or comma-separated, and each item is a folder name,
@@ -608,8 +670,8 @@ def _resolve_include_mailboxes(
     if not references:
         return ()
     declared = {_scope_account_uuid(scope) for scope in resolved}
-    selected: list["Mailbox"] = []
-    seen: set[int] = set()
+    selected: list["MailboxRow"] = []
+    seen: set[Any] = set()
     for raw in references:
         if raw is None:
             continue
@@ -617,40 +679,40 @@ def _resolve_include_mailboxes(
             reference = reference.strip()
             if not reference:
                 continue
-            mailbox = _resolve_reference(store, resolved, reference)
+            mailbox = _resolve_reference(backend, resolved, reference)
             if mailbox is not None:
-                if int(mailbox.rowid) not in seen:
-                    seen.add(int(mailbox.rowid))
+                if mailbox["id"] not in seen:
+                    seen.add(mailbox["id"])
                     selected.append(mailbox)
                 continue
-            elsewhere = _find_reference_outside_scope(store, declared, reference)
+            elsewhere = _find_reference_outside_scope(backend, declared, reference)
             if elsewhere is not None:
                 raise MailqueryError(
                     "E_ACCOUNT_NOT_IN_SCOPE",
                     f"mailbox {reference!r} belongs to account "
-                    f"{elsewhere.account_uuid!r}, which is not declared in config.toml",
+                    f"{elsewhere['account_uuid']!r}, which is not declared in config.toml",
                     "only accounts declared with a [scope.<account>] block are "
                     "read; declare the account in ~/.mailquery/config.toml or "
                     "drop --include-mailbox",
+                    "an included mailbox belongs to an account that is not declared",
                 )
-            raise MailqueryError(
-                "E_MAILBOX_NOT_FOUND",
-                f"mailbox {reference!r} was not found in the declared accounts",
-                "run `mailquery mailboxes` to list the available folders and "
-                "their exact name/path/url",
+            # The hint lists the folders of all declared accounts, in block order.
+            ordered = dict.fromkeys(_scope_account_uuid(scope) for scope in resolved)
+            raise config_module.include_mailbox_not_found(
+                reference, [uuid for uuid in ordered if uuid], backend
             )
     return tuple(selected)
 
 
 def _resolve_reference(
-    store: "EnvelopeStore", resolved: Sequence[Any], reference: str
-) -> "Mailbox | None":
+    backend: "MailBackend", resolved: Sequence[Any], reference: str
+) -> "MailboxRow | None":
     for scope in resolved:
         account_uuid = _scope_account_uuid(scope)
         if not account_uuid:
             continue
         try:
-            mailbox = store.resolve_mailbox(account_uuid, reference)
+            mailbox = backend.resolve_mailbox(account_uuid, reference)
         except MailqueryError:
             raise
         except Exception:
@@ -661,16 +723,16 @@ def _resolve_reference(
 
 
 def _find_reference_outside_scope(
-    store: "EnvelopeStore", declared: set[str], reference: str
-) -> "Mailbox | None":
+    backend: "MailBackend", declared: set[str], reference: str
+) -> "MailboxRow | None":
     seen: set[str] = set()
-    for mailbox in store.mailboxes:
-        account_uuid = mailbox.account_uuid
+    for mailbox in config_module.listed_mailboxes(backend):
+        account_uuid = mailbox["account_uuid"]
         if not account_uuid or account_uuid in declared or account_uuid in seen:
             continue
         seen.add(account_uuid)
         try:
-            candidate = store.resolve_mailbox(account_uuid, reference)
+            candidate = backend.resolve_mailbox(account_uuid, reference)
         except MailqueryError:
             raise
         except Exception:
@@ -680,365 +742,115 @@ def _find_reference_outside_scope(
     return None
 
 
+def _recipients_open_items(backend: "MailBackend") -> bool:
+    """Whether evaluating ``--to``/``--cc`` opens every item (Outlook; RF-17)."""
+    return bool(getattr(backend, "recipients_open_items", False))
+
+
+def _items_opened(backend: "MailBackend") -> int | None:
+    """Items the backend opened so far (Outlook), or ``None`` (Apple Mail).
+
+    With it, ``scan.messages_read`` is the number of items opened (RF-17);
+    without it, the bodies read (``_was_read``).
+    """
+    opened = getattr(backend, "items_opened", None)
+    return None if opened is None else int(opened)
+
+
+def _content_flags(filters: Filters, opens_recipients: bool) -> tuple[str, ...]:
+    """Flags that force reading message content: ``--text``, and ``--to``/``--cc``
+    where the recipients are read from each item (RF-17)."""
+    flags: list[str] = []
+    if _filter_terms(filters.text):
+        flags.append("--text")
+    if opens_recipients:
+        if _filter_terms(filters.to):
+            flags.append("--to")
+        if _filter_terms(filters.cc):
+            flags.append("--cc")
+    return tuple(flags)
+
+
+def _flag_names(flags: Sequence[str]) -> str:
+    if len(flags) == 1:
+        return flags[0]
+    return ", ".join(flags[:-1]) + " and " + flags[-1]
+
+
 def _require_bounded_scan(
-    resolved: Sequence[Any], include: Sequence["Mailbox"], filters: Filters
+    resolved: Sequence[Any],
+    include: Sequence["MailboxRow"],
+    filters: Filters,
+    content_flags: Sequence[str] = ("--text",),
+    opens_recipients: bool = False,
 ) -> None:
-    """Reject ``--text`` queries without a narrowing filter (RF-17)."""
+    """Reject content-reading queries without a narrowing filter (RF-17).
+
+    Validated once for every flag in ``content_flags``. Where ``--to``/``--cc``
+    open every item they do not narrow, and the error names the flags that
+    force reading content and lists only the filters that narrow.
+    """
     has_filter = bool(
         filters.since is not None
         or filters.until is not None
-        or filters.subject
-        or filters.from_
-        or filters.to
-        or filters.cc
+        or _filter_terms(filters.subject, split=True)
+        or _filter_terms(filters.from_)
+        or (
+            not opens_recipients
+            and (_filter_terms(filters.to) or _filter_terms(filters.cc))
+        )
     )
     has_extra_folder = any(
-        not bool(getattr(mailbox, "is_inbox", False))
-        for mailbox in _scope_mailboxes(resolved)
-    ) or any(not bool(getattr(mailbox, "is_inbox", False)) for mailbox in include)
+        not mailbox["is_inbox"] for mailbox in _scope_mailboxes(resolved)
+    ) or any(not mailbox["is_inbox"] for mailbox in include)
     if has_filter or has_extra_folder:
         return
+    if not opens_recipients:
+        raise MailqueryError(
+            "E_UNBOUNDED_SCAN",
+            "--text without a narrowing filter would read every message in the scope",
+            "add --since, --until, --from, --to, --cc, --subject or "
+            "--include-mailbox (for example: mailquery search --text invoice --since 30d)",
+        )
+    example = (
+        "mailquery search --text invoice --since 30d" if "--text" in content_flags else "--since 30d"
+    )
     raise MailqueryError(
         "E_UNBOUNDED_SCAN",
-        "--text without a narrowing filter would read every message in the scope",
-        "add --since, --until, --from, --to, --cc, --subject or "
-        "--include-mailbox (for example: mailquery search --text invoice --since 30d)",
+        f"{_flag_names(content_flags)} without a narrowing filter would read every "
+        "message in the scope",
+        f"add --since, --until, --from, --subject or --include-mailbox (for example: {example})",
     )
 
 
-# --------------------------------------------------------------------------- #
-# SQL access (through the read-only EnvelopeStore connection)
-# --------------------------------------------------------------------------- #
-
-
-def _sql_connection(store: "EnvelopeStore") -> sqlite3.Connection:
-    """Return the read-only connection owned by the store."""
-    connection = getattr(store, "connection", None)
-    if connection is None:
-        raise MailqueryError(
-            "E_INTERNAL",
-            "the mail store does not expose a SQLite connection",
-            "internal error: EnvelopeStore must keep its read-only connection "
-            "as the .connection attribute",
+def _scan_too_large(
+    content_flags: Sequence[str], candidates: int, max_scan: int, opens_recipients: bool
+) -> MailqueryError:
+    """``E_SCAN_TOO_LARGE``; the hint lists only the filters that narrow (RF-17)."""
+    if not opens_recipients:
+        return MailqueryError(
+            "E_SCAN_TOO_LARGE",
+            f"--text would read {candidates} messages, above the configured "
+            f"maximum of {max_scan}",
+            "narrow the query with --since, --until, --from, --to, --cc or "
+            "--subject, or raise [search].max_scan (maximum 50000)",
         )
-    return connection
-
-
-def _table_names(connection: sqlite3.Connection) -> frozenset[str]:
-    """Feature-detect the tables present in the Envelope Index."""
-    try:
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
-        ).fetchall()
-    except sqlite3.Error:
-        return frozenset()
-    names: set[str] = set()
-    for row in rows:
-        try:
-            names.add(str(row[0]))
-        except (IndexError, TypeError):  # pragma: no cover - defensive
-            continue
-    return frozenset(names)
-
-
-def _scope_predicate(
-    mailbox_ids: Iterable[int], tables: frozenset[str], alias: str = "m"
-) -> tuple[str, list[Any]]:
-    """Return the scope ``WHERE`` fragment: direct mailbox or label membership."""
-    ids = list(dict.fromkeys(int(rowid) for rowid in mailbox_ids))
-    if not ids:
-        return "", []
-    placeholders = ", ".join("?" for _ in ids)
-    clause = f"({alias}.mailbox IN ({placeholders})"
-    params: list[Any] = list(ids)
-    if "labels" in tables:
-        clause += (
-            f" OR EXISTS (SELECT 1 FROM labels l WHERE l.message_id = "
-            f"{alias}.ROWID AND l.mailbox_id IN ({placeholders}))"
-        )
-        params.extend(ids)
-    return clause + ")", params
-
-
-def _select_sql(tables: frozenset[str]) -> str:
-    """Build the feature-detected metadata SELECT (columns in _ROW_COLUMNS)."""
-    joins: list[str] = []
-    if "subjects" in tables:
-        subject_expression = "COALESCE(sub.subject, '')"
-        joins.append("LEFT JOIN subjects sub ON sub.ROWID = m.subject")
-    else:  # pragma: no cover - store validates the schema first
-        subject_expression = "''"
-    if "addresses" in tables:
-        sender_name_expression = "COALESCE(sender.comment, '')"
-        sender_address_expression = "COALESCE(sender.address, '')"
-        joins.append("LEFT JOIN addresses sender ON sender.ROWID = m.sender")
-    else:  # pragma: no cover - store validates the schema first
-        sender_name_expression = "''"
-        sender_address_expression = "''"
-    if "message_global_data" in tables:
-        message_id_expression = (
-            "COALESCE((SELECT mgd.message_id_header FROM message_global_data "
-            "mgd WHERE mgd.ROWID = m.global_message_id LIMIT 1), '')"
-        )
-    else:  # pragma: no cover - store validates the schema first
-        message_id_expression = "''"
-    if "attachments" in tables:
-        has_attachments_expression = (
-            "EXISTS (SELECT 1 FROM attachments att WHERE att.message = m.ROWID)"
-        )
-    else:  # pragma: no cover - store validates the schema first
-        has_attachments_expression = "0"
-
-    columns = ",\n       ".join(
-        (
-            "m.ROWID",
-            "COALESCE(m.global_message_id, 0)",
-            subject_expression,
-            sender_name_expression,
-            sender_address_expression,
-            "m.date_sent",
-            "m.date_received",
-            "m.mailbox",
-            "COALESCE(m.read, 0)",
-            "COALESCE(m.flagged, 0)",
-            "COALESCE(m.size, 0)",
-            message_id_expression,
-            has_attachments_expression,
-        )
+    return MailqueryError(
+        "E_SCAN_TOO_LARGE",
+        f"{_flag_names(content_flags)} would read {candidates} messages, above the "
+        f"configured maximum of {max_scan}",
+        "narrow the query with --since, --until, --from or --subject, or raise "
+        "[search].max_scan (maximum 50000)",
     )
-    return f"SELECT {columns}\nFROM messages m\n{' '.join(joins)}"
-
-
-def _fetch_rows(
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    mailbox_ids: Sequence[int],
-    *,
-    since: float | None = None,
-    until: float | None = None,
-    unread: bool = False,
-    flagged: bool = False,
-    has_attachments: bool = False,
-    order: str = "desc",
-    uid: int | None = None,
-) -> list[dict]:
-    """Execute the metadata query and return plain row dictionaries."""
-    where: list[str] = ["m.deleted = 0"]
-    params: list[Any] = []
-    if uid is not None:
-        where.append("m.ROWID = ?")
-        params.append(int(uid))
-    else:
-        scope_sql, scope_params = _scope_predicate(mailbox_ids, tables)
-        if not scope_sql:
-            return []
-        where.append(scope_sql)
-        params.extend(scope_params)
-    if since is not None:
-        where.append("m.date_received IS NOT NULL AND m.date_received >= ?")
-        params.append(float(since))
-    if until is not None:
-        where.append("m.date_received IS NOT NULL AND m.date_received < ?")
-        params.append(float(until))
-    if unread:
-        where.append("COALESCE(m.read, 0) = 0")
-    if flagged:
-        where.append("COALESCE(m.flagged, 0) = 1")
-    if has_attachments:
-        if "attachments" not in tables:  # pragma: no cover - schema validated
-            return []
-        where.append("EXISTS (SELECT 1 FROM attachments att2 WHERE att2.message = m.ROWID)")
-    order_sql = (
-        "m.date_received DESC, m.ROWID DESC"
-        if order == "desc"
-        else "m.date_received ASC, m.ROWID ASC"
-    )
-    sql = f"{_select_sql(tables)}\nWHERE {' AND '.join(where)}\nORDER BY {order_sql}"
-    try:
-        cursor = connection.execute(sql, params)
-        values = cursor.fetchall()
-    except sqlite3.Error as exc:
-        raise _query_error(exc) from exc
-    return [_row_dict(value) for value in values]
-
-
-def _row_dict(values: Sequence[Any]) -> dict:
-    data = dict(zip(_ROW_COLUMNS, values))
-    return {
-        "uid": int(data["uid"]),
-        "global_message_id": int(data["global_message_id"] or 0),
-        "subject": str(data["subject"] or ""),
-        "sender_name": str(data["sender_name"] or ""),
-        "sender_address": str(data["sender_address"] or ""),
-        "date_sent": data["date_sent"],
-        "date_received": data["date_received"],
-        "mailbox_id": int(data["mailbox_id"] or 0),
-        "read": int(data["read"] or 0),
-        "flagged": int(data["flagged"] or 0),
-        "size": int(data["size"] or 0),
-        "message_id": str(data["message_id"] or ""),
-        "has_attachments": bool(data["has_attachments"]),
-    }
-
-
-def _fetch_recipients(
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    uids: Sequence[int],
-) -> dict[int, dict[str, list[dict]]]:
-    """Return ``{uid: {"to": [...], "cc": [...]}}`` for the requested uids."""
-    if not uids or "recipients" not in tables or "addresses" not in tables:
-        return {}
-    unique = list(dict.fromkeys(int(uid) for uid in uids))
-    result: dict[int, dict[str, list[dict]]] = {}
-    for chunk in _chunks(unique, _PLACEHOLDER_CHUNK):
-        placeholders = ", ".join("?" for _ in chunk)
-        sql = (
-            "SELECT r.message, r.type, COALESCE(a.address, ''), "
-            "COALESCE(a.comment, '') "
-            "FROM recipients r JOIN addresses a ON a.ROWID = r.address "
-            f"WHERE r.message IN ({placeholders}) "
-            "ORDER BY r.message, COALESCE(r.position, 0)"
-        )
-        try:
-            rows = connection.execute(sql, chunk).fetchall()
-        except sqlite3.Error as exc:  # pragma: no cover - schema validated
-            raise _query_error(exc) from exc
-        for message_uid, recipient_type, address, name in rows:
-            bucket = result.setdefault(
-                int(message_uid), {"to": [], "cc": []}
-            )
-            entry = {"name": str(name or ""), "address": str(address or "")}
-            kind = 0 if recipient_type is None else int(recipient_type)
-            if kind == 1:
-                bucket["cc"].append(entry)
-            elif kind == 0:
-                bucket["to"].append(entry)
-    return result
 
 
 def _recipient_lists(
-    recipients: dict[int, dict[str, list[dict]]], uid: int
+    recipients: dict[Any, dict[str, list[dict]]], uid: Any
 ) -> tuple[list[dict], list[dict]]:
-    bucket = recipients.get(int(uid), {})
+    bucket = recipients.get(uid, {})
     to_list = [dict(entry) for entry in bucket.get("to", [])]
     cc_list = [dict(entry) for entry in bucket.get("cc", [])]
     return to_list, cc_list
-
-
-def _fetch_attachment_names(
-    connection: sqlite3.Connection, tables: frozenset[str], uid: int
-) -> list[str]:
-    if "attachments" not in tables:  # pragma: no cover - schema validated
-        return []
-    sql = (
-        "SELECT COALESCE(name, '') FROM attachments WHERE message = ? "
-        "ORDER BY ROWID"
-    )
-    try:
-        rows = connection.execute(sql, (int(uid),)).fetchall()
-    except sqlite3.Error as exc:  # pragma: no cover - schema validated
-        raise _query_error(exc) from exc
-    return [str(row[0]) for row in rows if row[0]]
-
-
-def _fetch_label_mailboxes(
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    uids: Sequence[int],
-) -> dict[int, set[int]]:
-    """Return ``{message_uid: {mailbox_id, ...}}`` for the label memberships."""
-    if not uids or "labels" not in tables:
-        return {}
-    unique = list(dict.fromkeys(int(uid) for uid in uids))
-    result: dict[int, set[int]] = {}
-    for chunk in _chunks(unique, _PLACEHOLDER_CHUNK):
-        placeholders = ", ".join("?" for _ in chunk)
-        sql = (
-            f"SELECT l.message_id, l.mailbox_id FROM labels l "
-            f"WHERE l.message_id IN ({placeholders})"
-        )
-        try:
-            rows = connection.execute(sql, chunk).fetchall()
-        except sqlite3.Error as exc:  # pragma: no cover - schema validated
-            raise _query_error(exc) from exc
-        for message_uid, mailbox_id in rows:
-            result.setdefault(int(message_uid), set()).add(int(mailbox_id))
-    return result
-
-
-def _fetch_duplicate_counts(
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    mailbox_ids: Iterable[int],
-) -> dict[int, int]:
-    """Count, in the scope, the copies of each ``global_message_id``."""
-    clause, params = _scope_predicate(mailbox_ids, tables)
-    if not clause:
-        return {}
-    sql = (
-        "SELECT m.global_message_id, COUNT(*) FROM messages m "
-        f"WHERE m.deleted = 0 AND {clause} GROUP BY m.global_message_id"
-    )
-    counts: dict[int, int] = {}
-    try:
-        rows = connection.execute(sql, params).fetchall()
-    except sqlite3.Error as exc:  # pragma: no cover - schema validated
-        raise _query_error(exc) from exc
-    for global_id, count in rows:
-        if global_id:
-            counts[int(global_id)] = int(count)
-    return counts
-
-
-def _newest_scoped_message(
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    mailbox_ids: Iterable[int],
-) -> tuple[int, int] | None:
-    """Return ``(date_received, uid)`` of the newest message of the scope."""
-    clause, params = _scope_predicate(mailbox_ids, tables)
-    if not clause:
-        return None
-    sql = (
-        "SELECT m.ROWID, m.date_received FROM messages m "
-        f"WHERE m.deleted = 0 AND {clause} AND m.date_received IS NOT NULL "
-        "ORDER BY m.date_received DESC, m.ROWID DESC LIMIT 1"
-    )
-    try:
-        row = connection.execute(sql, params).fetchone()
-    except sqlite3.Error as exc:  # pragma: no cover - schema validated
-        raise _query_error(exc) from exc
-    if row is None:
-        return None
-    return int(row[1]), int(row[0])
-
-
-def _ring_uid_seed(
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    mailbox_ids: Iterable[int],
-    end_date: int,
-    lookback_seconds: int,
-) -> tuple[int, ...]:
-    """Seed the emitted-uid ring with the uids of the baseline window."""
-    clause, params = _scope_predicate(mailbox_ids, tables)
-    if not clause:
-        return ()
-    start_date = int(end_date) - int(lookback_seconds)
-    sql = (
-        "SELECT m.ROWID FROM messages m "
-        f"WHERE m.deleted = 0 AND {clause} AND m.date_received IS NOT NULL "
-        "AND m.date_received >= ? AND m.date_received <= ? "
-        "ORDER BY m.date_received DESC, m.ROWID DESC LIMIT ?"
-    )
-    try:
-        rows = connection.execute(
-            sql, params + [start_date, int(end_date), int(MAX_EMITTED_UIDS)]
-        ).fetchall()
-    except sqlite3.Error as exc:  # pragma: no cover - schema validated
-        raise _query_error(exc) from exc
-    return tuple(int(row[0]) for row in reversed(rows))
 
 
 # --------------------------------------------------------------------------- #
@@ -1049,16 +861,20 @@ def _ring_uid_seed(
 def _apply_pattern_filters(
     rows: list[dict],
     filters: Filters,
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
+    backend: "MailBackend",
+    *,
+    recipients: bool = True,
 ) -> list[dict]:
-    """Apply the wildcard/substring filters (accent- and case-insensitive)."""
+    """Apply the wildcard/substring filters (accent- and case-insensitive).
+
+    Without ``recipients`` the ``--to``/``--cc`` filters are left to the caller.
+    """
     if not rows:
         return []
-    subject_terms = _filter_terms(filters.subject)
+    subject_terms = _filter_terms(filters.subject, split=True)
     from_terms = _filter_terms(filters.from_)
-    to_terms = _filter_terms(filters.to)
-    cc_terms = _filter_terms(filters.cc)
+    to_terms = _filter_terms(filters.to) if recipients else ()
+    cc_terms = _filter_terms(filters.cc) if recipients else ()
 
     if subject_terms:
         rows = [
@@ -1073,67 +889,86 @@ def _apply_pattern_filters(
             if _terms_match_any(from_terms, [_sender_haystack(row)])
         ]
     if rows and (to_terms or cc_terms):
-        recipients = _fetch_recipients(
-            connection, tables, [row["uid"] for row in rows]
-        )
-        if to_terms:
-            rows = [
-                row
-                for row in rows
-                if _terms_match_any(
-                    to_terms, _recipient_haystacks(recipients, row["uid"], "to")
-                )
-            ]
-        if rows and cc_terms:
-            rows = [
-                row
-                for row in rows
-                if _terms_match_any(
-                    cc_terms, _recipient_haystacks(recipients, row["uid"], "cc")
-                )
-            ]
+        rows = _filter_recipients(rows, to_terms, cc_terms, backend)
+    return rows
+
+
+def _filter_recipients(
+    rows: list[dict],
+    to_terms: Sequence[str],
+    cc_terms: Sequence[str],
+    backend: "MailBackend",
+) -> list[dict]:
+    """Keep the rows whose To and Cc match ``to_terms`` and ``cc_terms``."""
+    if not rows:
+        return []
+    recipients = backend.recipients([row["uid"] for row in rows])
+    if to_terms:
+        rows = [
+            row
+            for row in rows
+            if _terms_match_any(
+                to_terms, _recipient_haystacks(recipients, row["uid"], "to")
+            )
+        ]
+    if rows and cc_terms:
+        rows = [
+            row
+            for row in rows
+            if _terms_match_any(
+                cc_terms, _recipient_haystacks(recipients, row["uid"], "cc")
+            )
+        ]
     return rows
 
 
 def _scan_bodies(
-    store: "EnvelopeStore",
+    backend: "MailBackend",
     rows: list[dict],
-    mailbox_map: dict[int, "Mailbox"],
     terms: Sequence[str],
+    recipient_terms: tuple[Sequence[str], Sequence[str]] = ((), ()),
 ) -> tuple[list[dict], list[str], int]:
-    """Bounded ``--text`` scan: parse the candidate rows in order and match."""
+    """Bounded ``--text`` scan: read the candidate rows in order and match.
+
+    With ``recipient_terms`` (``--to``, ``--cc`` where they open each item),
+    each row's recipients are checked first and its body is read only if they
+    match, so the item is opened once.
+    """
     matched: list[dict] = []
     warnings: list[str] = []
     messages_read = 0
+    load = _body_loader(backend)
     for row in rows:
-        mailbox = mailbox_map.get(int(row["mailbox_id"]))
-        parsed, path, load_warnings = _load_emlx(store, mailbox, int(row["uid"]))
-        warnings.extend(load_warnings)
-        if path is not None:
+        if any(recipient_terms) and not _filter_recipients([row], *recipient_terms, backend):
+            continue
+        body = load(row)
+        warnings.extend(body["warnings"])
+        if _was_read(body):
             messages_read += 1
-        if parsed is None:
+        if not body["available"] or not body["readable"]:
             continue
-        if not bool(getattr(parsed, "available", True)):
-            continue
-        if not bool(getattr(parsed, "readable", True)):
-            continue
-        body_text = parsed.body_text or ""
+        body_text = body["body_text"] or ""
         if not _matches_all_terms(terms, body_text):
             continue
         matched_row = dict(row)
         matched_row["_body_text"] = body_text
-        matched_row["_body_partial"] = bool(getattr(parsed, "partial", False))
+        matched_row["_body_partial"] = bool(body["partial"])
         matched.append(matched_row)
     return matched, warnings, messages_read
 
 
+def _was_read(body: "BodyRow") -> bool:
+    """Whether loading the body touched a message (a located file or a read item)."""
+    return body["source"]["emlx_path"] is not None or bool(body["available"])
+
+
 def _dedupe(
     rows: list[dict],
-    mailbox_map: dict[int, "Mailbox"],
-    label_map: dict[int, set[int]],
-    duplicate_counts: dict[int, int],
+    mailbox_map: dict[Any, "MailboxRow"],
+    label_map: dict[Any, set[Any]],
+    duplicate_counts: dict[Any, int],
 ) -> list[dict]:
-    """Dedupe by ``global_message_id`` (INBOX > normal folder > aggregate).
+    """Dedupe by the global message key (INBOX > normal folder > aggregate).
 
     The canonical copy is chosen with the PRD Anexo B ordering, and the result
     is returned in the documented total order ``(date_received DESC, ROWID
@@ -1141,20 +976,14 @@ def _dedupe(
     """
     if not rows:
         return []
-    inbox_ids = {
-        rowid
-        for rowid, mailbox in mailbox_map.items()
-        if bool(getattr(mailbox, "is_inbox", False))
-    }
+    inbox_ids = {rowid for rowid, mailbox in mailbox_map.items() if mailbox["is_inbox"]}
     aggregate_ids = {
-        rowid
-        for rowid, mailbox in mailbox_map.items()
-        if bool(getattr(mailbox, "is_aggregate", False))
+        rowid for rowid, mailbox in mailbox_map.items() if mailbox["is_aggregate"]
     }
-    groups: dict[tuple[str, int], list[dict]] = {}
+    groups: dict[tuple[str, Any], list[dict]] = {}
     for row in rows:
         global_id = int(row.get("global_message_id") or 0)
-        key = ("global", global_id) if global_id else ("uid", int(row["uid"]))
+        key = ("global", global_id) if global_id else ("uid", row["uid"])
         groups.setdefault(key, []).append(row)
 
     canonical: list[dict] = []
@@ -1168,33 +997,33 @@ def _dedupe(
         else:
             chosen["duplicate_count"] = 1
         canonical.append(chosen)
-    canonical.sort(key=lambda row: (_date_key(row), int(row["uid"])), reverse=True)
+    canonical.sort(key=lambda row: (_date_key(row), row["uid"]), reverse=True)
     return canonical
 
 
 def _dedupe_sort_key(
     row: dict,
-    inbox_ids: set[int],
-    aggregate_ids: set[int],
-    label_map: dict[int, set[int]],
-) -> tuple[int, int, int]:
+    inbox_ids: set[Any],
+    aggregate_ids: set[Any],
+    label_map: dict[Any, set[Any]],
+) -> tuple[int, int, Any]:
     return (
         _mailbox_priority_for_row(row, inbox_ids, aggregate_ids, label_map),
         _date_key(row),
-        int(row["uid"]),
+        row["uid"],
     )
 
 
 def _mailbox_priority_for_row(
     row: dict,
-    inbox_ids: set[int],
-    aggregate_ids: set[int],
-    label_map: dict[int, set[int]],
+    inbox_ids: set[Any],
+    aggregate_ids: set[Any],
+    label_map: dict[Any, set[Any]],
 ) -> int:
-    mailbox_id = int(row["mailbox_id"])
+    mailbox_id = row["mailbox_id"]
     if mailbox_id in inbox_ids:
         return 0
-    if label_map.get(int(row["uid"]), set()) & inbox_ids:
+    if label_map.get(row["uid"], set()) & inbox_ids:
         return 0
     if mailbox_id in aggregate_ids:
         return 2
@@ -1207,58 +1036,54 @@ def _mailbox_priority_for_row(
 
 
 def _build_messages(
-    store: "EnvelopeStore",
-    labels: "AccountLabels",
+    backend: "MailBackend",
+    accounts: "dict[str, AccountRow]",
     page: Sequence[dict],
-    mailbox_map: dict[int, "Mailbox"],
-    allowed_ids: frozenset[int],
-    label_map: dict[int, set[int]],
-    recipients: dict[int, dict[str, list[dict]]],
+    mailbox_map: dict[Any, "MailboxRow"],
+    allowed_ids: frozenset[Any],
+    label_map: dict[Any, set[Any]],
+    recipients: dict[Any, dict[str, list[dict]]],
     *,
     cached_bodies: bool,
 ) -> tuple[list[dict], list[str], int]:
-    """Build the page message objects, parsing only the returned page.
+    """Build the page message objects, reading only the returned page.
 
-    The ``.emlx`` file always lives under the message's physical mailbox (a
-    Gmail message labelled INBOX is stored under ``[Gmail]/All Mail``), while
-    the reported ``mailbox`` is the effective in-scope one (INBOX).
+    The body always comes from the message's physical mailbox (a Gmail message
+    labelled INBOX is stored under ``[Gmail]/All Mail``), while the reported
+    ``mailbox`` is the effective in-scope one (INBOX).
     """
     messages: list[dict] = []
     warnings: list[str] = []
     messages_read = 0
     for row in page:
-        uid = int(row["uid"])
         display_mailbox = _display_mailbox(row, mailbox_map, allowed_ids, label_map)
-        physical_mailbox = mailbox_map.get(int(row["mailbox_id"]))
-        to_list, cc_list = _recipient_lists(recipients, uid)
+        to_list, cc_list = _recipient_lists(recipients, row["uid"])
         if cached_bodies and "_body_text" in row:
             snippet, body_fields = _body_from_cached(row)
         else:
-            snippet, body_fields, _parsed, path, body_warnings = _body_fields(
-                store, physical_mailbox, uid
-            )
-            warnings.extend(body_warnings)
-            if path is not None:
+            snippet, body_fields, body = _body_fields(backend, row)
+            warnings.extend(body["warnings"])
+            if _was_read(body):
                 messages_read += 1
         messages.append(
             _message_payload(
-                labels, row, display_mailbox, to_list, cc_list, snippet, body_fields
+                accounts, row, display_mailbox, to_list, cc_list, snippet, body_fields
             )
         )
     return messages, warnings, messages_read
 
 
 def _message_payload(
-    labels: "AccountLabels",
+    accounts: "dict[str, AccountRow]",
     row: dict,
-    mailbox: "Mailbox | None",
+    mailbox: "MailboxRow | None",
     to_list: list[dict],
     cc_list: list[dict],
     snippet: str,
     body_fields: dict,
 ) -> dict:
     return {
-        "uid": int(row["uid"]),
+        "uid": row["uid"],
         "message_id": row.get("message_id") or "",
         "duplicate_count": int(row.get("duplicate_count", 1)),
         "subject": row.get("subject") or "",
@@ -1270,7 +1095,7 @@ def _message_payload(
         "cc": cc_list,
         "date_sent": output.iso_timestamp(row.get("date_sent")),
         "date_received": output.iso_timestamp(row.get("date_received")),
-        "mailbox": _mailbox_payload(labels, mailbox),
+        "mailbox": _mailbox_payload(accounts, mailbox),
         "is_read": bool(row.get("read")),
         "is_flagged": bool(row.get("flagged")),
         "has_attachments": bool(row.get("has_attachments")),
@@ -1282,17 +1107,17 @@ def _message_payload(
 
 def _display_mailbox(
     row: dict,
-    mailbox_map: dict[int, "Mailbox"],
-    allowed_ids: frozenset[int] | None,
-    label_map: dict[int, set[int]],
-) -> "Mailbox | None":
+    mailbox_map: dict[Any, "MailboxRow"],
+    allowed_ids: frozenset[Any] | None,
+    label_map: dict[Any, set[Any]],
+) -> "MailboxRow | None":
     """Pick the mailbox reported for a message.
 
     A message included through a label (Gmail INBOX lives physically in
     ``[Gmail]/All Mail``) is reported as the in-scope label mailbox (INBOX),
     which is what a search scoped to INBOX should show.
     """
-    mailbox_id = int(row["mailbox_id"])
+    mailbox_id = row["mailbox_id"]
     direct = mailbox_map.get(mailbox_id)
     if allowed_ids is None or direct is None:
         return direct
@@ -1300,7 +1125,7 @@ def _display_mailbox(
         return direct
     candidates = [
         mailbox_map[label_id]
-        for label_id in label_map.get(int(row["uid"]), set())
+        for label_id in label_map.get(row["uid"], set())
         if label_id in allowed_ids and label_id in mailbox_map
     ]
     if candidates:
@@ -1308,16 +1133,18 @@ def _display_mailbox(
     return direct
 
 
-def _mailbox_priority(mailbox: "Mailbox") -> int:
-    if bool(getattr(mailbox, "is_inbox", False)):
+def _mailbox_priority(mailbox: "MailboxRow") -> int:
+    if mailbox["is_inbox"]:
         return 0
-    if bool(getattr(mailbox, "is_aggregate", False)):
+    if mailbox["is_aggregate"]:
         return 2
     return 1
 
 
-def _mailbox_payload(labels: "AccountLabels", mailbox: "Mailbox | None") -> dict:
-    if mailbox is None:  # pragma: no cover - defensive, the store maps every row
+def _mailbox_payload(
+    accounts: "dict[str, AccountRow]", mailbox: "MailboxRow | None"
+) -> dict:
+    if mailbox is None:  # pragma: no cover - defensive, the backend maps every row
         return {
             "account": {"uuid": "", "label": "", "email": None},
             "name": "",
@@ -1325,106 +1152,81 @@ def _mailbox_payload(labels: "AccountLabels", mailbox: "Mailbox | None") -> dict
             "url": "",
         }
     return {
-        "account": _account_payload(labels, mailbox.account_uuid),
-        "name": mailbox.name,
-        "path": mailbox.path,
-        "url": mailbox.url,
+        "account": _account_payload(accounts, mailbox["account_uuid"]),
+        "name": mailbox["name"],
+        "path": mailbox["path"],
+        "url": mailbox["url"],
     }
 
 
-def _account_payload(labels: "AccountLabels", uuid: str) -> dict:
+def _account_payload(accounts: "dict[str, AccountRow]", uuid: str) -> dict:
     account_uuid = str(uuid or "")
-    if account_uuid and _labels_available(labels):
-        try:
-            entry = labels.get(account_uuid)
-        except Exception:  # pragma: no cover - labels module degrades itself
-            entry = None
-        if entry is not None:
-            return {
-                "uuid": str(getattr(entry, "uuid", account_uuid) or account_uuid),
-                "label": str(getattr(entry, "label", "") or account_uuid),
-                "email": getattr(entry, "email", None),
-            }
-    label = account_uuid
-    if account_uuid and labels is not None:
-        try:
-            label = str(labels.label_for(account_uuid) or account_uuid)
-        except Exception:  # pragma: no cover - labels module degrades itself
-            label = account_uuid
-    return {"uuid": account_uuid, "label": label, "email": None}
+    entry = accounts.get(account_uuid) if account_uuid else None
+    if entry is not None:
+        return {
+            "uuid": account_uuid,
+            "label": str(entry["label"] or account_uuid),
+            "email": entry["email"],
+        }
+    return {"uuid": account_uuid, "label": account_uuid, "email": None}
 
 
-def _labels_available(labels: "AccountLabels | None") -> bool:
-    if labels is None:
-        return False
-    try:
-        return bool(labels.available)
-    except Exception:  # pragma: no cover - labels module degrades itself
-        return False
+def _scope_warnings(backend: "MailBackend", excluded: Sequence[dict]) -> list[str]:
+    """Scope warnings after ``W_NO_ACCOUNTS`` (PRD 12.3 step 6).
+
+    ``W_STORE_EXCLUDED`` for each declared account that is an excluded store
+    (PRD 15.3), then ``W_ACCOUNT_LABELS_UNAVAILABLE`` (Annex A.5.2).
+    """
+    return [_store_excluded_warning(entry) for entry in excluded] + _labels_warnings(backend)
+
+
+def _store_excluded_warning(entry: dict) -> str:
+    """``W_STORE_EXCLUDED: <label> at <path> is excluded: <reason>`` (no `` at`` without path)."""
+    return f"W_STORE_EXCLUDED: {_store_where(entry)} is excluded: {entry.get('reason')}"
+
+
+def _store_where(entry: dict) -> str:
+    """``<label> at <path>`` of an excluded store, or just ``<label>`` when it has no path."""
+    where = str(entry.get("label") or "")
+    if entry.get("path"):
+        where += f" at {entry['path']}"
+    return where
+
+
+def _labels_warnings(backend: "MailBackend") -> list[str]:
+    """``W_ACCOUNT_LABELS_UNAVAILABLE`` for data commands (Annex A.5.2)."""
+    return [] if backend.labels_available else [LABELS_UNAVAILABLE_WARNING]
 
 
 # --------------------------------------------------------------------------- #
-# ``.emlx`` bodies
+# Bodies
 # --------------------------------------------------------------------------- #
-
-
-def _load_emlx(
-    store: "EnvelopeStore", mailbox: "Mailbox | None", uid: int
-) -> tuple[Any, Any, list[str]]:
-    """Resolve and parse one ``.emlx``, turning failures into warnings."""
-    warnings: list[str] = []
-    if mailbox is None:  # pragma: no cover - defensive, the store maps every row
-        warnings.append(f"W_EMLX_UNREADABLE: no mailbox information for uid {uid}")
-        return None, None, warnings
-    try:
-        path = emlx.resolve_path(store, mailbox, uid)
-    except Exception as exc:
-        warnings.append(
-            f"W_EMLX_UNREADABLE: cannot resolve the .emlx path for uid {uid} "
-            f"({type(exc).__name__})"
-        )
-        return None, None, warnings
-    if path is None:
-        warnings.append(f"W_EMLX_MISSING: no .emlx file for uid {uid}")
-        return None, None, warnings
-    try:
-        parsed = emlx.parse_emlx(path)
-    except Exception as exc:
-        warnings.append(
-            f"W_EMLX_UNREADABLE: cannot read the .emlx for uid {uid} "
-            f"({type(exc).__name__})"
-        )
-        return None, path, warnings
-    for warning in getattr(parsed, "warnings", ()) or ():
-        if warning:
-            warnings.append(str(warning))
-    if not bool(getattr(parsed, "available", True)) and not _has_warning(
-        warnings, "W_EMLX_UNREADABLE", "W_EMLX_MISSING"
-    ):
-        warnings.append(f"W_EMLX_UNREADABLE: the .emlx for uid {uid} is not available")
-    if not bool(getattr(parsed, "readable", True)) and not _has_warning(
-        warnings, "W_EMLX_CORRUPT"
-    ):
-        warnings.append(f"W_EMLX_CORRUPT: the .emlx for uid {uid} could not be parsed")
-    return parsed, path, warnings
 
 
 def _body_fields(
-    store: "EnvelopeStore", mailbox: "Mailbox | None", uid: int
-) -> tuple[str, dict, Any, Any, list[str]]:
-    """Return ``(snippet, body, parsed, path, warnings)`` for a message."""
-    parsed, path, warnings = _load_emlx(store, mailbox, uid)
-    if parsed is None:
-        partial = bool(path is not None and str(path).endswith(".partial.emlx"))
-        return "", _unavailable_body(partial), None, path, warnings
-    body_text = parsed.body_text or ""
+    backend: "MailBackend", row: dict
+) -> tuple[str, dict, "BodyRow"]:
+    """Return ``(snippet, body, loaded)`` for a message."""
+    loaded = _body_loader(backend)(row)
+    body_text = loaded["body_text"] or ""
     snippet = output.make_snippet(body_text) if body_text else ""
     fields = {
-        "available": bool(getattr(parsed, "available", True)),
-        "partial": bool(getattr(parsed, "partial", False)),
+        "available": bool(loaded["available"]),
+        "readable": bool(loaded["readable"]),
+        "partial": bool(loaded["partial"]),
         "truncated": _snippet_truncated(body_text),
     }
-    return snippet, fields, parsed, path, warnings
+    return snippet, fields, loaded
+
+
+def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
+    """``load_body``, or the backend's body-only ``load_snippet`` when it has one.
+
+    ``search``/``new`` use only the body; ``show`` always calls ``load_body``
+    (attachments and headers; PRD 19).
+    """
+    loader = getattr(backend, "load_snippet", None)
+    return loader if callable(loader) else backend.load_body
 
 
 def _body_from_cached(row: dict) -> tuple[str, dict]:
@@ -1432,13 +1234,10 @@ def _body_from_cached(row: dict) -> tuple[str, dict]:
     snippet = output.make_snippet(body_text) if body_text else ""
     return snippet, {
         "available": True,
+        "readable": True,
         "partial": bool(row.get("_body_partial", False)),
         "truncated": _snippet_truncated(body_text),
     }
-
-
-def _unavailable_body(partial: bool) -> dict:
-    return {"available": False, "partial": bool(partial), "truncated": False}
 
 
 def _snippet_truncated(body_text: str) -> bool:
@@ -1449,9 +1248,8 @@ def _snippet_truncated(body_text: str) -> bool:
 
 
 def _show_headers(
-    parsed: Any, row: dict, to_list: list[dict], cc_list: list[dict]
+    raw_headers: dict, row: dict, to_list: list[dict], cc_list: list[dict]
 ) -> dict[str, str]:
-    raw_headers = dict(getattr(parsed, "headers", {}) or {}) if parsed is not None else {}
     sender = _format_address(row.get("sender_name"), row.get("sender_address"))
     to_value = ", ".join(
         _format_address(entry.get("name"), entry.get("address")) for entry in to_list
@@ -1496,65 +1294,6 @@ def _format_address(name: str | None, address: str | None) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _run_new_baseline(
-    store: "EnvelopeStore",
-    config: "Config",
-    labels: "AccountLabels",
-    state_store: "StateStore",
-    connection: sqlite3.Connection,
-    tables: frozenset[str],
-    mailbox_map: dict[int, "Mailbox"],
-    allowed_ids: frozenset[int],
-    app_state: AppState,
-    peek: bool,
-    started: float,
-) -> dict:
-    """First run: emit nothing, set the cursor to the newest scoped message."""
-    warnings = [FIRST_RUN_WARNING]
-    lookback = int(getattr(config.new, "lookback_seconds", 600) or 600)
-    newest = _newest_scoped_message(connection, tables, sorted(allowed_ids))
-    if newest is None:
-        return _new_result(
-            started,
-            warnings,
-            None,
-            None,
-            candidates=0,
-            messages_read=0,
-        )
-    date_received, uid = newest
-    baseline = Cursor(
-        last_date_received=int(date_received),
-        last_uid=int(uid),
-        lookback_seconds=lookback,
-    )
-    if peek:
-        return _new_result(
-            started,
-            warnings,
-            None,
-            None,
-            candidates=0,
-            messages_read=0,
-        )
-    seed = _ring_uid_seed(
-        connection, tables, sorted(allowed_ids), int(date_received), lookback
-    )
-    seeded_state = AppState(cursor=baseline, emitted_uids=seed)
-    new_state = state_store.record_new(seeded_state, [], command="new")
-    state_store.save(new_state)
-    current_payload = _cursor_payload(new_state.cursor)
-    return {
-        "count": 0,
-        "truncated": False,
-        "hint": None,
-        "messages": [],
-        "scan": _scan_dict("metadata", len(seed), 0, started),
-        "cursor": {"previous": None, "current": current_payload},
-        "warnings": warnings,
-    }
-
-
 def _new_result(
     started: float,
     warnings: Sequence[str],
@@ -1580,7 +1319,7 @@ def _cursor_payload(cursor: Cursor | None) -> dict | None:
         return None
     return {
         "last_date_received": int(cursor.last_date_received),
-        "last_uid": int(cursor.last_uid),
+        "last_uid": cursor.last_uid,
         "lookback_seconds": int(cursor.lookback_seconds),
     }
 
@@ -1616,12 +1355,14 @@ def _effective_max_scan(config: "Config") -> int:
     return max(1, min(value, MAX_SCAN_HARD_LIMIT))
 
 
-def _filter_terms(values: Iterable[str]) -> tuple[str, ...]:
-    """Expand filter values into AND terms.
+def _filter_terms(values: Iterable[str], *, split: bool = False) -> tuple[str, ...]:
+    """Expand filter values into AND terms (PRD 12.2).
 
-    A value without ``*``/``?`` is split on whitespace so each word is an AND
-    term; a value with wildcards stays a single pattern (phrases are allowed).
-    Repeated CLI flags are ANDed too because every value contributes terms.
+    With ``split`` (``--subject``) every value is split on whitespace and each
+    word is an AND term, with or without wildcards. Without it (``--text``,
+    ``--from``, ``--to``, ``--cc``) the whole value is one pattern. Repeated
+    CLI flags are ANDed too because every value contributes terms; an empty
+    value contributes none.
     """
     terms: list[str] = []
     for value in values or ():
@@ -1630,10 +1371,10 @@ def _filter_terms(values: Iterable[str]) -> tuple[str, ...]:
         text = str(value).strip()
         if not text:
             continue
-        if "*" in text or "?" in text:
-            terms.append(text)
-        else:
+        if split:
             terms.extend(part for part in text.split() if part)
+        else:
+            terms.append(text)
     return tuple(terms)
 
 
@@ -1653,9 +1394,9 @@ def _sender_haystack(row: dict) -> str:
 
 
 def _recipient_haystacks(
-    recipients: dict[int, dict[str, list[dict]]], uid: int, kind: str
+    recipients: dict[Any, dict[str, list[dict]]], uid: Any, kind: str
 ) -> list[str]:
-    bucket = recipients.get(int(uid), {})
+    bucket = recipients.get(uid, {})
     return [
         _format_address(entry.get("name"), entry.get("address"))
         for entry in bucket.get(kind, [])
@@ -1692,11 +1433,6 @@ def _parse_iso_datetime(text: str) -> datetime | None:
         return datetime.fromisoformat(candidate)
     except ValueError:
         return None
-
-
-def _chunks(items: Sequence[Any], size: int) -> Iterable[Sequence[Any]]:
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
 
 
 def _scan_dict(
@@ -1740,38 +1476,34 @@ def _new_hint(truncated: bool) -> str | None:
     return f"raise --limit (max {NEW_MAX_LIMIT}) or process the mail across several runs"
 
 
-def _has_warning(warnings: Sequence[str], *codes: str) -> bool:
-    return any(
-        any(str(warning).startswith(code) for code in codes) for warning in warnings
-    )
-
-
 def _bad_time(value: Any) -> MailqueryError:
     from mailquery.errors import bad_time
 
     return bad_time("" if value is None else value)
 
 
-def _message_not_found(uid: Any) -> MailqueryError:
+def _excluded_store_error(uid: Any, entry: dict) -> MailqueryError:
+    """``E_ACCOUNT_NOT_IN_SCOPE`` for a uid of an excluded store (PRD 12.4)."""
+    where = _store_where(entry)
+    return MailqueryError(
+        "E_ACCOUNT_NOT_IN_SCOPE",
+        f"message uid {uid} belongs to {where}, which is excluded: {entry.get('reason')}",
+        "excluded stores are never read; see excluded_stores in `mailquery mailboxes` "
+        "for the reason",
+        f"the message belongs to an excluded store: {entry.get('reason')}",
+    )
+
+
+def _message_not_found(uid: Any, hint: str | None = None) -> MailqueryError:
+    """``E_USAGE`` for a uid ``show`` cannot find; ``hint`` overrides the Apple Mail one."""
     from mailquery.errors import usage_error
 
     return usage_error(
         f"message uid {uid!r} was not found",
-        "run `mailquery search` to find the uid; deleted messages and orphan "
+        hint
+        or "run `mailquery search` to find the uid; deleted messages and orphan "
         ".emlx files are not shown",
+        "message uid was not found",
     )
 
 
-def _query_error(exc: sqlite3.Error) -> MailqueryError:
-    message = str(exc).lower()
-    if "locked" in message or "busy" in message:
-        return MailqueryError(
-            "E_DB_BUSY",
-            "the Envelope Index is locked by another process",
-            "retry the command (the harness should only retry exit code 5)",
-        )
-    return MailqueryError(
-        "E_INTERNAL",
-        f"the Envelope Index query failed: {exc}",
-        "run `mailquery doctor` and check that the Mail store schema is supported",
-    )

@@ -7,8 +7,8 @@
 # `docs/config.example.toml`. The application never creates or modifies its
 # configuration: only this installer seeds it, and only when missing.
 #
-# Requirements: macOS or Linux, Python >= 3.11 and pipx (this script installs
-# pipx when missing, via Homebrew or `python3 -m pip --user`).
+# Requirements: macOS or Linux (Linux is for development/CI only), Python >= 3.11 and pipx
+# (this script installs pipx when missing, via Homebrew or `python3 -m pip --user`).
 # ============================================================================
 set -eu
 umask 077
@@ -194,10 +194,10 @@ case "$OS" in
     Darwin)
         ;;
     Linux)
-        log "warning: mailquery only runs on macOS with Apple Mail; on Linux the install is for development/CI."
+        log "warning: mailquery runs on macOS (Apple Mail) and Windows (Outlook); on Linux the install is for development/CI only."
         ;;
     *)
-        log "warning: system '$OS' is not supported by the app (macOS only); the install may not be useful."
+        log "warning: system '$OS' is not supported by the app (macOS and Windows only); the install may not be useful."
         ;;
 esac
 

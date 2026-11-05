@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "command": "show",
+  "message": {
+    "uid": 90110,
+    "message_id": "<smime-enc-90110@fixture.example>",
+    "subject": "Encrypted S/MIME",
+    "from": {
+      "name": "Secure",
+      "address": "secure@fixture.example"
+    },
+    "to": [
+      {
+        "name": "Fixture User",
+        "address": "me@fixture.example"
+      }
+    ],
+    "cc": [],
+    "date_sent": "<ISO>",
+    "date_received": "<ISO>",
+    "mailbox": {
+      "account": {
+        "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
+        "label": "iCloud (fixture@icloud.com)",
+        "email": "fixture@icloud.com"
+      },
+      "name": "INBOX",
+      "path": "INBOX",
+      "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
+    },
+    "is_read": true,
+    "is_flagged": false,
+    "has_attachments": true,
+    "size_bytes": 4096,
+    "headers": {
+      "From": "Secure <secure@fixture.example>",
+      "To": "Fixture User <me@fixture.example>",
+      "Cc": "",
+      "Subject": "Encrypted S/MIME",
+      "Date": "<EMAIL_DATE>",
+      "Message-ID": "<smime-enc-90110@fixture.example>"
+    },
+    "body_text": "",
+    "body_truncated": false,
+    "attachments": [
+      {
+        "name": "smime.p7m"
+      }
+    ],
+    "partial": false,
+    "readable": false,
+    "source": {
+      "emlx_path": "<ROOT>/Mail/V10/AAAAAAAA-0000-4000-8000-000000000001/INBOX.mbox/11111111-2222-4333-8444-555555555555/Data/0/9/Messages/90110.emlx",
+      "partial": false
+    }
+  },
+  "warnings": [
+    "W_BODY_UNREADABLE: S/MIME encrypted content is not supported",
+    "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the envelope index; the message body could not be read"
+  ]
+}

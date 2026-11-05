@@ -96,6 +96,14 @@ def _is_within(path: Path, parent: Path) -> bool:
     return True
 
 
+def _make_private(path: Path) -> None:
+    """Restrict a temporary copy to its owner (0600, RNF-05); best effort."""
+    try:
+        path.chmod(0o600)
+    except OSError:  # pragma: no cover - best effort on foreign filesystems
+        pass
+
+
 def _connect_readonly(path: Path) -> sqlite3.Connection:
     uri = Path(path).expanduser().resolve().as_uri() + "?mode=ro"
     connection = sqlite3.connect(uri, uri=True)
@@ -247,9 +255,9 @@ class AccountLabels:
         if label is not None:
             return label.label
         if not self.available:
-            _log().warning("account labels unavailable (%s); using uuid", self._warning)
+            _log().warning("account labels unavailable; using uuid")
         else:
-            _log().warning("no visible label for account uuid %s; using uuid", uuid)
+            _log().warning("no visible label for an account; using uuid")
         return str(uuid)
 
     def _ensure_loaded(self) -> None:
@@ -332,9 +340,11 @@ class AccountLabels:
         target = work_dir / self.db_path.name
         try:
             shutil.copy2(self.db_path, target)
+            _make_private(target)
             wal = _sidecar(self.db_path, "-wal")
             if wal.is_file():
                 shutil.copy2(wal, work_dir / wal.name)
+                _make_private(work_dir / wal.name)
         except OSError as exc:
             shutil.rmtree(work_dir, ignore_errors=True)
             self._warning = f"cannot copy accounts database: {exc}"

@@ -4,9 +4,9 @@ Owns the optional ``~/.mailquery/config.toml``: parsing with ``tomllib``,
 strict validation (unknown keys are errors), defaults and the declaration of
 observed accounts (``[scope.<account-id>]``).
 
-This module never writes the configuration and never opens the Mail store by
-itself: scope resolution receives the store and the account labels as
-arguments to avoid import cycles.
+This module never writes the configuration and never opens a mail client by
+itself: scope resolution receives the backend (``MailBackend``, PRD 9.3) as an
+argument and only uses its interface.
 """
 
 from __future__ import annotations
@@ -21,8 +21,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 from mailquery.errors import MailqueryError, config_error
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from mailquery.accounts import AccountLabel, AccountLabels
-    from mailquery.store import EnvelopeStore, Mailbox
+    from mailquery.backends.base import AccountRow, MailBackend, MailboxRow
 
 LOG_LEVELS = ("error", "warning", "info", "debug")
 
@@ -31,14 +30,14 @@ APP_HOME_SUBDIRS = ("logs", "locks", "tmp")
 DEFAULT_APP_HOME_DIRNAME = ".mailquery"
 
 DEFAULT_LOG_LEVEL = "info"
-DEFAULT_RETENTION_DAYS = 7
+DEFAULT_MAX_SIZE_MB = 10
 DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_SEARCH_MAX_SCAN = 5000
 DEFAULT_NEW_LIMIT = 100
 DEFAULT_LOOKBACK = "10min"
 
-MIN_RETENTION_DAYS = 1
-MAX_RETENTION_DAYS = 365
+MIN_MAX_SIZE_MB = 1
+MAX_MAX_SIZE_MB = 1024
 MIN_SEARCH_LIMIT = 1
 MAX_SEARCH_LIMIT = 200
 MIN_SEARCH_MAX_SCAN = 100
@@ -70,7 +69,7 @@ _CONSERVATIVE_LABELS_HINT = (
 @dataclass(frozen=True)
 class LoggingConfig:
     level: str = DEFAULT_LOG_LEVEL
-    retention_days: int = DEFAULT_RETENTION_DAYS
+    max_size_mb: int = DEFAULT_MAX_SIZE_MB
 
 
 @dataclass(frozen=True)
@@ -114,7 +113,7 @@ class ResolvedScope:
     account_uuid: str
     account_label: str
     account_email: str | None
-    mailboxes: tuple["Mailbox", ...]
+    mailboxes: tuple["MailboxRow", ...]
 
 
 # --------------------------------------------------------------------------- #
@@ -183,11 +182,13 @@ def load_config(home: Path | None = None) -> Config:
             f"invalid TOML in {path}: {exc}",
             "fix the TOML syntax; quoted keys with spaces, dots or parentheses, "
             'e.g. [scope."iCloud (user@example.com)"]',
+            "invalid TOML in config.toml",
         ) from exc
     except OSError as exc:
         raise config_error(
             f"cannot read {path}: {exc.strerror or exc}",
             f"check that {path} is a readable file with mode 0600",
+            "cannot read config.toml",
         ) from exc
 
     if not isinstance(data, dict):  # pragma: no cover - tomllib always returns a dict
@@ -220,11 +221,13 @@ def _unknown_top_level(key: str, value: Any) -> MailqueryError:
             f"unknown top-level section [{key}]",
             'account blocks must be declared as [scope."<account-id>"], not as '
             "top-level tables; only [logging], [search], [new] and [scope.*] are allowed",
+            "unknown top-level section in config.toml",
         )
     return config_error(
         f"unknown top-level key {key!r}",
         "only the [logging], [search], [new] and [scope.*] sections are allowed; "
         "see the configuration reference in docs/PRD.md §15",
+        "unknown top-level key in config.toml",
     )
 
 
@@ -273,23 +276,28 @@ def _parse_logging(value: Any) -> LoggingConfig:
         return LoggingConfig()
     table = _as_table(value, "logging")
     for key in table:
-        if key not in ("level", "retention_days"):
-            raise _unknown_key("[logging]", ("level", "retention_days"), key)
+        if key == "retention_days":
+            raise config_error(
+                "unknown key [logging].retention_days",
+                "retention_days was replaced by max_size_mb",
+            )
+        if key not in ("level", "max_size_mb"):
+            raise _unknown_key("[logging]", ("level", "max_size_mb"), key)
     level = table.get("level", DEFAULT_LOG_LEVEL)
     if not isinstance(level, str) or level not in LOG_LEVELS:
         raise config_error(
             f"invalid [logging].level: {level!r}",
             f"valid values: {', '.join(LOG_LEVELS)}",
         )
-    retention = _parse_int(
+    max_size_mb = _parse_int(
         table,
         display="[logging]",
-        key="retention_days",
-        default=DEFAULT_RETENTION_DAYS,
-        minimum=MIN_RETENTION_DAYS,
-        maximum=MAX_RETENTION_DAYS,
+        key="max_size_mb",
+        default=DEFAULT_MAX_SIZE_MB,
+        minimum=MIN_MAX_SIZE_MB,
+        maximum=MAX_MAX_SIZE_MB,
     )
-    return LoggingConfig(level=level, retention_days=retention)
+    return LoggingConfig(level=level, max_size_mb=max_size_mb)
 
 
 def _parse_search(value: Any) -> SearchConfig:
@@ -358,23 +366,27 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
             raise config_error(
                 "empty account identifier in [scope]",
                 'use a label, a unique email or a UUID, e.g. [scope."iCloud (user@example.com)"]',
+                "invalid account block in config.toml",
             )
         if not isinstance(block, dict):
             raise config_error(
                 f"{display} must be a TOML table",
                 'declare each account as its own table, e.g. [scope."iCloud (user@example.com)"]',
+                "invalid account block in config.toml",
             )
         for inner_key in block:
             if inner_key != "mailbox_list":
                 raise config_error(
                     f"unknown key {display}.{inner_key}",
                     'the only allowed key inside an account block is "mailbox_list"',
+                    "unknown key in an account block of config.toml",
                 )
         raw_refs = block.get("mailbox_list", [])
         if not isinstance(raw_refs, list):
             raise config_error(
                 f"{display}.mailbox_list must be an array of strings",
-                'write it as a TOML array, e.g. mailbox_list = ["Facturas", "Archivo"]',
+                'write it as a TOML array, e.g. mailbox_list = ["Invoices", "Archive"]',
+                "invalid mailbox_list in config.toml",
             )
         refs: list[str] = []
         for index, ref in enumerate(raw_refs):
@@ -382,11 +394,13 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
                 raise config_error(
                     f"{display}.mailbox_list[{index}] must be a string",
                     "each mailbox reference must be a string (name, path or URL)",
+                    "invalid mailbox_list in config.toml",
                 )
             if not ref.strip():
                 raise config_error(
                     f"{display}.mailbox_list[{index}] must not be empty",
                     "use a mailbox name, path or URL as shown by `mailquery mailboxes`",
+                    "invalid mailbox_list in config.toml",
                 )
             refs.append(ref)
         entries.append(ScopeEntry(key=account_key, mailbox_list=tuple(refs)))
@@ -398,27 +412,58 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
 # --------------------------------------------------------------------------- #
 
 
+def listed_mailboxes(
+    backend: "MailBackend", account_uuids: Sequence[str] | None = None
+) -> list["MailboxRow"]:
+    """The backend's folders when only their identity matters (scope, display, hints).
+
+    A backend whose ``total``/``unread`` cost a table scan per folder (Outlook)
+    offers ``mailboxes_without_counters()``: the same rows without counting.
+    Only the ``mailboxes`` command needs the counters (PRD 19, annex B.9);
+    other backends answer with ``mailboxes()``. ``account_uuids`` tells that
+    only the folders of those accounts are used: the hook may then list (and
+    read) only those (Outlook walks one store's folder tree per account); other
+    backends return every folder, as without it.
+    """
+    without_counters = getattr(backend, "mailboxes_without_counters", None)
+    if callable(without_counters):
+        if account_uuids is None:
+            return list(without_counters())
+        return list(without_counters(list(account_uuids)))
+    return list(backend.mailboxes())
+
+
 def resolve_scope(
     config: Config,
-    store: "EnvelopeStore",
-    labels: "AccountLabels",
+    backend: "MailBackend",
+    excluded: list[dict[str, Any]] | None = None,
 ) -> list[ResolvedScope]:
-    """Resolve declared accounts and their mailbox list against the store.
+    """Resolve declared accounts and their mailbox list against the backend.
 
     INBOX is always included first; ``mailbox_list`` entries are additive.
+    A key that resolves to an excluded store (Outlook account row with an
+    ``excluded`` entry, PRD 15.3) is not read and is left out of the result;
+    its ``{label, path, reason}`` entry is appended once to ``excluded`` when
+    the caller passes a list (for ``W_STORE_EXCLUDED``).
     Raises E_CONFIG_ACCOUNT_UNKNOWN, E_ACCOUNT_AMBIGUOUS,
     E_ACCOUNT_LABELS_UNAVAILABLE or E_MAILBOX_NOT_FOUND.
     """
     if not config.scopes:
         return []
 
-    store_mailboxes = list(store.mailboxes)
-    account_uuids = list(dict.fromkeys(mailbox.account_uuid for mailbox in store_mailboxes))
+    accounts = list(backend.accounts())
+    labels_available = bool(backend.labels_available)
 
     declared_order: list[str] = []
     declared_refs: dict[str, list[str]] = {}
     for entry in config.scopes:
-        account_uuid = _resolve_account(entry.key, account_uuids, labels)
+        account = _resolve_account(entry.key, accounts, labels_available)
+        excluded_store = account.get("excluded")
+        if excluded_store is not None:
+            if excluded is not None and excluded_store not in excluded:
+                excluded.append(excluded_store)
+            continue
+        account_uuid = account["uuid"]
         if account_uuid not in declared_refs:
             declared_order.append(account_uuid)
             declared_refs[account_uuid] = []
@@ -427,25 +472,28 @@ def resolve_scope(
             if ref not in merged_refs:
                 merged_refs.append(ref)
 
+    by_uuid = {account["uuid"]: account for account in accounts}
+    # Only the declared accounts' folders are used (PRD 19: Outlook reads no other store).
+    backend_mailboxes = listed_mailboxes(backend, declared_order) if declared_order else []
     resolved: list[ResolvedScope] = []
     for account_uuid in declared_order:
         account_mailboxes = [
-            mailbox for mailbox in store_mailboxes if mailbox.account_uuid == account_uuid
+            mailbox for mailbox in backend_mailboxes if mailbox["account_uuid"] == account_uuid
         ]
-        chosen: list["Mailbox"] = []
-        seen_rowids: set[int] = set()
+        chosen: list["MailboxRow"] = []
+        seen_ids: set[Any] = set()
         for mailbox in account_mailboxes:
-            if mailbox.is_inbox and mailbox.rowid not in seen_rowids:
+            if mailbox["is_inbox"] and mailbox["id"] not in seen_ids:
                 chosen.append(mailbox)
-                seen_rowids.add(mailbox.rowid)
+                seen_ids.add(mailbox["id"])
         for ref in declared_refs[account_uuid]:
-            mailbox = _find_mailbox(store, account_uuid, account_mailboxes, ref)
+            mailbox = _find_mailbox(backend, account_uuid, ref)
             if mailbox is None:
-                raise _mailbox_not_found(ref, account_uuid, account_mailboxes, labels)
-            if mailbox.rowid not in seen_rowids:
+                raise _mailbox_not_found(ref, account_uuid, account_mailboxes, by_uuid)
+            if mailbox["id"] not in seen_ids:
                 chosen.append(mailbox)
-                seen_rowids.add(mailbox.rowid)
-        account_label, account_email = _account_identity(labels, account_uuid)
+                seen_ids.add(mailbox["id"])
+        account_label, account_email = _account_identity(by_uuid, account_uuid)
         resolved.append(
             ResolvedScope(
                 account_uuid=account_uuid,
@@ -459,36 +507,58 @@ def resolve_scope(
 
 def _resolve_account(
     key: str,
-    account_uuids: list[str],
-    labels: "AccountLabels",
-) -> str:
-    """Resolve one config key: label -> unique email -> UUID/prefix (PRD 15.2)."""
+    accounts: Sequence["AccountRow"],
+    labels_available: bool,
+) -> "AccountRow":
+    """Resolve one config key: label -> unique email -> UUID/prefix (PRD 15.2).
+
+    Returns the matched account row; it may be an excluded store (Outlook row
+    with ``excluded``, PRD 15.3), which the caller reports instead of reading.
+    """
     key_folded = key.casefold()
-    labels_available = bool(getattr(labels, "available", False))
-    entries: list["AccountLabel"] = list(labels.all()) if labels_available else []
+    # UUID matching uses the accounts that have folders; label and email
+    # matching and the "known accounts" lists use every label entry. An
+    # unreadable excluded store has no uuid and resolves by label only.
+    in_store = [
+        account
+        for account in accounts
+        if account.get("store_index", 0) is not None and account["uuid"]
+    ]
+    in_store.sort(key=lambda account: account.get("store_index", 0) or 0)
+    account_uuids = [account["uuid"] for account in in_store]
+    by_uuid: dict[str, "AccountRow"] = {}
+    for account in in_store:
+        by_uuid.setdefault(account["uuid"], account)
+    entries: list["AccountRow"] = (
+        [account for account in accounts if account.get("labelled", True)]
+        if labels_available
+        else []
+    )
 
     label_matches = [
-        entry for entry in entries if entry.label and entry.label.casefold() == key_folded
+        entry for entry in entries if entry["label"] and entry["label"].casefold() == key_folded
     ]
-    email_matches: list["AccountLabel"] = []
+    email_matches: list["AccountRow"] = []
     if not label_matches:
         email_matches = [
-            entry for entry in entries if entry.email and entry.email.casefold() == key_folded
+            entry
+            for entry in entries
+            if entry["email"] and entry["email"].casefold() == key_folded
         ]
 
     candidates = label_matches or email_matches
     if len(candidates) > 1:
-        raise _ambiguous_account(key, [(entry.label, entry.uuid) for entry in candidates])
+        raise _ambiguous_account(key, [(entry["label"], entry["uuid"]) for entry in candidates])
     if candidates:
-        account_uuid = candidates[0].uuid
-        if account_uuid in account_uuids:
-            return account_uuid
+        account = candidates[0]
+        if account.get("excluded") is not None or account["uuid"] in account_uuids:
+            return account
         raise _unknown_account(key, entries)
 
     if _UUID_RE.match(key):
         for account_uuid in account_uuids:
             if account_uuid.casefold() == key_folded:
-                return account_uuid
+                return by_uuid[account_uuid]
 
     if len(key) >= MIN_UUID_PREFIX:
         prefixed = [
@@ -497,21 +567,24 @@ def _resolve_account(
             if account_uuid.casefold().startswith(key_folded)
         ]
         if len(prefixed) == 1:
-            return prefixed[0]
+            return by_uuid[prefixed[0]]
         if len(prefixed) > 1:
+            labels = {account["uuid"]: account["label"] for account in accounts}
             raise _ambiguous_account(
-                key, [(_label_of(labels, uuid), uuid) for uuid in prefixed]
+                key,
+                [(labels[uuid] if labels_available else None, uuid) for uuid in prefixed],
             )
 
     if not labels_available:
-        # A UUID (full or prefix-like) is resolvable without the accounts
-        # database, so a miss means the account is unknown, not unresolvable.
+        # A UUID (full or prefix-like) is resolvable without account labels,
+        # so a miss means the account is unknown, not unresolvable.
         if _UUID_RE.match(key) or _UUIDISH_PREFIX_RE.match(key):
             raise _unknown_account(key, entries)
         raise MailqueryError(
             "E_ACCOUNT_LABELS_UNAVAILABLE",
             f"cannot resolve account {key!r}: account labels are unavailable",
             _CONSERVATIVE_LABELS_HINT,
+            "cannot resolve an account: account labels are unavailable",
         )
     raise _unknown_account(key, entries)
 
@@ -525,12 +598,15 @@ def _ambiguous_account(
         "E_ACCOUNT_AMBIGUOUS",
         f"account reference {key!r} matches more than one account",
         f"use a more specific identifier; matching accounts: {pairs}",
+        "an account reference matches more than one account",
     )
 
 
-def _unknown_account(key: str, entries: Sequence["AccountLabel"]) -> MailqueryError:
+def _unknown_account(key: str, entries: Sequence["AccountRow"]) -> MailqueryError:
+    # Excluded stores (Outlook) are never offered as accounts to declare.
+    entries = [entry for entry in entries if entry.get("excluded") is None]
     if entries:
-        known = ", ".join(_format_account(entry.label, entry.uuid) for entry in entries)
+        known = ", ".join(_format_account(entry["label"], entry["uuid"]) for entry in entries)
         hint = f"declare an existing account; known accounts: {known}"
     else:
         hint = (
@@ -541,62 +617,82 @@ def _unknown_account(key: str, entries: Sequence["AccountLabel"]) -> MailqueryEr
         "E_CONFIG_ACCOUNT_UNKNOWN",
         f"unknown account in config.toml: {key!r}",
         hint,
+        "unknown account in config.toml",
     )
 
 
-def _label_of(labels: "AccountLabels", account_uuid: str) -> str | None:
-    if not bool(getattr(labels, "available", False)):
-        return None
-    info = labels.get(account_uuid)
-    return info.label if info is not None else None
-
-
-def _format_account(label: str | None, account_uuid: str) -> str:
+def _format_account(label: str | None, account_uuid: str | None) -> str:
+    if account_uuid is None:  # an unreadable excluded store (Outlook)
+        return label or ""
     if label and label != account_uuid:
         return f"{label} ({account_uuid})"
     return account_uuid
 
 
-def _account_identity(labels: "AccountLabels", account_uuid: str) -> tuple[str, str | None]:
-    if bool(getattr(labels, "available", False)):
-        info = labels.get(account_uuid)
-        if info is not None:
-            return (info.label or account_uuid), info.email
-        return labels.label_for(account_uuid), None
-    return account_uuid, None
+def _account_identity(
+    accounts: dict[str, "AccountRow"], account_uuid: str
+) -> tuple[str, str | None]:
+    """``(label, email)`` of an account; the UUID stands in for a missing label."""
+    entry = accounts.get(account_uuid)
+    if entry is None:
+        return account_uuid, None
+    return (entry["label"] or account_uuid), entry["email"]
 
 
 def _find_mailbox(
-    store: "EnvelopeStore",
-    account_uuid: str,
-    account_mailboxes: Sequence["Mailbox"],
-    ref: str,
-) -> "Mailbox | None":
-    mailbox = store.resolve_mailbox(account_uuid, ref)
-    if mailbox is not None and mailbox.account_uuid == account_uuid:
+    backend: "MailBackend", account_uuid: str, ref: str
+) -> "MailboxRow | None":
+    # PRD 15.3: INBOX is always the account inbox, an exact path or URL beats a
+    # name match and the first name match wins; all of that lives in the backend.
+    mailbox = backend.resolve_mailbox(account_uuid, ref)
+    if mailbox is not None and mailbox["account_uuid"] == account_uuid:
         return mailbox
-    needle = ref.strip().casefold()
-    for candidate in account_mailboxes:
-        if needle in (
-            candidate.name.casefold(),
-            candidate.path.casefold(),
-            candidate.url.casefold(),
-        ):
-            return candidate
     return None
+
+
+def _valid_folders(account_mailboxes: Sequence["MailboxRow"]) -> str:
+    valid = sorted({mailbox["path"] or mailbox["name"] for mailbox in account_mailboxes})
+    return ", ".join(valid) if valid else "(no folders)"
+
+
+def include_mailbox_not_found(
+    ref: str,
+    account_uuids: Sequence[str],
+    backend: "MailBackend",
+) -> MailqueryError:
+    """``E_MAILBOX_NOT_FOUND`` for an ``--include-mailbox`` reference (PRD 15.3).
+
+    The hint lists the folders of every declared account.
+    """
+    accounts = {account["uuid"]: account for account in backend.accounts()}
+    backend_mailboxes = listed_mailboxes(backend)
+    parts: list[str] = []
+    for account_uuid in account_uuids:
+        account_mailboxes = [
+            mailbox for mailbox in backend_mailboxes if mailbox["account_uuid"] == account_uuid
+        ]
+        label = _account_identity(accounts, account_uuid)[0]
+        parts.append(f"{_format_account(label, account_uuid)}: {_valid_folders(account_mailboxes)}")
+    valid_text = "; ".join(parts) if parts else "(no declared accounts)"
+    return MailqueryError(
+        "E_MAILBOX_NOT_FOUND",
+        f"mailbox {ref!r} was not found in the declared accounts",
+        f"valid folders: {valid_text}; run `mailquery mailboxes` to list names, paths and URLs",
+        "an included mailbox was not found in the declared accounts",
+    )
 
 
 def _mailbox_not_found(
     ref: str,
     account_uuid: str,
-    account_mailboxes: Sequence["Mailbox"],
-    labels: "AccountLabels",
+    account_mailboxes: Sequence["MailboxRow"],
+    accounts: dict[str, "AccountRow"],
 ) -> MailqueryError:
-    account_label, _ = _account_identity(labels, account_uuid)
-    valid = sorted({mailbox.path or mailbox.name for mailbox in account_mailboxes})
-    valid_text = ", ".join(valid) if valid else "(no folders)"
+    account_label, _ = _account_identity(accounts, account_uuid)
+    valid_text = _valid_folders(account_mailboxes)
     return MailqueryError(
         "E_MAILBOX_NOT_FOUND",
         f"mailbox {ref!r} not found in account {_format_account(account_label, account_uuid)}",
         f"valid folders: {valid_text}; run `mailquery mailboxes` to list names, paths and URLs",
+        "mailbox not found in an account",
     )

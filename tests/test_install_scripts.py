@@ -7,11 +7,14 @@ the installers.
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+import venv
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,11 +28,17 @@ SH = shutil.which("sh")
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
+# Isolation (plan 7.1): no subprocess may see the user's real home.
+_ISOLATED_HOME = tempfile.mkdtemp(prefix="mailquery-test-home-")
+atexit.register(shutil.rmtree, _ISOLATED_HOME, ignore_errors=True)
+
+
 def _env(home: Path | None = None) -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    if home is not None:
-        env["HOME"] = str(home)
+    isolated = str(home) if home is not None else _ISOLATED_HOME
+    env["HOME"] = isolated
+    env["USERPROFILE"] = isolated
     return env
 
 
@@ -40,6 +49,7 @@ def _run_sh(*arguments: str, home: Path | None = None) -> subprocess.CompletedPr
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_env(home),
         timeout=60,
     )
@@ -92,7 +102,7 @@ class ConfigTemplateTest(unittest.TestCase):
         self.assertEqual(config.scopes, ())
         self.assertFalse(config.has_scopes)
         self.assertEqual(config.logging.level, "info")
-        self.assertEqual(config.logging.retention_days, 7)
+        self.assertEqual(config.logging.max_size_mb, 10)
         self.assertEqual(config.search.default_limit, 20)
         self.assertEqual(config.search.max_scan, 5000)
         self.assertEqual(config.new.default_limit, 100)
@@ -120,6 +130,8 @@ class InstallShTest(unittest.TestCase):
             [SH, "-n", str(INSTALL_SH)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=_env(),
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -205,6 +217,8 @@ class InstallPs1Test(unittest.TestCase):
             [PWSH, "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=_env(),
             timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -223,10 +237,117 @@ class InstallPs1Test(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=_env(),
             timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Deployment plan", result.stdout + result.stderr)
+
+
+@unittest.skipUnless(sys.platform == "win32" and PWSH is not None, "UT-INS-01 runs only on win32 with PowerShell")
+class InstallPs1FinalCheckTest(unittest.TestCase):
+    """UT-INS-01: final check of install.ps1 with fake pipx and mailquery shims."""
+
+    GOOD_VERSION = "mailquery 2.0.0 (backend outlook; Python 3.14.0; Windows 10.0.26200 AMD64)"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.mkdtemp(prefix="mailquery-ins-")
+        cls.addClassCleanup(shutil.rmtree, cls._tmp, ignore_errors=True)
+        cls.venvs = Path(cls._tmp) / "venvs"
+        cls.venv = cls.venvs / "mailquery"
+        venv.create(cls.venv, with_pip=False)
+        cls.bin = Path(cls._tmp) / "bin"
+        cls.bin.mkdir()
+        (cls.bin / "pipx.cmd").write_text(
+            "@echo off\r\n"
+            'echo pipx %*>>"%MQ_FAKE_LOG%"\r\n'
+            'if "%~1"=="environment" echo %MQ_FAKE_VENVS%\r\n'
+            "exit /b 0\r\n",
+            encoding="ascii",
+        )
+        (cls.bin / "mailquery.cmd").write_text(
+            "@echo off\r\n"
+            'echo mailquery %*>>"%MQ_FAKE_LOG%"\r\n'
+            'if "%~1"=="-v" goto version\r\n'
+            "exit /b 0\r\n"
+            ":version\r\n"
+            "echo %MQ_FAKE_VERSION%\r\n"
+            "exit /b %MQ_FAKE_VERSION_RC%\r\n",
+            encoding="ascii",
+        )
+
+    def _site_packages_stub(self) -> Path:
+        return self.venv / "Lib" / "site-packages" / "win32com"
+
+    def _run(self, *, win32com_ok: bool, version: str, version_rc: int = 0):
+        stub = self._site_packages_stub()
+        shutil.rmtree(stub, ignore_errors=True)
+        if win32com_ok:
+            stub.mkdir(parents=True)
+            (stub / "__init__.py").write_text("", encoding="utf-8")
+        home = Path(tempfile.mkdtemp(prefix="home-", dir=self._tmp))
+        log = Path(self._tmp) / "calls.log"
+        log.write_text("", encoding="ascii")
+        env = _env(home)
+        env["PATH"] = str(self.bin) + os.pathsep + env.get("PATH", "")
+        env["MQ_FAKE_LOG"] = str(log)
+        env["MQ_FAKE_VENVS"] = str(self.venvs)
+        env["MQ_FAKE_VERSION"] = version
+        env["MQ_FAKE_VERSION_RC"] = str(version_rc)
+        assert PWSH is not None
+        result = subprocess.run(
+            [PWSH, "-NoProfile", "-NonInteractive", "-File", str(INSTALL_PS1)],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=120,
+        )
+        return result, home, log.read_text(encoding="ascii")
+
+    def test_ut_ins_01_01_win32com_import_failure_is_reported(self) -> None:
+        """UT-INS-01.01: import win32com fails in the venv => hint and exit != 0."""
+        result, _home, _calls = self._run(win32com_ok=False, version=self.GOOD_VERSION)
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("win32com", output)
+        self.assertIn("pipx reinstall mailquery", output)
+
+    def test_ut_ins_01_02_bad_version_output_is_reported(self) -> None:
+        """UT-INS-01.02: mailquery -v fails or lacks 'backend outlook' => hint and exit != 0."""
+        wrong, _home, _calls = self._run(
+            win32com_ok=True, version="mailquery 2.0.0 (backend apple_mail; Python 3.14.0)"
+        )
+        wrong_output = wrong.stdout + wrong.stderr
+        self.assertNotEqual(wrong.returncode, 0, wrong_output)
+        self.assertIn("pipx reinstall mailquery", wrong_output)
+        failing, _home, _calls = self._run(
+            win32com_ok=True, version=self.GOOD_VERSION, version_rc=1
+        )
+        failing_output = failing.stdout + failing.stderr
+        self.assertNotEqual(failing.returncode, 0, failing_output)
+        self.assertIn("pipx reinstall mailquery", failing_output)
+
+    def test_ut_ins_01_03_success_seeds_config_with_restricted_acl(self) -> None:
+        """UT-INS-01.03: everything fine => exit 0 and config.toml seeded with a restricted ACL."""
+        result, home, calls = self._run(win32com_ok=True, version=self.GOOD_VERSION)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("only runs on macOS", output)
+        config = home / ".mailquery" / "config.toml"
+        self.assertTrue(config.is_file(), output)
+        self.assertEqual(config.read_text(encoding="utf-8"), TEMPLATE.read_text(encoding="utf-8"))
+        acl = subprocess.run(
+            ["icacls", str(config)], capture_output=True, text=True, encoding="utf-8", timeout=30
+        )
+        self.assertEqual(acl.returncode, 0, acl.stderr)
+        self.assertNotIn("(I)", acl.stdout, "inherited ACEs must be removed")
+        self.assertIn(os.environ.get("USERNAME", ""), acl.stdout)
+        self.assertIn("mailquery --help", calls)
+        self.assertIn("mailquery doctor", calls)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs
