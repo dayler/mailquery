@@ -1,7 +1,7 @@
 # Receta 02 — Búsqueda de facturas (`search-invoices`)
 
 > Receta/precepto para el harness. Es la misma en macOS (Apple Mail) y en
-> Windows (Outlook clásico). Documentación general: [`../../README.md`](../../README.md).
+> Windows (Outlook clásico). Documentación general: [`../../README.es.md`](../../README.es.md).
 > PRD de referencia: §6.2 (`--text`, fechas, adjuntos), §12.2 (`search`) y §21
 > (operación con el harness).
 
