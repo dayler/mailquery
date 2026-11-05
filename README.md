@@ -109,7 +109,7 @@ aplica al equipo:
 
 | Prueba | Se salta cuando |
 |--------|-----------------|
-| `tests/test_smoke.py` (SMOKE-INSTALL, SMOKE-NEW) | Linux; Windows sin Outlook clásico abierto; macOS sin store de Apple Mail (`V9`/`V10`/`V11`) en `~/Library/Mail`; `pipx` no está en el `PATH` |
+| `tests/test_smoke.py` (SMOKE-INSTALL, SMOKE-NEW) | Linux; Windows sin Outlook clásico abierto; macOS sin store de Apple Mail (`V9`/`V10`/`V11`) en `~/Library/Mail` o sin ninguna cuenta con buzón incluido (p. ej. solo `On My Device`); `pipx` no está en el `PATH` |
 | `InstallShTest` | no hay `sh` en el `PATH` (habitual en PowerShell) |
 | `InstallPs1Test` | no hay PowerShell (`pwsh`) |
 | `UT-INS-01`, `OL-05.02` | el SO no es Windows |
