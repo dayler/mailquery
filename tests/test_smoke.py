@@ -3,8 +3,8 @@
 These are the only tests that read the installed Outlook / Apple Mail (PRD 13.2, 23.2,
 annex B.10). They install the package with ``pipx`` into temporary pipx dirs, run the
 installed ``mailquery`` with a temporary HOME/USERPROFILE and skip (never fail) where
-they do not apply: Linux, Windows without classic Outlook running, macOS without
-``~/Library/Mail``.
+they do not apply: Linux, Windows without classic Outlook running, macOS without an
+Apple Mail store (V9/V10/V11) under ``~/Library/Mail``.
 """
 
 import json
@@ -48,13 +48,38 @@ def _outlook_running() -> bool:
     return "OUTLOOK.EXE" in out.upper()
 
 
+def _apple_mail_store_missing(mail_root: Path) -> bool:
+    """True when ``mail_root`` holds no supported store (V9/V10/V11 with an Envelope Index).
+
+    A ``~/Library/Mail`` without a store (e.g. the GitHub macOS runner) is not an Apple
+    Mail host. A listing denied by TCC is *not* treated as missing: the store may be
+    there and the failure (no Full Disk Access) must surface.
+    """
+    try:
+        entries = list(mail_root.iterdir())
+    except PermissionError:
+        return False
+    except OSError:
+        return True
+    for entry in entries:
+        if entry.name in ("V9", "V10", "V11"):
+            try:
+                if (entry / "MailData" / "Envelope Index").is_file():
+                    return False
+            except PermissionError:
+                return False
+            except OSError:
+                continue
+    return True
+
+
 def _skip_reason() -> str | None:
     if sys.platform == "win32":
         if not _outlook_running():
             return "classic Outlook (OUTLOOK.EXE) is not running"
     elif sys.platform == "darwin":
-        if not (REAL_HOME / "Library" / "Mail").is_dir():
-            return "no ~/Library/Mail"
+        if _apple_mail_store_missing(REAL_HOME / "Library" / "Mail"):
+            return "no Apple Mail store (V9/V10/V11) under ~/Library/Mail"
     else:
         return "SMOKE applies only to Windows and macOS"
     if shutil.which("pipx") is None:
