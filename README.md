@@ -20,7 +20,8 @@ para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
 Referencias: [`docs/PRD.md`](docs/PRD.md) (producto y contrato),
 [`docs/recipes/`](docs/recipes/) (recetas para el harness),
 [`docs/config.example.toml`](docs/config.example.toml) y
-[`docs/INTERFACES.md`](docs/INTERFACES.md) (desarrollo y pruebas).
+[`docs/INTERFACES.md`](docs/INTERFACES.md) (desarrollo y pruebas) y
+[`docs/PERFORMANCE-BACKLOG.md`](docs/PERFORMANCE-BACKLOG.md) (rendimiento pendiente).
 
 ## Requisitos
 

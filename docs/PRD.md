@@ -1101,6 +1101,11 @@ Presupuestos p95 por backend:
 | `show` | < 150 ms | < 500 ms |
 | `search --text` acotado (≤ 500 candidatos) | < 3 s | < 10 s |
 
+**Pendiente conocido (abierto, no resuelto en 2.0.0):** en macOS, `mailboxes` y `show`
+superan este presupuesto en stores grandes (medido con 44 carpetas y 148.054 mensajes).
+No se corrige en esta versión; el análisis, la medición reproducible y los criterios de
+cierre están en [`docs/PERFORMANCE-BACKLOG.md`](PERFORMANCE-BACKLOG.md).
+
 ---
 
 ## 20. Criterios de aceptación
