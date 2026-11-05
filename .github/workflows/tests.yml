@@ -75,6 +75,16 @@ jobs:
         shell: bash
         run: shellcheck --severity=error scripts/install.sh
 
+      - name: Validate and dry-run skills/install.sh
+        if: matrix.kind == 'sh'
+        shell: bash
+        run: |
+          sh -n skills/install.sh
+          sh skills/install.sh --help > /dev/null
+          sh skills/install.sh --dry-run --harness dsh --scope project
+          sh skills/install.sh --dry-run --path "$RUNNER_TEMP/mq-skills-test"
+          shellcheck --severity=error skills/install.sh
+
       - name: Validate and dry-run scripts/install.ps1
         if: matrix.kind == 'ps1'
         shell: pwsh
@@ -88,4 +98,18 @@ jobs:
           }
           ./scripts/install.ps1 -DryRun -NoConfig
           ./scripts/install.ps1 -PrintConfig > $null
+
+      - name: Validate and dry-run skills/install.ps1
+        if: matrix.kind == 'ps1'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "skills/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          ./skills/install.ps1 -Help | Out-Null
+          ./skills/install.ps1 -Path "$env:TEMP\mq-skills-test" -DryRun
 

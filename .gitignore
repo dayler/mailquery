@@ -18,6 +18,9 @@ htmlcov/
 .ruff_cache/
 .vscode/
 
+# Harness skills installed locally by skills/install.sh (source of truth: skills/)
+.dsh/
+
 # Generated at test runtime (synthetic Apple Mail store fixtures)
 tests/fixtures/generated/
 
