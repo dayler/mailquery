@@ -335,7 +335,7 @@ class HelpContractTests(_CliTestCase):
         examples = {
             "doctor": "mailquery doctor --json",
             "mailboxes": "mailquery mailboxes",
-            "search": 'mailquery search --text "*factura*" --since 1mo',
+            "search": 'mailquery search --text "*invoice*" --since 1mo',
             "new": "mailquery new --peek",
             "show": "mailquery show 83143",
         }
