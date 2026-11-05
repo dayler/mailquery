@@ -20,8 +20,9 @@ para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
 Referencias: [`docs/PRD.md`](docs/PRD.md) (producto y contrato),
 [`docs/recipes/`](docs/recipes/) (recetas para el harness),
 [`docs/config.example.toml`](docs/config.example.toml) y
-[`docs/INTERFACES.md`](docs/INTERFACES.md) (desarrollo y pruebas) y
-[`docs/PERFORMANCE-BACKLOG.md`](docs/PERFORMANCE-BACKLOG.md) (rendimiento pendiente).
+[`docs/INTERFACES.md`](docs/INTERFACES.md) (desarrollo y pruebas),
+[`docs/PERFORMANCE-BACKLOG.md`](docs/PERFORMANCE-BACKLOG.md) (rendimiento pendiente) y
+[`skills/README.md`](skills/README.md) (skill para harnesses).
 
 ## Requisitos
 
@@ -72,6 +73,25 @@ En Windows, el borrado opcional es `Remove-Item -Recurse -Force $HOME\.mailquery
 (o `.\scripts\install.ps1 -Uninstall -Purge`). `pipx uninstall` no toca
 `~/.mailquery`. Para ejecutar sin instalar, ver
 [`docs/INTERFACES.md` §8](docs/INTERFACES.md).
+
+## Skill para harnesses de IA (`skills/`)
+
+El repositorio incluye un skill listo para harnesses (DeepSeek Harness, Claude Code) que
+enseña al agente a usar el CLI: contrato JSON, reglas de solo lectura y cuerpos no
+confiables. No forma parte del paquete Python ni hace falta para usar la app.
+
+```bash
+# macOS / Linux
+./skills/install.sh
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File skills\install.ps1
+```
+
+Detecta los harnesses instalados, muestra un menú (cada harness detectado, ruta
+personalizada o instalar en todos) y copia `skills/mailquery/SKILL.md` a la raíz de
+skills del harness. Modo no interactivo: `./skills/install.sh --harness dsh --scope
+project`, `--all`, `--path DIR`, `--dry-run`, `--force`. Detalle en
+[`skills/README.md`](skills/README.md).
 
 ## Ejecutar los tests
 
