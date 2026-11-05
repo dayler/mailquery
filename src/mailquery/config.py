@@ -385,7 +385,7 @@ def _parse_scopes(value: Any) -> tuple[ScopeEntry, ...]:
         if not isinstance(raw_refs, list):
             raise config_error(
                 f"{display}.mailbox_list must be an array of strings",
-                'write it as a TOML array, e.g. mailbox_list = ["Facturas", "Archivo"]',
+                'write it as a TOML array, e.g. mailbox_list = ["Invoices", "Archive"]',
                 "invalid mailbox_list in config.toml",
             )
         refs: list[str] = []

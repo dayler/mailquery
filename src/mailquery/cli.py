@@ -64,7 +64,7 @@ Examples:
   mailquery doctor                     environment and read-only preflight
   mailquery mailboxes                  accounts, folders and included flags
   mailquery search --since 1w --unread
-  mailquery search --text "*factura*" --since 1mo
+  mailquery search --text "*invoice*" --since 1mo
   mailquery new --peek
   mailquery show 83143
 
@@ -102,7 +102,7 @@ _SEARCH_EPILOG = """\
 Matching:
   Patterns are case- and accent-insensitive; * matches any sequence and ? one
   character; without wildcards the value is matched as a substring anywhere in
-  the text. A pattern is not anchored: factura* also matches "la factura".
+  the text. A pattern is not anchored: invoice* also matches "the invoice".
   --subject: words separated by spaces are AND terms, with or without wildcards.
   --text, --from, --to and --cc: the whole value is one pattern, spaces included.
   Repeating a flag is AND too. An empty value does not filter.
@@ -111,7 +111,7 @@ Examples:
   mailquery search --since 1w
   mailquery search --since 2w --unread
   mailquery search --from "*@bank.com*" --since 2mo
-  mailquery search --text "*factura*" --since 1mo --has-attachments
+  mailquery search --text "*invoice*" --since 1mo --has-attachments
 
 Notes:
   --text needs a narrowing filter: --since, --until, --subject, --from or an extra
@@ -701,7 +701,7 @@ def _parse_include_mailboxes(values: Sequence[str] | None) -> tuple[str, ...]:
         raise MailqueryError(
             "E_USAGE",
             "--include-mailbox requires at least one mailbox",
-            "pass a mailbox name, path or URL, e.g. --include-mailbox Facturas",
+            "pass a mailbox name, path or URL, e.g. --include-mailbox Invoices",
         )
     return tuple(refs)
 
