@@ -927,11 +927,16 @@ class OutlookComErrorTests(_OutlookCliCase):
         fake = fk.FakeOutlook.default()
         backend = _backend(fake)
         fake.reject_next(times=1)
-        started = time.monotonic()
-        info = backend.describe()
-        elapsed = time.monotonic() - started
+        from mailquery.backends import outlook_com
+
+        # The 100 ms wait is checked on the sleep call itself, not with a wall clock:
+        # time.monotonic() ticks every ~15.6 ms on some Windows runners.
+        with mock.patch.object(outlook_com.time, "sleep", wraps=time.sleep) as sleep:
+            info = backend.describe()
         self.assertEqual(info["version"], fk.DEFAULT_VERSION)
-        self.assertGreaterEqual(elapsed, 0.095)
+        self.assertEqual(outlook_com.RETRY_DELAY_SECONDS, 0.1)
+        retry_waits = [c for c in sleep.call_args_list if c == mock.call(outlook_com.RETRY_DELAY_SECONDS)]
+        self.assertEqual(len(retry_waits), 1)
         self.assertEqual(fake.call_log.count(kind="Application", member="Version"), 2)
 
     def test_ol_03_03_transient_rejection_twice_is_client_busy_exit_5(self) -> None:
