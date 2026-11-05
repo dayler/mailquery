@@ -1,84 +1,86 @@
 # mailquery
 
-`mailquery` es una herramienta de línea de comandos (Python, solo biblioteca
-estándar salvo `pywin32` en Windows) que **lee y busca correo local sin
-modificar nada**: Apple Mail en macOS y Outlook clásico en Windows. Está pensada
-para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
+> [English](README.md) · [Español](README.es.md)
 
-- **Un único objeto JSON por ejecución** en `stdout` (no existe `--format`).
-  Excepciones: `--help`, `--version` y el informe de texto de `doctor`.
-- **Solo lectura** (invariante I-1): no marca leído, no mueve, no borra, no
-  envía, no descarga adjuntos y **no lanza** Mail.app ni Outlook. Solo escribe
-  dentro de `~/.mailquery` (estado, logs, locks y temporales).
-- **Sin red, sin demonio y sin scheduler**: quien decide cuándo ejecutarla es
-  el harness.
-- **Mismos comandos y mismo JSON en ambas plataformas.** En macOS la solo
-  lectura es estructural (SQLite y `.emlx` abiertos en solo lectura); en Windows
-  la impone un proxy de lista blanca sobre el modelo de objetos de Outlook. El
-  `uid` es un entero en macOS y un string hexadecimal en Windows.
+`mailquery` is a command-line tool (Python, standard library only except
+`pywin32` on Windows) that **reads and searches local mail without modifying
+anything**: Apple Mail on macOS and classic Outlook on Windows. It is meant for
+an agent harness to invoke it **on demand** and consume its output.
 
-Referencias: [`docs/PRD.md`](docs/PRD.md) (producto y contrato),
-[`docs/recipes/`](docs/recipes/) (recetas para el harness),
-[`docs/config.example.toml`](docs/config.example.toml) y
-[`docs/INTERFACES.md`](docs/INTERFACES.md) (desarrollo y pruebas),
-[`docs/PERFORMANCE-BACKLOG.md`](docs/PERFORMANCE-BACKLOG.md) (rendimiento pendiente) y
-[`skills/README.md`](skills/README.md) (skill para harnesses).
+- **One JSON object per run** on `stdout` (there is no `--format`).
+  Exceptions: `--help`, `--version` and the `doctor` text report.
+- **Read-only** (invariant I-1): it does not mark as read, move, delete, send,
+  download attachments or **launch** Mail.app or Outlook. It only writes inside
+  `~/.mailquery` (state, logs, locks and temporaries).
+- **No network, no daemon and no scheduler**: the harness decides when to run it.
+- **Same commands and same JSON on both platforms.** On macOS read-only access is
+  structural (SQLite and `.emlx` opened read-only); on Windows it is enforced by a
+  whitelist proxy over Outlook's object model. The `uid` is an integer on macOS
+  and a hexadecimal string on Windows.
 
-## Requisitos
+References: [`docs/PRD.md`](docs/PRD.md) (product and contract),
+[`docs/recipes/`](docs/recipes/) (recipes for the harness),
+[`docs/config.example.toml`](docs/config.example.toml) and
+[`docs/INTERFACES.md`](docs/INTERFACES.md) (development and tests),
+[`docs/PERFORMANCE-BACKLOG.md`](docs/PERFORMANCE-BACKLOG.md) (pending performance work)
+and [`skills/README.md`](skills/README.md) (skill for harnesses).
 
-| Requisito | macOS | Windows |
-|-----------|-------|---------|
-| Sistema | macOS con Apple Mail (store `V9`/`V10`/`V11`) | Windows 10/11 x64 con Outlook **clásico** 16.0 **abierto** |
-| Python | ≥ 3.11 (el que use `pipx`) | ≥ 3.11 (el que use `pipx`) |
+## Requirements
+
+| Requirement | macOS | Windows |
+|-------------|-------|---------|
+| System | macOS with Apple Mail (store `V9`/`V10`/`V11`) | Windows 10/11 x64 with **classic** Outlook 16.0 **open** |
+| Python | ≥ 3.11 (the one used by `pipx`) | ≥ 3.11 (the one used by `pipx`) |
 | `pipx` | `brew install pipx && pipx ensurepath` | `python -m pip install --user pipx && python -m pipx ensurepath` |
-| Dependencias | Ninguna | `pywin32` (la instala `pipx`) |
-| Permisos | **Acceso total al disco** (FDA) | Misma sesión y mismo nivel de integridad que Outlook |
+| Dependencies | None | `pywin32` (installed by `pipx`) |
+| Permissions | **Full Disk Access** (FDA) | Same session and same integrity level as Outlook |
 
-No se soportan el nuevo Outlook (`olk`), Outlook en la web, Outlook para Mac ni
-otros clientes. Linux solo sirve para desarrollo y CI.
+The new Outlook (`olk`), Outlook on the web, Outlook for Mac and other clients
+are not supported. Linux is only used for development and CI.
 
-## Instalar, actualizar y desinstalar
+## Install, upgrade and uninstall
 
 ```bash
-pipx install .          # desde la raíz del repo (macOS o Windows)
+pipx install .          # from the repository root (macOS or Windows)
 mailquery --help
-mailquery doctor        # crea ~/.mailquery y valida el entorno
+mailquery doctor        # creates ~/.mailquery and validates the environment
 ```
 
-Los instaladores automatizan `pipx` y siembran `~/.mailquery/config.toml` desde
-[`docs/config.example.toml`](docs/config.example.toml) **solo si no existe** (la
-aplicación nunca crea ni modifica la configuración):
+The installers automate `pipx` and seed `~/.mailquery/config.toml` from
+[`docs/config.example.toml`](docs/config.example.toml) **only if it does not
+exist** (the application never creates or modifies the configuration):
 
 ```bash
 scripts/install.sh [--dry-run]          # macOS
 ```
 
 ```powershell
-.\scripts\install.ps1 [-DryRun]         # Windows (o doble clic en install.bat)
+.\scripts\install.ps1 [-DryRun]         # Windows (or double-click install.bat)
 ```
 
-Opciones: `--no-config`/`-NoConfig`, `--force-config`/`-ForceConfig` (guarda un
-`.bak`), `--python`/`-Python`, `--from-git`/`-FromGit`. Al terminar,
-`install.ps1` comprueba que `pywin32` se importa desde el venv de `pipx` y que
-`mailquery -v` muestra `backend outlook`; si falla, indica
-`pipx reinstall mailquery` y termina con un código distinto de 0.
+Options: `--no-config`/`-NoConfig`, `--force-config`/`-ForceConfig` (keeps a
+`.bak`), `--python`/`-Python`, `--from-git`/`-FromGit`. When it finishes,
+`install.ps1` checks that `pywin32` imports from the `pipx` venv and that
+`mailquery -v` shows `backend outlook`; if it fails, it points to
+`pipx reinstall mailquery` and exits with a non-zero code.
 
 ```bash
-git pull && pipx reinstall mailquery    # actualizar; luego: mailquery doctor
-pipx uninstall mailquery                # desinstalar el comando
-rm -rf ~/.mailquery                     # opcional: borra estado, logs y configuración
+git pull && pipx reinstall mailquery    # upgrade; then: mailquery doctor
+pipx uninstall mailquery                # uninstall the command
+rm -rf ~/.mailquery                     # optional: remove state, logs and configuration
 ```
 
-En Windows, el borrado opcional es `Remove-Item -Recurse -Force $HOME\.mailquery`
-(o `.\scripts\install.ps1 -Uninstall -Purge`). `pipx uninstall` no toca
-`~/.mailquery`. Para ejecutar sin instalar, ver
+On Windows the optional removal is `Remove-Item -Recurse -Force $HOME\.mailquery`
+(or `.\scripts\install.ps1 -Uninstall -Purge`). `pipx uninstall` does not touch
+`~/.mailquery`. To run without installing, see
 [`docs/INTERFACES.md` §8](docs/INTERFACES.md).
 
-## Skill para harnesses de IA (`skills/`)
+## Skill for AI harnesses (`skills/`)
 
-El repositorio incluye un skill listo para harnesses (DeepSeek Harness, Claude Code) que
-enseña al agente a usar el CLI: contrato JSON, reglas de solo lectura y cuerpos no
-confiables. No forma parte del paquete Python ni hace falta para usar la app.
+The repository ships a skill ready for harnesses (DeepSeek Harness, Claude Code)
+that teaches the agent to use the CLI: JSON contract, read-only rules and
+untrusted bodies. It is not part of the Python package and is not needed to use
+the app.
 
 ```bash
 # macOS / Linux
@@ -87,125 +89,124 @@ confiables. No forma parte del paquete Python ni hace falta para usar la app.
 powershell -ExecutionPolicy Bypass -File skills\install.ps1
 ```
 
-Detecta los harnesses instalados, muestra un menú (cada harness detectado, ruta
-personalizada o instalar en todos) y copia `skills/mailquery/SKILL.md` a la raíz de
-skills del harness. Modo no interactivo: `./skills/install.sh --harness dsh --scope
-project`, `--all`, `--path DIR`, `--dry-run`, `--force`. Detalle en
+It detects the installed harnesses, shows a menu (each detected harness, a custom
+path, or install in all) and copies `skills/mailquery/SKILL.md` into the harness
+skill root. Non-interactive mode: `./skills/install.sh --harness dsh --scope
+project`, `--all`, `--path DIR`, `--dry-run`, `--force`. Details in
 [`skills/README.md`](skills/README.md).
 
-## Ejecutar los tests
+## Running the tests
 
-Los tests se ejecutan **desde el clon del repositorio** con un Python ≥ 3.11;
-`tests/` no forma parte del paquete que instala `pipx`. Se pueden correr antes
-o después de instalar: la suite importa el código de `src/` y **no usa** la
-copia instalada ni toca el `~/.mailquery` real (cada test usa un `HOME`
-temporal). Solo `unittest` de la biblioteca estándar; no hace falta `pytest`.
+The tests run **from the repository clone** with Python ≥ 3.11; `tests/` is not
+part of the package installed by `pipx`. They can run before or after installing:
+the suite imports the code from `src/` and **does not use** the installed copy nor
+touch the real `~/.mailquery` (every test uses a temporary `HOME`). Standard
+library `unittest` only; `pytest` is not needed.
 
-**Windows** (PowerShell, desde la raíz del repo):
+**Windows** (PowerShell, from the repository root):
 
 ```powershell
-python -m pip install --user pywin32                      # una vez, como en la CI
-python -B -m unittest discover -s tests -t . -v           # suite completa
-python -B -m unittest discover -s tests -t . -k ol_02_05  # un caso por ID
-python -B -m unittest tests.test_outlook -v               # un módulo
+python -m pip install --user pywin32                      # once, as in CI
+python -B -m unittest discover -s tests -t . -v           # full suite
+python -B -m unittest discover -s tests -t . -k ol_02_05  # one case by ID
+python -B -m unittest tests.test_outlook -v               # one module
 ```
 
-**macOS** (Terminal, desde la raíz del repo; el `python3` del sistema es
-anterior a 3.11, se usa el de Homebrew con `brew install python`):
+**macOS** (Terminal, from the repository root; the system `python3` is older
+than 3.11, so use the Homebrew one with `brew install python`):
 
 ```bash
-python3 -B -m unittest discover -s tests -t . -v           # suite completa
-python3 -B -m unittest discover -s tests -t . -k st_03_01  # un caso por ID
-python3 -B -m unittest tests.test_store -v                 # un módulo
+python3 -B -m unittest discover -s tests -t . -v           # full suite
+python3 -B -m unittest discover -s tests -t . -k st_03_01  # one case by ID
+python3 -B -m unittest tests.test_store -v                 # one module
 ```
 
-**Linux** (solo desarrollo y CI; mismos comandos que macOS con `python3` ≥ 3.11):
+**Linux** (development and CI only; same commands as macOS with `python3` ≥ 3.11):
 
 ```bash
 python3 -B -m unittest discover -s tests -t . -v
 ```
 
-Resultado esperado: `OK`, con saltos (`skipped=N`) solo donde la prueba no
-aplica al equipo:
+Expected result: `OK`, with skips (`skipped=N`) only where the test does not
+apply to the machine:
 
-| Prueba | Se salta cuando |
-|--------|-----------------|
-| `tests/test_smoke.py` (SMOKE-INSTALL, SMOKE-NEW) | Linux; Windows sin Outlook clásico abierto; macOS sin store de Apple Mail (`V9`/`V10`/`V11`) en `~/Library/Mail` o sin ninguna cuenta con buzón incluido (p. ej. solo `On My Device`); `pipx` no está en el `PATH` |
-| `InstallShTest` | no hay `sh` en el `PATH` (habitual en PowerShell) |
-| `InstallPs1Test` | no hay PowerShell (`pwsh`) |
-| `UT-INS-01`, `OL-05.02` | el SO no es Windows |
+| Test | Skipped when |
+|------|--------------|
+| `tests/test_smoke.py` (SMOKE-INSTALL, SMOKE-NEW) | Linux; Windows without classic Outlook open; macOS without an Apple Mail store (`V9`/`V10`/`V11`) under `~/Library/Mail` or without any account that exposes an included mailbox (e.g. only `On My Device`); `pipx` is not on the `PATH` |
+| `InstallShTest` | `sh` is not on the `PATH` (usual in PowerShell) |
+| `InstallPs1Test` | PowerShell (`pwsh`) is not available |
+| `UT-INS-01`, `OL-05.02` | the OS is not Windows |
 
-Las pruebas SMOKE son las únicas que leen el cliente de correo real, siempre en
-solo lectura: instalan `mailquery` con `pipx` en directorios temporales (no
-tocan tu instalación), ejecutan los comandos y comprueban que los no leídos no
-cambian y que se cumplen los tiempos de §19 del PRD. Tardan unos minutos. En
-macOS, la app de terminal que las ejecuta necesita **Acceso total al disco**.
-Para correr solo las SMOKE:
+The SMOKE tests are the only ones that read the real mail client, always
+read-only: they install `mailquery` with `pipx` into temporary directories (they
+do not touch your installation), run the commands and check that the unread
+counters do not change and that the PRD §19 timings are met. They take a few
+minutes. On macOS the terminal app running them needs **Full Disk Access**. To
+run only the SMOKE tests:
 
 ```bash
-python -B -m unittest tests.test_smoke -v    # python3 en macOS
+python -B -m unittest tests.test_smoke -v    # python3 on macOS
 ```
 
-Convenciones (nombres por ID de caso, goldens, Outlook falso, CI): ver
+Conventions (case-ID names, goldens, fake Outlook, CI): see
 [`docs/INTERFACES.md` §8](docs/INTERFACES.md).
 
-## Primeros pasos
+## Getting started
 
 ```bash
-mailquery doctor        # 1. preflight: entorno, solo lectura, config, estado, lock
-mailquery mailboxes     # 2. cuentas y carpetas, con la etiqueta que usará la config
-# 3. declara al menos una cuenta en ~/.mailquery/config.toml
-mailquery doctor        # 4. vuelve a validar
+mailquery doctor        # 1. preflight: environment, read-only, config, state, lock
+mailquery mailboxes     # 2. accounts and folders, with the label the config will use
+# 3. declare at least one account in ~/.mailquery/config.toml
+mailquery doctor        # 4. validate again
 mailquery search --since 1w
 ```
 
-Sin cuentas declaradas, `search` y `new` devuelven `count: 0` con
-`W_NO_ACCOUNTS`: no es un error, solo no hay nada que observar.
+Without declared accounts, `search` and `new` return `count: 0` with
+`W_NO_ACCOUNTS`: it is not an error, there is simply nothing to observe.
 
-## Configuración (`~/.mailquery/config.toml`)
+## Configuration (`~/.mailquery/config.toml`)
 
-Es **opcional** y su formato es idéntico en ambas plataformas. Solo se leen las
-cuentas declaradas; dentro de cada una, `INBOX` se incluye siempre y
-`mailbox_list` añade carpetas extra. Una clave desconocida da `E_CONFIG_INVALID`
-(exit 2). Mínimo en macOS y su equivalente en Windows:
+It is **optional** and its format is identical on both platforms. Only declared
+accounts are read; inside each one, `INBOX` is always included and
+`mailbox_list` adds extra folders. An unknown key gives `E_CONFIG_INVALID`
+(exit 2). Minimal example on macOS and its Windows equivalent:
 
 ```toml
 [scope."iCloud (you@gmail.com)"]                      # macOS
-mailbox_list = ["Facturas"]
+mailbox_list = ["Invoices"]
 
 [scope."Exchange (you@company.com)"]         # Windows
-mailbox_list = ["INBOX/Facturas"]
+mailbox_list = ["INBOX/Invoices"]
 ```
 
-La clave de cada bloque es la etiqueta que muestra `mailquery mailboxes`, el
-email si es único o el UUID (o un prefijo de ≥ 8 caracteres); con espacios,
-puntos o `@` va entre comillas. Todas las propiedades (`[logging]`, `[search]`,
-`[new]`, cuentas) están en [`docs/config.example.toml`](docs/config.example.toml)
-y en el PRD §15. Precedencia: flags de la CLI, `config.toml`, defaults. La
-rotación diaria del log de la 1.x se reemplazó por `[logging].max_size_mb`; la
-clave retirada da `E_CONFIG_INVALID` con el hint
-`retention_days was replaced by max_size_mb`.
+Each block's key is the label shown by `mailquery mailboxes`, the email if it is
+unique, or the UUID (or a prefix of ≥ 8 characters); with spaces, dots or `@` it
+must be quoted. All properties (`[logging]`, `[search]`, `[new]`, accounts) are
+in [`docs/config.example.toml`](docs/config.example.toml) and in PRD §15.
+Precedence: CLI flags, `config.toml`, defaults. The 1.x daily log rotation was
+replaced by `[logging].max_size_mb`; the retired key gives `E_CONFIG_INVALID`
+with the hint `retention_days was replaced by max_size_mb`.
 
-## Comandos
+## Commands
 
-Opciones globales: `-h`/`--help` (también por comando), `-v`/`--version` (solo
-antes del subcomando) y `--log-level {error,warning,info,debug}`. No existen
-`--format`, `--config`, `--home` ni `--backend`. Los ejemplos de abajo son salidas
-reales de la 2.0.0, recortadas con `…`.
+Global options: `-h`/`--help` (also per command), `-v`/`--version` (only before
+the subcommand) and `--log-level {error,warning,info,debug}`. There is no
+`--format`, `--config`, `--home` or `--backend`. The examples below are based on
+real 2.0.0 output, trimmed with `…`.
 
 ### `mailquery -v`
 
 ```text
-$ mailquery -v          # sin efectos: no crea ~/.mailquery ni abre el cliente
+$ mailquery -v          # no side effects: does not create ~/.mailquery nor open the client
 mailquery 2.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64)
 ```
 
 ### `mailquery doctor [--json]`
 
-Informe de texto (con `--json`, el payload máquina con `checks[]`). Sale con
-exit 0 si puede diagnosticar; un chequeo fallido se marca `[FAIL]`. En macOS los
-chequeos son `python`, `home`, `store`, `envelope_index`, `schema`,
-`readonly_strategy`, `accounts_db`, `config`, `state` y `lock`. En Windows:
+Text report (with `--json`, the machine payload with `checks[]`). It exits 0 if
+it can diagnose; a failed check is marked `[FAIL]`. On macOS the checks are
+`python`, `home`, `store`, `envelope_index`, `schema`, `readonly_strategy`,
+`accounts_db`, `config`, `state` and `lock`. On Windows:
 
 ```text
 $ mailquery doctor
@@ -217,7 +218,7 @@ Checks:
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)
   [ok]   stores              1 candidate(s): Exchange (ana.perez@example.com) [Exchange]; 1
-                             excluded: Exchange shared (Soporte) [shared_mailbox]
+                             excluded: Exchange shared (Support) [shared_mailbox]
   [ok]   readonly_strategy   com_readonly: read-only whitelist proxy active, attached with …
   [ok]   object_model_guard  no Outlook security policy decides; active antivirus: Fake Defender
   …
@@ -230,10 +231,10 @@ Result: 10/10 checks passed
 
 ### `mailquery mailboxes`
 
-Cuentas, carpetas, contadores y si están incluidas en el alcance
-(`included`). `excluded_stores` lista, solo en Windows, los stores que no se
-leen y el motivo (`shared_mailbox`, `public_folders`, `online_mode`,
-`network_path`, `unsupported_account_type`, `unavailable`); en macOS es `[]`.
+Accounts, folders, counters and whether they are included in the scope
+(`included`). `excluded_stores` lists, on Windows only, the stores that are not
+read and the reason (`shared_mailbox`, `public_folders`, `online_mode`,
+`network_path`, `unsupported_account_type`, `unavailable`); on macOS it is `[]`.
 
 ```json
 {
@@ -246,24 +247,24 @@ leen y el motivo (`shared_mailbox`, `public_folders`, `online_mode`,
      "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX", "total": 3, "unread": 2, "included": true},
     …
   ],
-  "excluded_stores": [{"label": "Exchange shared (Soporte)", "path": null, "reason": "shared_mailbox"}],
+  "excluded_stores": [{"label": "Exchange shared (Support)", "path": null, "reason": "shared_mailbox"}],
   "warnings": []
 }
 ```
 
 ### `mailquery search`
 
-Filtros: `--subject`, `--text`, `--from`, `--to`, `--cc`, `--since`, `--until`,
-`--unread`, `--flagged`, `--has-attachments`, `--include-mailbox` y `--limit`
-(default 20, máx. 200). Los patrones son subcadenas con comodines `*` y `?`,
-sin distinguir mayúsculas ni acentos; en `--subject`, los términos separados por
-espacios son AND. Fechas: ISO 8601 o relativas (`30min`, `24h`, `7d`, `1w`,
-`1mo`, `1y`, `today`, `yesterday`); `--since` incluye y `--until` excluye.
+Filters: `--subject`, `--text`, `--from`, `--to`, `--cc`, `--since`, `--until`,
+`--unread`, `--flagged`, `--has-attachments`, `--include-mailbox` and `--limit`
+(default 20, max 200). Patterns are substrings with the wildcards `*` and `?`,
+case- and accent-insensitive; in `--subject`, space-separated terms are AND.
+Dates: ISO 8601 or relative (`30min`, `24h`, `7d`, `1w`, `1mo`, `1y`, `today`,
+`yesterday`); `--since` is inclusive and `--until` exclusive.
 
-Ejemplos: `mailquery search --since 1w --unread` y
-`mailquery search --text "*factura*" --since 1mo --has-attachments`.
+Examples: `mailquery search --since 1w --unread` and
+`mailquery search --text "*invoice*" --since 1mo --has-attachments`.
 
-Salida de `mailquery search --since 1w` (Windows; `uid` recortado):
+Output of `mailquery search --since 1w` (Windows; `uid` trimmed):
 
 ```json
 {
@@ -274,11 +275,11 @@ Salida de `mailquery search --since 1w` (Windows; `uid` recortado):
   "messages": [
     {
       "uid": "00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…",
-      "subject": "Factura octubre 2026",
-      "from": {"name": "Proveedor SA", "address": "facturas@proveedor.example"},
+      "subject": "October 2026 invoice",
+      "from": {"name": "Supplier Inc", "address": "invoices@supplier.example"},
       "date_received": "2026-11-02T09:54:09-04:00",
       "has_attachments": true,
-      "snippet": "Estimado cliente, adjuntamos la factura de octubre.",
+      "snippet": "Dear customer, please find the October invoice attached.",
       "body": {"available": true, "readable": true, "partial": false, "truncated": false},
       …
     },
@@ -289,29 +290,28 @@ Salida de `mailquery search --since 1w` (Windows; `uid` recortado):
 }
 ```
 
-`--text` lee el cuerpo de cada candidato, así que **exige acotar** con
-`--since`/`--until`, `--from`, `--subject` o una carpeta extra (`--include-mailbox`
-o una carpeta de `mailbox_list` distinta de INBOX); si no, falla con
-`E_UNBOUNDED_SCAN` (exit 4). Si quedan más de `[search].max_scan` candidatos
-(default 5000), falla con `E_SCAN_TOO_LARGE` (exit 4). En Windows, `--to` y `--cc`
-**no acotan** `--text` (comprobarlos obliga a abrir cada mensaje); en macOS sí.
-`--include-mailbox` solo acepta carpetas de cuentas declaradas. `scan.mode` es
-`metadata` o `text`. En macOS, `--text "*factura*" --since 1mo` devuelve, entre
-otros campos, `"scan": {"mode": "text", "candidates": 12, "messages_read": 11, …}`
-y warnings como
-`W_EMLX_MISSING: no .emlx file for uid 83170`.
+`--text` reads the body of every candidate, so it **requires narrowing** with
+`--since`/`--until`, `--from`, `--subject` or an extra folder
+(`--include-mailbox` or a `mailbox_list` folder other than INBOX); otherwise it
+fails with `E_UNBOUNDED_SCAN` (exit 4). If more than `[search].max_scan`
+candidates remain (default 5000), it fails with `E_SCAN_TOO_LARGE` (exit 4). On
+Windows, `--to` and `--cc` **do not narrow** `--text` (checking them forces
+opening every message); on macOS they do. `--include-mailbox` only accepts
+folders of declared accounts. `scan.mode` is `metadata` or `text`. On macOS,
+`--text "*invoice*" --since 1mo` returns, among other fields,
+`"scan": {"mode": "text", "candidates": 12, "messages_read": 11, …}` and
+warnings such as `W_EMLX_MISSING: no .emlx file for uid 83170`.
 
 ### `mailquery new [--peek] [--limit N]`
 
-Mensajes recibidos desde la última ejecución, **una sola vez**: usa un cursor
-global guardado en `~/.mailquery/state.json` (default 100, máx. 500). `--peek`
-devuelve los nuevos sin avanzar el cursor ni escribir estado. La **primera
-corrida** (sin cursor) emite, en orden ascendente, los mensajes recibidos en los
-`[new].lookback` (default `10min`) anteriores al más reciente del alcance, al
-menos ese, y añade `W_FIRST_RUN`; las siguientes emiten lo que llegó después del
-cursor. Las cuentas o carpetas añadidas después no emiten su histórico (usa
-`search`). Los mensajes con fecha nula o futura se ignoran hasta que su fecha
-sea válida.
+Messages received since the last run, **only once**: it uses a global cursor
+stored in `~/.mailquery/state.json` (default 100, max 500). `--peek` returns the
+new messages without advancing the cursor or writing state. The **first run**
+(no cursor) emits, in ascending order, the messages received in the
+`[new].lookback` (default `10min`) before the newest one in the scope, at least
+that one, and adds `W_FIRST_RUN`; later runs emit what arrived after the cursor.
+Accounts or folders added later do not emit their history (use `search`).
+Messages with a null or future date are ignored until their date is valid.
 
 ```json
 {
@@ -326,20 +326,20 @@ sea válida.
 }
 ```
 
-La corrida siguiente, sin correo nuevo, devuelve `"count": 0`, `"messages": []`
-y `warnings: []`, con `cursor.previous` igual a `cursor.current`.
+The next run, with no new mail, returns `"count": 0`, `"messages": []` and
+`warnings: []`, with `cursor.previous` equal to `cursor.current`.
 
 ### `mailquery show <uid>`
 
-Detalle de un mensaje: cabeceras, `body_text` (truncado a 20.000 caracteres, con
-`body_truncated` y `W_BODY_TRUNCATED`) y nombres de adjuntos. Trata el `uid`
-como un **token opaco** (entero en macOS, string hexadecimal en mayúsculas en
-Windows): pásalo tal cual, sin aritmética. Solo muestra mensajes de cuentas
-declaradas (`E_ACCOUNT_NOT_IN_SCOPE` si no). Un uid inválido o inexistente da
-`E_USAGE` (exit 2).
+Detail of one message: headers, `body_text` (truncated to 20,000 characters,
+with `body_truncated` and `W_BODY_TRUNCATED`) and attachment names. Treat the
+`uid` as an **opaque token** (integer on macOS, uppercase hexadecimal string on
+Windows): pass it through as-is, no arithmetic. It only shows messages from
+declared accounts (`E_ACCOUNT_NOT_IN_SCOPE` otherwise). An invalid or missing uid
+gives `E_USAGE` (exit 2).
 
 ```bash
-mailquery show 00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…    # el uid completo, tal como lo devuelve search
+mailquery show 00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…    # the full uid, as returned by search
 ```
 
 ```json
@@ -348,11 +348,11 @@ mailquery show 00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…    # el uid completo,
   "command": "show",
   "message": {
     "uid": "00000000D70DBCF6…",
-    "subject": "Factura octubre 2026",
-    "headers": {"From": "Proveedor SA <facturas@proveedor.example>", "Date": "Mon, 02 Nov 2026 13:54:03 +0000", …},
-    "body_text": "Estimado cliente, adjuntamos la factura de octubre.",
+    "subject": "October 2026 invoice",
+    "headers": {"From": "Supplier Inc <invoices@supplier.example>", "Date": "Mon, 02 Nov 2026 13:54:03 +0000", …},
+    "body_text": "Dear customer, please find the October invoice attached.",
     "body_truncated": false,
-    "attachments": [{"name": "factura-2026-10.pdf"}],
+    "attachments": [{"name": "invoice-2026-10.pdf"}],
     "partial": false, "readable": true, "source": {"emlx_path": null, "partial": false},
     …
   },
@@ -360,89 +360,90 @@ mailquery show 00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…    # el uid completo,
 }
 ```
 
-### Cuerpo y warnings
+### Body and warnings
 
-`body.available` indica si hay cuerpo local y `body.readable` si se pudo leer.
-Los warnings (`"W_CODIGO: motivo"`) no son errores. En ambas plataformas:
+`body.available` tells whether a local body exists and `body.readable` whether it
+could be read. Warnings (`"W_CODE: reason"`) are not errors. On both platforms:
 `W_NO_ACCOUNTS`, `W_FIRST_RUN`, `W_RESULTS_TRUNCATED`, `W_BODY_TRUNCATED`,
-`W_HTML_NO_TEXT`, `W_BODY_UNREADABLE` (incluye S/MIME) y
-`W_ATTACHMENTS_UNAVAILABLE`. Solo en macOS: `W_EMLX_MISSING`, `W_EMLX_CORRUPT`
-y `W_ACCOUNT_LABELS_UNAVAILABLE`. Solo en Windows: `W_BODY_NOT_LOCAL` (el item
-solo tiene cabeceras en local; nunca se descarga) y `W_STORE_EXCLUDED`.
-Catálogo completo: PRD §12.10.
+`W_HTML_NO_TEXT`, `W_BODY_UNREADABLE` (includes S/MIME) and
+`W_ATTACHMENTS_UNAVAILABLE`. macOS only: `W_EMLX_MISSING`, `W_EMLX_CORRUPT` and
+`W_ACCOUNT_LABELS_UNAVAILABLE`. Windows only: `W_BODY_NOT_LOCAL` (the item only
+has headers locally; it is never downloaded) and `W_STORE_EXCLUDED`. Full
+catalogue: PRD §12.10.
 
-## Códigos de salida
+## Exit codes
 
-Los errores también son JSON en `stdout` (`{"ok": false, "error": {"code",
-"message", "hint"}}`) y un resumen en `stderr`. Reintentar **solo con 5**.
+Errors are JSON on `stdout` too (`{"ok": false, "error": {"code", "message",
+"hint"}}`) plus a summary on `stderr`. Retry **only on 5**.
 
-| Exit | Significado | Códigos `E_*` |
-|------|-------------|----------------|
-| 0 | Éxito (incluye 0 resultados, `--help` y `--version`) | — |
-| 1 | Error interno inesperado | `E_INTERNAL` |
-| 2 | Uso o configuración inválidos | `E_USAGE`, `E_CONFIG_INVALID`, `E_CONFIG_ACCOUNT_UNKNOWN`, `E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE`, `E_ACCOUNT_NOT_IN_SCOPE`, `E_MAILBOX_NOT_FOUND`, `E_BAD_TIME`, `E_BAD_FILTER` |
-| 3 | Entorno no válido | `E_STORE_NOT_FOUND`, `E_SCHEMA_UNSUPPORTED`, `E_PERMISSION`, `E_STATE_CORRUPT`, `E_CLIENT_UNSUPPORTED`, `E_DEPENDENCY_MISSING`, `E_CLIENT_TIMEOUT` |
-| 4 | Consulta rechazada | `E_UNBOUNDED_SCAN`, `E_SCAN_TOO_LARGE` |
-| 5 | Ocupado o transitorio | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` |
-| 6 | Cliente de correo no disponible | `E_OUTLOOK_NOT_RUNNING` |
+| Exit | Meaning | `E_*` codes |
+|------|---------|-------------|
+| 0 | Success (includes 0 results, `--help` and `--version`) | — |
+| 1 | Unexpected internal error | `E_INTERNAL` |
+| 2 | Invalid usage or configuration | `E_USAGE`, `E_CONFIG_INVALID`, `E_CONFIG_ACCOUNT_UNKNOWN`, `E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE`, `E_ACCOUNT_NOT_IN_SCOPE`, `E_MAILBOX_NOT_FOUND`, `E_BAD_TIME`, `E_BAD_FILTER` |
+| 3 | Invalid environment | `E_STORE_NOT_FOUND`, `E_SCHEMA_UNSUPPORTED`, `E_PERMISSION`, `E_STATE_CORRUPT`, `E_CLIENT_UNSUPPORTED`, `E_DEPENDENCY_MISSING`, `E_CLIENT_TIMEOUT` |
+| 4 | Rejected query | `E_UNBOUNDED_SCAN`, `E_SCAN_TOO_LARGE` |
+| 5 | Busy or transient | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` |
+| 6 | Mail client not available | `E_OUTLOOK_NOT_RUNNING` |
 
 ```text
-$ mailquery search --text "*factura*"          # Outlook; sin acotar: exit 4
+$ mailquery search --text "*invoice*"          # Outlook; no narrowing: exit 4
 mailquery: E_UNBOUNDED_SCAN: --text without a narrowing filter would read every message in the scope
 mailquery: hint: add --since, --until, --from, --subject or --include-mailbox (for example: mailquery search --text invoice --since 30d)
 ```
 
-Con Outlook cerrado, `mailquery search --since 1w` termina con exit 6 y
-`E_OUTLOOK_NOT_RUNNING` (`classic Outlook is not running (mailquery never launches it)`;
-hint: `open classic Outlook with the same user, without elevation, and retry`).
+With Outlook closed, `mailquery search --since 1w` ends with exit 6 and
+`E_OUTLOOK_NOT_RUNNING` (`classic Outlook is not running (mailquery never launches
+it)`; hint: `open classic Outlook with the same user, without elevation, and
+retry`).
 
-## Logs y privacidad
+## Logs and privacy
 
-`~/.mailquery/logs/mailquery.log`, en texto plano; rota por tamaño
-(`[logging].max_size_mb`, default 10 MB, 5 archivos rotados). Nunca se
-registran asuntos, cuerpos, direcciones, carpetas, cuentas, rutas, términos de
-búsqueda ni identificadores de mensajes. Cero red y cero telemetría; nunca se
-leen credenciales ni tokens.
+`~/.mailquery/logs/mailquery.log`, plain text; it rotates by size
+(`[logging].max_size_mb`, default 10 MB, 5 rotated files). Subjects, bodies,
+addresses, folders, accounts, paths, search terms and message identifiers are
+never logged. Zero network and zero telemetry; credentials and tokens are never
+read.
 
-## Permisos
+## Permissions
 
-- **macOS:** concede **Acceso total al disco** (FDA) a la app que lanza el
-  proceso (harness, Terminal, VS Code…), **no** al venv de `pipx`: Ajustes del
-  Sistema → Privacidad y seguridad → Acceso total al disco. Sin FDA, los
-  comandos dan `E_PERMISSION` (exit 3) y `doctor` marca `store`/`accounts_db`.
-  No hace falta que Mail.app esté abierto.
-- **Windows:** Outlook clásico debe estar **abierto** y `mailquery` debe correr
-  en la misma sesión y con el mismo nivel de integridad: no lo ejecutes elevado
-  ni como servicio (verías `E_OUTLOOK_NOT_RUNNING`). El chequeo
-  `object_model_guard` de `doctor` anticipa el aviso de seguridad de Outlook
-  (Object Model Guard): debe salir `[ok]`; si el aviso apareciera, la llamada se
-  aborta a los 30 s con `E_CLIENT_TIMEOUT` (exit 3). Revisa el antivirus o la
-  directiva de Outlook.
-- Ejecuta `mailquery doctor` tras actualizar el intérprete, el sistema o el
-  cliente de correo.
+- **macOS:** grant **Full Disk Access** (FDA) to the app that launches the
+  process (harness, Terminal, VS Code…), **not** to the `pipx` venv: System
+  Settings → Privacy & Security → Full Disk Access. Without FDA, commands return
+  `E_PERMISSION` (exit 3) and `doctor` marks `store`/`accounts_db`. Mail.app does
+  not need to be open.
+- **Windows:** classic Outlook must be **open** and `mailquery` must run in the
+  same session and with the same integrity level: do not run it elevated or as a
+  service (you would see `E_OUTLOOK_NOT_RUNNING`). `doctor`'s
+  `object_model_guard` check anticipates the Outlook security prompt (Object
+  Model Guard): it must show `[ok]`; if the prompt appears, the call aborts after
+  30 s with `E_CLIENT_TIMEOUT` (exit 3). Check the antivirus or the Outlook
+  policy.
+- Run `mailquery doctor` after upgrading the interpreter, the system or the mail
+  client.
 
-El cuerpo de los correos es **entrada no confiable**: las recetas del harness lo
-tratan como datos citados, nunca como instrucciones.
+Email bodies are **untrusted input**: the harness recipes treat them as quoted
+data, never as instructions.
 
-## Problemas típicos
+## Troubleshooting
 
-| Síntoma | Causa | Qué hacer |
-|---------|-------|-----------|
-| `mailquery: command not found` / `pipx: command not found` | El directorio de `pipx` no está en el `PATH` de la sesión | `pipx ensurepath` y abre una terminal nueva |
-| El comando usa otro Python o falla con `ModuleNotFoundError` | `pipx` instaló la app con otro intérprete | `pipx list`; `pipx reinstall --python <python> mailquery` |
-| `count: 0` y `W_NO_ACCOUNTS` | No hay cuentas declaradas | Declara una cuenta en `config.toml` (ver `mailquery mailboxes`) |
-| `count: 0` sin warnings | Rango de fechas, patrón o carpeta | Revisa `--since`/`--until`, prueba un patrón más corto y comprueba `included` en `mailboxes`; `new` no emite histórico: usa `search` |
-| `W_STORE_EXCLUDED` (Windows) | La cuenta declarada es un store excluido (compartido, online, ruta de red…) | Mira el motivo en `mailboxes` → `excluded_stores` |
-| `E_PERMISSION` (3, macOS) | Falta FDA | Ver [Permisos](#permisos) |
-| `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | Falta `pywin32` / no es Outlook clásico 16.0 | `pipx reinstall mailquery` / instala Outlook clásico |
-| `E_OUTLOOK_NOT_RUNNING` (6) | Outlook cerrado, o sesión o integridad distintas | Abre Outlook clásico con el mismo usuario y sin elevar; reintenta |
-| `E_CLIENT_TIMEOUT` (3) | Outlook no respondió en 30 s (posible aviso de seguridad) | Revisa `mailquery doctor` antes de reintentar |
-| `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store, lock u Outlook ocupados | Reintenta una vez tras una pausa; no lances corridas concurrentes |
-| `E_STATE_CORRUPT` (3) | `state.json` dañado (solo afecta a `new`) | Renómbralo; la siguiente corrida de `new` será una primera corrida y volverá a emitir la ventana de `lookback` |
-| `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` sin acotar / demasiados candidatos | Añade `--since` u otro filtro, o sube `search.max_scan` (máx. 50000) |
-| `E_INTERNAL` (1) | Fallo inesperado | Revisa `~/.mailquery/logs/mailquery.log` con `--log-level debug` |
+| Symptom | Cause | What to do |
+|---------|-------|------------|
+| `mailquery: command not found` / `pipx: command not found` | The `pipx` directory is not on the session `PATH` | `pipx ensurepath` and open a new terminal |
+| The command uses another Python or fails with `ModuleNotFoundError` | `pipx` installed the app with another interpreter | `pipx list`; `pipx reinstall --python <python> mailquery` |
+| `count: 0` and `W_NO_ACCOUNTS` | No declared accounts | Declare an account in `config.toml` (see `mailquery mailboxes`) |
+| `count: 0` with no warnings | Date range, pattern or folder | Check `--since`/`--until`, try a shorter pattern and check `included` in `mailboxes`; `new` does not emit history: use `search` |
+| `W_STORE_EXCLUDED` (Windows) | The declared account is an excluded store (shared, online, network path…) | See the reason in `mailboxes` → `excluded_stores` |
+| `E_PERMISSION` (3, macOS) | FDA missing | See [Permissions](#permissions) |
+| `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | `pywin32` missing / not classic Outlook 16.0 | `pipx reinstall mailquery` / install classic Outlook |
+| `E_OUTLOOK_NOT_RUNNING` (6) | Outlook closed, or different session or integrity level | Open classic Outlook with the same user and without elevation; retry |
+| `E_CLIENT_TIMEOUT` (3) | Outlook did not respond within 30 s (possible security prompt) | Check `mailquery doctor` before retrying |
+| `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store, lock or Outlook busy | Retry once after a pause; do not run concurrent invocations |
+| `E_STATE_CORRUPT` (3) | Damaged `state.json` (only affects `new`) | Rename it; the next `new` run is a first run and emits the `lookback` window again |
+| `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` without narrowing / too many candidates | Add `--since` or another filter, or raise `search.max_scan` (max 50000) |
+| `E_INTERNAL` (1) | Unexpected failure | Check `~/.mailquery/logs/mailquery.log` with `--log-level debug` |
 
-## Licencia
+## License
 
-MIT. Copyright (c) 2026 Ariel Dayler Salzar Hinojosa. Consulta
-[`LICENSE`](LICENSE) para el texto completo.
+MIT. Copyright (c) 2026 Ariel Dayler Salzar Hinojosa. See
+[`LICENSE`](LICENSE) for the full text.

@@ -1,7 +1,7 @@
 # Receta 01 — Resumen de correo nuevo (`new-mail-digest`)
 
 > Receta/precepto para el harness. Es la misma en macOS (Apple Mail) y en
-> Windows (Outlook clásico). Documentación general: [`../../README.md`](../../README.md).
+> Windows (Outlook clásico). Documentación general: [`../../README.es.md`](../../README.es.md).
 > PRD de referencia: §12.3 (`new`), §18 (procesamiento único) y §21 (operación
 > con el harness).
 
