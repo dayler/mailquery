@@ -1,13 +1,13 @@
-# Skill para harnesses de IA (`skills/`)
+# Skill for AI harnesses (`skills/`)
 
-`mailquery` incluye un *skill* listo para que lo use un harness de IA (DeepSeek Harness o
-Claude Code): [`skills/mailquery/SKILL.md`](mailquery/SKILL.md) describe el CLI, el
-contrato JSON y las reglas de uso (solo lectura, cuerpos no confiables). El skill **no**
-forma parte del paquete Python ni del código fuente: solo lo consumen los harnesses.
+`mailquery` ships a *skill* ready for an AI harness (DeepSeek Harness or Claude Code):
+[`skills/mailquery/SKILL.md`](mailquery/SKILL.md) describes the CLI, the JSON contract
+and the usage rules (read-only, untrusted bodies). The skill is **not** part of the
+Python package or the source code: only harnesses consume it.
 
-## Instalación
+## Installation
 
-Desde la raíz del repositorio:
+From the repository root:
 
 ```bash
 # macOS / Linux
@@ -17,61 +17,62 @@ Desde la raíz del repositorio:
 powershell -ExecutionPolicy Bypass -File skills\install.ps1
 ```
 
-Sin argumentos el script detecta los harnesses instalados y muestra un menú:
+Without arguments the script detects the installed harnesses and shows a menu:
 
-- cada harness detectado (DeepSeek Harness, Claude Code);
-- ruta personalizada (copia a `<ruta>/mailquery/SKILL.md`);
-- instalar en todos los detectados.
+- each detected harness (DeepSeek Harness, Claude Code);
+- a custom path (copies to `<path>/mailquery/SKILL.md`);
+- install in all detected harnesses.
 
-Para automatizar o evitar el menú:
+To automate it or skip the menu:
 
 ```bash
 ./skills/install.sh --harness dsh --scope project
 ./skills/install.sh --all
-./skills/install.sh --path ~/.config/otro-harness/skills
+./skills/install.sh --path ~/.config/other-harness/skills
 ./skills/install.sh --dry-run
-./skills/install.sh --force          # sobrescribe un SKILL.md con contenido distinto
+./skills/install.sh --force          # overwrite a SKILL.md with different content
 ```
 
-En PowerShell los equivalentes son `-Harness dsh|claude|all`, `-Scope`, `-Path`,
-`-DryRun` y `-Force`.
+In PowerShell the equivalents are `-Harness dsh|claude|all`, `-Scope`, `-Path`,
+`-DryRun` and `-Force`.
 
-## Dónde instala
+## Where it installs
 
-| Harness | Usuario (por defecto) | Proyecto (`--scope project`) |
-|---------|------------------------|------------------------------|
+| Harness | User (default) | Project (`--scope project`) |
+|---------|----------------|------------------------------|
 | DeepSeek Harness | `${DSH_HOME:-~/.dsh}/skills/mailquery/SKILL.md` | `./.dsh/skills/mailquery/SKILL.md` |
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/mailquery/SKILL.md` | `./.claude/skills/mailquery/SKILL.md` |
 
-DSH también descubre skills en `./.agents/skills` y `~/.agents/skills` (útil para
-compartirlos entre harnesses); Claude Code solo lee `~/.claude/skills` y
+DSH also discovers skills in `./.agents/skills` and `~/.agents/skills` (useful for
+sharing them across harnesses); Claude Code only reads `~/.claude/skills` and
 `.claude/skills`.
 
-## Detección
+## Detection
 
-- **DeepSeek Harness:** existe `$DSH_HOME` (o `~/.dsh`), o `dsh` está en `PATH`.
-- **Claude Code:** existe `$CLAUDE_CONFIG_DIR` (o `~/.claude`), o `claude` está en `PATH`.
-- Si no detecta ninguno, el menú solo ofrece ruta personalizada y `--all` falla con
-  instrucciones.
+- **DeepSeek Harness:** `$DSH_HOME` exists (or `~/.dsh`), or `dsh` is on `PATH`.
+- **Claude Code:** `$CLAUDE_CONFIG_DIR` exists (or `~/.claude`), or `claude` is on
+  `PATH`.
+- If none is detected, the menu only offers a custom path and `--all` fails with
+  instructions.
 
-## Requisitos para que el skill funcione
+## Requirements for the skill to work
 
-- `mailquery` instalado y en `PATH` (`pipx install .` desde la raíz; ver el README
-  principal).
-- macOS: Acceso total al disco para la app que ejecuta el harness.
-- Windows: Outlook clásico abierto con el mismo usuario; si no,
+- `mailquery` installed and on `PATH` (`pipx install .` from the root; see the main
+  README).
+- macOS: Full Disk Access for the app that runs the harness.
+- Windows: classic Outlook open with the same user; otherwise
   `E_OUTLOOK_NOT_RUNNING` (exit 6).
-- Al menos una cuenta declarada en `~/.mailquery/config.toml`
-  (`%USERPROFILE%\.mailquery\config.toml` en Windows).
+- At least one account declared in `~/.mailquery/config.toml`
+  (`%USERPROFILE%\.mailquery\config.toml` on Windows).
 
-## Verificación
+## Verification
 
-Reinicia la sesión del harness para que descubra el skill y ejecuta `mailquery doctor` y
-`mailquery mailboxes`. En Claude Code se puede invocar con `/mailquery`; en DSH aparece en
-el catálogo de skills.
+Restart the harness session so it discovers the skill, then run `mailquery doctor` and
+`mailquery mailboxes`. In Claude Code invoke it with `/mailquery`; in DSH it appears in
+the skill catalog.
 
-## Mantenimiento
+## Maintenance
 
-`skills/mailquery/SKILL.md` es la fuente de verdad: edítalo, vuelve a correr el instalador
-(`--force` si el destino ya existía) y reinicia la sesión. La copia instalada no se
-commitea: `.dsh/` está en `.gitignore`.
+`skills/mailquery/SKILL.md` is the source of truth: edit it, re-run the installer
+(`--force` if the destination already existed) and restart the session. The installed
+copy is not committed: `.dsh/` is in `.gitignore`.
