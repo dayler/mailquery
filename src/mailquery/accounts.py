@@ -1,7 +1,7 @@
 """Read-only resolution of visible account labels (PRD 11.3).
 
 Reads ``~/Library/Accounts/Accounts4.sqlite`` in SQLite read-only mode to map a
-Mail account UUID to a human label such as ``iCloud (you@gmail.com)``,
+Mail account UUID to a human label such as ``iCloud (you@icloud.com)``,
 ``Gmail (you@gmail.com)`` or ``On My Device``. Never reads credentials and
 never writes to the database.
 """
