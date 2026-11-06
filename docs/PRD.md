@@ -519,7 +519,7 @@ Un objeto por ejecución, con la misma forma en ambas plataformas y siempre **fo
       "cc": [],
       "date_sent": "2026-11-01T22:54:03-04:00",
       "date_received": "2026-11-01T22:54:09-04:00",
-      "mailbox": {"account": {"uuid": "D70DBCF6-...", "label": "iCloud (you@gmail.com)", "email": "you@gmail.com"}, "name": "INBOX", "path": "INBOX", "url": "imap://D70DBCF6-.../INBOX"},
+      "mailbox": {"account": {"uuid": "D70DBCF6-...", "label": "iCloud (you@icloud.com)", "email": "you@icloud.com"}, "name": "INBOX", "path": "INBOX", "url": "imap://D70DBCF6-.../INBOX"},
       "is_read": false,
       "is_flagged": false,
       "has_attachments": false,
@@ -695,10 +695,10 @@ Opción global que imprime **una sola línea de texto** en `stdout` y termina co
 
 ```text
 $ mailquery --version
-mailquery 2.0.0 (backend apple_mail; Python 3.14.6; macOS 27.0.1 arm64)
+mailquery 2.0.1 (backend apple_mail; Python 3.14.6; macOS 27.0.1 arm64)
 
 $ mailquery -v          # en Windows
-mailquery 2.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64)
+mailquery 2.0.1 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64)
 ```
 
 Formato: `mailquery <versión> (backend <backend>; Python <x.y.z>; <plataforma>)`.
@@ -816,7 +816,7 @@ Formato (estilo log4j):
 | `[new]` | tabla TOML | No | — | — | `[new]` | Defaults de `new`. |
 | `new.default_limit` | entero | No | `100` | 1–500 | `200` | Límite por defecto de `new`; `--limit` lo sobreescribe. |
 | `new.lookback` | string | No | `"10min"` | duración (`min`, `h`, `d`), 1 min–1 día | `"15min"` | Solape del cursor al buscar mensajes nuevos. |
-| `[scope.<account-id>]` | tabla TOML | No | — | etiqueta de cuenta, email único o UUID/prefijo (≥ 8) | `[scope."iCloud (you@gmail.com)"]` | **Declara una cuenta observada**; si no existe, la cuenta queda excluida. La clave identifica la cuenta (§15.2). |
+| `[scope.<account-id>]` | tabla TOML | No | — | etiqueta de cuenta, email único o UUID/prefijo (≥ 8) | `[scope."iCloud (you@icloud.com)"]` | **Declara una cuenta observada**; si no existe, la cuenta queda excluida. La clave identifica la cuenta (§15.2). |
 | `mailbox_list` | array de strings | No | `[]` | nombre, `path` o URL de carpeta tal como aparece en `mailquery mailboxes`, o `INBOX`; case-insensitive (resolución: §15.3) | `["Facturas", "[Gmail]/Important"]` | Carpetas adicionales a INBOX para esa cuenta. |
 
 El namespace `scope` es obligatorio en la ruta de las claves, pero **no hace falta escribir un encabezado `[scope]` vacío**: `[scope."<cuenta>"]` crea la tabla padre implícitamente. Las tablas de cuenta en el nivel superior no se admiten.
@@ -827,11 +827,11 @@ Dentro de un bloque `[scope.<cuenta>]` la única clave es `mailbox_list`. Todo l
 
 Se aceptan tres formas, en este orden de resolución:
 
-1. **Etiqueta legible** mostrada por `mailquery mailboxes` (`account.label`), p. ej. `"iCloud (you@gmail.com)"`, `"Gmail (you@gmail.com)"`, `"On My Device"` (macOS) o `"Exchange (you@company.com)"`, `"PST (Archivo 2025)"` (Windows).
+1. **Etiqueta legible** mostrada por `mailquery mailboxes` (`account.label`), p. ej. `"iCloud (you@icloud.com)"`, `"Gmail (you@gmail.com)"`, `"On My Device"` (macOS) o `"Exchange (you@company.com)"`, `"PST (Archivo 2025)"` (Windows).
 2. **Email** de la cuenta si es único (p. ej. `"you@gmail.com"`).
 3. **UUID** completo o prefijo único de ≥ 8 caracteres (siempre válido, aunque las etiquetas no estén disponibles).
 
-Origen de etiquetas y UUID: en macOS, `Accounts4.sqlite` en solo lectura; en Windows, las cuentas y stores del perfil de Outlook (§11.3, §15.7). Las claves TOML con espacios, puntos o paréntesis deben ir entre comillas (`[scope."iCloud (you@gmail.com)"]`); los UUID (con guiones) se pueden usar como clave bare.
+Origen de etiquetas y UUID: en macOS, `Accounts4.sqlite` en solo lectura; en Windows, las cuentas y stores del perfil de Outlook (§11.3, §15.7). Las claves TOML con espacios, puntos o paréntesis deben ir entre comillas (`[scope."iCloud (you@icloud.com)"]`); los UUID (con guiones) se pueden usar como clave bare.
 
 Si las etiquetas no están disponibles (solo puede ocurrir en macOS), las etiquetas/emails no se resuelven: solo funciona el UUID, `doctor` lo advierte en `accounts_db` y los comandos de datos añaden `W_ACCOUNT_LABELS_UNAVAILABLE`.
 
@@ -848,7 +848,7 @@ Si las etiquetas no están disponibles (solo puede ocurrir en macOS), las etique
 [scope."you@gmail.com"]
 
 # VÁLIDO (etiqueta; recomendado cuando dos cuentas comparten email)
-[scope."iCloud (you@gmail.com)"]
+[scope."iCloud (you@icloud.com)"]
 ```
 
 ### 15.3 Validación y errores
@@ -872,7 +872,7 @@ Para leer una cuenta hay que **declararla**. Un bloque sin `mailbox_list` ya obs
 ```toml
 # ~/.mailquery/config.toml — mínimo
 # Declara la cuenta (INBOX siempre incluido) y añade una carpeta extra.
-[scope."iCloud (you@gmail.com)"]
+[scope."iCloud (you@icloud.com)"]
 mailbox_list = ["Facturas"]
 ```
 
@@ -916,7 +916,7 @@ default_limit = 100            # 1..500
 lookback = "10min"             # 1min..1d
 
 # --- Cuentas observadas (declararlas es lo que las activa) -----------------
-[scope."iCloud (you@gmail.com)"]
+[scope."iCloud (you@icloud.com)"]
 mailbox_list = ["Facturas", "Archivo"]
 
 [scope."Gmail (you@gmail.com)"]
@@ -929,7 +929,7 @@ mailbox_list = ["Recovered Messages (you@gmail.com)"]
 # Formas alternativas de identificar la MISMA cuenta (usar UNA por bloque;
 # si se repiten bloques para la misma cuenta, sus listas se unen):
 #
-#   [scope."you@gmail.com"]                      # por email único
+#   [scope."you@gmail.com"]                          # por email único
 #   [scope."D70DBCF6-02DD-454C-8049-F63796B2EFAC"]   # por UUID completo
 #   [scope."D70DBCF6"]                               # por prefijo único (>= 8)
 #
@@ -962,7 +962,7 @@ mailbox_list = ["Proyectos/2025"]
 # Formas alternativas de identificar la MISMA cuenta (usar UNA por bloque;
 # si se repiten bloques para la misma cuenta, sus listas se unen):
 #
-#   [scope."you@company.com"]           # por email único
+#   [scope."you@company.com"]                         # por email único
 #   [scope."<uuid de la cuenta>"]                    # por UUID completo (lo muestra `mailboxes`)
 #   [scope."<8+ primeros caracteres del uuid>"]      # por prefijo único (>= 8)
 #

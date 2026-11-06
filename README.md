@@ -172,10 +172,10 @@ accounts are read; inside each one, `INBOX` is always included and
 (exit 2). Minimal example on macOS and its Windows equivalent:
 
 ```toml
-[scope."iCloud (you@gmail.com)"]                      # macOS
+[scope."iCloud (you@icloud.com)"]                         # macOS
 mailbox_list = ["Invoices"]
 
-[scope."Exchange (you@company.com)"]         # Windows
+[scope."Exchange (you@company.com)"]                      # Windows
 mailbox_list = ["INBOX/Invoices"]
 ```
 

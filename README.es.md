@@ -172,10 +172,10 @@ cuentas declaradas; dentro de cada una, `INBOX` se incluye siempre y
 (exit 2). Mínimo en macOS y su equivalente en Windows:
 
 ```toml
-[scope."iCloud (you@gmail.com)"]                      # macOS
+[scope."iCloud (you@icloud.com)"]                         # macOS
 mailbox_list = ["Facturas"]
 
-[scope."Exchange (you@company.com)"]         # Windows
+[scope."Exchange (you@company.com)"]                      # Windows
 mailbox_list = ["INBOX/Facturas"]
 ```
 
