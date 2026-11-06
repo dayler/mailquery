@@ -228,10 +228,11 @@ Decisión: nada en el núcleo. `doctor` detecta `olk.exe` y lo dice con
 claridad (`E_CLIENT_UNSUPPORTED`). El README explica en tres líneas por qué.
 Outlook clásico tiene soporte oficial hasta al menos 2029 en Microsoft 365.
 
-### Estado de Graph en el tenant del dueño (2026-11-06)
+### Estado de Graph en un tenant corporativo (2026-11-06)
 
-Comprobado sin iniciar sesión (endpoints públicos de Microsoft y DNS):
-`company.com` es tenant de Entra ID gestionado, buzón en Exchange Online.
+Comprobado sin iniciar sesión (endpoints públicos de Microsoft y DNS): el
+dominio corporativo del dueño (omitido aquí a propósito) es un tenant de
+Entra ID gestionado, con buzón en Exchange Online.
 Graph existe. La prueba `Connect-MgGraph -Scopes Mail.Read` devolvió
 "Aprobación necesaria": el tenant no permite consentimiento de usuario, pero
 tiene activado el **flujo de solicitud de consentimiento** (cuadro de
