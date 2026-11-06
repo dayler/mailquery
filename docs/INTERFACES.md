@@ -1,4 +1,4 @@
-# Interfaz interna y reglas de trabajo — mailquery 2.0.0
+# Interfaz interna y reglas de trabajo — mailquery 2.0.1
 
 Documento de coordinación para el equipo de implementación y guía de
 desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) y manda sobre

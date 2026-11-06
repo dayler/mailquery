@@ -228,7 +228,7 @@ class SmokeTest(unittest.TestCase):
         rc, out, err, _ = self._run(["-v"])
         self.assertEqual(rc, 0, err)
         backend = "outlook" if sys.platform == "win32" else "apple_mail"
-        self.assertRegex(out, rf"^mailquery 2\.0\.0 \(backend {backend}; Python \d+\.\d+\.\d+; ")
+        self.assertRegex(out, rf"^mailquery 2\.0\.1 \(backend {backend}; Python \d+\.\d+\.\d+; ")
         self.assertEqual(len(out.strip().splitlines()), 1)
 
     def test_smoke_install_03_doctor_all_checks_ok(self):
