@@ -1,5 +1,5 @@
 # ============================================================================
-# mailquery — example configuration (2.0.0, macOS and Windows)
+# mailquery — example configuration (2.0.1, macOS and Windows)
 #
 # The installers (`scripts/install.sh` or `scripts/install.ps1`) copy this file
 # to `~/.mailquery/config.toml` when that file does not exist yet. The
