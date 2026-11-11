@@ -34,7 +34,20 @@
 # default_limit = 100            # 1..500
 # lookback = "10min"             # 1min..1d
 
+# --- Local attachment recovery (PRD-v2.1, future 3.0.0) ---------------------
+# Limits of `mailquery attachment`; `show` is not affected by `enabled`.
+# [attachments]
+# enabled = true                 # true | false
+# max_file_size_mb = 100         # 1..500
+# max_total_size_mb = 200        # 1..1024 (>= max_file_size_mb)
+# max_count = 50                 # 1..500
+
 # --- Observed accounts: macOS (Apple Mail) ----------------------------------
+# A block without a driver prefix uses the native driver of the OS
+# (`apple_mail` on macOS, `outlook` on Windows). Write the prefix explicitly to
+# pin a driver: [scope."<driver>:<account>"]. An account label that contains
+# ":" must be declared with the explicit prefix, because the first ":" is the
+# driver separator.
 # Uncomment and adjust to your accounts.
 # [scope."iCloud (you@email.com)"]
 # mailbox_list = ["Invoices", "Archive"]
@@ -43,6 +56,12 @@
 # mailbox_list = ["[Gmail]/Important"]
 
 # [scope."On My Device"]
+
+# Explicit driver prefix (same account as the block above; the native driver
+# can also be written explicitly). Two blocks that resolve to the same driver
+# and account are merged.
+# [scope."apple_mail:iCloud (you@email.com)"]
+# mailbox_list = ["Invoices", "Archive"]
 
 # --- Observed accounts: Windows (classic Outlook) ---------------------------
 # Exchange account in cached mode: INBOX (the inbox, whatever the Outlook
@@ -62,6 +81,11 @@
 # W_STORE_EXCLUDED with its reason; `mailquery mailboxes` lists them under
 # `excluded_stores`.
 
+# An installed backend plugin is declared with its own driver prefix and the
+# label/uuid it exposes (opaque identifiers, resolved by the plugin):
+# [scope."graph:trabajo@empresa.com"]
+# mailbox_list = ["INBOX/Invoices"]
+
 # ----------------------------------------------------------------------------
 # Alternative ways to identify the SAME account (use ONE per block; if blocks
 # repeat for the same account, their lists are merged):
@@ -73,4 +97,8 @@
 # Each mailbox_list item is a name, path or folder URL as shown by
 # `mailquery mailboxes`. It must exist in that account; otherwise the command
 # fails with E_MAILBOX_NOT_FOUND.
+#
+# `[attachments]` accepts only `enabled`, `max_file_size_mb`,
+# `max_total_size_mb` and `max_count`; a value out of range (or a total lower
+# than the per-file limit) fails with E_CONFIG_INVALID (exit 2).
 # ----------------------------------------------------------------------------
