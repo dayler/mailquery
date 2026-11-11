@@ -1,9 +1,12 @@
-"""Pure attachment core: catalog, blocking, sanitization, paths and screening.
+"""Attachment core: catalog, blocking, sanitization, paths, screening and engine.
 
-Public API of milestone M06 (C6, PRD-v2.1 §10.3). Everything here is pure
-stdlib code that decides policy; it never writes files, never reads the cache
-and never opens a path. The consumers are M07 (cache/staging engine) and M08
-(``show``/``attachment`` command).
+Public API of milestones M06 (C6, PRD-v2.1 §10.3) and M07 (C7, §10.1/§10.4/
+§11.3 rows 11-15). M06 is the pure policy layer: it never writes files, never
+reads the cache and never opens a path. M07 adds the filesystem engine
+(:class:`AttachmentsEngine`) and the cache/staging layer
+(:class:`AttachmentCache`, :class:`StagingArea`) consumed by M08
+(``show``/``attachment``) and by the M09/M10 adapters. Only stdlib and the
+mailquery package are imported (RNF-12).
 """
 
 from __future__ import annotations
@@ -26,6 +29,14 @@ from mailquery.attachments.blocking import (
     classify_content,
     classify_name,
 )
+from mailquery.attachments.cache import (
+    STAGING_DIR_NAME,
+    AttachmentCache,
+    CacheHit,
+    StagedAttachment,
+    StagingArea,
+    cached_path,
+)
 from mailquery.attachments.catalog import (
     CATALOG,
     CATEGORY_EXECUTABLES,
@@ -41,6 +52,14 @@ from mailquery.attachments.catalog import (
     is_reserved_name,
     normalize_name,
     reserved_name,
+)
+from mailquery.attachments.engine import (
+    MIB,
+    AttachmentDriver,
+    AttachmentLimits,
+    AttachmentResult,
+    AttachmentsEngine,
+    DeadlineFactory,
 )
 from mailquery.attachments.paths import (
     ATTACHMENTS_DIR_NAME,
@@ -137,4 +156,18 @@ __all__ = [
     "read_first_block",
     "screen_content",
     "screen_names",
+    # cache/staging (M07)
+    "STAGING_DIR_NAME",
+    "AttachmentCache",
+    "CacheHit",
+    "StagedAttachment",
+    "StagingArea",
+    "cached_path",
+    # engine (M07)
+    "MIB",
+    "AttachmentDriver",
+    "AttachmentLimits",
+    "AttachmentResult",
+    "AttachmentsEngine",
+    "DeadlineFactory",
 ]
