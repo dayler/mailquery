@@ -123,7 +123,8 @@ plugins/api, plugins/__init__ (SQL/CLIENTE ajenos al núcleo: PLUGIN_API, Reason
    │       ↑
    │    backends/base
    │       ↑
-   │       state (→ base, errors, output)      config (→ errors; MailBackend solo en TYPE_CHECKING)
+   │       state (→ base, errors, output)      config (→ errors, uid; `BackendRegistry` y
+   │       │                                   MailBackend solo perezosos/TYPE_CHECKING)
    │          ↑                                   ↑
    │          │                                   │
 accounts, store, emlx   (Apple Mail; → errors, logging_setup, output)
@@ -148,6 +149,11 @@ Reglas:
 - `search.py` y `config.py` solo conocen la interfaz `MailBackend`
   (`backends/base.py`): no importan `store`, `emlx`, `accounts`, `apple_mail`
   ni `outlook*`, y no usan `sqlite3`.
+- `config.py` importa `uid` (validación de nombres de driver) y usa
+  `BackendRegistry.is_installed` para validar el prefijo de `[scope]`: importa
+  `backends/registry.py` perezosamente (dentro de `load_config`) y solo cuando
+  un bloque declara prefijo, así que un `config.toml` sin prefijos no crea el
+  registro. No importa implementaciones de backend ni abre el store.
 - `store.py`, `emlx.py` y `accounts.py` (Apple Mail) solo los importa
   `backends/apple_mail.py`.
 - `state.py` importa `StateUidError` y `Uid` de `backends/base.py` y recibe la
@@ -579,32 +585,59 @@ llama a `save` salvo con `--peek`. `RunLock(home)` es un context manager
 os.replace`; corrupción → `E_STATE_CORRUPT`; sin PII.
 
 ### `config.py`
-`LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit, max_scan)`,
-`NewConfig(default_limit, lookback, lookback_seconds)`, `ScopeEntry(key,
-mailbox_list)`, `Config(home, logging, search, new, scopes)`,
-`ResolvedScope(account_uuid, account_label, account_email, mailboxes)`.
-`app_home()`, `ensure_app_home(home)`, `parse_duration(value)`,
-`load_config(home=None)`, `resolve_scope(config, backend, excluded=None) ->
-list[ResolvedScope]` (usa solo `MailBackend`: `accounts()`, `labels_available`,
-`resolve_mailbox` y las carpetas de `listed_mailboxes`; nunca el store). Una
-clave que resuelve a un store excluido (fila de `accounts()` con `excluded`)
-no se lee ni entra en el resultado; si se pasa una lista en `excluded`, se le
-añade su entrada `{label, path, reason}` una sola vez, en el orden de los
-bloques (para `W_STORE_EXCLUDED`, PRD §15.3).
-`listed_mailboxes(backend, account_uuids=None) -> list[MailboxRow]`: las
-carpetas cuando solo importa su identidad (alcance, dedupe, presentación,
-hints): `mailboxes_without_counters(account_uuids)` si el backend lo ofrece,
-si no `mailboxes()` (Apple Mail ignora `account_uuids`). `resolve_scope` y
-`search` piden solo las cuentas declaradas.
-Solo el comando `mailboxes` necesita los contadores (PRD §19, §B.9).
-`include_mailbox_not_found(ref, account_uuids, backend)`: `E_MAILBOX_NOT_FOUND`
-de `--include-mailbox` con las carpetas de las cuentas declaradas.
-Validación estricta: cualquier clave/sección desconocida ⇒ `E_CONFIG_INVALID`.
-`[scope."<cuenta>"]` declara una cuenta observada; INBOX siempre incluida;
-`mailbox_list` aditivo. Resolver la cuenta por etiqueta → email único → UUID o
-prefijo único ≥ 8 (errores `E_CONFIG_ACCOUNT_UNKNOWN`, `E_ACCOUNT_AMBIGUOUS`,
-`E_ACCOUNT_LABELS_UNAVAILABLE`, `E_MAILBOX_NOT_FOUND`). `parse_duration`
-min/h/d, 1 min–1 día (para `[new].lookback`).
+
+Esquema cerrado de `config.toml`, resolución de alcance por driver y
+`[attachments]` (PRD-v2.1 §6.1 RF-36, §6.2 RF-42/49, §13; C2).
+
+Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
+max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
+`AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count)`,
+`ScopeEntry(key, mailbox_list, driver, account)`, `Config(home, logging,
+search, new, attachments, scopes)` y `ResolvedScope(account_uuid,
+account_label, account_email, mailboxes, driver)`.
+
+- `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`; rangos `1..500`,
+  `1..1024` (`>= max_file_size_mb`) y `1..500`; una tabla ausente usa los
+  defaults. MiB = 1.048.576 bytes (los límites los aplica M08).
+- `ScopeEntry`: `driver` es el prefijo explícito del bloque (`None` = driver
+  nativo del SO) y `account` la referencia dentro de ese driver (`None` en un
+  bloque sin prefijo); `key` conserva la clave escrita y `account_ref` devuelve
+  la referencia en ambas formas.
+- `load_config(home=None, *, registry=None)`: `registry` (un
+  `BackendRegistry`) valida el prefijo de driver; se crea perezosamente y solo
+  si algún bloque declara prefijo. La clave se divide en el **primer** `:`
+  (RF-36): prefijo vacío, con mayúsculas, guion o > 64 ⇒ `E_DRIVER_UNKNOWN`
+  (exit 2); prefijo válido pero no instalado (`is_installed`) ⇒
+  `E_DRIVER_UNKNOWN`; cuenta vacía tras el prefijo ⇒ `E_CONFIG_INVALID`. Una
+  etiqueta de cuenta que contenga `:` debe declararse con el prefijo explícito
+  (limitación documentada); sin prefijo el primer `:` se interpreta como
+  separador de driver.
+- `resolve_scope(config, backend, excluded=None, *, drivers=None, native=None)
+  -> list[ResolvedScope]`: `backend`/`native` son el driver nativo (por
+  defecto `backend.driver`) y `drivers` mapea los demás drivers declarados a su
+  instancia. Un bloque sin prefijo resuelve contra el nativo; uno con prefijo
+  dentro de las `accounts()` de su driver: formas del `PRD.md` §15.2 (etiqueta
+  casefold → email único → UUID completo → prefijo de UUID ≥ 8) para los
+  backends internos y `label`/`uuid` opacos exactos para plugins (sin prefijo
+  de UUID). Bloques que resuelven a la misma `(driver, cuenta)` se combinan
+  (unión de `mailbox_list`); INBOX va primero; un driver declarado sin backend
+  disponible en la llamada ⇒ `E_DRIVER_UNKNOWN`; una clave que resuelve a un
+  store excluido (fila de `accounts()` con `excluded`) no se lee y se reporta
+  en `excluded` una sola vez (para `W_STORE_EXCLUDED`, PRD §15.3).
+  `listed_mailboxes(backend, account_uuids=None)` y
+  `include_mailbox_not_found(ref, account_uuids, backend)` no cambian.
+- `declared_drivers(config, *, native=None) -> tuple[str, ...]`: drivers que
+  declara `[scope]`, en orden de evaluación (el nativo primero si hay bloques
+  sin prefijo; después los prefijos explícitos en orden de declaración, sin
+  duplicados). `driver_in_scope(config, driver, *, native=None)` y
+  `require_driver_in_scope(...)` exponen la comprobación de alcance para
+  `show`/`attachment` (M03/M08): un driver instalado sin bloque ⇒
+  `E_ACCOUNT_NOT_IN_SCOPE` (exit 2) con el hint de declarar la cuenta, sin
+  cargarlo. Los comandos de datos no consultan un driver no declarado.
+- Validación estricta: `[logging]`, `[search]`, `[new]`, `[attachments]` y
+  `[scope."<driver>:<cuenta>"]`; cualquier clave/sección desconocida ⇒
+  `E_CONFIG_INVALID` (exit 2). `parse_duration` min/h/d, 1 min–1 día.
+`[scope.**]` sin prefijo conserva el comportamiento de 2.0.1 (regresión).
 
 ### `search.py`
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
@@ -664,16 +697,24 @@ detail)` completa el informe sin volver a llamar al cliente de correo.
 `; drivers: <driver> <versión>, ...` dentro del paréntesis, alfabético: los
 backends internos se filtran por plataforma (DP-02) y los plugins externos se
 listan siempre; la línea usa `BackendRegistry.versions()` (metadata de
-distribución, sin importar plugins) y no lee config ni escribe log. Es la única
-superficie de `cli` que cambia en M01 (además de `selected.driver` en
-`event=start`); el JSON de los comandos de datos no cambia.
-`_collect_doctor_checks` evalúa en el orden de D-03 (`python`, `home`,
-sintaxis de `config`, `state`, `lock`, los chequeos del backend y al final la
-resolución de `config`); `_record_config_check` resuelve cada bloque (o
-`not evaluated: <chequeo> failed` si falló su dependencia, `store` en Apple
-Mail y `stores` en Outlook) y añade `W_STORE_EXCLUDED` al `detail` con
-`ok=true` (PRD §15.3). `_bind_doctor_timeout` registra en el backend (si tiene
-`bind_doctor_timeout`) un `finish` que escribe el informe con
+distribución, sin importar plugins) y no lee config ni escribe log. M01 cambia
+`--version` (además de `selected.driver` en `event=start`); M02 añade el
+`driver` check a `doctor` (orden y detalle en `### doctor`). El JSON de los
+comandos de datos no cambia.
+`_collect_doctor_checks(home_path, backend, run=None, *, registry=None)` evalúa
+en el orden de D-03 (`python`, `home`, sintaxis de `config`, `driver`,
+`state`, `lock`, los chequeos del backend y al final la resolución de
+`config`); `registry` es el `BackendRegistry` del `driver` check y de la
+validación de prefijos de `[scope]` (`_run_doctor` crea uno y lo comparte).
+`_record_driver_check` (M02) valida el driver nativo (el backend en
+diagnóstico) y cada driver declarado; el detalle y los sufijos son el contrato
+de §11.6 (ver `### doctor`). `_record_config_check` resuelve cada bloque (o
+`not evaluated: <chequeo> failed` si falló su dependencia: primero `driver`,
+luego `store` en Apple Mail y `stores` en Outlook; los bloques de un driver
+distinto del nativo solo se reportan como declarados, su resolución de cuentas
+llega con el motor multi-driver de M04) y añade `W_STORE_EXCLUDED` al `detail`
+con `ok=true` (PRD §15.3). `_bind_doctor_timeout` registra en el backend (si
+tiene `bind_doctor_timeout`) un `finish` que escribe el informe con
 `_emit_doctor_report(checks, json_output, logger, client)` (JSON o texto, más
 la línea `event=end` del log), hace `flush` de `stdout`, `stderr` y el log y
 termina con `os._exit(0)` (D-03).
@@ -760,18 +801,45 @@ siempre exit 0 si puede diagnosticar. Con `--json`, payload máquina:
 {"checks": [{"name": "store", "ok": true, "detail": "V10 ..."}]}
 ```
 
-Chequeos comunes (los añade `cli.py`): `python`, `home`, `config`, `state`,
-`lock`. Los del backend (`MailBackend.doctor_checks()`) en Apple Mail son
-`store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`; en
+Chequeos comunes (los añade `cli.py`): `python`, `home`, `driver`, `config`,
+`state`, `lock`. Los del backend (`MailBackend.doctor_checks()`) en Apple Mail
+son `store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`; en
 Outlook, `pywin32`, `outlook`, `stores`, `readonly_strategy` y
 `object_model_guard` (PRD §12.8, §B.8; con Outlook cerrado, `outlook` falla
 con `E_OUTLOOK_NOT_RUNNING` y su hint, sus dependientes salen `not evaluated`
-y el exit sigue siendo 0). El chequeo
-`config` valida el TOML y **la resolución de cada bloque `[scope]` y su
-`mailbox_list`** contra el store y las etiquetas de cuenta (por entrada, con el
-`code`/`hint` de cada error); distingue config ausente de config presente sin
-`[scope]` y, cuando no hay cuentas declaradas, lista las disponibles con el
-formato `0 account block(s) declared; available: <label>, ...` sin activarlas.
+y el exit sigue siendo 0). Orden de la lista (PRD-v2.1 §11.6, M02):
+
+- macOS: `python`, `home`, `driver`, `store`, `envelope_index`, `schema`,
+  `readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
+- Windows: `python`, `home`, `driver`, `pywin32`, `outlook`, `stores`,
+  `readonly_strategy`, `object_model_guard`, `config`, `state`, `lock`.
+
+El chequeo `driver` (M02, común y con nombre estable) valida que todo driver
+declarado en `[scope."<driver>:<cuenta>"]` (más el nativo cuando hay bloques
+sin prefijo) esté instalado, declare `driver` válido/único y `plugin_api = 1` y
+tenga capacidades válidas. Es la única comprobación que lista la metadata de
+los drivers; `config` depende primero de ella (`not evaluated: driver failed`)
+y después de `schema` (macOS) / `stores` (Windows) como hasta ahora.
+`detail` (contrato C2): por cada driver, en orden de declaración (nativo
+primero si hay bloques sin prefijo),
+`<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>; body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`,
+unidos por `; `; la versión es la de la distribución (`package_version()`,
+`2.0.1` en esta fase) y el nativo se obtiene del backend seleccionado (así el
+fake de Outlook sobre `platform="win32"` reporta `outlook` en cualquier host).
+Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒
+`; no declared drivers` (valida solo el nativo); config que no parsea ⇒
+`; declared drivers: unknown (config failed)` (valida solo el nativo y el error
+lo reporta `config`); un driver que no valida añade
+`; <driver>: <CODE>: <message> (hint: <hint>)` y `driver` queda `ok=false`
+(exit 0 siempre). Un plugin externo no añade chequeos propios.
+El chequeo `config` valida el TOML y **la resolución de cada bloque `[scope]` y
+su `mailbox_list`** del driver nativo contra el store y las etiquetas de cuenta
+(por entrada, con el `code`/`hint` de cada error); un bloque de otro driver
+declarado se reporta como `<clave> → declared for driver <driver>` hasta que el
+motor multi-driver (M04) resuelva sus cuentas. Distingue config ausente de
+config presente sin `[scope]` y, cuando no hay cuentas declaradas, lista las
+disponibles con el formato `0 account block(s) declared; available: <label>, ...`
+sin activarlas.
 
 ### Error
 ```json
