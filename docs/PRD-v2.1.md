@@ -2,7 +2,8 @@
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes.
 **Versión del documento:** 2.1 — **delta normativo** sobre [`PRD.md`](PRD.md) v1.3.
-**Versión del paquete que introduce:** `3.0.0`.
+**Versión del paquete que introduce:** `3.0.0` (release futuro).
+**Publicación:** el `3.0.0` incluirá más features además de estas dos; su implementación se acumula en `develop` y este delta **no se publica por separado**. El bump de versión, el tag y el release se hacen cuando se complete el resto del alcance del `3.0.0` (§0.5, §0.7.3).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
 **Estado:** borrador para aprobación. Decisiones de producto de §0.6 aprobadas por el dueño el 2026-11-11. No implementado.
@@ -34,14 +35,14 @@ En esta tabla, las referencias `§N` de la columna central son siempre del `PRD.
 | Modelo de mensaje: adjuntos | §11.1, §11.3 y §24 (Anexo D) | `message.attachments[]` pasa a `{"index", "name", "cached_path"}`; el núcleo puede leer los bytes del adjunto desde el store local del cliente. Sigue sin haber contenido en el JSON ni copia del correo. |
 | Bytes de adjuntos en Outlook (COM) | §9.3 | El proxy de solo lectura autoriza una operación adicional de materialización de adjunto local (`Attachment.SaveAsFile`/`GetTemporaryFilePath`) para trasladar bytes de un adjunto **ya descargado** al staging temporal; el resto de la lista blanca no cambia. Queda registrado como excepción de riesgo OMG y de escritura en `tmp/` (§15). |
 | `state.json` | §11.2 y RF-23 | `schema: 2` con uids prefijados y migración determinista desde `schema: 1`. La migración se hace en memoria y se persiste atómicamente en la siguiente corrida de `new` que no sea `--peek`; `doctor` informa `schema: 1 (migration pending)`. |
-| `show` | §12.4 | El uid se valida con el formato nuevo (con compatibilidad de entrada) y `attachments` usa la forma definida en RF-43. |
+| `show` | §12.4 | El uid se valida con el formato nuevo (con compatibilidad de entrada) y `attachments` usa la forma definida en RF-43. En S/MIME `show` devuelve `attachments: []`; `W_ATTACHMENTS_UNAVAILABLE` se reserva para cuerpo ilegible (no S/MIME). |
 | Contrato JSON | §12.5 | `uid` pasa a string; `show.attachments` cambia de forma; el resto del contrato no cambia. |
 | Códigos de salida y errores | §12.6 | Se añaden los códigos de §11.7. La tabla de §11.7 es la única del delta. Se añade `E_IO`; `E_CLIENT_TIMEOUT`, `E_CLIENT_BUSY` y `E_PERMISSION` amplían su uso a operaciones de driver; `E_ACCOUNT_NOT_IN_SCOPE` amplía su uso a un driver instalado pero no declarado (ver §11.3). |
 | Tabla de comandos y ayuda | §12 (tabla de comandos) y §12.7 | Seis comandos (`attachment` nuevo), línea de códigos de salida actualizada y sin referencias a “cinco comandos”. |
 | `doctor` | §12.8 | Se añade el chequeo común `driver` tras `home`; `config` depende de `driver`; se documenta la composición de chequeos con varios drivers y las capacidades. |
 | `--version` | §12.9 | Formato **aditivo**: conserva `backend`, `Python` y plataforma y añade `drivers: <driver> <versión>, ...` dentro del paréntesis. |
 | Catálogo de warnings | §12.10 | No se añade ningún warning nuevo: el bloqueo de adjuntos es un error (`E_ATTACHMENT_BLOCKED`, exit 4). El resto del catálogo no cambia. |
-| Instalación y dependencias | §13.1 y §13.2 | Versión `3.0.0`; entry points para los backends internos; `pipx inject mailquery <paquete>` para plugins externos. `pyproject.toml` gana `[project.entry-points."mailquery.backends"]`. |
+| Instalación y dependencias | §13.1 y §13.2 | Versión `3.0.0` al publicar (la fase de implementación mantiene la vigente); entry points para los backends internos; `pipx inject mailquery <paquete>` para plugins externos. `pyproject.toml` gana `[project.entry-points."mailquery.backends"]`. |
 | Logs | §14 | Evento `start`: `backend=` (driver nativo) y `drivers=` (lista declarada). Evento `end` de `attachment` con `count`, `cached`, `bytes` y `duration_ms`. Se mantiene la prohibición de registrar uids, nombres, rutas, cuentas y términos. |
 | Errores y timeouts de Windows | §17 | `E_CLIENT_TIMEOUT` y `E_CLIENT_BUSY` amplían su uso según §11.7; no cambia su exit. |
 | Operación con el harness | §21.1 | El `uid` se sigue tratando como token opaco, ahora `string`; los comandos `show`/`attachment` se rigen por §11.3. |
@@ -58,7 +59,7 @@ En esta tabla, las referencias `§N` de la columna central son siempre del `PRD.
 
 ### 0.3 Conciliación con el PRD central
 
-Este delta es temporal. Antes de publicar `3.0.0` debe conciliarse en `PRD.md`: se aplican las filas de §0.2, se renumeran los AC y el delta se elimina o queda como anexo histórico sin valor normativo. Hasta entonces, este documento es la fuente de verdad para las reglas que sustituye.
+Este delta es temporal. Antes de publicar `3.0.0` debe conciliarse en `PRD.md`: se aplican las filas de §0.2, se renumeran los AC y el delta se elimina o queda como anexo histórico sin valor normativo. Hasta entonces, este documento es la fuente de verdad para las reglas que sustituye. El seguimiento operativo de esa conciliación (registro, checklist y semáforos) vive en §0.7 y en el [plan maestro](plan/PLAN-MASTER.md); `PRD.md` no se modifica durante la implementación.
 
 ### 0.4 Cambios visibles en macOS (sustituye y amplía `PRD.md` §22.2)
 
@@ -69,6 +70,7 @@ Además de lo que el `PRD.md` §22.2 ya lista, `3.0.0` cambia en macOS exactamen
 | `uid` en `search`/`new`/`show` | Entero | String `"apple_mail:<n>"` |
 | `uid` en `state.json` | Entero | String prefijado, `schema: 2` (migrado automáticamente) |
 | `show.message.attachments[]` | `[{"name": "..."}]` | `[{"index", "name", "cached_path"}]` |
+| `show.message.attachments[]` en S/MIME | Nombres del `Envelope Index` (`smime.p7m`) y `W_ATTACHMENTS_UNAVAILABLE` | `[]` sin nombres; el warning queda solo para cuerpo ilegible no S/MIME |
 | `[scope]` | `[scope."<cuenta>"]` | `[scope."<driver>:<cuenta>"]` (el prefijo puede omitirse) |
 | `doctor` | `python`, `home`, chequeos, `config`, `state`, `lock` | `python`, `home`, `driver`, chequeos, `config`, `state`, `lock` |
 | `--version` | `... (backend apple_mail; Python x; macOS y)` | `... (backend apple_mail; Python x; macOS y; drivers: ...)` |
@@ -98,6 +100,8 @@ En Windows, `3.0.0` cambia exactamente esto; el resto debe quedar idéntico:
 
 `3.0.0` (mayor). El cambio de tipo y forma de `uid` (incluido `cursor.*.last_uid`), la forma de `show.attachments`, el esquema de `[scope]` y la semántica de errores son incompatibles para un harness que consume la 2.0.x. El formato de `--version` es aditivo. Se aplica la regla que el propio `PRD.md` usó para justificar `2.0.0`.
 
+**Cuándo se aplica el bump:** al publicar el `3.0.0` completo, no al implementar este delta. Mientras estos features estén solo en `develop`, el paquete conserva la versión vigente (`2.0.1`), no se crea tag de release y ningún documento debe presentar `3.0.0` como publicado.
+
 ### 0.6 Decisiones de producto aprobadas
 
 | ID | Decisión | Dónde aplica |
@@ -105,6 +109,81 @@ En Windows, `3.0.0` cambia exactamente esto; el resto debe quedar idéntico:
 | DP-01 | **`E_IO` (exit 3)** para fallos de E/S de caché/staging (espacio, cuota, sistema de archivos); `E_PERMISSION` queda para permisos. | §11.3, §11.7, RNF-14, §15, AC-12 |
 | DP-02 | **`--version` lista solo drivers disponibles en la plataforma**: en macOS no lista `outlook`; en Windows no lista `apple_mail`. | §11.9, RF-41 |
 | DP-03 | **Desinstalar un plugin** deja sus bloques `[scope]` en `E_DRIVER_UNKNOWN`, su cursor en `E_STATE_CORRUPT`, poda el anillo y conserva la caché. | §10.2 punto 10 |
+
+---
+
+## 0.7 Registro de conciliación y checklist de release
+
+**Propósito:** seguir la implementación de este delta y servir de puerta para su conciliación futura en `PRD.md`. Este registro lo mantiene el **orquestador** del plan maestro ([`plan/PLAN-MASTER.md`](plan/PLAN-MASTER.md)); los subagentes no lo editan. `PRD.md` **no se modifica** durante la implementación: su conciliación es una tarea posterior (ver §0.3).
+
+### 0.7.1 Semáforos
+
+| Símbolo | Significado |
+|---|---|
+| ⚪ | No iniciado / pendiente |
+| 🟡 | En curso |
+| 🟢 | Implementado y conciliado (evidencia verde) |
+| 🔴 | Bloqueado (se registra el motivo y la fecha) |
+
+Una fila pasa a 🟢 solo con su milestone cerrado, sus AC verdes y la evidencia registrada. La conciliación con `PRD.md` (CL-09) permanece ⚪ por diseño hasta la tarea futura.
+
+### 0.7.2 Registro de conciliación (tabla de supresión §0.2)
+
+Cada fila de la tabla de supresión §0.2 se sigue aquí.
+
+| ID | Fila de §0.2 | Milestone(s) que la implementan | Evidencia principal | Estado |
+|---|---|---|---|---|
+| RC-01 | No objetivos / clientes soportados | M01, M02, M04 | AC-01, AC-03, AC-04; `INTERFACES.md` (API 1 y registro) | ⚪ |
+| RC-02 | Invariante de solo lectura (I-1) | M06, M07, M09, M10 | AC-12; TC-03 y OL-30 extendidos a `attachment` | ⚪ |
+| RC-03 | Red del núcleo y de plugins | M01, M02, M05 | AC-02, AC-18; capacidades en `doctor`; `threat-model.md` | ⚪ |
+| RC-04 | Selección de backend (`[scope."<driver>:<cuenta>"]`) | M02, M04 | AC-03, AC-04; UT-DRV-01..03 y UT-MD-01..07 | ⚪ |
+| RC-05 | Tipo y formato de `uid` | M01, M03 | AC-05, AC-06; UT-UID-01/02, UT-ST-06/07; goldens de uid | ⚪ |
+| RC-06 | Modelo de mensaje: adjuntos | M06, M07, M08 | AC-07, AC-09, AC-10, AC-11; UT-ATT-01..05, UT-ATC-01 | ⚪ |
+| RC-07 | Bytes de adjuntos en Outlook (COM) | M10 | AC-10, AC-12, AC-15; UT-OL-ATT-02; `INTERFACES.md` y `threat-model.md` | ⚪ |
+| RC-08 | `state.json` schema 2 | M03 | AC-06; UT-ST-06/07; migración probada | ⚪ |
+| RC-09 | `show` | M08 | AC-07; UT-ATC-01 (incluye `cached_path` symlink/directorio, contenido bloqueable y S/MIME `[]`); goldens `show_*` | ⚪ |
+| RC-10 | Contrato JSON | M03, M08 | AC-05, AC-07; TC-05; goldens | ⚪ |
+| RC-11 | Códigos de salida y errores | M01, M02, M05, M08 | AC-08, AC-14, AC-15, AC-16; UT-ERR-01..04; UT-CLI-09 actualizado | ⚪ |
+| RC-12 | Tabla de comandos y ayuda | M08, M11 | AC-21; UT-ATC-09; DOC-01..05 | ⚪ |
+| RC-13 | `doctor` | M02 | AC-02, AC-18; UT-DRV-05; goldens `doctor.json` y `outlook/doctor.json` (los actualiza M02, única edición; la versión del paquete no cambia en esta fase) | ⚪ |
+| RC-14 | `--version` | M01, M11 | AC-18; UT-PL-03; README/`SKILL.md` | ⚪ |
+| RC-15 | Catálogo de warnings | M02, M08 | Sin warnings nuevos; AC-15 (bloqueo = error exit 4); tests de warnings | ⚪ |
+| RC-16 | Instalación y dependencias | M01, M11 | AC-01; PKG-02, INS-SMOKE-01; entry points y `pipx inject` | ⚪ |
+| RC-17 | Logs | M04, M05, M08, M10 | AC-19; UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | ⚪ |
+| RC-18 | Errores y timeouts de Windows | M10 | AC-17; UT-OL-ATT-03; SMOKE-ATT (Windows) | ⚪ |
+| RC-19 | Operación con el harness | M11 | AC-21; `skills/mailquery/SKILL.md`, READMEs y recetas | ⚪ |
+| RC-20 | Configuración | M02 | AC-03, AC-14; UT-DRV-04; `config.example.toml` | ⚪ |
+| RC-21 | Layout del home | M02, M07 | AC-12; `~/.mailquery/attachments/` y `tmp/staging`; UT-ATT-07/09 | ⚪ |
+| RC-22 | Rendimiento | M08, M09, M10, M11 | AC-12, AC-20; SMOKE de presupuestos; `PERFORMANCE-BACKLOG.md` | ⚪ |
+| RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | ⚪ |
+| RC-24 | Cambios de comportamiento en macOS | M03, M08, M09 | AC-05, AC-07, AC-12; goldens Apple Mail y SMOKE; fila S/MIME de §0.4 (`show` ⇒ `[]`) | ⚪ |
+| RC-25 | Versión del paquete | Release futuro del `3.0.0` (fuera de esta fase) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar | ⚪ |
+
+### 0.7.3 Checklist de conciliación (gate de release `3.0.0`)
+
+Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de implementación de este delta. La fase de implementación cierra con los ítems de features (CL-01, CL-03, CL-04, CL-06, CL-07, CL-10, CL-11 y CL-13) y con CL-02 evidenciado en el PR del último lote de integración; CL-05, CL-08 (en lo que dependa de RC-25), CL-09 y CL-12 quedan ⚪ pendientes del release futuro.
+
+| ID | Ítem | Evidencia | Estado |
+|---|---|---|---|
+| CL-01 | AC-01…AC-21 verdes con su caso/golden y trazados en el plan maestro | Matriz AC de `plan/PLAN-MASTER.md` §4 | ⚪ |
+| CL-02 | Suite completa verde en la matriz de CI (3 SO × Python 3.11–3.14) | PR del último lote de integración (I4) en esta fase; la corrida del release queda para el release futuro | ⚪ |
+| CL-03 | SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-AM/SMOKE-ATT-OL verdes en los hosts del dueño (macOS/Windows) o saltadas con motivo | Evidencia de M11-T08 | ⚪ |
+| CL-04 | Gates de solo lectura (TC-03, OL-30) verdes, incluido `attachment` | Evidencia de M09/M10 | ⚪ |
+| CL-05 | Versión `3.0.0`, entry points de backends y instaladores correctos | PKG-02, INS-SMOKE-01; el bump de versión es parte del release futuro | ⚪ |
+| CL-06 | Documentación consumidora actualizada: READMEs, `INTERFACES.md`, `config.example.toml`, recetas, skills y ayudas | DOC-01..06 | ⚪ |
+| CL-07 | Sin referencias obsoletas (cinco comandos/five commands, uid entero, `attachments` solo `name`, `[scope]` sin driver, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`, `retention_days`) | DOC-01..05, TC-07 y revisión del planificador | ⚪ |
+| CL-08 | Todas las filas de §0.7.2 en 🟢 | Este registro | ⚪ |
+| CL-09 | `PRD.md` sin cambios y marcado para conciliación futura | `git diff` del release | ⚪ |
+| CL-10 | Dashboard del plan maestro en 🟢 y registro de ejecución completo | `plan/PLAN-MASTER.md` §3 y §11 | ⚪ |
+| CL-11 | Sin dependencias nuevas, sin red en el núcleo e I-1 verificado | PKG-02, gates de solo lectura | ⚪ |
+| CL-12 | Evidencia de release archivada (suite, goldens, CI, hosts) | Release futuro; la fase archiva evidencia de cierre en `docs/plan/evidence/M11.md` | ⚪ |
+| CL-13 | S/MIME en `show`: `attachments: []` y `W_ATTACHMENTS_UNAVAILABLE` solo para cuerpo ilegible no S/MIME; fila de §0.4 verificada | UT-ATC-01.06, TC-09; M08/M09 | ⚪ |
+
+### 0.7.4 Mantenimiento
+
+1. El orquestador actualiza §0.7.2 y §0.7.3 al cerrar cada milestone, antes de marcarlo 🟢 en el plan maestro; ambos documentos deben coincidir.
+2. Un cambio del plan que altere el alcance de una fila obliga a actualizar esta tabla en el mismo cambio.
+3. La conciliación con `PRD.md` (aplicar §0.2, renumerar AC, retirar el delta) no forma parte de este plan; cuando se haga, esta sección se sustituye por el registro histórico correspondiente.
 
 ---
 
@@ -386,7 +465,7 @@ sequenceDiagram
      "emitted_uids": ["apple_mail:83135", "apple_mail:83138", "apple_mail:83143"]
    }
    ```
-5. **Migración `schema 1 → 2`:** al cargar un `state.json` con `schema: 1`, el núcleo convierte los uids legados de forma determinista **según el tipo del valor, sin depender del SO**: entero ⇒ `"apple_mail:<n>"`; string hexadecimal en mayúsculas ⇒ `"outlook:<HEX>"`; cualquier otro valor ⇒ `E_STATE_CORRUPT` (exit 3) con hint de renombrar el archivo. El resultado se persiste como `schema: 2` en la siguiente escritura de estado (una corrida de `new` que no sea `--peek`). `--peek` migra en memoria y no escribe. La validación de `schema: 2` (§10.2, punto 6) aplica la cota de 1024 caracteres; un valor migrado que la exceda ⇒ `E_STATE_CORRUPT` con hint; un uid migrado cuyo driver no está instalado se valida después como en el punto 6. Mientras la migración no se haya persistido, el chequeo `state` de `doctor` muestra `schema: 1 (migration pending)`.
+5. **Migración `schema 1 → 2`:** al cargar un `state.json` con `schema: 1`, el núcleo convierte los uids legados de forma determinista **según el tipo del valor, sin depender del SO**: entero ≥ 1 ⇒ `"apple_mail:<n>"`; string hexadecimal en mayúsculas ⇒ `"outlook:<HEX>"`; `0`, negativos, cualquier otro valor o formato ⇒ `E_STATE_CORRUPT` (exit 3) con hint de renombrar el archivo. El resultado se persiste como `schema: 2` en la siguiente escritura de estado (una corrida de `new` que no sea `--peek`). `--peek` migra en memoria y no escribe. La validación de `schema: 2` (§10.2, punto 6) aplica la cota de 1024 caracteres; un valor migrado que la exceda ⇒ `E_STATE_CORRUPT` con hint; un uid migrado cuyo driver no está instalado se valida después como en el punto 6. Mientras la migración no se haya persistido, el chequeo `state` de `doctor` muestra `schema: 1 (migration pending)`.
 6. **Validación de `schema: 2`:** un uid que no sea `string` con formato válido ⇒ `E_STATE_CORRUPT`. Un `cursor.last_uid` cuyo driver no está instalado ⇒ `E_STATE_CORRUPT` (hint: reinstalar el plugin o renombrar el estado). Los elementos de `emitted_uids` cuyo driver no está instalado se **podan** en silencio (no rompen `new`) y se informa en `doctor` (`state`).
 7. **Orden total (sustituye al criterio de §11.3 y al orden de §12.3 del `PRD.md`):** en `search`/`show` es `(date_received DESC, driver ASC, native_order_key DESC)`; en `new` es `(date_received ASC, driver ASC, native_order_key ASC)`. `native_order_key` lo define el driver: Apple Mail entero, Outlook texto hexadecimal en mayúsculas, plugins según `native_order`. No hay deduplicación cross-driver: si dos drivers ven el mismo correo, aparecen dos resultados con `duplicate_count` calculado dentro de cada driver. El avance del cursor y del anillo usan este mismo orden total, no la comparación lexicográfica del uid.
 8. **Cursor multi-driver:** el cursor es global (un solo `last_date_received`/`last_uid`) y el anillo almacena uids prefijados. Cada driver declarado se consulta con el mismo `last_date_received` y `lookback`; el anillo global filtra duplicados por `uid`. La primera corrida emite la ventana `[más reciente − lookback, más reciente]` sobre el conjunto fusionado, como en el `PRD.md` §12.3. Si el driver del `last_uid` está instalado pero ya no declarado, el cursor se conserva y se usa `last_date_received` como marca (no es `E_STATE_CORRUPT`); los uids de drivers no declarados permanecen en el anillo y no se comparan.
@@ -728,7 +807,7 @@ Se inserta después de `home`, antes de los chequeos del backend:
 
 | Código | Exit | Dueño | Cuándo | Hint |
 |--------|------|-------|--------|------|
-| `E_DRIVER_UNKNOWN` | 2 | Núcleo | El prefijo `<driver>` de `[scope]` o del `uid` no corresponde a un driver instalado (o el nombre no cumple `[a-z0-9_]{1,64}`). | Lista los drivers instalados (`installed drivers: ...`) e indica `pipx inject mailquery <paquete>`; los nombres de driver deben cumplir `[a-z0-9_]{1,64}`. |
+| `E_DRIVER_UNKNOWN` | 2 | Núcleo | El prefijo `<driver>` de `[scope]` no corresponde a un driver instalado, o el nombre del driver en `[scope]` no cumple `[a-z0-9_]{1,64}`. En un `uid` con sintaxis de driver inválida se devuelve `E_USAGE` (§11.3 fila 2). | Lista los drivers instalados (`installed drivers: ...`) e indica `pipx inject mailquery <paquete>`; los nombres de driver deben cumplir `[a-z0-9_]{1,64}`. |
 | `E_ACCOUNT_NOT_IN_SCOPE` | 2 | Núcleo | (Ampliado) Un driver instalado no aparece en ningún bloque `[scope]`: los comandos de datos no lo consultan y `show`/`attachment` con su prefijo fallan sin cargarlo. | Declarar la cuenta en `~/.mailquery/config.toml`; el driver queda fuera de alcance hasta entonces. |
 | `E_ATTACHMENTS_DISABLED` | 2 | Núcleo | `mailquery attachment` con `[attachments].enabled = false`. | `set [attachments].enabled = true in ~/.mailquery/config.toml to allow attachment recovery`. |
 | `E_PLUGIN_INCOMPATIBLE` | 3 | Núcleo | Un driver declarado no declara `plugin_api = 1`, carece de `driver` válido/único (`[a-z0-9_]{1,64}`), declara capacidades inválidas, incumple el protocolo en la carga o no se puede importar (dependencia faltante). | Versión esperada (`1`) vs. encontrada, dependencia faltante y sugerencia de actualizar/reinstalar el plugin; `driver` debe cumplir `[a-z0-9_]{1,64}`. |
@@ -737,7 +816,7 @@ Se inserta después de `home`, antes de los chequeos del backend:
 | `E_ATTACHMENT_UNREADABLE` | 3 | Núcleo (mensaje) + plugin (`reason`) | Adjunto corrupto, ilegible o S/MIME (`smime`, `corrupt`, `unreadable`); el driver puede propagar el motivo al listar los adjuntos, aunque la lista quede vacía. | Causa específica; `S/MIME attachments cannot be extracted`. |
 | `E_ATTACHMENT_BLOCKED` | 4 | Núcleo | **Cualquier** adjunto del mensaje tiene nombre peligroso, extensión del catálogo o *magic bytes* ejecutables; se bloquea el mensaje completo. | `notify the user to inspect the message and its attachments in the email client at their own risk`; no reintentar la misma operación. |
 | `E_ATTACHMENT_TOO_LARGE` | 4 | Núcleo | Se excede `max_count`, `max_file_size_mb` o `max_total_size_mb`. | Límite superado, clave en `[attachments]` y sugerencia de usar `--index` si se usó `--all`. |
-| `E_PERMISSION` | 3 | Núcleo | (Ampliado) El plugin o el store devuelven `permission`/`auth`; también fallos de E/S de la caché. | Conceder permisos o revisar la configuración del plugin. |
+| `E_PERMISSION` | 3 | Núcleo | (Ampliado) El plugin o el store devuelven `permission`/`auth`; permisos de directorios/archivos de la caché o del staging. Los fallos de E/S son `E_IO` (DP-01, §11.3 fila 15). | Conceder permisos o revisar la configuración del plugin. |
 | `E_IO` | 3 | Núcleo | Fallo de E/S al leer o escribir la caché o el staging (espacio, cuota, sistema de archivos) — DP-01. | Revisar espacio libre y permisos de `~/.mailquery`, y reintentar. |
 | `E_CLIENT_BUSY` | 5 | Núcleo | (Ampliado) El plugin clasifica la condición como transitoria (`busy`). Reintentable. | Reintentar una vez. |
 | `E_CLIENT_TIMEOUT` | 3 | Núcleo | (Ampliado) Una operación del driver supera 30 s (metadatos) o 120 s (extracción). | Revisar `doctor`; no reintentar en bucle. |
@@ -762,7 +841,7 @@ Se inserta después de `home`, antes de los chequeos del backend:
 
 ### 11.8 Warnings
 
-No se añade ningún warning nuevo en este delta: el bloqueo de un mensaje es un error (`E_ATTACHMENT_BLOCKED`, exit 4). El resto del catálogo (`PRD.md` §12.10) no cambia; `W_ATTACHMENTS_UNAVAILABLE` se mantiene para `show` con cuerpo ilegible.
+No se añade ningún warning nuevo en este delta: el bloqueo de un mensaje es un error (`E_ATTACHMENT_BLOCKED`, exit 4). El resto del catálogo (`PRD.md` §12.10) no cambia; `W_ATTACHMENTS_UNAVAILABLE` se mantiene para `show` con cuerpo ilegible **no S/MIME** (en S/MIME `show` devuelve `[]` y solo conserva el warning de cuerpo).
 
 ### 11.9 `--version` (`-v`)
 
@@ -776,7 +855,7 @@ mailquery 3.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drive
 
 - El prefijo `mailquery <versión> (backend <backend>; Python <x.y.z>; <plataforma>` y el paréntesis final se conservan; `; drivers: <driver> <versión>, ...` es aditivo y ordenado alfabéticamente por driver. Como se conserva `backend <nativo>`, la comprobación de `scripts/install.ps1` (`mailquery -v` contiene `backend outlook`) sigue funcionando.
 - Sin efectos: no crea `~/.mailquery`, no escribe log, no toma lock, no lee `config.toml`, no importa plugins (usa metadata de distribución) y no accede al cliente.
-- `--version` lista los drivers por metadata de distribución, sin importarlos, y solo los disponibles en la plataforma actual (DP-02): por ejemplo, en macOS no se lista el backend interno `outlook` y en Windows no se lista `apple_mail`. Un plugin incompatible o no declarado aparece listado igualmente, y si está declarado es `doctor` quien reporta el problema en el chequeo `driver`.
+- `--version` lista los drivers por metadata de distribución, sin importarlos, y solo los disponibles en la plataforma actual (DP-02): por ejemplo, en macOS no se lista el backend interno `outlook` y en Windows no se lista `apple_mail`. El filtro por plataforma aplica solo a los backends internos: los plugins externos se listan siempre (su metadata no declara plataforma). Un plugin incompatible o no declarado aparece listado igualmente, y si está declarado es `doctor` quien reporta el problema en el chequeo `driver`.
 
 ---
 
@@ -785,7 +864,7 @@ mailquery 3.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drive
 ### 12.1 Logs (`~/.mailquery/logs/mailquery.log`)
 
 - `event=start`: `command=... backend=<driver nativo> drivers=<lista declarada separada por comas>`. `backend` es siempre el driver nativo; `drivers` es el conjunto declarado, que puede diferir (p. ej. solo un plugin declarado en macOS).
-- `event=end` de `attachment`: `exit_code=<n> count=<N> cached=<M> bytes=<total> duration_ms=<ms>`.
+- `event=end` de `attachment` (solo en éxito; en fallo se registra `event=error` y no se emite `end`): `exit_code=0 count=<N> cached=<M> bytes=<total> duration_ms=<ms>`.
 - Se mantienen las prohibiciones del `PRD.md` §14: nunca uids, `native_id`, `original_name`, `sanitized_name`, rutas, cuentas, asuntos, cuerpos ni términos.
 - El `log_message` de un plugin se sanea (controles, 200 bytes) y se registra en lugar del `message` si está presente; el núcleo no registra nunca `hint` ni `detail` de plugin con datos personales.
 - El log de un plugin (`~/.mailquery/logs/<driver>.log`) es opcional y propiedad del plugin: el núcleo no lo escribe, no lo rota ni lo lee. El plugin debe aplicar la misma política de privacidad (sin uids, nombres, rutas, cuentas ni secretos).
