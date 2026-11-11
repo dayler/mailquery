@@ -42,6 +42,7 @@ from tests.fixtures.make_fixtures import (
     build_store,
     write_config,
     write_state,
+    prefixed_uid,
 )
 
 EXPECTED_DIR = Path(__file__).resolve().parent / "fixtures" / "expected"
@@ -56,18 +57,18 @@ ISO_EXACT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$
 # account with no folders): 12 distinct global messages ordered by
 # (date_received DESC, ROWID DESC).
 DEFAULT_UID_ORDER = [
-    83170,
-    83160,
-    83150,
-    83143,
-    83210,
-    2714,
-    83220,
-    83200,
-    79658,
-    83180,
-    830,
-    83190,
+    prefixed_uid(83170),
+    prefixed_uid(83160),
+    prefixed_uid(83150),
+    prefixed_uid(83143),
+    prefixed_uid(83210),
+    prefixed_uid(2714),
+    prefixed_uid(83220),
+    prefixed_uid(83200),
+    prefixed_uid(79658),
+    prefixed_uid(83180),
+    prefixed_uid(830),
+    prefixed_uid(83190),
 ]
 
 MESSAGE_FIELDS = {
@@ -105,6 +106,11 @@ TOO_LARGE_CONFIG = (
 )
 NO_ACCOUNTS_CONFIG = "[logging]\nlevel = \"warning\"\n"
 BROKEN_CONFIG = "[search]\nnot_a_key = 1\n"
+
+
+def _all_installed(driver: str) -> bool:
+    """``state.json`` driver check for the fixture commands (both built-ins installed)."""
+    return bool(driver)
 
 
 def _normalize(value: object, root: Path) -> object:
@@ -287,14 +293,16 @@ class IntegrationBase(unittest.TestCase):
     # -- contract helpers ------------------------------------------------- #
 
     def message_by_uid(self, payload: dict, uid: int) -> dict:
+        wanted = prefixed_uid(uid)
         for message in payload["messages"]:
-            if message["uid"] == uid:
+            if message["uid"] == wanted:
                 return message
-        self.fail(f"uid {uid} not present in {payload['count']} results")
+        self.fail(f"uid {wanted} not present in {payload['count']} results")
 
     def assert_message_shape(self, message: dict) -> None:
         self.assertTrue(MESSAGE_FIELDS <= set(message), MESSAGE_FIELDS - set(message))
-        self.assertIsInstance(message["uid"], int)
+        self.assertIsInstance(message["uid"], str)
+        self.assertTrue(message["uid"].startswith("apple_mail:"))
         self.assertIsInstance(message["message_id"], str)
         self.assertIsInstance(message["duplicate_count"], int)
         self.assertGreaterEqual(message["duplicate_count"], 1)
@@ -529,7 +537,7 @@ class SearchTest(IntegrationBase):
         payload = self.run_ok("search")
         self.assertEqual(payload["count"], 12)
         self.assertEqual([message["uid"] for message in payload["messages"]], DEFAULT_UID_ORDER)
-        self.assertNotIn(83142, [message["uid"] for message in payload["messages"]])
+        self.assertNotIn(prefixed_uid(83142), [message["uid"] for message in payload["messages"]])
 
         duplicate = self.message_by_uid(payload, 83143)
         self.assertEqual(duplicate["duplicate_count"], 2)
@@ -538,7 +546,7 @@ class SearchTest(IntegrationBase):
         self.assertEqual(duplicate["mailbox"]["path"], "INBOX")
         self.assertEqual(duplicate["snippet"], "Duplicate body from the inbox.")
         for message in payload["messages"]:
-            if message["uid"] != 83143:
+            if message["uid"] != prefixed_uid(83143):
                 self.assertEqual(message["duplicate_count"], 1, message["uid"])
         self.assert_golden("search_all_mail.json", payload)
 
@@ -546,7 +554,7 @@ class SearchTest(IntegrationBase):
         self.configure(ICLOUD_ONLY_CONFIG)
         payload = self.run_ok("search", "--text", "invoice", "--since", "30d")
         self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["messages"][0]["uid"], 2714)
+        self.assertEqual(payload["messages"][0]["uid"], prefixed_uid(2714))
         self.assertEqual(payload["messages"][0]["snippet"], "Please find the invoice attached.")
         self.assertEqual(payload["scan"]["mode"], "text")
         self.assertEqual(payload["scan"]["candidates"], 6)
@@ -554,14 +562,14 @@ class SearchTest(IntegrationBase):
     def test_search_text_bounded_by_config_extra_mailbox(self) -> None:
         payload = self.run_ok("search", "--text", "factura")
         self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["messages"][0]["uid"], 79658)
+        self.assertEqual(payload["messages"][0]["uid"], prefixed_uid(79658))
         self.assertEqual(payload["messages"][0]["snippet"], "Adjuntamos la factura de septiembre.")
 
     def test_search_text_bounded_by_include_mailbox(self) -> None:
         self.configure(ICLOUD_ONLY_CONFIG)
         payload = self.run_ok("search", "--text", "factura", "--include-mailbox", "Facturas")
         self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["messages"][0]["uid"], 79658)
+        self.assertEqual(payload["messages"][0]["uid"], prefixed_uid(79658))
 
     def test_search_text_unbounded_is_rejected(self) -> None:
         self.configure(ICLOUD_ONLY_CONFIG)
@@ -600,13 +608,13 @@ class NewTest(IntegrationBase):
     def _seed_cursor(self, hours: int = 2) -> dict:
         cursor = {
             "last_date_received": int((self.fx.now - timedelta(hours=hours)).timestamp()),
-            "last_uid": 1,
+            "last_uid": prefixed_uid(1),
             "lookback_seconds": 600,
         }
         write_state(
             self.fx.home,
             {
-                "schema": 1,
+                "schema": 2,
                 "updated_at": "",
                 "last_run": None,
                 "cursor": cursor,
@@ -617,12 +625,12 @@ class NewTest(IntegrationBase):
 
     def test_tc_01_05_first_run_emits_the_lookback_window(self) -> None:
         """TC-01.05: first run of ``new`` emits the [D - lookback, D] window (golden)."""
-        self.assertFalse(StateStore(self.fx.home, AppleMailBackend.check_state_uid).path.exists())
+        self.assertFalse(StateStore(self.fx.home, _all_installed).path.exists())
         payload = self.run_ok("new")
         self.assertEqual(payload["command"], "new")
         self.assertEqual(payload["count"], 2)
         self.assertEqual(
-            [message["uid"] for message in payload["messages"]], [83160, 83170]
+            [message["uid"] for message in payload["messages"]], [prefixed_uid(83160), prefixed_uid(83170)]
         )
         for message in payload["messages"]:
             self.assert_message_shape(message)
@@ -635,16 +643,16 @@ class NewTest(IntegrationBase):
         expected_date = int((self.fx.now - timedelta(minutes=15)).timestamp())
         cursor = payload["cursor"]
         self.assertIsNone(cursor["previous"])
-        self.assertEqual(cursor["current"]["last_uid"], 83170)
+        self.assertEqual(cursor["current"]["last_uid"], prefixed_uid(83170))
         self.assertEqual(cursor["current"]["last_date_received"], expected_date)
         self.assertEqual(cursor["current"]["lookback_seconds"], 600)
 
-        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
+        state = StateStore(self.fx.home, _all_installed).load()
         self.assertIsNotNone(state.cursor)
         assert state.cursor is not None
-        self.assertEqual(state.cursor.last_uid, 83170)
+        self.assertEqual(state.cursor.last_uid, prefixed_uid(83170))
         self.assertEqual(state.cursor.last_date_received, expected_date)
-        self.assertEqual(state.emitted_uids, (83160, 83170))
+        self.assertEqual(state.emitted_uids, (prefixed_uid(83160), prefixed_uid(83170)))
         self.assertEqual(state.last_run.command, "new")
         self.assert_golden("new_first_run.json", payload)
 
@@ -658,24 +666,24 @@ class NewTest(IntegrationBase):
         self.assertEqual(payload["count"], 4)
         self.assertEqual(
             [message["uid"] for message in payload["messages"]],
-            [83143, 83150, 83160, 83170],
+            [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)],
         )
         self.assertIs(payload["truncated"], False)
         for message in payload["messages"]:
             self.assert_message_shape(message)
         cursor = payload["cursor"]
         self.assertEqual(cursor["previous"], seeded)
-        self.assertEqual(cursor["current"]["last_uid"], 83170)
+        self.assertEqual(cursor["current"]["last_uid"], prefixed_uid(83170))
         self.assertEqual(
             cursor["current"]["last_date_received"],
             int((self.fx.now - timedelta(minutes=15)).timestamp()),
         )
         self.assertEqual(cursor["current"]["lookback_seconds"], 600)
 
-        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
+        state = StateStore(self.fx.home, _all_installed).load()
         assert state.cursor is not None
-        self.assertEqual(state.cursor.last_uid, 83170)
-        self.assertEqual(set(state.emitted_uids), {83143, 83150, 83160, 83170})
+        self.assertEqual(state.cursor.last_uid, prefixed_uid(83170))
+        self.assertEqual(set(state.emitted_uids), {prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)})
         self.assertEqual(state.last_run.command, "new")
 
         again = self.run_ok("new")
@@ -689,16 +697,16 @@ class NewTest(IntegrationBase):
         self.assertEqual(peeked["count"], 4)
         self.assertEqual(
             [message["uid"] for message in peeked["messages"]],
-            [83143, 83150, 83160, 83170],
+            [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)],
         )
-        state = StateStore(self.fx.home, AppleMailBackend.check_state_uid).load()
+        state = StateStore(self.fx.home, _all_installed).load()
         assert state.cursor is not None
-        self.assertEqual(state.cursor.last_uid, 1)
+        self.assertEqual(state.cursor.last_uid, prefixed_uid(1))
         self.assertEqual(state.emitted_uids, ())
 
         # A real run after the peek still emits the same window.
         emitted = self.run_ok("new")
-        self.assertEqual({message["uid"] for message in emitted["messages"]}, {83143, 83150, 83160, 83170})
+        self.assertEqual({message["uid"] for message in emitted["messages"]}, {prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)})
         # And then there is nothing left.
         self.assertEqual(self.run_ok("new")["count"], 0)
         self.assertEqual(self.run_ok("new", "--peek")["count"], 0)
@@ -715,7 +723,7 @@ class ShowTest(IntegrationBase):
         payload = self.run_ok("show", "2714")
         self.assertEqual(payload["command"], "show")
         message = payload["message"]
-        self.assertEqual(message["uid"], 2714)
+        self.assertEqual(message["uid"], prefixed_uid(2714))
         self.assertEqual(message["message_id"], "<invoice-2714@fixture.example>")
         self.assertEqual(message["subject"], "Invoice 2026-10")
         self.assertEqual(message["from"], {"name": "Billing Team", "address": "billing@fixture.example"})
@@ -744,7 +752,7 @@ class ShowTest(IntegrationBase):
         """TC-01.08: show with a missing .emlx (golden)."""
         payload = self.run_ok("show", "83170")
         message = payload["message"]
-        self.assertEqual(message["uid"], 83170)
+        self.assertEqual(message["uid"], prefixed_uid(83170))
         self.assertIs(message["body_text"], "")
         self.assertIs(message["body_truncated"], False)
         self.assertEqual(message["attachments"], [])
@@ -758,7 +766,7 @@ class ShowTest(IntegrationBase):
         """TC-01.09: show with a corrupt .emlx (golden)."""
         payload = self.run_ok("show", "83180")
         message = payload["message"]
-        self.assertEqual(message["uid"], 83180)
+        self.assertEqual(message["uid"], prefixed_uid(83180))
         self.assertIs(message["body_text"], "")
         self.assertIs(message["readable"], False)
         self.assert_warning(payload, "W_EMLX_")
@@ -767,7 +775,7 @@ class ShowTest(IntegrationBase):
     def test_show_partial_emlx(self) -> None:
         payload = self.run_ok("show", "79658")
         message = payload["message"]
-        self.assertEqual(message["uid"], 79658)
+        self.assertEqual(message["uid"], prefixed_uid(79658))
         self.assertIs(message["partial"], True)
         self.assertIs(message["source"]["partial"], True)
         self.assertIs(message["readable"], True)
@@ -788,7 +796,7 @@ class ExtendedGoldenTest(IntegrationBase):
         """TC-01.10: show of the encrypted S/MIME message with attachment rows (golden)."""
         payload = self.run_ok("show", "90110")
         message = payload["message"]
-        self.assertEqual(message["uid"], 90110)
+        self.assertEqual(message["uid"], prefixed_uid(90110))
         self.assertIs(message["has_attachments"], True)
         self.assert_golden("show_smime_encrypted.json", payload)
 
@@ -860,8 +868,8 @@ class OutlookGoldenTest(unittest.TestCase):
         return payload
 
     def show(self, key: str) -> dict:
-        payload = self.run_ok("show", self.fake.item(key).entry_id)
-        self.assertEqual(payload["message"]["uid"], self.fake.item(key).entry_id)
+        payload = self.run_ok("show", prefixed_uid(self.fake.item(key).entry_id, "outlook"))
+        self.assertEqual(payload["message"]["uid"], prefixed_uid(self.fake.item(key).entry_id, "outlook"))
         return payload
 
     def test_tc_02_01_mailboxes(self) -> None:
@@ -884,7 +892,7 @@ class OutlookGoldenTest(unittest.TestCase):
         payload = self.run_ok("search")
         self.assertEqual(
             [message["uid"] for message in payload["messages"]],
-            [self.fake.item(key).entry_id for key in ("normal", "header_only", "smime_encrypted")],
+            [prefixed_uid(self.fake.item(key).entry_id, "outlook") for key in ("normal", "header_only", "smime_encrypted")],
         )
         normal = payload["messages"][0]
         self.assertEqual(normal["date_received"], "2026-11-02T09:54:09-04:00")
@@ -925,7 +933,7 @@ class OutlookGoldenTest(unittest.TestCase):
 
         normal = self.fake.item("normal").entry_id
         payload = self.run_ok("new")
-        self.assertEqual([message["uid"] for message in payload["messages"]], [normal])
+        self.assertEqual([message["uid"] for message in payload["messages"]], [prefixed_uid(normal, "outlook")])
         self.assertEqual(
             payload["warnings"],
             [
@@ -935,9 +943,9 @@ class OutlookGoldenTest(unittest.TestCase):
             ],
         )
         self.assertIsNone(payload["cursor"]["previous"])
-        self.assertEqual(payload["cursor"]["current"]["last_uid"], normal)
-        state = StateStore(self.home, OutlookBackend.check_state_uid).load()
-        self.assertEqual(state.emitted_uids, (normal,))
+        self.assertEqual(payload["cursor"]["current"]["last_uid"], prefixed_uid(normal, "outlook"))
+        state = StateStore(self.home, _all_installed).load()
+        self.assertEqual(state.emitted_uids, (prefixed_uid(normal, "outlook"),))
         _assert_golden(self, "outlook/new_first_run.json", payload, self.root)
 
     def test_tc_02_07_doctor(self) -> None:

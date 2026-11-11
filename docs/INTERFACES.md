@@ -45,7 +45,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   └── backends/
 │       ├── __init__.py             # get_backend(...), backend_class(...), BackendRegistry
 │       ├── registry.py             # descubrimiento/validación/carga perezosa de drivers (C1)
-│       ├── base.py                 # MailBackend (protocolo v1), filas TypedDict, StateUidError, ExcludedStoreError
+│       ├── base.py                 # MailBackend (protocolo v1), filas TypedDict, ExcludedStoreError
 │       ├── apple_mail.py           # AppleMailBackend (SQL + helpers de Apple Mail)
 │       ├── outlook.py              # OutlookBackend: stores, carpetas, items y cuerpos (sin win32com)
 │       └── outlook_com.py          # único módulo que importa win32com: detección, proxy, vigilante
@@ -112,7 +112,7 @@ Reglas globales:
 ```text
 errors  logging_setup  output          (base, sin imports internos)
    ↑          ↑           ↑
-   │       backends/base (solo stdlib: MailBackend, StateUidError, ExcludedStoreError,
+   │       backends/base (solo stdlib: MailBackend, ExcludedStoreError,
    │       │             Uid/LegacyUid, filas TypedDict; importa plugins/api)
    │       ↑
 plugins/api, plugins/__init__ (SQL/CLIENTE ajenos al núcleo: PLUGIN_API, Reason,
@@ -156,9 +156,9 @@ Reglas:
   registro. No importa implementaciones de backend ni abre el store.
 - `store.py`, `emlx.py` y `accounts.py` (Apple Mail) solo los importa
   `backends/apple_mail.py`.
-- `state.py` importa `StateUidError` y `Uid` de `backends/base.py` y recibe la
-  validación de uids como argumento (`validate_uid`); no importa ningún
-  backend concreto.
+- `state.py` importa `mailquery.uid` y `errors` (no `backends.base`) y recibe
+  la comprobación de drivers instalados como argumento (`is_installed`, la del
+  `BackendRegistry`); no importa ningún backend concreto.
 - `backends/__init__.py` elige el backend por plataforma e **importa
   `outlook` solo en `win32`** (import perezoso dentro de la función): ninguna
   otra plataforma importa jamás `win32com`.
@@ -292,16 +292,18 @@ el mismo grupo con `"<nombre> = <paquete>.<módulo>:<clase>"`.
 ### `backends/base.py`
 
 Protocolo de backend v1 (C1). `Uid = str` es el uid de contrato
-(`"<driver>:<native_id>"`); `LegacyUid = int | str` es el alias transitorio del
-uid nativo que intercambian los adaptadores internos hasta M03 (entero en Apple
-Mail, hex en mayúsculas en Outlook). `MessageRow` incluye `native_order_key: str`
+(`"<driver>:<native_id>"`, la forma que emite el núcleo); `LegacyUid = int | str`
+es el alias del uid nativo que intercambian los adaptadores internos (entero en
+Apple Mail, hex en mayúsculas en Outlook) — M03 lo mantiene para no romper
+M01/M02 (D1) y la prefijación ocurre solo en `search.py`/`cli.py`.
+`MessageRow` incluye `native_order_key: str`
 en toda fila de listado: el núcleo lo compara como entero si la capacidad
 `native_order` es `numeric` (Apple Mail) o como texto si es `text` (Outlook y
 plugins por defecto), y nunca compara el texto del uid. `AttachmentRow(name)` se
 mantiene para `BodyRow`; `AttachmentMetadataRow(index, name, size_bytes,
 native_order_key, unavailable_reason)` es la lista ordenada de adjuntos (C1).
-`StateUidError(cursor_detail, ring_detail)` (subclase de `ValueError`) y
-`ExcludedStoreError(entry)` (subclase de `LookupError`) siguen igual.
+`StateUidError` se retira en M03 (el estado valida sus uids en `state.py`);
+`ExcludedStoreError(entry)` (subclase de `LookupError`) sigue igual.
 
 `MailBackend` (ABC; PRD §9.3 y PRD-v2.1 §6.1 §9.3). Metadatos declarativos
 (propiedades en la ABC, atributos de clase en los adaptadores y plugins):
@@ -328,7 +330,7 @@ native_order_key, unavailable_reason)` es la lista ordenada de adjuntos (C1).
 | `attachment_names(uid)` | `list[str]` |
 | `find_message(uid)` | `(MessageRow, MailboxRow o None)` o `None`; uid de un store excluido ⇒ `ExcludedStoreError` |
 | `load_body(row)` | `BodyRow`; nunca dispara descargas; S/MIME ⇒ `readable=False` |
-| `parse_uid(text)` | uid legado del backend o `E_USAGE` (transitorio hasta M03) |
+| `parse_uid(text)` | uid legado del backend o `E_USAGE` (se mantiene hasta M04, D1; el núcleo de M03 ya no lo usa) |
 | `parse_native_id(native_id)` | **nuevo C1**: valida la parte nativa de un uid prefijado y devuelve el uid legado; puro y sin abrir cliente/store |
 | `attachments(uid)` | **nuevo C1**: `list[AttachmentMetadataRow]` ordenada por `index` 1..N (M09/M10 la implementan; los plugins deben) |
 | `attachment_stream(uid, index)` | **nuevo C1**: iterador de bytes **decodificados** del adjunto `index`; el plugin no escribe en la caché |
@@ -436,17 +438,16 @@ en mayúsculas sin abrir COM. Implementa §9.3 según el anexo B:
   primeros abiertos y el último) y los destinatarios de cada uid se leen una
   vez; `close()` vacía las cachés.
 - `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
-- `check_state_uid(uid) -> None` (estático): regla de `state.json` en Windows
-  (PRD §11.2): string no vacío de hex en mayúsculas; un entero (uid de Apple
-  Mail), minúsculas o `""` lanzan `StateUidError` con los detalles de
-  `E_STATE_CORRUPT` de Outlook. Solo comparte con `parse_uid` la expresión
-  hexadecimal (D-05).
+- `parse_native_id(native_id) -> str` (estático, C1): valida la parte nativa de
+  un uid prefijado (hex en mayúsculas) o `E_USAGE`; puro y offline.
+- `check_state_uid` se retira en M03: los uids de `state.json` los valida el
+  núcleo (`state.py` + `uid.py`), no el backend (PRD-v2.1 §10.2.5-6).
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
   "com_readonly", schema_ok: True}` para el log.
 - `new`: lo resuelve el núcleo (`search.run_new`) con la interfaz común; el
-  estado guarda uids hex validados por `check_state_uid`. Un mensaje movido
-  por el usuario cambia de `EntryID` y se reemite una vez con su uid nuevo
-  (PRD §12.3, §18).
+  estado guarda los uids prefijados `outlook:<EntryID>` de `schema: 2`. Un
+  mensaje movido por el usuario cambia de `EntryID` y se reemite una vez con su
+  uid nuevo (PRD §12.3, §18).
 - `doctor_checks() -> list[dict]`: `pywin32`, `outlook`, `stores`,
   `readonly_strategy` y `object_model_guard`, devueltos en el orden de PRD
   §12.8 (`DOCTOR_CHECKS`) y evaluados en el de D-03: primero los que no llaman
@@ -515,17 +516,18 @@ primer uso. Es dueño del store: `close()` lo cierra. Aloja el SQL y los
 helpers de Apple Mail que antes vivían en `search.py`, con el mismo orden,
 warnings y reintento (`store.run_query`). Extras propios (fuera de la
 interfaz): `store`, `labels`, `connection`, `tables` (propiedades),
-`prepare()` (valida la conexión y detecta las tablas) y tres métodos estáticos:
-`parse_uid`, `parse_native_id` (entero) y `check_state_uid` (transitorio hasta
-M03). Declara `driver = "apple_mail"`, `plugin_api = 1` y capacidades
+`prepare()` (valida la conexión y detecta las tablas) y dos métodos estáticos:
+`parse_uid` (uid legado de entrada, hasta M04) y `parse_native_id` (entero). Declara `driver = "apple_mail"`, `plugin_api = 1` y capacidades
 `network=false, readonly="structural", body_local=true, attachments="local",
 native_order="numeric"`; cada fila de listado lleva `native_order_key = str(uid)`.
 Los dos métodos estáticos de parseo:
 
-- `parse_uid(raw) -> int`: entero (`E_USAGE` si no); puro y sin I/O.
-- `check_state_uid(uid) -> None`: regla de `state.json` (PRD §11.2): entero
-  JSON ≥ 1, `bool` excluido; si no, lanza `StateUidError` con los detalles de
-  `E_STATE_CORRUPT` de Apple Mail. No comparte código ni error con `parse_uid`.
+- `parse_uid(raw) -> int`: uid legado de entrada, entero (`E_USAGE` si no);
+  puro y sin I/O. Se mantiene hasta M04 (D1).
+- `parse_native_id(native_id) -> int`: parte nativa de un uid prefijado,
+  entero; puro y sin I/O. `show` lo usa antes de abrir el store.
+- `check_state_uid` se retira en M03; la validación del estado vive en
+  `state.py`.
 
 ### `accounts.py` (Apple Mail)
 `AccountLabel(uuid, label, email=None, provider=None, local=False)`.
@@ -569,20 +571,41 @@ plano preferente, HTML→texto con `output.html_to_text`, nombres de adjuntos;
 corrupto → `readable=False` + warning; `partial` por nombre `.partial.emlx`.
 
 ### `state.py`
+`state.json` **schema 2** (PRD-v2.1 §10.2.4-6, C3). Tipos:
 `Cursor(last_date_received, last_uid, lookback_seconds=600)`,
-`LastRun(command, at)`, `AppState(schema=1, updated_at="", last_run=None,
-cursor=None, emitted_uids=())`. `last_uid` y `emitted_uids` son `Uid`
-(`int` o `str`), opacos para este módulo.
-`StateStore(home, validate_uid)` con `.home`, `.path`, `.load()`,
-`.save(state)` y `.record_new(state, emitted, lookback_seconds,
-command="new")`. `validate_uid` es el `check_state_uid` del backend (D-05):
-devuelve `None` si el uid es válido o lanza `StateUidError`, y `load` lo
-traduce a `E_STATE_CORRUPT`. `record_new` **solo calcula** el estado nuevo
-(`emitted` = pares `(date_received, uid)`; el cursor solo avanza; anillo de
-1.000 uids, el más reciente al final) y **no lo guarda**: `search.run_new`
-llama a `save` salvo con `--peek`. `RunLock(home)` es un context manager
-(`acquire/release`). `state.json` 0600, escritura `tmp + fsync +
-os.replace`; corrupción → `E_STATE_CORRUPT`; sin PII.
+`LastRun(command, at)`, `AppState(schema=2, updated_at="", last_run=None,
+cursor=None, emitted_uids=())`, `EmittedUid(date_received, driver,
+native_order_key, uid)` y `StateLoadInfo(exists, persisted_schema, migrated,
+pruned_emitted_uids, pruned_drivers)` con `.migration_pending`. `last_uid` y
+`emitted_uids` son strings prefijados `"<driver>:<native_id>"`; la forma se
+valida con `mailquery.uid` y la instalación del driver con `is_installed`.
+
+- `migrate_uid(value) -> str` (**función pura**, PRD-v2.1 §10.2.5, D8):
+  determinista por tipo y sin depender del SO. Entero (no `bool`) ≥ 1 ⇒
+  `apple_mail:<n>`; string hexadecimal en mayúsculas (`[0-9A-F]+`, incluido uno
+  solo de dígitos) ⇒ `outlook:<HEX>`; `0`, negativos, `bool`, `None`, listas,
+  minúsculas con letras y demás formatos ⇒ `E_STATE_CORRUPT` (exit 3) con el
+  hint de renombrar el estado.
+- `StateStore(home, is_installed)` con `.home`, `.path`, `.load()`,
+  `.load_info` (metadata del último `load`), `.save(state)` y
+  `.record_new(state, emitted, lookback_seconds, command="new")`.
+  `is_installed(driver) -> bool` es la comprobación del `BackendRegistry`
+  (`register.is_installed`; los dos backends internos figuran instalados en
+  todo SO, así la migración por tipo es platform-neutral). `load`: `schema`
+  requerido (1 o 2; ausente/`bool`/otro ⇒ `E_STATE_CORRUPT`); un schema 1 se
+  **migra en memoria** y devuelve `AppState(schema=2, ...)`; un
+  `cursor.last_uid` de un driver no instalado ⇒ `E_STATE_CORRUPT` con hint de
+  reinstalar/renombrar; los ítems del anillo de drivers no instalados se
+  **podan en silencio** y se informan en `load_info` (conteo + drivers, sin
+  uids). `record_new` **solo calcula** el estado nuevo: `emitted` son
+  `EmittedUid` con la clave total `(date_received, driver, native_order_key)`
+  (PRD-v2.1 §10.2.7); el cursor solo avanza (nunca compara el uid como texto) y
+  el anillo de 1.000 uids queda en orden total, el más reciente al final. **No
+  guarda**: `search.run_new` llama a `save` salvo con `--peek` (un `--peek`
+  migra en memoria y no escribe; la primera corrida de `new` no `--peek`
+  persiste schema 2 con la escritura atómica). `RunLock(home)` no cambia.
+  `state.json` 0600, `tmp + fsync + os.replace`; corrupción →
+  `E_STATE_CORRUPT`; sin PII. El schema 1 no se vuelve a escribir jamás.
 
 ### `config.py`
 
@@ -645,15 +668,24 @@ account_label, account_email, mailboxes, driver)`.
 `run_search(backend, config, filters)`,
 `run_new(backend, config, state_store, *, peek=False, limit=None, clock=None)`,
 `run_show(backend, config, uid)`, `run_mailboxes(backend, config)`.
-Solo usan la interfaz `MailBackend`. `uid` de `run_show` es el que ya devolvió
-`backend.parse_uid` (`cli` la llama antes de crear el home, PRD §12.4);
-`state_store` es un `StateStore` creado con el `check_state_uid` del backend.
+Solo usan la interfaz `MailBackend`. **Todo uid emitido** (`search`, `new`,
+`show`, `cursor.previous/current.last_uid` y `state.json`) es el string
+prefijado `format_uid(backend.driver, str(row["uid"]))`; los adaptadores siguen
+intercambiando el uid nativo (D1) y el núcleo es el único que prefija. `uid` de
+`run_show` es el uid nativo que ya validó `cli` (`parse_native_id` antes de
+abrir el store, PRD-v2.1 §11.3); los mensajes de error de `run_show`
+(`E_USAGE`, `E_ACCOUNT_NOT_IN_SCOPE`) muestran el uid prefijado.
+`state_store` es un `StateStore` creado con `is_installed` del registro.
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
 añade `cli`); `run_mailboxes` devuelve `accounts`, `mailboxes`,
 `excluded_stores` y `warnings`. Semántica de fechas: `--since` incluye,
-`--until` excluye. Orden total: `search` = `(date_received DESC, uid DESC)`;
-`new` = ASCENDENTE `(date_received ASC, uid ASC)` para que "el cursor avanza
-hasta el último emitido" sea el más reciente (PRD §12.3). Dedupe por clave
+`--until` excluye. Orden total de un driver (PRD-v2.1 §10.2.7): `search`/`show`
+= `(date_received DESC, driver ASC, native_order_key DESC)`; `new` =
+ASCENDENTE `(date_received ASC, driver ASC, native_order_key ASC)`; el key se
+compara como entero si la capacidad es `numeric` (Apple Mail) o como texto si
+es `text` (Outlook/plugins) y **nunca** se compara el texto del uid. En M03 el
+comando abre un solo driver; M04 extiende el merge. El anillo de `new` filtra
+por uid prefijado y el cursor avanza con esa misma clave total. Dedupe por clave
 global con prioridad INBOX > carpeta normal > buzón agregado;
 `duplicate_count` = copias en el alcance (≥ 1); límites y `truncated`/`hint`
 según PRD §12.2/§12.3. `--text` obliga a acotamiento (ver §5) y máximo de
@@ -681,8 +713,18 @@ accounts_db=None, backend=None) -> int`. Los 4 kwargs son **solo para tests**
 (el Outlook falso, desde W3); sin ellos, el backend de la plataforma
 (`get_backend`). `-h/--help` y `-v/--version` en texto y exit 0; `--log-level`
 global; JSON de error en `stdout` + resumen humano en `stderr`; exit codes
-según `errors.CODE_EXIT`; lock automático; `parse_uid` de `show` antes de crear
-el home; `bind_command(command)` del backend si existe; todo `E_INTERNAL`
+según `errors.CODE_EXIT`; lock automático; validación del uid de `show` **antes
+de crear el home** (M03, PRD-v2.1 §11.3): `uid.parse_uid` con el driver nativo y
+`BackendRegistry.is_installed` (un formato inválido ⇒ `E_USAGE`, un driver no
+instalado ⇒ `E_DRIVER_UNKNOWN`), y `backend.parse_native_id` del driver nativo
+(puro y offline, también antes del home; un backend inyectado cuenta como
+disponible). Después de leer `config.toml` y antes de construir el backend,
+`show` exige que el driver del prefijo aparezca en `[scope]`
+(`driver_in_scope`/`require_driver_in_scope` de `config.py`): un driver
+instalado sin bloque ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo. En M03 solo el
+driver nativo sirve `show`; el despacho a cualquier driver declarado llega con
+M04. `new` crea `StateStore(home, BackendRegistry().is_installed)`.
+`bind_command(command)` del backend si existe; todo `E_INTERNAL`
 (también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
 su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
 `event=error`), el resto de códigos sin traceback (PRD §14); `doctor` devuelve exit 0 y muestra un **informe de texto
@@ -704,8 +746,17 @@ comandos de datos no cambia.
 `_collect_doctor_checks(home_path, backend, run=None, *, registry=None)` evalúa
 en el orden de D-03 (`python`, `home`, sintaxis de `config`, `driver`,
 `state`, `lock`, los chequeos del backend y al final la resolución de
-`config`); `registry` es el `BackendRegistry` del `driver` check y de la
-validación de prefijos de `[scope]` (`_run_doctor` crea uno y lo comparte).
+`config`); `registry` es el `BackendRegistry` del `driver` check, de la
+validación de prefijos de `[scope]` y de `is_installed` del chequeo `state`
+(`_run_doctor` crea uno y lo comparte). El chequeo `state` (M03) usa
+`StateStore(home, registry.is_installed)` y el detalle conserva el de 2.0.1 con
+el uid prefijado: sin fichero, el mensaje de primera corrida de siempre; con
+fichero, `schema: 2; cursor last_date_received=<n> last_uid=<prefijado>` (o
+`schema: 1 (migration pending); ...` mientras la migración no se haya
+persistido, y `schema: <n>; no cursor yet` sin cursor); si el anillo podó uids,
+añade `; pruned <N> emitted uid(s) of uninstalled drivers: <drivers>` (sin
+uids). Un cursor de un driver no instalado deja el chequeo `ok=false` con
+`E_STATE_CORRUPT`. `doctor` no escribe estado.
 `_record_driver_check` (M02) valida el driver nativo (el backend en
 diagnóstico) y cada driver declarado; el detalle y los sufijos son el contrato
 de §11.6 (ver `### doctor`). `_record_config_check` resuelve cada bloque (o
@@ -721,17 +772,23 @@ termina con `os._exit(0)` (D-03).
 
 ## 4. Contrato JSON
 
-> M01 **no cambia** el JSON de `search`/`new`/`show`/`mailboxes`/`doctor` ni los
-> goldens: `native_order_key` es interno (viaja en la fila del backend, no se
-> emite) y `--version` no es un golden. El `uid` sigue siendo el valor legado
-> hasta M03; el formato prefijado se emite a partir de M03 con el contrato de
-> `uid.py`.
+> M03 emite por fin el **`uid` string prefijado** `"<driver>:<native_id>"` en
+> `search`/`new`/`show` y en `state.json` (`schema: 2`), con migración
+> determinista desde `schema: 1` y aceptación del uid legado en la entrada
+> (PRD-v2.1 RF-40, §10.2, AC-05/AC-06). `native_order_key` sigue siendo
+> interno (viaja en la fila del backend, no se emite). Los goldens con uid
+> cambian **solo** en el uid; la forma de `show.attachments` y el chequeo
+> `driver` de `doctor` son de M08/M02. En entradas de `show` se acepta además el
+> uid legado (entero Apple Mail, hex mayúsculas Outlook), resuelto con el
+> driver nativo; los warnings de 2.0.1 que citan el uid mantienen el valor
+> nativo (no son contrato de este milestone).
 
 Resumen de coordinación; el contrato completo es el PRD §12.5. Los ejemplos
 están compactados en una línea por brevedad: la salida real es JSON
 **formateado** (2 espacios, `output.dumps_json`) y siempre UTF-8. Los ejemplos
-con `uid` entero e `imap://` son los de Apple Mail; en Outlook `uid` es un
-string hex y `mailbox.url` es `outlook://...` (PRD §12.5, tabla de diferencias).
+con `imap://` son los de Apple Mail; en Outlook `mailbox.url` es
+`outlook://...` y el uid es `"outlook:<EntryID>"` (PRD §12.5, tabla de
+diferencias).
 
 ### Éxito (base)
 ```json
@@ -750,6 +807,8 @@ Outlook: `W_BODY_NOT_LOCAL`, `W_STORE_EXCLUDED`.
  "messages": [<message>],
  "scan": {"mode": "metadata", "candidates": 1, "messages_read": 1, "duration_ms": 211}}
 ```
+Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<EntryID>"`
+(Windows).
 `hint` (RF-15) es `null`/ausente cuando `truncated=false`; cuando
 `truncated=true` es un string accionable, p. ej. `"refina los filtros o sube
 --limit (máx. 200)"`, y además se emite
@@ -758,13 +817,13 @@ Outlook: `W_BODY_NOT_LOCAL`, `W_STORE_EXCLUDED`.
 ### `new`
 Igual que `search` más:
 ```json
-{"cursor": {"previous": {"last_date_received": 0, "last_uid": 0, "lookback_seconds": 600}, "current": {"...": 1}}}
+{"cursor": {"previous": {"last_date_received": 0, "last_uid": "apple_mail:0", "lookback_seconds": 600}, "current": {"...": "apple_mail:1"}}}
 ```
 `previous`/`current` pueden ser `null`.
 
 ### `show`
 ```json
-{"message": {"uid": 83143, "message_id": "...", "subject": "...",
+{"message": {"uid": "apple_mail:83143", "message_id": "...", "subject": "...",
   "from": {"name": "", "address": ""}, "to": [{"name": "", "address": ""}],
   "cc": [], "date_sent": "<ISO>", "date_received": "<ISO>",
   "mailbox": {"account": {"uuid": "", "label": "", "email": ""},
@@ -849,7 +908,7 @@ Sin `generated_at` (contrato de error del PRD §12.5).
 
 ### Mensaje (`search`/`new`)
 ```json
-{"uid": 83143, "message_id": "<...>", "duplicate_count": 1, "subject": "...",
+{"uid": "apple_mail:83143", "message_id": "<...>", "duplicate_count": 1, "subject": "...",
  "from": {"name": "", "address": ""}, "to": [{"name": "", "address": ""}], "cc": [],
  "date_sent": "<ISO>|null", "date_received": "<ISO>|null",
  "mailbox": {"account": {"uuid": "", "label": "", "email": ""}, "name": "INBOX", "path": "INBOX", "url": "imap://..."},

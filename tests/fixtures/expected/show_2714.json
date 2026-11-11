@@ -2,7 +2,7 @@
   "ok": true,
   "command": "show",
   "message": {
-    "uid": 2714,
+    "uid": "apple_mail:2714",
     "message_id": "<invoice-2714@fixture.example>",
     "subject": "Invoice 2026-10",
     "from": {

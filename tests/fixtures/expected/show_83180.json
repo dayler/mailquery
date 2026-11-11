@@ -2,7 +2,7 @@
   "ok": true,
   "command": "show",
   "message": {
-    "uid": 83180,
+    "uid": "apple_mail:83180",
     "message_id": "<corrupt-83180@fixture.example>",
     "subject": "Corrupt body",
     "from": {

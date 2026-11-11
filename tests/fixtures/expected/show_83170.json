@@ -2,7 +2,7 @@
   "ok": true,
   "command": "show",
   "message": {
-    "uid": 83170,
+    "uid": "apple_mail:83170",
     "message_id": "<missing-83170@fixture.example>",
     "subject": "Missing body",
     "from": {

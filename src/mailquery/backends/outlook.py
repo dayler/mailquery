@@ -1,7 +1,7 @@
 """Classic Outlook backend (Windows, annex B).
 
 Implemented so far: the connection (``describe``), ``name``,
-``labels_available``, ``parse_uid``, ``check_state_uid`` (``state.json`` uids,
+``labels_available``, ``parse_uid`` and ``parse_native_id`` (uid validation,
 D-05), ``close``, the D-03 ``bind_command`` hook
 the stores of the profile (``accounts``, ``excluded_stores``; annex B.3,
 B.4), their folders (``mailboxes``, ``resolve_mailbox``; annex B.3, B.4,
@@ -37,7 +37,6 @@ from mailquery.backends.base import (
     MailboxRow,
     MessageRow,
     AccountRow,
-    StateUidError,
     Uid,
 )
 from mailquery.errors import MailqueryError, error_detail, usage_error
@@ -914,22 +913,6 @@ class OutlookBackend(MailBackend):
                 "invalid uid part: expected an uppercase hexadecimal EntryID",
             )
         return native_id
-
-    @staticmethod
-    def check_state_uid(uid: Any) -> None:
-        """Validate a ``state.json`` uid (PRD 11.2): a non-empty uppercase hex string.
-
-        Integers (Apple Mail uids), lowercase and empty strings are invalid. Shares
-        only the hex expression with ``parse_uid``, not its text parsing or its
-        ``E_USAGE`` error (D-05). Raises ``StateUidError`` carrying the exact
-        ``E_STATE_CORRUPT`` details of Outlook.
-        """
-        if isinstance(uid, str) and _UID_PATTERN.fullmatch(uid) is not None:
-            return
-        raise StateUidError(
-            "'cursor.last_uid' must be a uid (an uppercase hexadecimal EntryID)",
-            "'emitted_uids' must be a list of uids (uppercase hexadecimal EntryIDs)",
-        )
 
     def doctor_checks(self) -> list[dict[str, Any]]:
         """``pywin32``, ``outlook``, ``stores``, ``readonly_strategy``, ``object_model_guard``.

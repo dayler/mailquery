@@ -55,6 +55,7 @@ from tests.fixtures.make_fixtures import (
     UID_SMIME_ENCRYPTED,
     UID_SMIME_SIGNED,
     FixturePaths,
+    prefixed_uid,
     build_store,
     write_config,
     write_state,
@@ -78,18 +79,18 @@ DEDUPE_CONFIG = (
 )
 
 DEFAULT_UIDS = [
-    83170,
-    83160,
-    83150,
-    83143,
-    83210,
-    2714,
-    83220,
-    83200,
-    79658,
-    83180,
-    830,
-    83190,
+    prefixed_uid(83170),
+    prefixed_uid(83160),
+    prefixed_uid(83150),
+    prefixed_uid(83143),
+    prefixed_uid(83210),
+    prefixed_uid(2714),
+    prefixed_uid(83220),
+    prefixed_uid(83200),
+    prefixed_uid(79658),
+    prefixed_uid(83180),
+    prefixed_uid(830),
+    prefixed_uid(83190),
 ]
 
 MESSAGE_KEYS = {
@@ -110,6 +111,10 @@ MESSAGE_KEYS = {
     "snippet",
     "body",
 }
+
+
+def _all_installed(driver: str) -> bool:
+    return True
 
 
 def warning_codes(warnings: list[str]) -> list[str]:
@@ -305,7 +310,7 @@ class SearchFixtureTest(unittest.TestCase):
         path = self.fx.home / "state.json"
         path.unlink(missing_ok=True)
         self.addCleanup(lambda: path.unlink(missing_ok=True))
-        return StateStore(self.fx.home, AppleMailBackend.check_state_uid)
+        return StateStore(self.fx.home, _all_installed)
 
     def seed_state(
         self,
@@ -316,21 +321,22 @@ class SearchFixtureTest(unittest.TestCase):
         emitted_uids: tuple[int, ...] = (),
         last_date_received: int | None = None,
     ) -> StateStore:
+        """Seed a schema-2 ``state.json`` from fixture-native Apple Mail uids."""
         state = self.fresh_state()
         if last_date_received is None:
             last_date_received = int((self.fx.now - age).timestamp())
         write_state(
             self.fx.home,
             {
-                "schema": 1,
+                "schema": 2,
                 "updated_at": "",
                 "last_run": None,
                 "cursor": {
                     "last_date_received": last_date_received,
-                    "last_uid": last_uid,
+                    "last_uid": prefixed_uid(last_uid),
                     "lookback_seconds": lookback_seconds,
                 },
-                "emitted_uids": list(emitted_uids),
+                "emitted_uids": [prefixed_uid(uid) for uid in emitted_uids],
             },
         )
         return state
@@ -351,14 +357,16 @@ class SearchFixtureTest(unittest.TestCase):
         )
 
     @staticmethod
-    def uids(result: dict) -> list[int]:
+    def uids(result: dict) -> list[str]:
         return [message["uid"] for message in result["messages"]]
 
     def message_by_uid(self, result: dict, uid: int) -> dict:
+        """Return the message whose emitted prefixed uid matches ``uid``."""
+        wanted = prefixed_uid(uid)
         for message in result["messages"]:
-            if message["uid"] == uid:
+            if message["uid"] == wanted:
                 return message
-        raise AssertionError(f"uid {uid} not in result: {self.uids(result)}")
+        raise AssertionError(f"uid {wanted} not in result: {self.uids(result)}")
 
 
 class ExtendedSearchFixtureTest(SearchFixtureTest):
@@ -411,7 +419,7 @@ class SearchMetadataTest(SearchFixtureTest):
 
     def test_gmail_inbox_membership_via_labels(self) -> None:
         result = self.run_search(subject=("Gmail labelled",))
-        self.assertEqual(self.uids(result), [83160])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160)])
         message = result["messages"][0]
         self.assertEqual(message["mailbox"]["name"], "INBOX")
         self.assertEqual(message["mailbox"]["path"], "INBOX")
@@ -423,16 +431,16 @@ class SearchMetadataTest(SearchFixtureTest):
         self.assertIn("labels table", message["snippet"])
 
         result = self.run_search(subject=("Gmail unread",))
-        self.assertEqual(self.uids(result), [83210])
+        self.assertEqual(self.uids(result), [prefixed_uid(83210)])
         self.assertEqual(result["messages"][0]["mailbox"]["name"], "INBOX")
 
     def test_subject_substring_and_wildcards(self) -> None:
         cases = {
-            ("invoice",): [2714],
-            ("INVOICE",): [2714],
-            ("*factura*",): [79658],
-            ("?nvoice",): [2714],
-            ("*2026-10*",): [2714],
+            ("invoice",): [prefixed_uid(2714)],
+            ("INVOICE",): [prefixed_uid(2714)],
+            ("*factura*",): [prefixed_uid(79658)],
+            ("?nvoice",): [prefixed_uid(2714)],
+            ("*2026-10*",): [prefixed_uid(2714)],
             ("zzz-no-match",): [],
         }
         for patterns, expected in cases.items():
@@ -441,30 +449,30 @@ class SearchMetadataTest(SearchFixtureTest):
 
     def test_subject_terms_are_and(self) -> None:
         self.assertEqual(
-            self.uids(self.run_search(subject=("invoice 2026",))), [2714]
+            self.uids(self.run_search(subject=("invoice 2026",))), [prefixed_uid(2714)]
         )
         self.assertEqual(self.uids(self.run_search(subject=("invoice 2025",))), [])
         # A wildcard value is one pattern, so the phrase is matched literally.
         self.assertEqual(
-            self.uids(self.run_search(subject=("*invoice 2026*",))), [2714]
+            self.uids(self.run_search(subject=("*invoice 2026*",))), [prefixed_uid(2714)]
         )
         # Repeating the flag is AND too.
         self.assertEqual(
-            self.uids(self.run_search(subject=("invoice", "2026"))), [2714]
+            self.uids(self.run_search(subject=("invoice", "2026"))), [prefixed_uid(2714)]
         )
 
     def test_ut_sr_02_01_subject_terms_with_wildcards_are_and(self) -> None:
         """UT-SR-02.01: --subject "*a* *b*" => a AND b, in any order."""
-        self.assertEqual(self.uids(self.run_search(subject=("*inv* *2026*",))), [2714])
-        self.assertEqual(self.uids(self.run_search(subject=("*2026* *inv*",))), [2714])
+        self.assertEqual(self.uids(self.run_search(subject=("*inv* *2026*",))), [prefixed_uid(2714)])
+        self.assertEqual(self.uids(self.run_search(subject=("*2026* *inv*",))), [prefixed_uid(2714)])
         self.assertEqual(self.uids(self.run_search(subject=("*inv* *2025*",))), [])
-        self.assertEqual(self.uids(self.run_search(subject=("2026 invoice",))), [2714])
+        self.assertEqual(self.uids(self.run_search(subject=("2026 invoice",))), [prefixed_uid(2714)])
 
     def test_ut_sr_02_03_from_to_cc_value_is_one_pattern(self) -> None:
         """UT-SR-02.03: --from/--to/--cc "Team Billing" does not match "Billing Team"."""
         # Words in the same order as the display value match as one pattern.
-        self.assertEqual(self.uids(self.run_search(from_=("Billing Team",))), [2714])
-        self.assertEqual(self.uids(self.run_search(cc=("Finance <finance",))), [2714])
+        self.assertEqual(self.uids(self.run_search(from_=("Billing Team",))), [prefixed_uid(2714)])
+        self.assertEqual(self.uids(self.run_search(cc=("Finance <finance",))), [prefixed_uid(2714)])
         # Words in another order do not (they used to be split into AND terms).
         self.assertEqual(self.uids(self.run_search(from_=("Team Billing",))), [])
         self.assertEqual(self.uids(self.run_search(to=("User Fixture",))), [])
@@ -472,10 +480,10 @@ class SearchMetadataTest(SearchFixtureTest):
 
     def test_from_to_cc_filters(self) -> None:
         self.assertEqual(
-            self.uids(self.run_search(from_=("billing@fixture.example",))), [2714]
+            self.uids(self.run_search(from_=("billing@fixture.example",))), [prefixed_uid(2714)]
         )
         self.assertEqual(
-            self.uids(self.run_search(from_=("Billing Team",))), [2714]
+            self.uids(self.run_search(from_=("Billing Team",))), [prefixed_uid(2714)]
         )
         self.assertEqual(
             self.uids(self.run_search(from_=("*@fixture.example",))), DEFAULT_UIDS
@@ -486,31 +494,31 @@ class SearchMetadataTest(SearchFixtureTest):
         self.assertEqual(
             self.uids(self.run_search(to=("me@fixture.example",))), DEFAULT_UIDS
         )
-        self.assertEqual(self.uids(self.run_search(cc=("finance",))), [2714])
+        self.assertEqual(self.uids(self.run_search(cc=("finance",))), [prefixed_uid(2714)])
         self.assertEqual(self.uids(self.run_search(cc=("nobody",))), [])
 
     def test_relative_since_and_until(self) -> None:
         since_week = self.run_search(since=search.parse_relative_time("7d"))
         self.assertEqual(
             self.uids(since_week),
-            [83170, 83160, 83150, 83143, 83210, 2714, 83220, 83200],
+            [prefixed_uid(83170), prefixed_uid(83160), prefixed_uid(83150), prefixed_uid(83143), prefixed_uid(83210), prefixed_uid(2714), prefixed_uid(83220), prefixed_uid(83200)],
         )
         until_week = self.run_search(until=search.parse_relative_time("7d"))
-        self.assertEqual(self.uids(until_week), [79658, 83180, 830, 83190])
+        self.assertEqual(self.uids(until_week), [prefixed_uid(79658), prefixed_uid(83180), prefixed_uid(830), prefixed_uid(83190)])
         minute_window = self.run_search(since=search.parse_relative_time("45min"))
-        self.assertEqual(self.uids(minute_window), [83170, 83160, 83150])
+        self.assertEqual(self.uids(minute_window), [prefixed_uid(83170), prefixed_uid(83160), prefixed_uid(83150)])
 
     def test_state_filters(self) -> None:
         self.assertEqual(
-            self.uids(self.run_search(unread=True)), [83150, 83143, 83210, 2714]
+            self.uids(self.run_search(unread=True)), [prefixed_uid(83150), prefixed_uid(83143), prefixed_uid(83210), prefixed_uid(2714)]
         )
-        self.assertEqual(self.uids(self.run_search(flagged=True)), [83150])
+        self.assertEqual(self.uids(self.run_search(flagged=True)), [prefixed_uid(83150)])
         self.assertEqual(
             self.uids(self.run_search(has_attachments=True)),
-            [83210, 2714, 79658],
+            [prefixed_uid(83210), prefixed_uid(2714), prefixed_uid(79658)],
         )
         self.assertEqual(
-            self.uids(self.run_search(flagged=True, unread=True)), [83150]
+            self.uids(self.run_search(flagged=True, unread=True)), [prefixed_uid(83150)]
         )
         self.assertEqual(
             self.uids(
@@ -520,7 +528,7 @@ class SearchMetadataTest(SearchFixtureTest):
                     since=search.parse_relative_time("7d"),
                 )
             ),
-            [83150],
+            [prefixed_uid(83150)],
         )
 
     def test_combined_filters_are_and(self) -> None:
@@ -529,7 +537,7 @@ class SearchMetadataTest(SearchFixtureTest):
             since=search.parse_relative_time("7d"),
             has_attachments=True,
         )
-        self.assertEqual(self.uids(result), [83210, 2714])
+        self.assertEqual(self.uids(result), [prefixed_uid(83210), prefixed_uid(2714)])
 
     def test_limit_and_truncated_hint(self) -> None:
         limited = self.run_search(limit=5)
@@ -577,13 +585,13 @@ class SearchMetadataTest(SearchFixtureTest):
 
         missing = self.run_search(subject=("Missing body",))
         missing_message = missing["messages"][0]
-        self.assertEqual(missing_message["uid"], 83170)
+        self.assertEqual(missing_message["uid"], prefixed_uid(83170))
         self.assertEqual(missing_message["snippet"], "")
         self.assertFalse(missing_message["body"]["available"])
         self.assertIn("W_EMLX_MISSING", warning_codes(missing["warnings"]))
 
         corrupt = self.run_search(subject=("Corrupt body",))
-        self.assertEqual(corrupt["messages"][0]["uid"], 83180)
+        self.assertEqual(corrupt["messages"][0]["uid"], prefixed_uid(83180))
         self.assertEqual(corrupt["messages"][0]["snippet"], "")
         self.assertIn("W_EMLX_CORRUPT", warning_codes(corrupt["warnings"]))
 
@@ -592,7 +600,7 @@ class SearchMetadataTest(SearchFixtureTest):
             subject=("Shared duplicate",),
             include_mailboxes=("[Gmail]/All Mail",),
         )
-        self.assertEqual(self.uids(result), [83143])
+        self.assertEqual(self.uids(result), [prefixed_uid(83143)])
         self.assertEqual(result["messages"][0]["duplicate_count"], 2)
         self.assertEqual(result["messages"][0]["mailbox"]["name"], "INBOX")
 
@@ -649,7 +657,7 @@ class SearchMetadataTest(SearchFixtureTest):
         # Declaring [Gmail]/All Mail brings the second copy into the scope.
         self.use_config(DEDUPE_CONFIG)
         result = self.run_search(subject=("Shared duplicate",))
-        self.assertEqual(self.uids(result), [83143])
+        self.assertEqual(self.uids(result), [prefixed_uid(83143)])
         message = result["messages"][0]
         self.assertEqual(message["duplicate_count"], 2)
         self.assertEqual(message["mailbox"]["account"]["uuid"], ACCOUNT_ICLOUD)
@@ -668,9 +676,9 @@ class SearchMetadataTest(SearchFixtureTest):
     def test_unscoped_account_is_not_read(self) -> None:
         self.use_config(ICLOUD_ONLY)
         result = self.run_search()
-        self.assertEqual(self.uids(result), [83170, 83150, 83143, 2714, 83220, 83200, 830, 83190])
-        self.assertNotIn(83160, self.uids(result))
-        self.assertNotIn(83210, self.uids(result))
+        self.assertEqual(self.uids(result), [prefixed_uid(83170), prefixed_uid(83150), prefixed_uid(83143), prefixed_uid(2714), prefixed_uid(83220), prefixed_uid(83200), prefixed_uid(830), prefixed_uid(83190)])
+        self.assertNotIn(prefixed_uid(83160), self.uids(result))
+        self.assertNotIn(prefixed_uid(83210), self.uids(result))
 
 
 # --------------------------------------------------------------------------- #
@@ -719,7 +727,7 @@ class SearchTextTest(SearchFixtureTest):
         """UT-SR-03.04: --text x --to y runs; scan.candidates counts the messages after --to."""
         self.use_config(ICLOUD_ONLY)
         result = self.run_search(text=("invoice",), to=("me@fixture.example",))
-        self.assertEqual(self.uids(result), [2714])
+        self.assertEqual(self.uids(result), [prefixed_uid(2714)])
         self.assertEqual(result["scan"]["mode"], "text")
         self.assertEqual(result["scan"]["candidates"], 8)
         nobody = self.run_search(text=("invoice",), to=("nobody@fixture.example",))
@@ -733,14 +741,14 @@ class SearchTextTest(SearchFixtureTest):
             self.config, search=SearchConfig(default_limit=20, max_scan=8)
         )
         result = self.run_search(text=("invoice",), to=("me@fixture.example",))
-        self.assertEqual(self.uids(result), [2714])
+        self.assertEqual(self.uids(result), [prefixed_uid(2714)])
         self.assertEqual(result["scan"]["candidates"], 8)
 
     def test_text_narrowed_by_since(self) -> None:
         result = self.run_search(
             text=("invoice",), since=search.parse_relative_time("1y")
         )
-        self.assertEqual(self.uids(result), [2714])
+        self.assertEqual(self.uids(result), [prefixed_uid(2714)])
         self.assertEqual(result["scan"]["mode"], "text")
         self.assertEqual(result["scan"]["candidates"], 11)
         self.assertEqual(result["scan"]["messages_read"], 10)
@@ -759,7 +767,7 @@ class SearchTextTest(SearchFixtureTest):
                     since=search.parse_relative_time("1y"),
                 )
             ),
-            [2714],
+            [prefixed_uid(2714)],
         )
         self.assertEqual(
             self.uids(
@@ -767,7 +775,7 @@ class SearchTextTest(SearchFixtureTest):
                     text=("remember *",), since=search.parse_relative_time("1y")
                 )
             ),
-            [83150],
+            [prefixed_uid(83150)],
         )
         self.assertEqual(
             self.uids(
@@ -775,7 +783,7 @@ class SearchTextTest(SearchFixtureTest):
                     text=("invoice attached",), since=search.parse_relative_time("1y")
                 )
             ),
-            [2714],
+            [prefixed_uid(2714)],
         )
         self.assertEqual(
             self.uids(
@@ -790,7 +798,7 @@ class SearchTextTest(SearchFixtureTest):
         """UT-SR-02.02: --text "attached invoice" does not match "invoice attached"."""
         since = search.parse_relative_time("1y")
         self.assertEqual(
-            self.uids(self.run_search(text=("invoice attached",), since=since)), [2714]
+            self.uids(self.run_search(text=("invoice attached",), since=since)), [prefixed_uid(2714)]
         )
         self.assertEqual(
             self.uids(self.run_search(text=("attached invoice",), since=since)), []
@@ -809,14 +817,14 @@ class SearchTextTest(SearchFixtureTest):
     def test_text_narrowed_by_extra_folder(self) -> None:
         self.use_config(ICLOUD_WITH_ARCHIVO)
         result = self.run_search(text=("Ancient message",))
-        self.assertEqual(self.uids(result), [83190])
+        self.assertEqual(self.uids(result), [prefixed_uid(83190)])
         self.assertEqual(result["scan"]["mode"], "text")
         self.assertEqual(result["scan"]["candidates"], 9)
 
     def test_text_narrowed_by_from_filter(self) -> None:
         self.use_config(ICLOUD_ONLY)
         result = self.run_search(text=("invoice",), from_=("billing",))
-        self.assertEqual(self.uids(result), [2714])
+        self.assertEqual(self.uids(result), [prefixed_uid(2714)])
         self.assertEqual(result["scan"]["candidates"], 1)
         self.assertEqual(result["scan"]["messages_read"], 1)
 
@@ -868,13 +876,13 @@ class NewTest(SearchFixtureTest):
         # 83170 is D (15 min old); 83160 is 20 min old, i.e. exactly D - 300 s.
         self.use_lookback("5min", 300)
         result = self.run_new(self.fresh_state())
-        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160), prefixed_uid(83170)])
 
     def test_ut_sr_07_02_message_one_second_before_the_window_is_excluded(self) -> None:
         """UT-SR-07.02: a message one second before D - lookback is excluded."""
         self.use_lookback("299s", 299)
         result = self.run_new(self.fresh_state())
-        self.assertEqual(self.uids(result), [83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83170)])
 
     def test_ut_sr_07_03_scope_with_a_single_message_emits_it(self) -> None:
         """UT-SR-07.03: a scope with one message emits it."""
@@ -891,11 +899,11 @@ class NewTest(SearchFixtureTest):
         self.addCleanup(store.close)
         labels = AccountLabels(fx.accounts_db, tmp_dir=fx.home / "tmp")
         result = search.run_new(
-            AppleMailBackend(store, labels), load_config(fx.home), StateStore(fx.home, AppleMailBackend.check_state_uid)
+            AppleMailBackend(store, labels), load_config(fx.home), StateStore(fx.home, _all_installed)
         )
-        self.assertEqual(self.uids(result), [83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83170)])
         self.assertEqual(result["count"], 1)
-        self.assertEqual(result["cursor"]["current"]["last_uid"], 83170)
+        self.assertEqual(result["cursor"]["current"]["last_uid"], prefixed_uid(83170))
         self.assertEqual(
             warning_codes(result["warnings"]), ["W_EMLX_MISSING", "W_FIRST_RUN"]
         )
@@ -904,10 +912,10 @@ class NewTest(SearchFixtureTest):
         """UT-SR-07.04: --limit below the window size keeps the newest, ascending."""
         self.use_lookback("1h", 3600)
         full = self.run_new(self.fresh_state(), peek=True)
-        self.assertEqual(self.uids(full), [83143, 83150, 83160, 83170])
+        self.assertEqual(self.uids(full), [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)])
         state = self.fresh_state()
         result = self.run_new(state, limit=2)
-        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160), prefixed_uid(83170)])
         self.assertEqual(result["count"], 2)
         self.assertTrue(result["truncated"])
         self.assertIsNotNone(result["hint"])
@@ -917,14 +925,14 @@ class NewTest(SearchFixtureTest):
         )
         self.assertIn("2 more messages", result["warnings"][0])
         persisted = state.load()
-        self.assertEqual(persisted.cursor.last_uid, 83170)
-        self.assertEqual(persisted.emitted_uids, (83160, 83170))
+        self.assertEqual(persisted.cursor.last_uid, prefixed_uid(83170))
+        self.assertEqual(persisted.emitted_uids, (prefixed_uid(83160), prefixed_uid(83170)))
 
     def test_ut_sr_07_05_first_run_peek_emits_and_does_not_write_state(self) -> None:
         """UT-SR-07.05: --peek on a first run emits the window and writes no state."""
         state = self.fresh_state()
         result = self.run_new(state, peek=True)
-        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160), prefixed_uid(83170)])
         self.assertIsNone(result["cursor"]["previous"])
         self.assertIsNone(result["cursor"]["current"])
         self.assertFalse((self.fx.home / "state.json").exists())
@@ -937,7 +945,7 @@ class NewTest(SearchFixtureTest):
             set(result),
             {"count", "truncated", "hint", "messages", "scan", "cursor", "warnings"},
         )
-        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160), prefixed_uid(83170)])
         self.assertEqual(result["count"], 2)
         self.assertFalse(result["truncated"])
         self.assertIsNone(result["hint"])
@@ -953,13 +961,13 @@ class NewTest(SearchFixtureTest):
         self.assertEqual(
             set(current), {"last_date_received", "last_uid", "lookback_seconds"}
         )
-        self.assertEqual(current["last_uid"], 83170)
+        self.assertEqual(current["last_uid"], prefixed_uid(83170))
         self.assertEqual(current["lookback_seconds"], 600)
         self.assertGreater(current["last_date_received"], 0)
 
         persisted = state.load()
-        self.assertEqual(persisted.cursor.last_uid, 83170)
-        self.assertEqual(persisted.emitted_uids, (83160, 83170))
+        self.assertEqual(persisted.cursor.last_uid, prefixed_uid(83170))
+        self.assertEqual(persisted.emitted_uids, (prefixed_uid(83160), prefixed_uid(83170)))
         self.assertEqual(persisted.last_run.command, "new")
 
     def test_ut_sr_07_07_declared_accounts_without_messages_emit_nothing_and_write_no_state(self) -> None:
@@ -1000,7 +1008,7 @@ class NewTest(SearchFixtureTest):
         # 5 min before the cursor: only the config lookback (10 min) reaches it.
         state = self.seed_state(age=timedelta(minutes=25), lookback_seconds=60)
         result = self.run_new(state)
-        self.assertEqual(self.uids(result), [83150, 83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)])
         self.assertEqual(result["cursor"]["previous"]["lookback_seconds"], 60)
         self.assertEqual(result["cursor"]["current"]["lookback_seconds"], 600)
         self.assertEqual(state.load().cursor.lookback_seconds, 600)
@@ -1008,19 +1016,19 @@ class NewTest(SearchFixtureTest):
     def test_subsequent_run_emits_lookback_window(self) -> None:
         state = self.seed_state(age=timedelta(hours=2))
         result = self.run_new(state)
-        self.assertEqual(self.uids(result), [83143, 83150, 83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)])
         self.assertFalse(result["truncated"])
         self.assertIsNone(result["hint"])
         self.assertEqual(result["scan"]["candidates"], 4)
         self.assertEqual(result["scan"]["messages_read"], 3)
         self.assertIn("W_EMLX_MISSING", warning_codes(result["warnings"]))
-        self.assertEqual(result["cursor"]["previous"]["last_uid"], 1)
-        self.assertEqual(result["cursor"]["current"]["last_uid"], 83170)
+        self.assertEqual(result["cursor"]["previous"]["last_uid"], prefixed_uid(1))
+        self.assertEqual(result["cursor"]["current"]["last_uid"], prefixed_uid(83170))
 
         persisted = state.load()
-        self.assertEqual(persisted.cursor.last_uid, 83170)
+        self.assertEqual(persisted.cursor.last_uid, prefixed_uid(83170))
         self.assertEqual(
-            set(persisted.emitted_uids), {83143, 83150, 83160, 83170}
+            set(persisted.emitted_uids), {prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)}
         )
 
     def test_rerun_after_cursor_advance_emits_nothing(self) -> None:
@@ -1036,40 +1044,40 @@ class NewTest(SearchFixtureTest):
     def test_limit_advances_cursor_and_next_run_continues(self) -> None:
         state = self.seed_state(age=timedelta(hours=2))
         first = self.run_new(state, limit=2)
-        self.assertEqual(self.uids(first), [83143, 83150])
+        self.assertEqual(self.uids(first), [prefixed_uid(83143), prefixed_uid(83150)])
         self.assertTrue(first["truncated"])
         self.assertIsNotNone(first["hint"])
         self.assertIn("W_RESULTS_TRUNCATED", warning_codes(first["warnings"]))
-        self.assertEqual(first["cursor"]["current"]["last_uid"], 83150)
-        self.assertEqual(state.load().cursor.last_uid, 83150)
+        self.assertEqual(first["cursor"]["current"]["last_uid"], prefixed_uid(83150))
+        self.assertEqual(state.load().cursor.last_uid, prefixed_uid(83150))
 
         second = self.run_new(state, limit=2)
-        self.assertEqual(self.uids(second), [83160, 83170])
+        self.assertEqual(self.uids(second), [prefixed_uid(83160), prefixed_uid(83170)])
         self.assertFalse(second["truncated"])
-        self.assertEqual(second["cursor"]["current"]["last_uid"], 83170)
+        self.assertEqual(second["cursor"]["current"]["last_uid"], prefixed_uid(83170))
 
     def test_peek_does_not_advance_cursor(self) -> None:
         state = self.seed_state(age=timedelta(hours=2))
         peeked = self.run_new(state, peek=True)
-        self.assertEqual(self.uids(peeked), [83143, 83150, 83160, 83170])
+        self.assertEqual(self.uids(peeked), [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160), prefixed_uid(83170)])
         self.assertEqual(
             peeked["cursor"]["previous"], peeked["cursor"]["current"]
         )
-        self.assertEqual(state.load().cursor.last_uid, 1)
+        self.assertEqual(state.load().cursor.last_uid, prefixed_uid(1))
         # The same messages are still new for the real run.
         self.assertEqual(self.run_new(state)["count"], 4)
 
     def test_emitted_ring_suppresses_duplicates(self) -> None:
         state = self.seed_state(age=timedelta(hours=2), emitted_uids=(83170,))
         result = self.run_new(state)
-        self.assertEqual(self.uids(result), [83143, 83150, 83160])
+        self.assertEqual(self.uids(result), [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83160)])
 
     def test_new_scope_only_declared_accounts(self) -> None:
         self.use_config(ICLOUD_ONLY)
         state = self.seed_state(age=timedelta(hours=2))
         result = self.run_new(state)
-        self.assertEqual(self.uids(result), [83143, 83150, 83170])
-        self.assertNotIn(83160, self.uids(result))
+        self.assertEqual(self.uids(result), [prefixed_uid(83143), prefixed_uid(83150), prefixed_uid(83170)])
+        self.assertNotIn(prefixed_uid(83160), self.uids(result))
 
     def test_new_without_accounts_and_with_a_cursor_only_warns_no_accounts(self) -> None:
         self.use_config("")
@@ -1081,7 +1089,7 @@ class NewTest(SearchFixtureTest):
     def test_new_limit_accepts_up_to_500(self) -> None:
         state = self.fresh_state()
         result = self.run_new(state, limit=1000)
-        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160), prefixed_uid(83170)])
         self.assertIsNone(result["hint"])
 
 
@@ -1110,14 +1118,14 @@ class NewDatesTest(ExtendedSearchFixtureTest):
 
     def assert_cursor_is_real_newest(self, result: dict) -> None:
         current = result["cursor"]["current"]
-        self.assertEqual(current["last_uid"], 83170)
+        self.assertEqual(current["last_uid"], prefixed_uid(83170))
         self.assertLessEqual(current["last_date_received"], self.fx.now.timestamp())
 
     def test_ut_sr_09_01_null_date_does_not_enter_the_first_run(self) -> None:
         """UT-SR-09.01: a NULL date_received is not emitted on a first run."""
         result = self.run_new(self.fresh_state())
         self.assertNotIn(UID_DATE_NULL, self.uids(result))
-        self.assertEqual(self.uids(result), [83160, 83170])
+        self.assertEqual(self.uids(result), [prefixed_uid(83160), prefixed_uid(83170)])
         self.assert_cursor_is_real_newest(result)
 
     def test_ut_sr_09_02_zero_date_does_not_enter_the_first_run(self) -> None:
@@ -1140,9 +1148,9 @@ class NewDatesTest(ExtendedSearchFixtureTest):
         emitted = self.uids(result)
         for uid in self.INVALID_UIDS + (UID_DATE_FUTURE,):
             self.assertNotIn(uid, emitted)
-        self.assertIn(83170, emitted)
+        self.assertIn(prefixed_uid(83170), emitted)
         self.assert_cursor_is_real_newest(result)
-        self.assertEqual(state.load().cursor.last_uid, 83170)
+        self.assertEqual(state.load().cursor.last_uid, prefixed_uid(83170))
 
     def test_ut_sr_09_05_search_shows_invalid_dates_as_null_without_aborting(self) -> None:
         """UT-SR-09.05: search lists them with date_received null."""
@@ -1177,14 +1185,14 @@ class NewDatesTest(ExtendedSearchFixtureTest):
         self.assertNotIn(UID_DATE_FUTURE, self.uids(first))
         later = self.fx.now.timestamp() + 31 * 24 * 3600
         second = self.run_new(state, now=later)
-        self.assertEqual(self.uids(second), [UID_DATE_FUTURE])
-        self.assertEqual(second["cursor"]["current"]["last_uid"], UID_DATE_FUTURE)
+        self.assertEqual(self.uids(second), [prefixed_uid(UID_DATE_FUTURE)])
+        self.assertEqual(second["cursor"]["current"]["last_uid"], prefixed_uid(UID_DATE_FUTURE))
         self.assertEqual(state.load().cursor.last_date_received, self.future_ts)
 
     def test_ut_sr_10_04_date_equal_to_the_run_time_enters(self) -> None:
         """UT-SR-10.04: a message whose date equals the run time is emitted."""
         result = self.run_new(self.fresh_state(), now=float(self.future_ts))
-        self.assertEqual(self.uids(result), [UID_DATE_FUTURE])
+        self.assertEqual(self.uids(result), [prefixed_uid(UID_DATE_FUTURE)])
         # One second earlier it is still in the future.
         early = self.run_new(self.fresh_state(), now=float(self.future_ts - 1))
         self.assertNotIn(UID_DATE_FUTURE, self.uids(early))
@@ -1239,7 +1247,7 @@ class ShowTest(SearchFixtureTest):
         self.assertEqual(set(result), {"message", "warnings"})
         message = result["message"]
         self.assertEqual(list(message), self.SHOW_KEYS)
-        self.assertEqual(message["uid"], 83143)
+        self.assertEqual(message["uid"], prefixed_uid(83143))
         self.assertEqual(message["subject"], "Shared duplicate")
         self.assertEqual(
             message["message_id"], "<duplicate-4@fixture.example>"
@@ -1640,7 +1648,7 @@ class SearchBodyTest(SearchFixtureTest):
             AppleMailBackend(store, labels), config,
             search.Filters(subject=(message.subject,)),
         )
-        found = [m for m in result["messages"] if m["uid"] == 83200]
+        found = [m for m in result["messages"] if m["uid"] == prefixed_uid(83200)]
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["snippet"], "")
         self.assertEqual(
@@ -1694,7 +1702,7 @@ class LabelsUnavailableTest(SearchFixtureTest):
     def test_ut_sr_06_01_search_warns_that_labels_are_unavailable(self) -> None:
         """UT-SR-06.01: search carries W_ACCOUNT_LABELS_UNAVAILABLE."""
         result = self.run_search(subject=("Shared duplicate",))
-        self.assertEqual(self.uids(result), [83143])
+        self.assertEqual(self.uids(result), [prefixed_uid(83143)])
         self.assertEqual(result["warnings"], [search.LABELS_UNAVAILABLE_WARNING])
 
     def test_ut_sr_06_02_show_warns_that_labels_are_unavailable(self) -> None:
@@ -1852,7 +1860,7 @@ class DuplicatesExtendedTest(ExtendedSearchFixtureTest):
         """UT-SR-15.01: duplicate in a normal folder and an aggregate => the normal folder."""
         self.use_config(DEDUPE_CONFIG)
         result = self.run_search(subject=("Aggregate duplicate",))
-        self.assertEqual(self.uids(result), [make_fixtures.UID_DUP_FOLDER])
+        self.assertEqual(self.uids(result), [prefixed_uid(make_fixtures.UID_DUP_FOLDER)])
         message = result["messages"][0]
         self.assertEqual(message["duplicate_count"], 2)
         self.assertEqual(message["mailbox"]["name"], "Facturas")
@@ -1861,7 +1869,7 @@ class DuplicatesExtendedTest(ExtendedSearchFixtureTest):
     def test_ut_sr_15_02_global_message_id_zero_is_unique(self) -> None:
         """UT-SR-15.02: global_message_id 0 => unique message, duplicate_count 1."""
         result = self.run_search(subject=("Global id zero",))
-        self.assertEqual(self.uids(result), [make_fixtures.UID_GLOBAL_ZERO])
+        self.assertEqual(self.uids(result), [prefixed_uid(make_fixtures.UID_GLOBAL_ZERO)])
         self.assertEqual(result["messages"][0]["duplicate_count"], 1)
 
 
