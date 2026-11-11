@@ -1,18 +1,23 @@
 name: tests
 
 on:
-  push:
-    branches: [main, develop]
+  # Batch PRs are the only gate: no push trigger in this phase (plan §7.5).
   pull_request:
     branches: [main, develop]
 
 permissions:
   contents: read
 
+# A new push to the PR branch cancels the previous run instead of queuing it.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unittest:
     name: unittest (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +39,7 @@ jobs:
   install-scripts:
     name: install scripts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
