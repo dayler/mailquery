@@ -17,11 +17,11 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from mailquery import __version__
 from mailquery.backends import backend_class, get_backend
-from mailquery.backends.registry import BackendRegistry
+from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.config import (
     APP_HOME_SUBDIRS,
     DEFAULT_LOG_LEVEL,
@@ -32,6 +32,7 @@ from mailquery.config import (
     MAX_SEARCH_LIMIT,
     Config,
     app_home,
+    declared_drivers,
     ensure_app_home,
     load_config,
     resolve_scope,
@@ -760,7 +761,8 @@ def _run_doctor(
         client = _CLIENT_NAMES.get(str(getattr(selected, "driver", "")), client)
         _bind_command(selected, "doctor")
         _bind_doctor_timeout(selected, run, json_output, logger, client)
-        checks = _collect_doctor_checks(home_path, selected, run)
+        registry = BackendRegistry()
+        checks = _collect_doctor_checks(home_path, selected, run, registry=registry)
     except Exception as exc:  # noqa: BLE001 - doctor never raises
         checks = [{"name": "doctor", "ok": False, "detail": error_detail(exc)}]
     finally:
@@ -894,7 +896,9 @@ class _DoctorRun:
 
     def ordered(self) -> list[dict]:
         """Common checks around the backend's, in the order of PRD 12.8."""
-        result = [self.checks[name] for name in ("python", "home") if name in self.checks]
+        result = [
+            self.checks[name] for name in ("python", "home", "driver") if name in self.checks
+        ]
         result.extend(self.backend_checks or [])
         result.extend(
             self.checks[name] for name in ("config", "state", "lock") if name in self.checks
@@ -919,15 +923,20 @@ class _DoctorRun:
 
 
 def _collect_doctor_checks(
-    home_path: Path, backend: Any, run: _DoctorRun | None = None
+    home_path: Path,
+    backend: Any,
+    run: _DoctorRun | None = None,
+    *,
+    registry: BackendRegistry | None = None,
 ) -> list[dict]:
     """Common checks plus ``backend.doctor_checks()``, in the order of PRD 12.8.
 
     Evaluation order (D-03): the checks that never call the mail client first
-    (``python``, ``home``, ``config`` syntax, ``state``, ``lock``), then the
-    backend checks and last the ``config`` resolution.
+    (``python``, ``home``, ``config`` syntax, ``driver``, ``state``, ``lock``),
+    then the backend checks and last the ``config`` resolution.
     """
     run = run if run is not None else _DoctorRun(home_path)
+    registry = registry if registry is not None else BackendRegistry()
 
     # python -----------------------------------------------------------------
     version_text = ".".join(str(part) for part in sys.version_info[:3])
@@ -967,9 +976,12 @@ def _collect_doctor_checks(
 
     # config syntax (always validated; reported by the config check) -----------
     try:
-        run.config = load_config(home_path)
+        run.config = load_config(home_path, registry=registry)
     except Exception as exc:  # noqa: BLE001 - diagnostics only
         run.config_error = exc
+
+    # driver (declared drivers: installed, plugin_api=1, valid capabilities) ---
+    _record_driver_check(run, backend, registry)
 
     # state ------------------------------------------------------------------
     try:
@@ -1023,17 +1035,124 @@ def _collect_doctor_checks(
     return run.ordered()
 
 
+def _backend_driver_name(backend: Any) -> str:
+    """Driver of the backend under diagnosis (protocol v1 ``driver``; tolerant of doubles)."""
+    driver = getattr(backend, "driver", None)
+    return str(driver) if driver else ""
+
+
+def _bool_text(value: Any) -> str:
+    """``true``/``false`` for the doctor detail (PRD-v2.1 §11.6)."""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return str(value)
+
+
+def _format_driver_metadata(metadata: dict[str, Any]) -> str:
+    """One ``driver`` detail entry: api, package version and the capability map (§11.6)."""
+    capabilities = metadata.get("capabilities") or {}
+    return (
+        f"{metadata.get('driver')} (api={metadata.get('plugin_api')}; "
+        f"pkg {metadata.get('version')}; "
+        f"network={_bool_text(capabilities.get('network'))}; "
+        f"readonly={capabilities.get('readonly', 'unknown')}; "
+        f"body_local={_bool_text(capabilities.get('body_local'))}; "
+        f"attachments={capabilities.get('attachments', 'unknown')}; "
+        f"native_order={capabilities.get('native_order', 'unknown')})"
+    )
+
+
+def _driver_failure_detail(driver: str, exc: Exception) -> str:
+    """Failure entry of the ``driver`` check: reason and hint of the error (§11.6)."""
+    if isinstance(exc, MailqueryError):
+        hint = f" (hint: {exc.hint})" if exc.hint else ""
+        return f"{driver}: {exc.code}: {exc.message}{hint}"
+    return f"{driver}: {error_detail(exc)}"
+
+
+def _backend_driver_metadata(backend: Any) -> dict[str, Any]:
+    """Metadata of a backend that the registry does not know (injected test doubles)."""
+    capabilities = getattr(backend, "capabilities", None)
+    return {
+        "driver": _backend_driver_name(backend),
+        "plugin_api": getattr(backend, "plugin_api", None),
+        "version": package_version(),
+        "capabilities": dict(capabilities) if isinstance(capabilities, Mapping) else {},
+    }
+
+
+def _native_driver_metadata(backend: Any, registry: BackendRegistry) -> dict[str, Any]:
+    """Metadata of the native driver: from the registry, or from the injected instance."""
+    driver = _backend_driver_name(backend)
+    if driver and registry.is_installed(driver):
+        return registry.info(driver)
+    return _backend_driver_metadata(backend)
+
+
+def _record_driver_check(run: _DoctorRun, backend: Any, registry: BackendRegistry) -> None:
+    """``driver``: every declared driver is installed with a valid API 1 contract (§11.6).
+
+    The native driver of the platform (the backend under diagnosis) is listed
+    first when a ``[scope]`` block has no prefix; the explicitly declared drivers
+    follow in config order. An invalid config is reported by the ``config``
+    check, so this one validates only the native driver and says that the
+    declared drivers are unknown. Without any ``[scope]`` block only the native
+    driver is validated and the detail says ``no declared drivers``.
+    """
+    native = _backend_driver_name(backend)
+    details: list[str] = []
+    ok = True
+    if run.config_error is not None:
+        drivers = (native,) if native else ()
+        suffix = "declared drivers: unknown (config failed)"
+    else:
+        config = run.config if run.config is not None else Config(home=run.home_path)
+        drivers = declared_drivers(config, native=native)
+        if not config.has_scopes:
+            drivers = (native,) if native else ()
+            suffix = "no declared drivers"
+        else:
+            suffix = ""
+    for driver in drivers:
+        try:
+            if driver == native:
+                metadata = _native_driver_metadata(backend, registry)
+            else:
+                metadata = registry.info(driver)
+        except Exception as exc:  # noqa: BLE001 - diagnostics only
+            ok = False
+            details.append(_driver_failure_detail(driver, exc))
+        else:
+            details.append(_format_driver_metadata(metadata))
+    if suffix:
+        details.append(suffix)
+    run.record("driver", ok, "; ".join(details) or "no declared drivers")
+
+
 def _record_config_check(run: _DoctorRun, backend: Any) -> None:
     """``config``: syntax plus the resolution of the ``[scope]`` blocks (PRD 12.8, RF-25).
 
-    The resolution depends on a check of the backend (annex A.7 / B.8); when
-    that check failed, the mail client is not called. A declared account that
-    resolves to an excluded store (Outlook) adds ``W_STORE_EXCLUDED`` to the
-    detail, which keeps ``ok=true`` (PRD 15.3).
+    The resolution depends first on the ``driver`` check (M02) and then on a
+    check of the backend (annex A.7 / B.8); when one failed, the mail client is
+    not called and the detail says ``not evaluated: <check> failed``. Blocks of
+    a driver other than the native one keep their account resolution for the
+    multi-driver phase, so they are only reported as declared. A declared
+    account that resolves to an excluded store (Outlook) adds
+    ``W_STORE_EXCLUDED`` to the detail, which keeps ``ok=true`` (PRD 15.3).
     """
     by_name = {str(check.get("name")): check for check in run.backend_checks or []}
     dependency = _RESOLUTION_DEPENDENCY.get(str(getattr(backend, "driver", "")))
     dependency_ok = dependency is None or bool(by_name.get(dependency, {}).get("ok"))
+    driver_check = run.checks.get("driver")
+    driver_ok = bool(driver_check.get("ok")) if driver_check is not None else True
+    first_failure = None
+    if not driver_ok:
+        first_failure = "driver"
+    elif not dependency_ok:
+        first_failure = dependency
+    native = _backend_driver_name(backend)
     try:
         if run.config_error is not None:
             raise run.config_error
@@ -1044,10 +1163,10 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
                 prefix = "config.toml exists but declares no [scope.*] blocks"
             else:
                 prefix = "no config.toml (optional)"
-            if not dependency_ok:
+            if first_failure is not None:
                 detail = (
                     f"{prefix}; 0 account block(s) declared; available accounts: unknown "
-                    f"({dependency} failed)"
+                    f"({first_failure} failed)"
                 )
             elif backend.labels_available:
                 accounts = [
@@ -1077,10 +1196,15 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
             problems = []
             lines: list[str] = []
             excluded: list[dict] = []
-            if not dependency_ok:
-                problems.append(f"not evaluated: {dependency} failed")
+            if first_failure is not None:
+                problems.append(f"not evaluated: {first_failure} failed")
             else:
                 for entry in config.scopes:
+                    if entry.driver is not None and entry.driver != native:
+                        # M04 resolves the accounts of every declared driver; in
+                        # this phase the ``driver`` check already validated it.
+                        lines.append(f"{entry.key} → declared for driver {entry.driver}")
+                        continue
                     try:
                         resolved = resolve_scope(
                             replace(config, scopes=(entry,)), backend, excluded=excluded
