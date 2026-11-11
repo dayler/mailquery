@@ -42,7 +42,7 @@ from mailquery.config import (
 from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
 from mailquery.output import configure_streams, now_iso, write_json
-from mailquery.plugins import PluginContext
+from mailquery.plugins import PluginContext, call_driver
 from mailquery.search import (
     Filters,
     _store_excluded_warning,
@@ -643,7 +643,10 @@ def _validate_show_native_id(
 
     The plugin receives only ``<native_id>`` (RF-40) and validates it with
     ``parse_native_id``; the CLI runs that check after loading the declared
-    driver (PRD-v2.1 §11.3 row 5) and hands the result to ``run_show``.
+    driver (PRD-v2.1 §11.3 row 5) and hands the result to ``run_show``. The call
+    goes through the M05 driver wrapper: a plugin ``reason`` (``invalid_uid``,
+    ``not_found``, ...) becomes the core code/exit and an unmapped failure is
+    ``E_PLUGIN_FAILED``, never ``E_INTERNAL``.
     """
     driver = str(getattr(args, "uid_driver", "") or "")
     if not driver or driver == native_name:
@@ -651,7 +654,12 @@ def _validate_show_native_id(
     instance = opened.get(driver)
     parser = getattr(instance, "parse_native_id", None)
     if callable(parser):
-        args.uid = parser(str(getattr(args, "uid_native_id", "")))
+        native_id = str(getattr(args, "uid_native_id", ""))
+        args.uid = call_driver(
+            "parse_native_id",
+            lambda: parser(native_id),
+            driver=driver,
+        )
     else:  # pragma: no cover - the API 1 contract requires parse_native_id
         args.uid = str(getattr(args, "uid_native_id", ""))
 
