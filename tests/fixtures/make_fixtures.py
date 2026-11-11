@@ -442,14 +442,35 @@ ORPHAN_UID = 99999
 # .emlx whose first line is not a valid length and whose payload is not MIME.
 CORRUPT_EMLX_BYTES = b"this-is-not-a-length\nnot a valid mime payload\x00\x01"
 
+# M02: the fixture config carries a valid ``[attachments]`` table with the
+# documented defaults (parsing coverage; it changes no output) and the account
+# blocks keep the 2.0.1 unprefixed form (regression: same behavior).
+ATTACHMENTS_CONFIG = """\
+[attachments]
+enabled = true
+max_file_size_mb = 100
+max_total_size_mb = 200
+max_count = 50
+"""
+
 DEFAULT_CONFIG = f"""\
 # Synthetic fixture configuration (all three accounts declared).
+{ATTACHMENTS_CONFIG}
 [scope."{ICLOUD_LABEL}"]
 mailbox_list = ["Facturas", "Archivo"]
 
 [scope."{GMAIL_LABEL}"]
 
 [scope."{LOCAL_LABEL}"]
+"""
+
+#: Same accounts declared with the explicit driver prefix (M02, RF-36).
+PREFIXED_CONFIG = f"""\
+{ATTACHMENTS_CONFIG}
+[scope."apple_mail:{ICLOUD_LABEL}"]
+mailbox_list = ["Facturas"]
+
+[scope."apple_mail:{GMAIL_LABEL}"]
 """
 
 

@@ -351,6 +351,7 @@ class DoctorTest(IntegrationBase):
         for required in (
             "python",
             "home",
+            "driver",
             "store",
             "envelope_index",
             "schema",
@@ -387,7 +388,7 @@ class DoctorTest(IntegrationBase):
         self.assertIn("mailquery doctor - environment and read-only preflight", text)
         self.assertIn("Checks:", text)
         self.assertIn("[ok]", text)
-        self.assertIn("Result: 10/10 checks passed", text)
+        self.assertIn("Result: 11/11 checks passed", text)
         self.assertIn("mailquery doctor --json", text)
         self.assertNotIn('"checks"', text)
 
@@ -946,8 +947,8 @@ class OutlookGoldenTest(unittest.TestCase):
         self.assertEqual(
             [check["name"] for check in checks],
             [
-                "python", "home", "pywin32", "outlook", "stores", "readonly_strategy",
-                "object_model_guard", "config", "state", "lock",
+                "python", "home", "driver", "pywin32", "outlook", "stores",
+                "readonly_strategy", "object_model_guard", "config", "state", "lock",
             ],
         )
         for check in checks:

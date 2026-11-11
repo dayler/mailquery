@@ -24,12 +24,22 @@ from mailquery import cli as cli_mod
 from mailquery import errors
 from mailquery.backends import apple_mail as apple_mail_mod
 from mailquery.backends.apple_mail import AppleMailBackend
+from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.errors import MailqueryError
 from mailquery.search import Filters
 
+from tests.fakes.plugin import (
+    DRIVER as PLUGIN_DRIVER,
+    VERSION as PLUGIN_VERSION,
+    FakeEntryPoint,
+    FakePluginBackend,
+    internal_entry_points,
+    plugin_class,
+)
 from tests.fixtures.make_fixtures import (
     DEFAULT_CONFIG,
     ICLOUD_LABEL,
+    PREFIXED_CONFIG,
     build_store,
     write_config,
     write_state,
@@ -52,6 +62,14 @@ class _FakeBackend:
     """Minimal stand-in for a ``MailBackend``: only what ``cli`` itself touches."""
 
     driver = "apple_mail"
+    plugin_api = 1
+    capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "numeric",
+    }
 
     def __init__(self) -> None:
         self.closed = False
@@ -951,7 +969,7 @@ class BackendInjectionTests(_CliTestCase):
         self.assertEqual(exit_code, 0)
         names = [check["name"] for check in self.json_object(stdout)["checks"]]
         self.assertEqual(
-            names, ["python", "home", "fake_check", "config", "state", "lock"]
+            names, ["python", "home", "driver", "fake_check", "config", "state", "lock"]
         )
         self.assertTrue(backend.closed)
 
@@ -1036,7 +1054,7 @@ class DoctorTests(_CliTestCase):
         self.assertIn("mailquery doctor - environment and read-only preflight", stdout)
         self.assertIn("Checks:", stdout)
         self.assertIn("[ok]", stdout)
-        self.assertIn("Result: 10/10 checks passed", stdout)
+        self.assertIn("Result: 11/11 checks passed", stdout)
         self.assertIn("Notes:", stdout)
         self.assertIn("mailquery doctor --json", stdout)
         self.assertNotIn('"checks"', stdout)
@@ -1104,6 +1122,7 @@ class DoctorTests(_CliTestCase):
             [
                 "python",
                 "home",
+                "driver",
                 "store",
                 "envelope_index",
                 "schema",
@@ -1363,6 +1382,181 @@ class DoctorTests(_CliTestCase):
         by_name = {check["name"]: check for check in payload["checks"]}
         self.assertFalse(by_name["lock"]["ok"])
         self.assertIn("another", by_name["lock"]["detail"])
+
+
+# --------------------------------------------------------------------------- #
+# UT-DRV-05 — doctor `driver` check (AC-02, AC-18, PRD-v2.1 §11.6)
+# --------------------------------------------------------------------------- #
+
+MACOS_DRIVER_ORDER = [
+    "python", "home", "driver", "store", "envelope_index", "schema",
+    "readonly_strategy", "accounts_db", "config", "state", "lock",
+]
+WINDOWS_DRIVER_ORDER = [
+    "python", "home", "driver", "pywin32", "outlook", "stores",
+    "readonly_strategy", "object_model_guard", "config", "state", "lock",
+]
+
+
+class DriverDoctorTests(_CliTestCase):
+    """UT-DRV-05 — the ``driver`` check of ``doctor`` (AC-02, AC-18)."""
+
+    def _registry(self, *entry_points) -> BackendRegistry:
+        return BackendRegistry(
+            platform=sys.platform,
+            entry_points=[*internal_entry_points(), *entry_points],
+        )
+
+    def _run_doctor(self, registry: BackendRegistry, *, argv=("doctor", "--json"), **kwargs):
+        with mock.patch.object(cli_mod, "BackendRegistry", lambda: registry):
+            return self.run_cli(list(argv), **kwargs)
+
+    def _doctor(self, registry: BackendRegistry | None = None, **kwargs) -> dict:
+        registry = registry if registry is not None else self._registry()
+        exit_code, stdout, stderr = self._run_doctor(registry, **kwargs)
+        self.assertEqual(exit_code, 0, "doctor must always exit 0")
+        self.assertEqual(stderr, "")
+        return self.json_object(stdout)
+
+    @staticmethod
+    def _by_name(payload: dict) -> dict[str, dict]:
+        return {check["name"]: check for check in payload["checks"]}
+
+    @staticmethod
+    def _windows_ordered() -> list[str]:
+        """``_DoctorRun.ordered()`` with the Windows backend checks (platform-independent)."""
+        run = cli_mod._DoctorRun(Path(tempfile.gettempdir()))
+        for name in ("python", "home", "driver"):
+            run.record(name, True, "detail")
+        run.backend_checks = [
+            {"name": name, "ok": True, "detail": "detail"}
+            for name in ("pywin32", "outlook", "stores", "readonly_strategy", "object_model_guard")
+        ]
+        for name in ("config", "state", "lock"):
+            run.record(name, True, "detail")
+        return [check["name"] for check in run.ordered()]
+
+    def _native_detail(self, version: str | None = None) -> str:
+        version = package_version() if version is None else version
+        return (
+            f"apple_mail (api=1; pkg {version}; network=false; readonly=structural; "
+            "body_local=true; attachments=local; native_order=numeric)"
+        )
+
+    def test_ut_drv_05_01_check_order_is_macos_and_windows_with_driver_after_home(self) -> None:
+        """UT-DRV-05.01: `driver` sits after `home` in the macOS and Windows orders."""
+        payload = self._doctor()
+        self.assertEqual([check["name"] for check in payload["checks"]], MACOS_DRIVER_ORDER)
+        self.assertEqual(self._windows_ordered(), WINDOWS_DRIVER_ORDER)
+
+    def test_ut_drv_05_02_detail_lists_api_package_and_capabilities(self) -> None:
+        """UT-DRV-05.02: the detail has api, pkg, network, readonly, body_local, attachments, native_order."""
+        payload = self._doctor()
+        driver = self._by_name(payload)["driver"]
+        self.assertTrue(driver["ok"], driver)
+        self.assertEqual(driver["detail"], self._native_detail() + "; no declared drivers")
+        for token in (
+            "api=1",
+            "pkg ",
+            "network=false",
+            "readonly=structural",
+            "body_local=true",
+            "attachments=local",
+            "native_order=numeric",
+        ):
+            self.assertIn(token, driver["detail"])
+
+        # A prefixed native block keeps the native entry and drops the suffix.
+        write_config(self.fx.home, PREFIXED_CONFIG)
+        driver = self._by_name(self._doctor())["driver"]
+        self.assertTrue(driver["ok"], driver)
+        self.assertEqual(driver["detail"], self._native_detail())
+        self.assertNotIn("no declared drivers", driver["detail"])
+
+    def test_ut_drv_05_03_incompatible_declared_driver_fails_and_blocks_config(self) -> None:
+        """UT-DRV-05.03: an incompatible declared driver ⇒ ok=false with reason/hint; config not evaluated."""
+        registry = self._registry(
+            FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_class(plugin_api=2))
+        )
+        write_config(self.fx.home, f'[scope."{PLUGIN_DRIVER}:work"]\n')
+        payload = self._doctor(registry)
+        checks = self._by_name(payload)
+        driver = checks["driver"]
+        self.assertFalse(driver["ok"])
+        self.assertIn("E_PLUGIN_INCOMPATIBLE", driver["detail"])
+        self.assertIn("expected 1, found 2", driver["detail"])
+        self.assertIn("(hint: ", driver["detail"])
+        self.assertFalse(checks["config"]["ok"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: driver failed")
+
+    def test_ut_drv_05_04_invalid_config_validates_only_the_native_driver(self) -> None:
+        """UT-DRV-05.04: invalid config.toml ⇒ native only plus `declared drivers: unknown (config failed)`."""
+        write_config(self.fx.home, "unknown_key = 1\n")
+        payload = self._doctor()
+        checks = self._by_name(payload)
+        self.assertTrue(checks["driver"]["ok"], checks["driver"])
+        self.assertEqual(
+            checks["driver"]["detail"],
+            self._native_detail() + "; declared drivers: unknown (config failed)",
+        )
+        self.assertFalse(checks["config"]["ok"])
+        self.assertIn("E_CONFIG_INVALID", checks["config"]["detail"])
+
+    def test_ut_drv_05_05_no_config_or_no_blocks_lists_no_declared_drivers(self) -> None:
+        """UT-DRV-05.05: no config.toml or no blocks ⇒ native + `no declared drivers`."""
+        expected = self._native_detail() + "; no declared drivers"
+        self.assertEqual(self._by_name(self._doctor())["driver"]["detail"], expected)
+        write_config(self.fx.home, "# template only\n")
+        self.assertEqual(self._by_name(self._doctor())["driver"]["detail"], expected)
+
+    def test_ut_drv_05_06_several_drivers_are_all_listed(self) -> None:
+        """UT-DRV-05.06: native + plugin are listed; a failing one fails the check."""
+        write_config(
+            self.fx.home,
+            f'[scope."{PLUGIN_DRIVER}:work"]\n\n[scope."{ICLOUD_LABEL}"]\n',
+        )
+        registry = self._registry(FakeEntryPoint(PLUGIN_DRIVER, plugin=FakePluginBackend()))
+        checks = self._by_name(self._doctor(registry))
+        self.assertTrue(checks["driver"]["ok"], checks["driver"])
+        self.assertEqual(
+            checks["driver"]["detail"],
+            self._native_detail()
+            + f"; {PLUGIN_DRIVER} (api=1; pkg {PLUGIN_VERSION}; network=true; "
+            "readonly=promise; body_local=false; attachments=remote; native_order=text)",
+        )
+        self.assertTrue(checks["config"]["ok"], checks["config"])
+
+        broken = self._registry(
+            FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_class(plugin_api=2))
+        )
+        checks = self._by_name(self._doctor(broken))
+        self.assertFalse(checks["driver"]["ok"])
+        self.assertIn("apple_mail (api=1;", checks["driver"]["detail"])
+        self.assertIn("E_PLUGIN_INCOMPATIBLE", checks["driver"]["detail"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: driver failed")
+
+    def test_ut_drv_05_07_driver_failure_wins_over_the_backend_dependency(self) -> None:
+        """UT-DRV-05.07: driver and schema fail together ⇒ config reports `not evaluated: driver failed`."""
+        write_config(self.fx.home, f'[scope."{PLUGIN_DRIVER}:work"]\n')
+        registry = self._registry(
+            FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_class(plugin_api=2))
+        )
+        with mock.patch.object(apple_mail_mod, "open_store", side_effect=RuntimeError("kaboom")):
+            payload = self._doctor(registry)
+        checks = self._by_name(payload)
+        self.assertFalse(checks["driver"]["ok"])
+        self.assertFalse(checks["schema"]["ok"])
+        self.assertFalse(checks["config"]["ok"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: driver failed")
+
+    def test_ut_drv_05_08_driver_is_third_in_both_platform_orders(self) -> None:
+        """UT-DRV-05.08: `driver` is exactly at position 3 on macOS and on Windows."""
+        payload = self._doctor()
+        names = [check["name"] for check in payload["checks"]]
+        self.assertEqual(names.index("driver"), 2)
+        self.assertEqual(MACOS_DRIVER_ORDER.index("driver"), 2)
+        self.assertEqual(WINDOWS_DRIVER_ORDER.index("driver"), 2)
+        self.assertEqual(self._windows_ordered().index("driver"), 2)
 
 
 # --------------------------------------------------------------------------- #

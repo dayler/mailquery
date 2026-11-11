@@ -545,8 +545,8 @@ HINT_UNSUPPORTED = "install classic Outlook (version 16.0 or later); the new Out
 HINT_NOT_RUNNING = "open classic Outlook with the same user, without elevation, and retry"
 #: `checks[].name` of the Outlook doctor, in the order of PRD 12.8.
 _OUTLOOK_DOCTOR_CHECKS = (
-    "python", "home", "pywin32", "outlook", "stores", "readonly_strategy",
-    "object_model_guard", "config", "state", "lock",
+    "python", "home", "driver", "pywin32", "outlook", "stores",
+    "readonly_strategy", "object_model_guard", "config", "state", "lock",
 )
 _DOCTOR_TIMEOUT = "timeout after 30 s: Outlook did not respond (possible security prompt)"
 _DISPATCH_NAMES = frozenset({"Dispatch", "DispatchEx", "EnsureDispatch"})
@@ -3952,7 +3952,7 @@ class OutlookNotRunningTests(_OutlookCommandCase):
                 self.assertEqual((code, stderr), (0, ""))
                 if argv == ("doctor",):
                     self.assertIn("[FAIL] outlook", stdout)
-                    self.assertIn("Result: 6/10 checks passed (4 failed)", stdout)
+                    self.assertIn("Result: 7/11 checks passed (4 failed)", stdout)
                     continue
                 checks = {check["name"]: check for check in json.loads(stdout)["checks"]}
                 self.assertEqual(list(checks), list(_OUTLOOK_DOCTOR_CHECKS))

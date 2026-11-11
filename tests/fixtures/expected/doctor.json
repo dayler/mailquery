@@ -13,6 +13,11 @@
       "detail": "<HOME>"
     },
     {
+      "name": "driver",
+      "ok": true,
+      "detail": "apple_mail (api=1; pkg 2.0.1; network=false; readonly=structural; body_local=true; attachments=local; native_order=numeric)"
+    },
+    {
       "name": "store",
       "ok": true,
       "detail": "V10 at <ROOT>/Mail"
