@@ -34,14 +34,15 @@ from mailquery.config import (
     Config,
     app_home,
     declared_drivers,
-    driver_in_scope,
     ensure_app_home,
     load_config,
+    require_driver_in_scope,
     resolve_scope,
 )
 from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
 from mailquery.output import configure_streams, now_iso, write_json
+from mailquery.plugins import PluginContext
 from mailquery.search import (
     Filters,
     _store_excluded_warning,
@@ -433,13 +434,14 @@ def main(
         return _report_error(exc, _guess_command(raw_argv))
 
     command = str(args.command)
+    registry = BackendRegistry()
     if command == "show":
         # Before the home is created, the config is read or the store is opened:
         # generic uid syntax plus the installed driver (PRD-v2.1 §11.3 row 2) and,
         # for the native driver, its ``parse_native_id`` (pure, offline).
         try:
-            args.uid, args.uid_driver = _parse_show_uid(
-                args.uid, mail_root, accounts_db, backend
+            args.uid, args.uid_driver, args.uid_native_id = _parse_show_uid(
+                args.uid, mail_root, accounts_db, backend, registry
             )
         except MailqueryError as exc:
             return _report_error(exc, command)
@@ -463,7 +465,9 @@ def main(
             args.log_level,
             json_output=bool(getattr(args, "json", False)),
         )
-    return _run_command(args, home_path, mail_root, accounts_db, backend)
+    return _run_command(
+        args, home_path, mail_root, accounts_db, backend, registry
+    )
 
 
 def _native_driver_name(
@@ -498,15 +502,17 @@ def _parse_show_uid(
     mail_root: Path | None,
     accounts_db: Path | None,
     backend: Any,
-) -> tuple[Any, str]:
+    registry: BackendRegistry,
+) -> tuple[Any, str, str]:
     """Validate the ``show`` uid before creating the home (PRD-v2.1 §11.3 row 2, AC-05).
 
-    Returns ``(native_uid_or_None, driver)``: the native uid of the platform
-    driver (ready for the backend) or ``None`` when the prefix belongs to another
-    installed driver (its native part is validated after the scope check).
+    Returns ``(native_uid_or_None, driver, native_id)``: the native uid of the
+    platform driver (ready for the backend) or ``None`` when the prefix belongs
+    to another installed driver (its native part is validated after the scope
+    check and after loading the declared driver).
     """
     native_driver = _native_driver_name(mail_root, accounts_db, backend)
-    registry_is_installed = BackendRegistry().is_installed
+    registry_is_installed = registry.is_installed
 
     def is_installed(driver: str) -> bool:
         # An injected backend (tests, the Outlook fake) is available by definition.
@@ -520,35 +526,23 @@ def _parse_show_uid(
     native: Any = None
     if parsed.driver == native_driver:
         native = _native_id_parser(mail_root, accounts_db, backend)(parsed.native_id)
-    return native, parsed.driver
+    return native, parsed.driver, parsed.native_id
 
 
 def _require_show_driver_in_scope(
-    args: argparse.Namespace,
-    config: Config,
-    mail_root: Path | None,
-    accounts_db: Path | None,
-    backend: Any,
+    args: argparse.Namespace, config: Config, native_name: str
 ) -> None:
     """``show``: the uid's driver must be declared in ``[scope]`` (RF-36).
 
-    Runs after ``config.toml`` is read and before the backend is built: an
+    Runs after ``config.toml`` is read and before any driver is opened: an
     installed driver with no ``[scope]`` block is ``E_ACCOUNT_NOT_IN_SCOPE``
-    (exit 2) without loading it. In this milestone only the platform's native
-    driver serves ``show``; M04 extends the dispatch to every declared driver.
+    (exit 2) without loading it. A config with no blocks at all keeps the 2.0.1
+    path: the native driver is opened and ``run_show`` rejects the message.
     """
     driver = str(getattr(args, "uid_driver", "") or "")
-    native_driver = _native_driver_name(mail_root, accounts_db, backend)
-    if not driver_in_scope(config, driver, native=native_driver or None):
-        raise MailqueryError(
-            "E_ACCOUNT_NOT_IN_SCOPE",
-            f"driver {driver!r} is installed but no [scope] block declares it",
-            f'declare an account for the driver in ~/.mailquery/config.toml, e.g. '
-            f'[scope."{driver}:<account>"]; the driver stays out of scope until then',
-            "driver out of scope",
-        )
-    if driver != native_driver:
-        raise uid_module.driver_unknown(driver)
+    if not config.scopes and driver == native_name:
+        return
+    require_driver_in_scope(config, driver, native=native_name or None)
 
 
 def _platform_override(mail_root: Path | None, accounts_db: Path | None) -> str | None:
@@ -592,12 +586,83 @@ def _close_backend(backend: Any) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _declared_driver_names(config: "Config", native_name: str) -> tuple[str, ...]:
+    """Declared drivers of the command, with the native fallback of a config with no blocks.
+
+    RF-36 opens only the declared drivers; a config with no ``[scope]`` block keeps
+    the 2.0.1 behavior (the native driver is the default driver, used for
+    discovery and ``W_NO_ACCOUNTS``). The order is the one of
+    ``config.declared_drivers`` (native first, then the explicit blocks).
+    """
+    declared = declared_drivers(config, native=native_name or None)
+    if declared:
+        return tuple(declared)
+    return (native_name,) if native_name else ()
+
+
+def _open_drivers(
+    names: Sequence[str],
+    command: str,
+    *,
+    home_path: Path,
+    mail_root: Path | None,
+    accounts_db: Path | None,
+    backend: Any,
+    native_name: str,
+    registry: BackendRegistry,
+) -> dict[str, Any]:
+    """Open the drivers the command consults (M04-T01/T05).
+
+    The native driver is the injected/platform backend; every other declared
+    driver is loaded and instantiated by the registry (API 1: the entry point is
+    a class or a factory invoked with one positional ``PluginContext``). Drivers
+    are opened before ``event=start`` and closed by the caller in a ``finally``;
+    a declared driver that does not load aborts the command here, without
+    partial results.
+    """
+    opened: dict[str, Any] = {}
+    plugins: list[str] = []
+    for name in names:
+        if name == native_name:
+            opened[name] = _make_backend(home_path, mail_root, accounts_db, backend)
+        else:
+            plugins.append(name)
+    if plugins:
+        context = PluginContext(home=home_path, tmp_dir=home_path / "tmp")
+        opened.update(registry.open_drivers(plugins, context=context))
+    for instance in opened.values():
+        _bind_command(instance, command)
+        _log_backend_connection(instance)
+    return opened
+
+
+def _validate_show_native_id(
+    args: argparse.Namespace, opened: Mapping[str, Any], native_name: str
+) -> None:
+    """Validate the native part of a plugin ``show`` uid with the driver parser.
+
+    The plugin receives only ``<native_id>`` (RF-40) and validates it with
+    ``parse_native_id``; the CLI runs that check after loading the declared
+    driver (PRD-v2.1 §11.3 row 5) and hands the result to ``run_show``.
+    """
+    driver = str(getattr(args, "uid_driver", "") or "")
+    if not driver or driver == native_name:
+        return
+    instance = opened.get(driver)
+    parser = getattr(instance, "parse_native_id", None)
+    if callable(parser):
+        args.uid = parser(str(getattr(args, "uid_native_id", "")))
+    else:  # pragma: no cover - the API 1 contract requires parse_native_id
+        args.uid = str(getattr(args, "uid_native_id", ""))
+
+
 def _run_command(
     args: argparse.Namespace,
     home_path: Path,
     mail_root: Path | None,
     accounts_db: Path | None,
     backend: Any = None,
+    registry: BackendRegistry | None = None,
 ) -> int:
     command = str(args.command)
     try:
@@ -612,8 +677,9 @@ def _run_command(
         )
         return _report_error(error, command)
 
+    registry = registry if registry is not None else BackendRegistry()
     try:
-        config = load_config(home_path)
+        config = load_config(home_path, registry=registry)
     except MailqueryError as exc:
         _log_error(_best_effort_logger(home_path, args.log_level), command, exc)
         return _report_error(exc, command)
@@ -633,23 +699,56 @@ def _run_command(
 
     logger = get_logger("mailquery.cli")
     started = time.perf_counter()
-    selected = None
+    native_name = _native_driver_name(mail_root, accounts_db, backend)
+    opened: dict[str, Any] = {}
     try:
         if command == "show":
-            _require_show_driver_in_scope(
-                args, config, mail_root, accounts_db, backend
+            _require_show_driver_in_scope(args, config, native_name)
+        with RunLock(home_path):
+            if command == "show":
+                names = (str(getattr(args, "uid_driver", "") or native_name),)
+            else:
+                names = _declared_driver_names(config, native_name)
+            opened = _open_drivers(
+                names,
+                command,
+                home_path=home_path,
+                mail_root=mail_root,
+                accounts_db=accounts_db,
+                backend=backend,
+                native_name=native_name,
+                registry=registry,
             )
-        selected = _make_backend(home_path, mail_root, accounts_db, backend)
-        _bind_command(selected, command)
-        logger.info("event=start command=%s backend=%s", command, selected.driver)
-        payload = _execute(args, config, home_path, selected)
-        if not isinstance(payload, dict):
-            raise MailqueryError(
-                "E_INTERNAL",
-                "the command returned an invalid payload",
-                "run `mailquery doctor` and check the technical log",
+            if command == "show":
+                _validate_show_native_id(args, opened, native_name)
+            logger.info(
+                "event=start command=%s backend=%s drivers=%s",
+                command,
+                native_name or "-",
+                ",".join(_declared_driver_names(config, native_name)) or "-",
             )
-        payload = _with_count(payload)
+            selected = opened.get(native_name)
+            drivers = {
+                name: instance
+                for name, instance in opened.items()
+                if name != native_name
+            }
+            payload = _execute(
+                args,
+                config,
+                home_path,
+                selected,
+                drivers=drivers,
+                native=native_name,
+                registry=registry,
+            )
+            if not isinstance(payload, dict):
+                raise MailqueryError(
+                    "E_INTERNAL",
+                    "the command returned an invalid payload",
+                    "run `mailquery doctor` and check the technical log",
+                )
+            payload = _with_count(payload)
     except MailqueryError as exc:
         _log_error(logger, command, exc)
         return _report_error(exc, command)
@@ -663,7 +762,8 @@ def _run_command(
         )
         return _report_error(error, command)
     finally:
-        _close_backend(selected)
+        for instance in opened.values():
+            _close_backend(instance)
 
     write_json(_success_payload(command, payload))
     duration_ms = int((time.perf_counter() - started) * 1000)
@@ -691,6 +791,10 @@ def _execute(
     config: Config,
     home_path: Path,
     backend: Any,
+    *,
+    drivers: "Mapping[str, Any] | None" = None,
+    native: str | None = None,
+    registry: BackendRegistry | None = None,
 ) -> dict:
     command = str(args.command)
     filters: Filters | None = None
@@ -700,33 +804,50 @@ def _execute(
     elif command == "new":
         new_limit = _validate_limit(args.limit, MAX_NEW_LIMIT)
 
-    with RunLock(home_path):
-        _log_backend_connection(backend)
-        if command == "mailboxes":
-            payload = run_mailboxes(backend, config)
-        elif command == "search":
-            payload = run_search(backend, config, filters)  # type: ignore[arg-type]
-        elif command == "new":
-            state_store = StateStore(home_path, BackendRegistry().is_installed)
-            payload = run_new(
+    mapping = dict(drivers or {})
+    extra: dict[str, Any] = {}
+    if mapping:
+        extra["drivers"] = mapping
+    if backend is None:
+        extra["native"] = native
+    state_validator = (
+        registry.is_installed
+        if registry is not None
+        else BackendRegistry().is_installed
+    )
+    if command == "mailboxes":
+        payload = run_mailboxes(backend, config, **extra)
+    elif command == "search":
+        payload = run_search(backend, config, filters, **extra)  # type: ignore[arg-type]
+    elif command == "new":
+        state_store = StateStore(home_path, state_validator)
+        payload = run_new(
+            backend,
+            config,
+            state_store,
+            peek=bool(args.peek),
+            limit=new_limit,
+            **extra,
+        )
+    elif command == "show":
+        uid_driver = str(getattr(args, "uid_driver", "") or "")
+        if backend is None or uid_driver != str(native or ""):
+            payload = run_show(
                 backend,
                 config,
-                state_store,
-                peek=bool(args.peek),
-                limit=new_limit,
+                args.uid,
+                driver=uid_driver or None,
+                drivers=mapping or None,
+                native=native,
             )
-        elif command == "show":
-            if args.uid is None:  # pragma: no cover - only the native driver serves show yet
-                raise uid_module.driver_unknown(
-                    str(getattr(args, "uid_driver", ""))
-                )
+        else:
             payload = run_show(backend, config, args.uid)
-        else:  # pragma: no cover - argparse prevents this
-            raise MailqueryError(
-                "E_USAGE",
-                f"unknown command: {command}",
-                'run "mailquery --help" to see the available commands',
-            )
+    else:  # pragma: no cover - argparse prevents this
+        raise MailqueryError(
+            "E_USAGE",
+            f"unknown command: {command}",
+            'run "mailquery --help" to see the available commands',
+        )
     return payload
 
 

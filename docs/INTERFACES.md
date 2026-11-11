@@ -274,6 +274,8 @@ parcheable, también usado por `--version`).
 | `declared(drivers)` | `list[DriverMetadata]` validada en el orden pedido; driver no instalado ⇒ `E_DRIVER_UNKNOWN` (2) |
 | `info(driver)` | `DriverMetadata` validada de un driver; importa solo ese plugin y una única vez |
 | `load(driver)` | objeto del entry point (clase o factoría) de **un** driver; import fallido ⇒ `E_PLUGIN_INCOMPATIBLE` (3) |
+| `open(driver, *, context=None)` | instancia del driver ya cargado (M04, T01): el entry point externo se invoca con un `PluginContext` posicional; los internos, sin argumentos; un fallo del constructor ⇒ `E_PLUGIN_INCOMPATIBLE` (3) |
+| `open_drivers(drivers, *, context=None)` | `dict[driver → instancia]` en el orden pedido; los abre el CLI antes de `event=start` |
 | `versions(platform=None)` | `list[(driver, version)]` alfabética para `--version`; filtra los internos por plataforma (DP-02) |
 
 Validación: `driver` debe cumplir `[a-z0-9_]{1,64}`, ser único (duplicado ⇒
@@ -288,6 +290,15 @@ distribución, o `mailquery.__version__` en desarrollo). `--version` usa
 "mailquery.backends.apple_mail:AppleMailBackend"` y `outlook =
 "mailquery.backends.outlook:OutlookBackend"`); un plugin externo se registra en
 el mismo grupo con `"<nombre> = <paquete>.<módulo>:<clase>"`.
+
+**Convención de instanciación (API 1, M04):** el objeto del entry point es una
+clase o una factoría; el núcleo lo invoca con **un** `PluginContext(home,
+tmp_dir)` posicional (nunca con keywords ni con argumentos extra) y espera un
+objeto que implemente `MailBackend`. Un entry point que ya devuelve una
+instancia se usa tal cual; los drivers internos se instancian sin argumentos.
+Solo se cargan los drivers declarados en `[scope]` (o el nativo cuando
+corresponde); un driver declarado que no importa o no arranca aborta el comando
+con `E_PLUGIN_INCOMPATIBLE` (3) y sin resultados parciales.
 
 ### `backends/base.py`
 
@@ -665,17 +676,46 @@ account_label, account_email, mailboxes, driver)`.
 ### `search.py`
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
 `wildcard_to_regex(pattern)`, `matches(pattern, text)`,
-`run_search(backend, config, filters)`,
-`run_new(backend, config, state_store, *, peek=False, limit=None, clock=None)`,
-`run_show(backend, config, uid)`, `run_mailboxes(backend, config)`.
-Solo usan la interfaz `MailBackend`. **Todo uid emitido** (`search`, `new`,
-`show`, `cursor.previous/current.last_uid` y `state.json`) es el string
-prefijado `format_uid(backend.driver, str(row["uid"]))`; los adaptadores siguen
-intercambiando el uid nativo (D1) y el núcleo es el único que prefija. `uid` de
-`run_show` es el uid nativo que ya validó `cli` (`parse_native_id` antes de
-abrir el store, PRD-v2.1 §11.3); los mensajes de error de `run_show`
+`run_search(backend, config, filters, *, drivers=None, native=None)`,
+`run_new(backend, config, state_store, *, peek=False, limit=None, clock=None,
+drivers=None, native=None)`,
+`run_show(backend, config, uid, *, driver=None, drivers=None, native=None)`,
+`run_mailboxes(backend, config, *, drivers=None, native=None)`.
+Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
+`None` cuando la config no lo declara); `drivers` es el mapping
+`{driver: instancia}` de los demás drivers declarados que el CLI abrió y
+`native` el nombre del driver nativo. Sin esos kwargs el comportamiento es el
+de un solo driver (2.0.1/M03). **Todo uid emitido** (`search`, `new`, `show`,
+`cursor.previous/current.last_uid` y `state.json`) es el string prefijado
+`format_uid(driver, str(row["uid"]))`; los adaptadores siguen intercambiando el
+uid nativo (D1) y el núcleo es el único que prefija. `uid` de `run_show` es el
+uid **nativo** ya validado por `cli` (`parse_native_id` del driver del prefijo,
+antes de abrir el store, PRD-v2.1 §11.3); los mensajes de error de `run_show`
 (`E_USAGE`, `E_ACCOUNT_NOT_IN_SCOPE`) muestran el uid prefijado.
 `state_store` es un `StateStore` creado con `is_installed` del registro.
+
+**Motor multi-driver (M04, C4; PRD-v2.1 RF-37, §10.2.7-9).** Cada driver
+declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
+native=)` y se consulta con los mismos filtros; la deduplicación por
+`message_id` se hace **dentro** de cada driver (RF-07 del `PRD.md`, sin dedupe
+cross-driver), y los resultados se fusionan con el orden total
+`(date_received, driver, native_order_key)` — DESC en `search`/`show`, ASC en
+`new`, `driver` siempre ASC — comparando el key como entero si la capacidad es
+`numeric` y como texto si es `text`, nunca el uid. Las filas fusionadas llevan
+el driver de forma interna (`_mq_driver`, no se emite); `--limit` se aplica
+tras el merge, `truncated`/`hint` se calculan sobre el total fusionado,
+`scan.candidates` y `scan.messages_read` suman por driver y el presupuesto de
+`[search].max_scan` compara la **suma** de candidatos de todos los drivers.
+`run_mailboxes` concatena los drivers en el orden de aparición de sus bloques
+`[scope]` (`accounts[]`/`mailboxes[]`/`excluded_stores[]` por driver; un plugin
+devuelve `excluded_stores: []`); el driver nativo sin bloques no aporta nada y,
+sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con `W_NO_ACCOUNTS`.
+`run_show` despacha por el driver del prefijo: resuelve solo los bloques de ese
+driver, llama a su `find_message`/`load_body` y —para un driver externo— a su
+operación `attachments()`; `attachments: "none"` devuelve `[]` sin llamarla y el
+payload de un plugin es `[{index, name, cached_path: null}]` (M08 calcula la
+caché; `show` no escribe). Los drivers internos conservan hasta M08 la forma
+2.0.1 `[{name}]`.
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
 añade `cli`); `run_mailboxes` devuelve `accounts`, `mailboxes`,
 `excluded_stores` y `warnings`. Semántica de fechas: `--since` incluye,
@@ -721,9 +761,26 @@ instalado ⇒ `E_DRIVER_UNKNOWN`), y `backend.parse_native_id` del driver nativo
 disponible). Después de leer `config.toml` y antes de construir el backend,
 `show` exige que el driver del prefijo aparezca en `[scope]`
 (`driver_in_scope`/`require_driver_in_scope` de `config.py`): un driver
-instalado sin bloque ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo. En M03 solo el
-driver nativo sirve `show`; el despacho a cualquier driver declarado llega con
-M04. `new` crea `StateStore(home, BackendRegistry().is_installed)`.
+instalado sin bloque ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo. **Ciclo de vida
+multi-driver (M04, T01/T05/T06):** el comando crea **un** `BackendRegistry` y
+lo comparte con `load_config(registry=)`, abre los drivers declarados
+(`config.declared_drivers`, nativo primero) dentro del `RunLock` y antes de
+`event=start`, y los cierra todos en un `finally` (best-effort: un fallo de
+cierre no enmascara el resultado). El nativo solo se abre si la config tiene
+bloques sin prefijo o si no hay ningún bloque `[scope]` (comportamiento 2.0.1);
+un driver declarado que no carga aborta el comando sin resultados parciales.
+`show` abre **solo** el driver del prefijo: si es el nativo pasa `args.uid` ya
+validado; si es otro declarado lo carga con `registry.open_drivers`, valida la
+parte nativa con su `parse_native_id` (`E_USAGE` si no cumple) y lo despacha con
+`run_show(..., driver=, drivers=)`. Un driver interno no nativo declarado (p.
+ej. `outlook:` en macOS) se instancia y falla de forma natural al consultar (el
+registro lo considera instalado; DP-02 solo filtra `--version`). `new` crea
+`StateStore(home, registry.is_installed)`.
+`event=start` registra `command=... backend=<driver nativo> drivers=<lista
+declarada separada por comas>` (el nativo primero; `-` si no hubiera ninguno):
+`backend` es siempre el driver de la plataforma aunque no se abra, y nunca
+incluye uids, `native_id`, cuentas, rutas, asuntos ni términos. `event=end`
+conserva sus campos actuales.
 `bind_command(command)` del backend si existe; todo `E_INTERNAL`
 (también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
 su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
@@ -927,6 +984,15 @@ es el fragmento de mensaje del bloqueo. Códigos:
 > uid legado (entero Apple Mail, hex mayúsculas Outlook), resuelto con el
 > driver nativo; los warnings de 2.0.1 que citan el uid mantienen el valor
 > nativo (no son contrato de este milestone).
+>
+> M04 **no cambia la forma** del JSON de `search`/`new`: la única diferencia es
+> que pueden aparecer mensajes de varios drivers en la misma lista, fusionados y
+> ordenados por `(date_received, driver, native_order_key)` (DESC en
+> `search`, ASC en `new`), con `duplicate_count` calculado dentro de cada driver
+> (PRD-v2.1 §10.2.7-9). El log `event=start` añade `drivers=` (fuera del
+> contrato JSON). `show` de un driver externo declarado ya devuelve
+> `attachments: [{index, name, cached_path: null}]` (AC-07 parcial, M04); los
+> drivers internos conservan la forma 2.0.1 `[{name}]` hasta M08.
 
 Resumen de coordinación; el contrato completo es el PRD §12.5. Los ejemplos
 están compactados en una línea por brevedad: la salida real es JSON
@@ -1238,6 +1304,16 @@ fechas fijas.
 `doctor`, errores, etc.) que compara `tests/test_integration.py`. Antes de
 comparar se normalizan los valores variables (`generated_at`,
 `duration_ms`, fechas ISO y epoch, ruta raíz temporal, separadores de ruta).
+`tests/fixtures/expected/search_multidriver.json` y `new_multidriver.json`
+(M04, TC-08) son las salidas de `search` y `new` con `apple_mail` + el doble de
+plugin API 1 declarado (`[scope."graph:Graph (user@example.com)"]`). Semilla
+determinista: `build_store()` (fixture base y su reloj) más dos mensajes del
+plugin en `fx.now − 18 min` (P2) y `fx.now − 16 min` (P1), de modo que ambos
+caen en la ventana de primera corrida de `new` (`D` = el mensaje más reciente de
+Apple Mail, −15 min, con `lookback` de 600 s). El registro del CLI se inyecta
+con los entry points internos más el del doble (`FakeEntryPoint`), sin instalar
+nada; la comparación normaliza `<ISO>`, `<EPOCH>` y las rutas. Los goldens de un
+solo driver no cambian en M04.
 `tests/fixtures/expected/outlook/` (`mailboxes`, `search`, `show`,
 `show_header_only`, `show_smime`, `new_first_run` y `doctor`; TC-02) son las
 del backend Outlook sobre `FakeOutlook.default()`, con la misma normalización y
