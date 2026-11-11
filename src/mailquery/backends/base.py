@@ -28,19 +28,6 @@ Uid = str
 LegacyUid = int | str
 
 
-class StateUidError(ValueError):
-    """An invalid ``state.json`` uid (PRD 11.2); each backend owns the wording.
-
-    ``cursor_detail`` is the ``E_STATE_CORRUPT`` detail when the uid is
-    ``cursor.last_uid``; ``ring_detail`` when it is an ``emitted_uids`` item.
-    """
-
-    def __init__(self, cursor_detail: str, ring_detail: str) -> None:
-        super().__init__(cursor_detail)
-        self.cursor_detail = cursor_detail
-        self.ring_detail = ring_detail
-
-
 class ExcludedStoreError(LookupError):
     """``find_message``: the uid belongs to an excluded store (PRD 12.4, annex B.4).
 

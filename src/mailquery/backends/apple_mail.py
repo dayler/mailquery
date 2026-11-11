@@ -24,7 +24,6 @@ from mailquery.backends.base import (
     MailBackend,
     MailboxRow,
     MessageRow,
-    StateUidError,
 )
 from mailquery.errors import MailqueryError, error_detail, usage_error
 from mailquery.plugins import PLUGIN_API, Capabilities
@@ -332,25 +331,6 @@ class AppleMailBackend(MailBackend):
                 "invalid uid part: expected an integer",
             )
         return int(native_id)
-
-    @staticmethod
-    def check_state_uid(uid: Any) -> None:
-        """Validate a ``state.json`` uid (PRD 11.2): a JSON integer >= 1, ``bool`` excluded.
-
-        Raises ``ValueError`` with the rule text; does not share ``parse_uid``'s
-        text parsing or its ``E_USAGE`` error (D-05). Raises ``StateUidError``
-        carrying the exact ``E_STATE_CORRUPT`` details of Apple Mail.
-        """
-        if isinstance(uid, int) and not isinstance(uid, bool) and uid >= 1:
-            return
-        if isinstance(uid, int) and not isinstance(uid, bool):
-            cursor_detail = "'cursor.last_uid' must be a uid (an integer >= 1)"
-        else:
-            cursor_detail = "'cursor' must hold integer 'last_date_received' and 'last_uid'"
-        raise StateUidError(
-            cursor_detail,
-            "'emitted_uids' must be a list of uids (integers >= 1)",
-        )
 
     def doctor_checks(self) -> list[dict[str, Any]]:
         """``store``, ``envelope_index``, ``schema``, ``readonly_strategy``, ``accounts_db``.
