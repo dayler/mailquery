@@ -21,6 +21,7 @@ from typing import Any, Sequence
 
 from mailquery import __version__
 from mailquery.backends import backend_class, get_backend
+from mailquery.backends.registry import BackendRegistry
 from mailquery.config import (
     APP_HOME_SUBDIRS,
     DEFAULT_LOG_LEVEL,
@@ -210,9 +211,13 @@ def _version_line() -> str:
     else:
         backend = "apple_mail"
         system = f"{platform.system()} {platform.release()} {platform.machine()}"
+    drivers = ", ".join(
+        f"{driver} {version}"
+        for driver, version in BackendRegistry().versions(platform=sys.platform)
+    )
     return (
         f"mailquery {__version__} (backend {backend}; "
-        f"Python {platform.python_version()}; {system})"
+        f"Python {platform.python_version()}; {system}; drivers: {drivers})"
     )
 
 
@@ -547,7 +552,7 @@ def _run_command(
     try:
         selected = _make_backend(home_path, mail_root, accounts_db, backend)
         _bind_command(selected, command)
-        logger.info("event=start command=%s backend=%s", command, selected.name)
+        logger.info("event=start command=%s backend=%s", command, selected.driver)
         payload = _execute(args, config, home_path, selected)
         if not isinstance(payload, dict):
             raise MailqueryError(
@@ -752,7 +757,7 @@ def _run_doctor(
     client = _CLIENT_NAMES["apple_mail"]
     try:
         selected = _make_backend(home_path, mail_root, accounts_db, backend)
-        client = _CLIENT_NAMES.get(str(getattr(selected, "name", "")), client)
+        client = _CLIENT_NAMES.get(str(getattr(selected, "driver", "")), client)
         _bind_command(selected, "doctor")
         _bind_doctor_timeout(selected, run, json_output, logger, client)
         checks = _collect_doctor_checks(home_path, selected, run)
@@ -1027,7 +1032,7 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
     detail, which keeps ``ok=true`` (PRD 15.3).
     """
     by_name = {str(check.get("name")): check for check in run.backend_checks or []}
-    dependency = _RESOLUTION_DEPENDENCY.get(str(getattr(backend, "name", "")))
+    dependency = _RESOLUTION_DEPENDENCY.get(str(getattr(backend, "driver", "")))
     dependency_ok = dependency is None or bool(by_name.get(dependency, {}).get("ok"))
     try:
         if run.config_error is not None:

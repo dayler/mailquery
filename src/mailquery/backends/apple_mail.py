@@ -27,6 +27,7 @@ from mailquery.backends.base import (
     StateUidError,
 )
 from mailquery.errors import MailqueryError, error_detail, usage_error
+from mailquery.plugins import PLUGIN_API, Capabilities
 from mailquery.store import (
     detect_version,
     open_store,
@@ -76,7 +77,15 @@ class AppleMailBackend(MailBackend):
     backend owns its store: :meth:`close` closes it.
     """
 
-    name = BACKEND_NAME
+    driver = BACKEND_NAME
+    plugin_api = PLUGIN_API
+    capabilities: Capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "numeric",
+    }
 
     def __init__(
         self,
@@ -306,6 +315,23 @@ class AppleMailBackend(MailBackend):
                 "invalid uid: expected an integer",
             )
         return int(text)
+
+    @staticmethod
+    def parse_native_id(native_id: str) -> int:
+        """Validate the native part of a prefixed uid: an integer (C1, RF-40).
+
+        Pure and offline. The core splits ``"<driver>:<native_id>"`` at the first
+        ``:`` and hands only ``native_id`` to the adapter; ``0`` and negative
+        integers are valid uids that simply do not exist.
+        """
+        if not isinstance(native_id, str) or _UID_PATTERN.fullmatch(native_id) is None:
+            raise usage_error(
+                f"invalid uid part {native_id!r}: expected an integer",
+                "Apple Mail uids are integers; run `mailquery search` to find the uid "
+                "of a message",
+                "invalid uid part: expected an integer",
+            )
+        return int(native_id)
 
     @staticmethod
     def check_state_uid(uid: Any) -> None:
@@ -619,8 +645,10 @@ def _fetch_rows(
 
 def _row_dict(values: Sequence[Any]) -> dict:
     data = dict(zip(_ROW_COLUMNS, values))
+    uid = int(data["uid"])
     return {
-        "uid": int(data["uid"]),
+        "uid": uid,
+        "native_order_key": str(uid),
         "global_message_id": int(data["global_message_id"] or 0),
         "subject": str(data["subject"] or ""),
         "sender_name": str(data["sender_name"] or ""),

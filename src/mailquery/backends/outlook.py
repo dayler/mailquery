@@ -41,6 +41,7 @@ from mailquery.backends.base import (
     Uid,
 )
 from mailquery.errors import MailqueryError, error_detail, usage_error
+from mailquery.plugins import PLUGIN_API, Capabilities
 
 BACKEND_NAME = "outlook"
 STRATEGY = "com_readonly"
@@ -316,6 +317,16 @@ class OutlookBackend(MailBackend):
     process-wide D-03 watchdog.
     """
 
+    driver = BACKEND_NAME
+    plugin_api = PLUGIN_API
+    capabilities: Capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "text",
+    }
+
     def __init__(
         self,
         *,
@@ -446,6 +457,7 @@ class OutlookBackend(MailBackend):
         message_id = _text(props.get(PR_INTERNET_MESSAGE_ID))
         return MessageRow(
             uid=uid,
+            native_order_key=uid,
             global_message_id=self._message_key(message_id),
             subject=_text(props.get(PR_SUBJECT)),
             sender_name=_text(props.get(PR_SENDER_NAME)),
@@ -532,10 +544,6 @@ class OutlookBackend(MailBackend):
         return None
 
     # -- PRD 9.3 ------------------------------------------------------------- #
-
-    @property
-    def name(self) -> str:
-        return BACKEND_NAME
 
     def describe(self) -> dict[str, Any]:
         """Version and strategy for the connection log line (connects to Outlook)."""
@@ -890,6 +898,22 @@ class OutlookBackend(MailBackend):
                 "invalid uid: expected an uppercase hexadecimal EntryID",
             )
         return text
+
+    @staticmethod
+    def parse_native_id(native_id: str) -> str:
+        """Validate the native part of a prefixed uid: an uppercase hex EntryID (C1, RF-40).
+
+        Pure and offline. The core splits ``"<driver>:<native_id>"`` at the first
+        ``:`` and hands only ``native_id`` to the adapter.
+        """
+        if not isinstance(native_id, str) or _UID_PATTERN.fullmatch(native_id) is None:
+            raise usage_error(
+                f"invalid uid part {native_id!r}: expected an uppercase hexadecimal EntryID",
+                "Outlook uids are uppercase hexadecimal EntryIDs; run `mailquery search` "
+                "to find the uid of a message",
+                "invalid uid part: expected an uppercase hexadecimal EntryID",
+            )
+        return native_id
 
     @staticmethod
     def check_state_uid(uid: Any) -> None:
