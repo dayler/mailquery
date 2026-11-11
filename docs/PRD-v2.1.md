@@ -134,11 +134,11 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 | ID | Fila de §0.2 | Milestone(s) que la implementan | Evidencia principal | Estado |
 |---|---|---|---|---|
 | RC-01 | No objetivos / clientes soportados | M01, M02, M04 | AC-01, AC-03, AC-04; `INTERFACES.md` (API 1 y registro) | 🟡 |
-| RC-02 | Invariante de solo lectura (I-1) | M06, M07, M09, M10 | AC-12; TC-03 y OL-30 extendidos a `attachment` | ⚪ |
+| RC-02 | Invariante de solo lectura (I-1) | M06, M07, M09, M10 | AC-12; TC-03 y OL-30 extendidos a `attachment` | 🟡 |
 | RC-03 | Red del núcleo y de plugins | M01, M02, M05 | AC-02, AC-18; capacidades en `doctor`; `threat-model.md` | 🟡 |
 | RC-04 | Selección de backend (`[scope."<driver>:<cuenta>"]`) | M02, M04 | AC-03, AC-04; UT-DRV-01..03 y UT-MD-01..07 | 🟡 |
 | RC-05 | Tipo y formato de `uid` | M01, M03 | AC-05, AC-06; UT-UID-01/02, UT-ST-06/07; goldens de uid | 🟢 |
-| RC-06 | Modelo de mensaje: adjuntos | M06, M07, M08 | AC-07, AC-09, AC-10, AC-11; UT-ATT-01..05, UT-ATC-01 | ⚪ |
+| RC-06 | Modelo de mensaje: adjuntos | M06, M07, M08 | AC-07, AC-09, AC-10, AC-11; UT-ATT-01..05, UT-ATC-01 | 🟡 |
 | RC-07 | Bytes de adjuntos en Outlook (COM) | M10 | AC-10, AC-12, AC-15; UT-OL-ATT-02; `INTERFACES.md` y `threat-model.md` | ⚪ |
 | RC-08 | `state.json` schema 2 | M03 | AC-06; UT-ST-06/07; migración probada | 🟢 |
 | RC-09 | `show` | M08 | AC-07; UT-ATC-01 (incluye `cached_path` symlink/directorio, contenido bloqueable y S/MIME `[]`); goldens `show_*` | ⚪ |
