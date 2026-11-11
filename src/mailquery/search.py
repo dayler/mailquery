@@ -27,6 +27,7 @@ from mailquery import output
 from mailquery import uid as uid_module
 from mailquery.backends.base import ExcludedStoreError
 from mailquery.errors import MailqueryError
+from mailquery.plugins import wrap_driver
 from mailquery.state import Cursor, EmittedUid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -211,16 +212,23 @@ def _driver_pool(
 
     ``backend`` is the platform driver (``None`` when the config does not declare
     it); ``drivers`` maps the other declared drivers. The order is the caller's:
-    native first, then the mapping order.
+    native first, then the mapping order. Every backend is wrapped with the M05
+    driver-call wrapper, so all metadata operations are mapped and bounded by the
+    metadata deadline (the wrapper is idempotent: wrapping twice is a no-op).
     """
     native_name = _native_driver(backend, native)
     pool: dict[str, Any] = {}
     if backend is not None:
-        pool[_driver(backend) or native_name] = backend
+        key = _driver(backend) or native_name
+        pool[key] = wrap_driver(
+            backend, driver=key, internal=key in _INTERNAL_DRIVERS
+        )
     for name, driver_backend in (drivers or {}).items():
         key = str(name)
         if key not in pool:
-            pool[key] = driver_backend
+            pool[key] = wrap_driver(
+                driver_backend, driver=key, internal=key in _INTERNAL_DRIVERS
+            )
     return native_name, pool
 
 
@@ -937,9 +945,22 @@ def _resolved_scope(
     ``excluded`` receives the entry of each declared account that is an
     excluded store (Outlook, PRD 15.3). ``drivers`` maps the other declared
     backends and ``native`` names the platform driver (M04, multi-driver).
+
+    The catalog handed to :mod:`mailquery.config` uses the M05 wrapped drivers,
+    so the ``accounts``/``mailboxes``/``resolve_mailbox`` calls of the scope
+    resolution are mapped and bounded too.
     """
+    native_name, pool = _driver_pool(backend, drivers, native)
+    native_backend = pool.get(native_name)
+    other_backends = {
+        name: instance for name, instance in pool.items() if name != native_name
+    }
     resolved = config_module.resolve_scope(
-        config, backend, excluded=excluded, drivers=drivers, native=native
+        config,
+        native_backend,
+        excluded=excluded,
+        drivers=other_backends,
+        native=native_name,
     )
     return list(resolved or ())
 

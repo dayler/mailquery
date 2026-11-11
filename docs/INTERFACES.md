@@ -169,6 +169,9 @@ Reglas:
 - `plugins/**` (API pública de plugin) y `backends/registry.py` solo importan
   stdlib y el propio paquete; ninguno importa `store`, `emlx`, `accounts`,
   `search`, `config` ni una implementación de backend (RNF-12, UT-PL-04.04).
+  Desde M05 `plugins/api.py` importa además `errors` y `output` (módulos base,
+  sin imports internos), y `search.py` importa el helper `plugins.wrap_driver`
+  (envoltura de llamadas, no una implementación de backend).
 - `backends/registry.py` no importa `apple_mail` ni `outlook`: la carga es
   perezosa y solo importa el driver que se pide (`load`). El registro usa una
   tabla estática de metadata para los backends internos, de modo que listarlos
@@ -202,7 +205,11 @@ log_message=None)`, `config_error(...)` (misma firma), `bad_time(value)`,
 `bad_filter(message, hint="")`, `exit_code_for(code)` y
 `error_detail(exc) -> str` (detalle de una línea para `doctor`:
 `CODE: message` o `Tipo: texto`). Un plugin nunca elige `code`/`exit`: aporta
-`reason` (enum cerrado de `mailquery.plugins`) y el núcleo lo mapea (M05).
+`reason` (enum cerrado de `mailquery.plugins`) y el núcleo lo mapea (M05). El
+protocolo de M05 vive en `plugins/api.py` (`call_driver`/`wrap_driver`) y se
+detalla en la sección de `plugins/__init__.py` y `plugins/api.py`; ningún camino
+de plugin produce `E_INTERNAL` (RF-50, §11.7) y el objeto `error` del JSON no
+cambia: `{code, message, hint}`.
 
 ### `output.py`
 `dumps_json(payload) -> str`, `write_json(payload)`, `configure_streams()`,
@@ -229,6 +236,8 @@ y el backend Outlook).
 **rotación por tamaño** (`RotatingFileHandler`, `maxBytes = max_size_mb` MiB,
 5 archivos rotados fijos; `max_size_mb` viene de `[logging].max_size_mb`).
 **Nunca** logear asunto, cuerpo, direcciones, nombres ni términos de búsqueda.
+**M05 no cambia este módulo:** el `log_message` de un plugin se sanea antes, en
+`plugins/api.py`, y el CLI lo registra en lugar del `message` (§12.1).
 
 ### `plugins/__init__.py` y `plugins/api.py`
 
@@ -256,6 +265,69 @@ store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
   `RESERVED_DRIVER_NAMES`, `DRIVER_NAME_PATTERN`, `DRIVER_NAME_MAX_LENGTH`.
 - `DriverMetadata` (`TypedDict`): `driver`, `plugin_api`, `version`,
   `capabilities`, `internal` (este último lo añade el registro).
+
+**Protocolo de errores de plugin y timeout de metadatos (M05, §11.7, RF-50,
+RNF-15/16; C5).** El núcleo posee `code`, `exit` y la plantilla de `message`; el
+plugin solo aporta `reason` (cerrado), `hint`, `detail` y `log_message`. Todo
+paso por el módulo usa una única envoltura:
+
+- `call_driver(operation, call, *, driver, internal=None, timeout=None) -> T`:
+  ejecuta la operación, aplica el plazo y traduce los fallos. `operation` es el
+  nombre del método de `MailBackend`. `internal` se deduce de los nombres
+  nativos (`apple_mail`/`outlook`) y un plugin es siempre externo.
+- `wrap_driver(backend, *, driver=None, internal=None, timeout=None)`: proxy
+  transparente que enruta cada operación de `METADATA_OPERATIONS` por
+  `call_driver`; envolver dos veces es no-op. Lo usa el pool de `search.py`.
+- `map_plugin_error(exc, *, driver, attachments)` y
+  `sanitize_error_field(value, max_bytes)` son las piezas puras (mapeo y
+  saneado); `METADATA_OPERATIONS`/`ATTACHMENT_OPERATIONS` fijan el contexto.
+
+Mapeo `reason` → código (exit de `errors.CODE_EXIT`): `invalid_uid`/`not_found`
+⇒ `E_USAGE` (2) en ambos contextos; `not_local`/`not_downloaded`/`unsupported`/
+`network` ⇒ `E_ATTACHMENT_UNAVAILABLE` (3) en operations de adjuntos y
+`E_PLUGIN_FAILED` (3) en el resto; `corrupt`/`smime`/`unreadable` ⇒
+`E_ATTACHMENT_UNREADABLE` (3) en adjuntos y `E_PLUGIN_FAILED` (3) en el resto;
+`permission`/`auth` ⇒ `E_PERMISSION` (3); `busy` ⇒ `E_CLIENT_BUSY` (5);
+`timeout` ⇒ `E_CLIENT_TIMEOUT` (3); cualquier otro `reason` (desconocido, vacío
+o no string) ⇒ `E_PLUGIN_FAILED` (3). Un plugin no elige código: un atributo
+`code`/`exit` suyo o un `MailqueryError` lanzado por el plugin se ignoran. Una
+excepción no mapeada o un retorno inválido (validadores por operación: filas
+`Mapping`, `native_id` string, adjuntos `{index:int, name:str, ...}`, `BodyRow`
+con `attachments` lista, etc.) ⇒ `E_PLUGIN_FAILED` (3), nunca `E_INTERNAL`; un
+fallo inesperado de un driver nativo se re-lanza y el CLI sigue dando
+`E_INTERNAL` (1).
+
+Plantillas de `message` (inglés, dueño: núcleo): `not available in the local
+store`; `could not be retrieved from its origin`; `cannot be recovered by driver
+'<driver>'`; `is corrupt or unreadable`; `is S/MIME protected and cannot be
+extracted`; `cannot be read: permission denied`; `is temporarily unavailable`;
+`did not respond within the timeout`. `invalid_uid`/`not_found` no tienen
+plantilla de motivo en §11.7: el núcleo redacta `invalid message id` / `message
+was not found` (su código es `E_USAGE`). El `detail` saneado, si existe, se añade
+tras `": "`. `hint` = el del plugin saneado o el defecto del motivo/código
+(`E_PLUGIN_FAILED` ⇒ `run "mailquery doctor" ...`; `E_CLIENT_BUSY` ⇒ retry once;
+motivos de adjunto con su hint propio, p. ej. S/MIME).
+
+Límites y saneado: `hint` ≤ 300 bytes, `detail` ≤ 200, `log_message` ≤ 200, en
+UTF-8 y sin partir un carácter (`encode()[:N].decode("utf-8", "ignore")`); se
+eliminan ANSI, controles C0/C1 (incluidos `\r`/`\n`/`\t`), formatos y bidi
+(`\u202e`); un valor no string se ignora. `sanitize_text` de `output.py` se
+reutiliza como primer paso.
+
+Timeout: `METADATA_TIMEOUT_SECONDS = 30.0` (y `EXTRACTION_TIMEOUT_SECONDS = 120.0`
+para M08), leídos en cada llamada para que un test inyecte un plazo corto con
+`mock.patch`/`timeout=` (nunca se duermen 30 s). Un driver **externo** corre en
+un hilo daemon con `Event.wait(deadline)`; al vencer ⇒ `E_CLIENT_TIMEOUT` (3),
+sin reintento y sin resultados parciales (el hilo no se puede matar: riesgo
+aceptado, PRD-v2.1 §15). Un driver **nativo** se ejecuta inline y se comprueba
+el plazo al volver: sus conexiones SQLite/COM son thread-affine, así que no se
+mueven a otro hilo; Outlook conserva además su watchdog COM de RF-33. Límite
+conocido: una llamada nativa colgada no se aborta por este mecanismo.
+
+Log (RNF-15, §12.1): el error de plugin lleva `log_message` saneado (o la
+plantilla sin `detail`); el CLI registra ese texto en nivel `error` con `code=`
+y nunca `hint`/`detail`, sin traceback (el traceback queda solo para
+`E_INTERNAL`). No se añaden uids, nombres, rutas, cuentas, asuntos ni términos.
 
 ### `backends/registry.py`
 
@@ -299,6 +371,13 @@ instancia se usa tal cual; los drivers internos se instancian sin argumentos.
 Solo se cargan los drivers declarados en `[scope]` (o el nativo cuando
 corresponde); un driver declarado que no importa o no arranca aborta el comando
 con `E_PLUGIN_INCOMPATIBLE` (3) y sin resultados parciales.
+
+**M05 no cambia el registro:** la envoltura de llamadas (`call_driver`) vive en
+`plugins/api.py` y se aplica al pool de `search.py` (`wrap_driver`, que incluye
+también `accounts`/`mailboxes`/`resolve_mailbox` usados por la resolución de
+alcance) y al `parse_native_id` de `show` en `cli.py`. La carga/import de un
+plugin sigue siendo `E_PLUGIN_INCOMPATIBLE`; los fallos de runtime del driver ya
+instanciado son `E_PLUGIN_FAILED` o el código mapeado por §11.7.
 
 ### `backends/base.py`
 
@@ -716,6 +795,16 @@ operación `attachments()`; `attachments: "none"` devuelve `[]` sin llamarla y e
 payload de un plugin es `[{index, name, cached_path: null}]` (M08 calcula la
 caché; `show` no escribe). Los drivers internos conservan hasta M08 la forma
 2.0.1 `[{name}]`.
+
+**Envoltura de llamadas (M05, C5).** `_driver_pool` envuelve cada backend con
+`plugins.wrap_driver`, así que todas las operaciones de `MailBackend` pasan por
+`call_driver` con el plazo de metadatos, incluidos los `accounts`/`mailboxes`/
+`resolve_mailbox` de la resolución de alcance (a `config.resolve_scope` se le
+pasa el catálogo ya envuelto). Un fallo de plugin sale con el código/exit de
+§11.7 y nunca `E_INTERNAL`; un fallo inesperado de un driver nativo se propaga
+intacto (el CLI lo convierte en `E_INTERNAL`). El plazo se comprueba tras la
+llamada en los drivers nativos y con un hilo daemon en los externos (límite
+conocido de RNF-16: ver la sección de `plugins/api.py`).
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
 añade `cli`); `run_mailboxes` devuelve `accounts`, `mailboxes`,
 `excluded_stores` y `warnings`. Semántica de fechas: `--since` incluye,
@@ -772,7 +861,12 @@ un driver declarado que no carga aborta el comando sin resultados parciales.
 `show` abre **solo** el driver del prefijo: si es el nativo pasa `args.uid` ya
 validado; si es otro declarado lo carga con `registry.open_drivers`, valida la
 parte nativa con su `parse_native_id` (`E_USAGE` si no cumple) y lo despacha con
-`run_show(..., driver=, drivers=)`. Un driver interno no nativo declarado (p.
+`run_show(..., driver=, drivers=)`. Desde M05 ese `parse_native_id` de un plugin
+pasa por `call_driver`: un `reason` `invalid_uid`/`not_found` ⇒ `E_USAGE` (2) y
+un fallo no mapeado ⇒ `E_PLUGIN_FAILED` (3), nunca `E_INTERNAL`. El log de error
+(`_log_error`) registra `error.log_message` en nivel `error` con `code=`; un
+fallo de plugin no lleva traceback (solo `E_INTERNAL` lo lleva) y nunca se
+registran `hint`/`detail`. Un driver interno no nativo declarado (p.
 ej. `outlook:` en macOS) se instancia y falla de forma natural al consultar (el
 registro lo considera instalado; DP-02 solo filtra `--version`). `new` crea
 `StateStore(home, registry.is_installed)`.
@@ -1115,7 +1209,11 @@ sin activarlas.
 ```json
 {"ok": false, "command": "search", "error": {"code": "E_UNBOUNDED_SCAN", "message": "...", "hint": "..."}}
 ```
-Sin `generated_at` (contrato de error del PRD §12.5).
+Sin `generated_at` (contrato de error del PRD §12.5). El objeto `error` es
+siempre `{code, message, hint}` sin campos nuevos (M05/RF-50); en un error de
+plugin `code`/`exit` salen del conjunto cerrado del núcleo, `message` usa la
+plantilla de §11.7 (con el `detail` saneado tras `": "`) y `hint` es el del
+plugin saneado o el defecto del motivo/código.
 
 ### Mensaje (`search`/`new`)
 ```json

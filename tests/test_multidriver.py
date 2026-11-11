@@ -31,6 +31,7 @@ from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import BackendRegistry
 from mailquery.config import load_config
 from mailquery.errors import MailqueryError
+from mailquery.plugins import PluginError, Reason
 from mailquery.state import StateStore
 from mailquery.store import open_store
 from tests.fakes.plugin import (
@@ -883,6 +884,61 @@ class ShowPluginTest(MultiDriverCase):
                 prefixed_uid("P1", PLUGIN_DRIVER),
             ],
         )
+
+
+# --------------------------------------------------------------------------- #
+# M05 — runtime plugin errors and metadata timeout (UT-ERR-03.04, UT-ERR-04.05)
+# --------------------------------------------------------------------------- #
+
+
+class PluginRuntimeErrorTest(MultiDriverCase):
+    """Fail-fast behavior of a mapped plugin error and of the metadata deadline."""
+
+    def test_ut_err_03_04_mapped_plugin_error_has_no_partial_results_and_closes_drivers(
+        self,
+    ) -> None:
+        """UT-ERR-03.04: a mapped plugin failure fails the command and closes every driver."""
+        failing, created = capturing_factory(
+            failures={"query": PluginError(Reason.BUSY, hint="the plugin is busy")}
+        )
+        registry = registry_for(FakeEntryPoint(PLUGIN_DRIVER, plugin=failing))
+        with mock.patch.object(
+            self.backend, "close", wraps=self.backend.close
+        ) as close_mock:
+            code, payload, _stderr = self.run_cli_error(
+                "search", registry=registry, backend=self.backend
+            )
+        self.assertEqual(code, 5)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_CLIENT_BUSY")
+        self.assertNotIn("messages", payload)
+        self.assertNotIn("count", payload)
+        self.assertTrue(close_mock.called, "the native driver is closed")
+        self.assertEqual(len(created), 1)
+        self.assertTrue(created[0].closed, "the plugin driver is closed")
+
+    def test_ut_err_04_05_timeout_during_merge_fails_without_messages_and_closes(
+        self,
+    ) -> None:
+        """UT-ERR-04.05: a merge timeout is E_CLIENT_TIMEOUT, no messages[], drivers closed."""
+        slow, created = capturing_factory(delays={"query": 2.0})
+        registry = registry_for(FakeEntryPoint(PLUGIN_DRIVER, plugin=slow))
+        with (
+            mock.patch("mailquery.plugins.api.METADATA_TIMEOUT_SECONDS", 0.2),
+            mock.patch.object(
+                self.backend, "close", wraps=self.backend.close
+            ) as close_mock,
+        ):
+            code, payload, _stderr = self.run_cli_error(
+                "search", registry=registry, backend=self.backend
+            )
+        self.assertEqual(code, 3)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_CLIENT_TIMEOUT")
+        self.assertNotIn("messages", payload)
+        self.assertTrue(close_mock.called, "the native driver is closed")
+        self.assertEqual(len(created), 1)
+        self.assertTrue(created[0].closed, "the plugin driver is closed")
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs

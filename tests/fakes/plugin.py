@@ -10,11 +10,15 @@ M04 extends the double with the data operations the multi-driver engine needs
 (``accounts``, ``mailboxes``, ``query``, ``find_message``, ``load_body`` and
 ``attachments``) and with :func:`plugin_factory`, an entry-point target that
 builds one instance per command so tests can hand it rows relative to the
-fixture clock. Pure Python: no pywin32, no network, no filesystem writes.
+fixture clock. M05 adds configurable failures, per-operation delays (hangs for
+the metadata deadline of every command) and invalid return values (the M05
+wrapper must turn them into ``E_PLUGIN_FAILED``). Pure Python: no pywin32, no
+network, no filesystem writes.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any, Iterator, Mapping, Sequence
 
 from mailquery.plugins import PLUGIN_API, PluginContext, PluginError, Reason
@@ -123,6 +127,8 @@ class FakePluginBackend:
         attachments: Sequence[dict[str, Any]] | None = None,
         capabilities: Mapping[str, Any] | None = None,
         failures: dict[str, BaseException] | None = None,
+        delays: Mapping[str, float] | None = None,
+        results: Mapping[str, Any] | None = None,
         stream_chunks: Sequence[bytes] | None = None,
     ) -> None:
         self.context = context
@@ -139,6 +145,10 @@ class FakePluginBackend:
         self.capabilities = dict(self.capabilities if capabilities is None else capabilities)
         self.native_order = str(self.capabilities.get("native_order", "text"))
         self.failures = dict(failures or {})
+        #: Per-operation delay in seconds (M05 timeout tests; the call blocks).
+        self.delays = dict(delays or {})
+        #: Per-operation return value override (M05 invalid-return tests).
+        self.results = dict(results or {})
         self.stream_chunks = list(stream_chunks or [b"plugin-bytes"])
         self.closed = False
         self.calls: list[str] = []
@@ -311,9 +321,14 @@ class FakePluginBackend:
         return dict(self._mailboxes[0]) if self._mailboxes else None
 
     def _fail(self, operation: str, value: Any) -> Any:
+        delay = self.delays.get(operation)
+        if delay:
+            time.sleep(float(delay))
         failure = self.failures.get(operation)
         if failure is not None:
             raise failure
+        if operation in self.results:
+            return self.results[operation]
         return value
 
 
