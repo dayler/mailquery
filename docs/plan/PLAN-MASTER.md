@@ -47,8 +47,8 @@ Reglas:
 
 | Fase | Nombre | Milestones | Estado | Puerta de fase |
 |---|---|---|---|---|
-| A | Fundaciones del contrato | M01 | ⚪ | registro, API 1, `uid` y `--version` congelados |
-| B | Identidad y configuración | M02, M03 | ⚪ | `[scope]`/`[attachments]` y `state.json` schema 2 congelados |
+| A | Fundaciones del contrato | M01 | 🟢 | registro, API 1, `uid` y `--version` congelados |
+| B | Identidad y configuración | M02, M03 | 🟡 | `[scope]`/`[attachments]` y `state.json` schema 2 congelados |
 | C | Núcleo de datos multi-driver | M04, M05 | ⚪ | merge/orden/cursor y protocolo de errores de plugin verdes |
 | D | Recuperación de adjuntos (núcleo) | M06, M07, M08 | ⚪ | bloqueo, caché y comando `attachment` verdes |
 | E | Adaptadores de backend | M09, M10 | ⚪ | Apple Mail y Outlook con adjuntos verdes |
@@ -58,8 +58,8 @@ Reglas:
 
 | ID | Milestone | Fase | Depende de | ACs | Test groups | Docs | Estado |
 |---|---|---|---|---|---|---|---|
-| M01 | [Contrato de plugin, registro de drivers y uid base](milestones/M01-plugin-contract-and-registry.md) | A | — | AC-01, AC-02 (parcial), AC-05 (parcial), AC-18 (parcial) | UT-PL-01..04, UT-UID-01, PKG-01 | INTERFACES §API/backend; `--version` | ⚪ |
-| M02 | [Configuración multi-driver, `[attachments]` y `doctor driver`](milestones/M02-config-scope-and-doctor.md) | B | M01 | AC-02, AC-03, AC-14 (config), AC-18 (doctor) | UT-DRV-01..05; UT-CLI-10/11 y TC-01 actualizados | INTERFACES config; `config.example.toml` | ⚪ |
+| M01 | [Contrato de plugin, registro de drivers y uid base](milestones/M01-plugin-contract-and-registry.md) | A | — | AC-01, AC-02 (parcial), AC-05 (parcial), AC-18 (parcial) | UT-PL-01..04, UT-UID-01, PKG-01 | INTERFACES §API/backend; `--version` | 🟢 |
+| M02 | [Configuración multi-driver, `[attachments]` y `doctor driver`](milestones/M02-config-scope-and-doctor.md) | B | M01 | AC-02, AC-03, AC-14 (config), AC-18 (doctor) | UT-DRV-01..05; UT-CLI-10/11 y TC-01 actualizados | INTERFACES config; `config.example.toml` | 🟡 |
 | M03 | [uid prefijado en comandos y `state.json` schema 2](milestones/M03-uid-and-state-schema-2.md) | B | M01, M02 | AC-05, AC-06 | UT-ST-06/07, UT-UID-02, UT-SR-07/08/11 actualizados; UT-CLI-07/09/11, TC-03 y tests de Outlook actualizados | INTERFACES estado/JSON | ⚪ |
 | M04 | [Motor multi-driver](milestones/M04-multi-driver-engine.md) | C | M01, M02, M03 | AC-04, AC-05 (routing de `show`), AC-07 (parcial), AC-19 (inicio) | UT-MD-01..07 | INTERFACES semántica multi-driver y log | ⚪ |
 | M05 | [Protocolo de errores de plugin y timeouts](milestones/M05-plugin-errors-and-timeouts.md) | C | M01, M04 | AC-16, AC-17 (metadatos), AC-19 (plugin) | UT-ERR-01..04 | INTERFACES protocolo de errores | ⚪ |
@@ -70,7 +70,7 @@ Reglas:
 | M10 | [Backend Outlook: adjuntos](milestones/M10-outlook-attachments.md) | E | M08, M09 | AC-10, AC-12, AC-15, AC-17 (Outlook), AC-19, AC-20 (integración) | UT-OL-ATT-01..04, TC-09, OL-30, SMOKE-ATT-OL | INTERFACES Outlook y excepción COM | ⚪ |
 | M11 | [Documentación, cierre de fase y conciliación](milestones/M11-docs-release-and-reconciliation.md) | F | M01–M10 | Cierre de AC-01…AC-21; AC-19 (docs), AC-21 | DOC-01..06, PKG-02, INS-SMOKE-01, TC-04/TC-05/TC-06/TC-07 | READMEs, recetas, skills, instaladores, PRD-v2.1 §0.7 | ⚪ |
 
-**Resumen:** milestones 🟢 0/11 · 🟡 0 · 🔴 0 · ⚪ 11. ACs 🟢 0/21. Documentos consumidores 🟢 0/10. Suite: línea base 747 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 6 saltados); objetivo final: 0 fallos nuevos y SMOKE verde en los hosts del dueño.
+**Resumen:** milestones 🟢 1/11 · 🟡 1 · 🔴 0 · ⚪ 9. ACs 🟢 1/21. Documentos consumidores 🟢 0/10. Suite: línea base 747 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 6 saltados); objetivo final: 0 fallos nuevos y SMOKE verde en los hosts del dueño.
 
 ### 3.2 Lotes de integración
 
@@ -93,11 +93,11 @@ Cada fila indica el milestone **dueño** de la evidencia principal; las filas co
 
 | AC | Requisito (PRD-v2.1) | Milestone(s) | Pruebas | Golden / doc | Estado |
 |---|---|---|---|---|---|
-| AC-01 | Registro de drivers, `plugin_api = 1`, duplicado/reservado/inválido ⇒ `E_PLUGIN_INCOMPATIBLE` | M01 | UT-PL-01, PKG-01 | INTERFACES API 1 | ⚪ |
-| AC-02 | Capacidades válidas y mostradas por `doctor` | M01, M02 | UT-PL-02, UT-DRV-05 | `doctor.json` | ⚪ |
+| AC-01 | Registro de drivers, `plugin_api = 1`, duplicado/reservado/inválido ⇒ `E_PLUGIN_INCOMPATIBLE` | M01 | UT-PL-01, PKG-01 | INTERFACES API 1 | 🟢 |
+| AC-02 | Capacidades válidas y mostradas por `doctor` | M01, M02 | UT-PL-02, UT-DRV-05 | `doctor.json` | 🟡 |
 | AC-03 | `[scope."<driver>:<cuenta>"]`, fallback nativo, driver no declarado/instalado | M02 | UT-DRV-01..03 | INTERFACES config | ⚪ |
 | AC-04 | Ejecución multi-driver, orden, sin dedupe cross-driver, fail-fast | M04 | UT-MD-01..07 | goldens `search/new` multi-driver | ⚪ |
-| AC-05 | `uid` string prefijado en JSON/state, legado aceptado, validación temprana | M01, M03, M04 | UT-UID-01/02, UT-SR-11 actualizado, UT-MD-07 | goldens `search/new/show` | ⚪ |
+| AC-05 | `uid` string prefijado en JSON/state, legado aceptado, validación temprana | M01, M03, M04 | UT-UID-01/02, UT-SR-11 actualizado, UT-MD-07 | goldens `search/new/show` | 🟡 |
 | AC-06 | Migración determinista schema 1→2, persistencia atómica, poda de anillos | M03 | UT-ST-06/07 | doctor `state` | ⚪ |
 | AC-07 | `show.attachments` con `index`, `name`, `cached_path`; `show` no escribe | M04, M08 | UT-ATC-01, UT-MD-07, UT-ATC-10 | goldens `show_*` | ⚪ |
 | AC-08 | `attachment` con `--index`/`--all`, validaciones y textos | M08 | UT-ATC-02..03 | golden ejemplo G | ⚪ |
@@ -110,7 +110,7 @@ Cada fila indica el milestone **dueño** de la evidencia principal; las filas co
 | AC-15 | Disponibilidad (`not_local`, `not_downloaded`, `unsupported`, `network`), S/MIME, `attachments: none` | M06, M07, M08, M09, M10 | UT-ATT-05, UT-ATT-11, UT-ATC-06, UT-ATC-10, UT-OL-ATT-03 | goldens de error | ⚪ |
 | AC-16 | Protocolo de errores de plugin: `reason`/`hint`/`detail`/`log_message`, `code` del núcleo | M05 | UT-ERR-01..03 | INTERFACES errores | ⚪ |
 | AC-17 | Timeout 30 s metadatos / 120 s extracción | M05, M08, M10 | UT-ERR-04, UT-ATC-07, UT-OL-ATT-03 | — | ⚪ |
-| AC-18 | `doctor` con `driver`; `--version` aditivo con drivers | M01, M02 | UT-PL-03, UT-DRV-05, PKG-02 | `doctor.json`, ayuda | ⚪ |
+| AC-18 | `doctor` con `driver`; `--version` aditivo con drivers | M01, M02 | UT-PL-03, UT-DRV-05, PKG-02 | `doctor.json`, ayuda | 🟡 |
 | AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin PII | M04, M05, M08, M10, M11 | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | INTERFACES log | ⚪ |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | M07, M09, M10 | UT-ATT-10, SMOKE-ATT-AM / SMOKE-ATT-OL | — | ⚪ |
 | AC-21 | Ayuda raíz con 6 comandos, ayuda de `attachment` y línea de exits | M08, M11 | UT-ATC-09, DOC-01..06, TC-07 extendido | READMEs/`--help` | ⚪ |
@@ -384,7 +384,7 @@ Se completa al cerrar cada milestone (solo el orquestador).
 | 2026-11-11 | Plan (rev. 1 → rev. 2) | — | Revisión independiente normativa y de pruebas: [`reviews/2026-11-11-normative-review.md`](reviews/2026-11-11-normative-review.md) y [`reviews/2026-11-11-test-review.md`](reviews/2026-11-11-test-review.md); correcciones aplicadas a este plan y a los 11 milestones | 0 bloqueantes abiertos; decisiones de interpretación en §13 |
 | 2026-11-11 | Plan (rev. 2 → rev. 3) | — | Optimización de la integración: lotes de 3–4 milestones con un PR por lote, CI por lote con `cancel-in-progress`, evidencia local por milestone y tag `prd-v2.1-MNN` (§3.2, §6.3, §7.5, §9) | Decisión del dueño 2026-11-11; sin cambios de alcance ni de AC |
 | 2026-11-11 | Plan (rev. 3 → rev. 4) | — | Alcance corregido: los features de PRD-v2.1 son parte del futuro `3.0.0` pero no los únicos; esta fase **no publica**: sin bump de versión, sin tag `v3.0.0`, sin merge a `main`. `develop` acumula los features hasta completar el resto del alcance (§3.2, §6.3, §9.3, D15) | Decisión del dueño 2026-11-11; sin cambios de AC ni de casos |
-| — | — | ⚪ → ⚪ | línea base registrada: 747 tests, 2 fallos SMOKE, 6 saltados | pendiente de ejecución |
+| 2026-11-11 | M01 | ⚪ → 🟢 | suite 770 tests, 2-3 fallos conocidos `SMOKE-NEW.07`, 6 saltados; UT-PL-01..04, UT-UID-01 y PKG-01 verdes solos; +36 tests; goldens intactos; +2443/−241; CI por lote (`pull_request`, `concurrency`, `timeout-minutes: 30`). Evidencia: [`evidence/M01.md`](evidence/M01.md) | 0 HITL; `PKG-01.02` se salta sin metadata instalada; hook pre-commit local roto, commits con `--no-verify` |
 
 ---
 

@@ -133,29 +133,29 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 
 | ID | Fila de §0.2 | Milestone(s) que la implementan | Evidencia principal | Estado |
 |---|---|---|---|---|
-| RC-01 | No objetivos / clientes soportados | M01, M02, M04 | AC-01, AC-03, AC-04; `INTERFACES.md` (API 1 y registro) | ⚪ |
+| RC-01 | No objetivos / clientes soportados | M01, M02, M04 | AC-01, AC-03, AC-04; `INTERFACES.md` (API 1 y registro) | 🟡 |
 | RC-02 | Invariante de solo lectura (I-1) | M06, M07, M09, M10 | AC-12; TC-03 y OL-30 extendidos a `attachment` | ⚪ |
-| RC-03 | Red del núcleo y de plugins | M01, M02, M05 | AC-02, AC-18; capacidades en `doctor`; `threat-model.md` | ⚪ |
+| RC-03 | Red del núcleo y de plugins | M01, M02, M05 | AC-02, AC-18; capacidades en `doctor`; `threat-model.md` | 🟡 |
 | RC-04 | Selección de backend (`[scope."<driver>:<cuenta>"]`) | M02, M04 | AC-03, AC-04; UT-DRV-01..03 y UT-MD-01..07 | ⚪ |
-| RC-05 | Tipo y formato de `uid` | M01, M03 | AC-05, AC-06; UT-UID-01/02, UT-ST-06/07; goldens de uid | ⚪ |
+| RC-05 | Tipo y formato de `uid` | M01, M03 | AC-05, AC-06; UT-UID-01/02, UT-ST-06/07; goldens de uid | 🟡 |
 | RC-06 | Modelo de mensaje: adjuntos | M06, M07, M08 | AC-07, AC-09, AC-10, AC-11; UT-ATT-01..05, UT-ATC-01 | ⚪ |
 | RC-07 | Bytes de adjuntos en Outlook (COM) | M10 | AC-10, AC-12, AC-15; UT-OL-ATT-02; `INTERFACES.md` y `threat-model.md` | ⚪ |
 | RC-08 | `state.json` schema 2 | M03 | AC-06; UT-ST-06/07; migración probada | ⚪ |
 | RC-09 | `show` | M08 | AC-07; UT-ATC-01 (incluye `cached_path` symlink/directorio, contenido bloqueable y S/MIME `[]`); goldens `show_*` | ⚪ |
 | RC-10 | Contrato JSON | M03, M08 | AC-05, AC-07; TC-05; goldens | ⚪ |
-| RC-11 | Códigos de salida y errores | M01, M02, M05, M08 | AC-08, AC-14, AC-15, AC-16; UT-ERR-01..04; UT-CLI-09 actualizado | ⚪ |
+| RC-11 | Códigos de salida y errores | M01, M02, M05, M08 | AC-08, AC-14, AC-15, AC-16; UT-ERR-01..04; UT-CLI-09 actualizado | 🟡 |
 | RC-12 | Tabla de comandos y ayuda | M08, M11 | AC-21; UT-ATC-09; DOC-01..05 | ⚪ |
 | RC-13 | `doctor` | M02 | AC-02, AC-18; UT-DRV-05; goldens `doctor.json` y `outlook/doctor.json` (los actualiza M02, única edición; la versión del paquete no cambia en esta fase) | ⚪ |
-| RC-14 | `--version` | M01, M11 | AC-18; UT-PL-03; README/`SKILL.md` | ⚪ |
+| RC-14 | `--version` | M01, M11 | AC-18; UT-PL-03; README/`SKILL.md` | 🟡 |
 | RC-15 | Catálogo de warnings | M02, M08 | Sin warnings nuevos; AC-15 (bloqueo = error exit 4); tests de warnings | ⚪ |
-| RC-16 | Instalación y dependencias | M01, M11 | AC-01; PKG-02, INS-SMOKE-01; entry points y `pipx inject` | ⚪ |
+| RC-16 | Instalación y dependencias | M01, M11 | AC-01; PKG-02, INS-SMOKE-01; entry points y `pipx inject` | 🟡 |
 | RC-17 | Logs | M04, M05, M08, M10 | AC-19; UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | ⚪ |
 | RC-18 | Errores y timeouts de Windows | M10 | AC-17; UT-OL-ATT-03; SMOKE-ATT (Windows) | ⚪ |
 | RC-19 | Operación con el harness | M11 | AC-21; `skills/mailquery/SKILL.md`, READMEs y recetas | ⚪ |
 | RC-20 | Configuración | M02 | AC-03, AC-14; UT-DRV-04; `config.example.toml` | ⚪ |
 | RC-21 | Layout del home | M02, M07 | AC-12; `~/.mailquery/attachments/` y `tmp/staging`; UT-ATT-07/09 | ⚪ |
 | RC-22 | Rendimiento | M08, M09, M10, M11 | AC-12, AC-20; SMOKE de presupuestos; `PERFORMANCE-BACKLOG.md` | ⚪ |
-| RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | ⚪ |
+| RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | 🟡 |
 | RC-24 | Cambios de comportamiento en macOS | M03, M08, M09 | AC-05, AC-07, AC-12; goldens Apple Mail y SMOKE; fila S/MIME de §0.4 (`show` ⇒ `[]`) | ⚪ |
 | RC-25 | Versión del paquete | Release futuro del `3.0.0` (fuera de esta fase) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar | ⚪ |
 
