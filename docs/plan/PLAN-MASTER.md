@@ -48,7 +48,7 @@ Reglas:
 | Fase | Nombre | Milestones | Estado | Puerta de fase |
 |---|---|---|---|---|
 | A | Fundaciones del contrato | M01 | 🟢 | registro, API 1, `uid` y `--version` congelados |
-| B | Identidad y configuración | M02, M03 | 🟡 | `[scope]`/`[attachments]` y `state.json` schema 2 congelados |
+| B | Identidad y configuración | M02, M03 | 🟢 | `[scope]`/`[attachments]` y `state.json` schema 2 congelados |
 | C | Núcleo de datos multi-driver | M04, M05 | ⚪ | merge/orden/cursor y protocolo de errores de plugin verdes |
 | D | Recuperación de adjuntos (núcleo) | M06, M07, M08 | ⚪ | bloqueo, caché y comando `attachment` verdes |
 | E | Adaptadores de backend | M09, M10 | ⚪ | Apple Mail y Outlook con adjuntos verdes |
@@ -60,7 +60,7 @@ Reglas:
 |---|---|---|---|---|---|---|---|
 | M01 | [Contrato de plugin, registro de drivers y uid base](milestones/M01-plugin-contract-and-registry.md) | A | — | AC-01, AC-02 (parcial), AC-05 (parcial), AC-18 (parcial) | UT-PL-01..04, UT-UID-01, PKG-01 | INTERFACES §API/backend; `--version` | 🟢 |
 | M02 | [Configuración multi-driver, `[attachments]` y `doctor driver`](milestones/M02-config-scope-and-doctor.md) | B | M01 | AC-02, AC-03, AC-14 (config), AC-18 (doctor) | UT-DRV-01..05; UT-CLI-10/11 y TC-01 actualizados | INTERFACES config; `config.example.toml` | 🟢 |
-| M03 | [uid prefijado en comandos y `state.json` schema 2](milestones/M03-uid-and-state-schema-2.md) | B | M01, M02 | AC-05, AC-06 | UT-ST-06/07, UT-UID-02, UT-SR-07/08/11 actualizados; UT-CLI-07/09/11, TC-03 y tests de Outlook actualizados | INTERFACES estado/JSON | ⚪ |
+| M03 | [uid prefijado en comandos y `state.json` schema 2](milestones/M03-uid-and-state-schema-2.md) | B | M01, M02 | AC-05, AC-06 | UT-ST-06/07, UT-UID-02, UT-SR-07/08/11 actualizados; UT-CLI-07/09/11, TC-03 y tests de Outlook actualizados | INTERFACES estado/JSON | 🟢 |
 | M04 | [Motor multi-driver](milestones/M04-multi-driver-engine.md) | C | M01, M02, M03 | AC-04, AC-05 (routing de `show`), AC-07 (parcial), AC-19 (inicio) | UT-MD-01..07 | INTERFACES semántica multi-driver y log | ⚪ |
 | M05 | [Protocolo de errores de plugin y timeouts](milestones/M05-plugin-errors-and-timeouts.md) | C | M01, M04 | AC-16, AC-17 (metadatos), AC-19 (plugin) | UT-ERR-01..04 | INTERFACES protocolo de errores | ⚪ |
 | M06 | [Adjuntos: bloqueo y sanitización](milestones/M06-attachment-blocking-and-sanitization.md) | D | M01, M03, M04 | AC-09, AC-10, AC-11, AC-15 (nombres) | UT-ATT-01..05 | INTERFACES bloqueo/sanitización | ⚪ |
@@ -70,7 +70,7 @@ Reglas:
 | M10 | [Backend Outlook: adjuntos](milestones/M10-outlook-attachments.md) | E | M08, M09 | AC-10, AC-12, AC-15, AC-17 (Outlook), AC-19, AC-20 (integración) | UT-OL-ATT-01..04, TC-09, OL-30, SMOKE-ATT-OL | INTERFACES Outlook y excepción COM | ⚪ |
 | M11 | [Documentación, cierre de fase y conciliación](milestones/M11-docs-release-and-reconciliation.md) | F | M01–M10 | Cierre de AC-01…AC-21; AC-19 (docs), AC-21 | DOC-01..06, PKG-02, INS-SMOKE-01, TC-04/TC-05/TC-06/TC-07 | READMEs, recetas, skills, instaladores, PRD-v2.1 §0.7 | ⚪ |
 
-**Resumen:** milestones 🟢 2/11 · 🟡 1 · 🔴 0 · ⚪ 8. ACs 🟢 4/21. Documentos consumidores 🟢 0/10. Suite: línea base 747 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 6 saltados); objetivo final: 0 fallos nuevos y SMOKE verde en los hosts del dueño.
+**Resumen:** milestones 🟢 3/11 · 🟡 1 · 🔴 0 · ⚪ 7. ACs 🟢 5/21. Documentos consumidores 🟢 0/10. Suite: línea base 747 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 6 saltados); objetivo final: 0 fallos nuevos y SMOKE verde en los hosts del dueño.
 
 ### 3.2 Lotes de integración
 
@@ -98,7 +98,7 @@ Cada fila indica el milestone **dueño** de la evidencia principal; las filas co
 | AC-03 | `[scope."<driver>:<cuenta>"]`, fallback nativo, driver no declarado/instalado | M02 | UT-DRV-01..03 | INTERFACES config | 🟢 |
 | AC-04 | Ejecución multi-driver, orden, sin dedupe cross-driver, fail-fast | M04 | UT-MD-01..07 | goldens `search/new` multi-driver | ⚪ |
 | AC-05 | `uid` string prefijado en JSON/state, legado aceptado, validación temprana | M01, M03, M04 | UT-UID-01/02, UT-SR-11 actualizado, UT-MD-07 | goldens `search/new/show` | 🟡 |
-| AC-06 | Migración determinista schema 1→2, persistencia atómica, poda de anillos | M03 | UT-ST-06/07 | doctor `state` | ⚪ |
+| AC-06 | Migración determinista schema 1→2, persistencia atómica, poda de anillos | M03 | UT-ST-06/07 | doctor `state` | 🟢 |
 | AC-07 | `show.attachments` con `index`, `name`, `cached_path`; `show` no escribe | M04, M08 | UT-ATC-01, UT-MD-07, UT-ATC-10 | goldens `show_*` | ⚪ |
 | AC-08 | `attachment` con `--index`/`--all`, validaciones y textos | M08 | UT-ATC-02..03 | golden ejemplo G | ⚪ |
 | AC-09 | Bloqueo del mensaje completo con adjunto hostil y otro seguro | M06, M09 | UT-ATT-03, UT-AM-01 | goldens `attachment_blocked_name/content` | ⚪ |
@@ -386,6 +386,7 @@ Se completa al cerrar cada milestone (solo el orquestador).
 | 2026-11-11 | Plan (rev. 3 → rev. 4) | — | Alcance corregido: los features de PRD-v2.1 son parte del futuro `3.0.0` pero no los únicos; esta fase **no publica**: sin bump de versión, sin tag `v3.0.0`, sin merge a `main`. `develop` acumula los features hasta completar el resto del alcance (§3.2, §6.3, §9.3, D15) | Decisión del dueño 2026-11-11; sin cambios de AC ni de casos |
 | 2026-11-11 | M01 | ⚪ → 🟢 | suite 770 tests, 2-3 fallos conocidos `SMOKE-NEW.07`, 6 saltados; UT-PL-01..04, UT-UID-01 y PKG-01 verdes solos; +36 tests; goldens intactos; +2443/−241; CI por lote (`pull_request`, `concurrency`, `timeout-minutes: 30`). Evidencia: [`evidence/M01.md`](evidence/M01.md) | 0 HITL; `PKG-01.02` se salta sin metadata instalada; hook pre-commit local roto, commits con `--no-verify` |
 | 2026-11-11 | M02 | ⚪ → 🟢 | suite 797 tests, 2 fallos conocidos `SMOKE-NEW.07`, 7 saltados; UT-DRV-01..05 verdes solos; +27 tests; goldens `doctor`/`outlook/doctor` solo con el check `driver`; +1402/−122. Evidencia: [`evidence/M02.md`](evidence/M02.md) | 0 HITL; `[scope]` sin prefijo mantiene el comportamiento 2.0.1 |
+| 2026-11-11 | M03 | ⚪ → 🟢 | suite 810 tests, 2 fallos conocidos `SMOKE-NEW.07`, 6 saltados; UT-ST-06/07, UT-UID-02, UT-CLI-07/11 y TC-03 verdes solos; +13 tests; 14 goldens con diff solo de uid; +1782/−687. Evidencia: [`evidence/M03.md`](evidence/M03.md) | 0 HITL; `check_state_uid` retirado; lote I1 completo (M01–M03) |
 
 ---
 
