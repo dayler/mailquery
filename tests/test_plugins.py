@@ -11,10 +11,13 @@ import ast
 import importlib.metadata
 import io
 import json
+import logging
 import os
 import platform
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -26,9 +29,16 @@ from mailquery import cli as cli_mod
 from mailquery.backends import registry as registry_mod
 from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.errors import MailqueryError
-from mailquery.plugins import PLUGIN_API, PluginContext, PluginError, Reason
+from mailquery.plugins import (
+    PLUGIN_API,
+    PluginContext,
+    PluginError,
+    Reason,
+    call_driver,
+)
 
 from tests.fakes.plugin import (
+    ACCOUNT_LABEL as PLUGIN_ACCOUNT_LABEL,
     CAPABILITIES,
     DRIVER,
     INTERNAL_TARGETS,
@@ -37,6 +47,7 @@ from tests.fakes.plugin import (
     FakePluginBackend,
     internal_entry_points,
     plugin_class,
+    plugin_factory,
 )
 from tests.fixtures.make_fixtures import DEFAULT_CONFIG, build_store, write_config
 
@@ -687,6 +698,600 @@ class PluginApiTests(_PluginTestCase):
                 }:
                     offenders.append(f"{path.relative_to(SRC_ROOT)} imports {module}")
         self.assertEqual(offenders, [])
+
+
+# --------------------------------------------------------------------------- #
+# M05 — plugin error protocol and metadata timeout (UT-ERR-01..04)
+# --------------------------------------------------------------------------- #
+
+#: Config with only the plugin account declared: the native driver is never opened.
+PLUGIN_ONLY_CONFIG = f'[scope."{DRIVER}:{PLUGIN_ACCOUNT_LABEL}"]\n'
+
+#: Config for the minimal injected native backend (UT-ERR-03.03).
+NATIVE_FAKE_CONFIG = '[scope."Fake"]\n'
+
+#: §11.7 mapping in attachment operations: reason -> (code, exit).
+ATTACHMENT_REASON_MAP = (
+    ("invalid_uid", "E_USAGE", 2),
+    ("not_found", "E_USAGE", 2),
+    ("not_local", "E_ATTACHMENT_UNAVAILABLE", 3),
+    ("not_downloaded", "E_ATTACHMENT_UNAVAILABLE", 3),
+    ("unsupported", "E_ATTACHMENT_UNAVAILABLE", 3),
+    ("network", "E_ATTACHMENT_UNAVAILABLE", 3),
+    ("corrupt", "E_ATTACHMENT_UNREADABLE", 3),
+    ("smime", "E_ATTACHMENT_UNREADABLE", 3),
+    ("unreadable", "E_ATTACHMENT_UNREADABLE", 3),
+    ("permission", "E_PERMISSION", 3),
+    ("auth", "E_PERMISSION", 3),
+    ("busy", "E_CLIENT_BUSY", 5),
+    ("timeout", "E_CLIENT_TIMEOUT", 3),
+)
+
+#: §11.7 mapping in every other operation: the attachment-only reasons fail as E_PLUGIN_FAILED.
+REST_REASON_MAP = tuple(
+    (reason, "E_PLUGIN_FAILED", 3)
+    if reason
+    in {
+        "not_local",
+        "not_downloaded",
+        "unsupported",
+        "network",
+        "corrupt",
+        "smime",
+        "unreadable",
+    }
+    else (reason, code, exit_code)
+    for reason, code, exit_code in ATTACHMENT_REASON_MAP
+)
+
+#: Core-owned English message templates of §11.7 (the driver name is substituted).
+MESSAGE_TEMPLATES = {
+    "not_local": "not available in the local store",
+    "not_downloaded": "could not be retrieved from its origin",
+    "network": "could not be retrieved from its origin",
+    "unsupported": f"cannot be recovered by driver '{DRIVER}'",
+    "corrupt": "is corrupt or unreadable",
+    "unreadable": "is corrupt or unreadable",
+    "smime": "is S/MIME protected and cannot be extracted",
+    "permission": "cannot be read: permission denied",
+    "auth": "cannot be read: permission denied",
+    "busy": "is temporarily unavailable",
+    "timeout": "did not respond within the timeout",
+}
+
+
+def _close_log_handlers() -> None:
+    """Release the log file ``cli.main`` leaves open (Windows cannot delete it)."""
+    logger = logging.getLogger("mailquery")
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()
+
+
+class _ReasonMappingCase(unittest.TestCase):
+    """Helpers to drive the public wrapper with a ``PluginError``."""
+
+    def mapped(
+        self,
+        reason,
+        *,
+        operation: str = "query",
+        hint: str = "",
+        detail: str = "",
+        log_message: str = "",
+        driver: str = DRIVER,
+        internal: bool = False,
+    ) -> MailqueryError:
+        def call():
+            raise PluginError(reason, hint, detail, log_message)
+
+        with self.assertRaises(MailqueryError) as context:
+            call_driver(operation, call, driver=driver, internal=internal)
+        return context.exception
+
+    def assert_maps(self, error: MailqueryError, code: str, exit_code: int) -> None:
+        self.assertEqual(error.code, code)
+        self.assertEqual(error.exit_code, exit_code)
+        self.assertNotEqual(error.code, "E_INTERNAL")
+
+
+# UT-ERR-01 — reason -> code/exit mapping (AC-16, §11.7)
+# --------------------------------------------------------------------------- #
+
+
+class PluginErrorMappingTests(_ReasonMappingCase):
+    def test_ut_err_01_01_attachment_operations_map_the_whole_reason_table(self) -> None:
+        """UT-ERR-01.01: every §11.7 reason in an attachment operation maps to its code."""
+        for reason, code, exit_code in ATTACHMENT_REASON_MAP:
+            with self.subTest(reason=reason):
+                error = self.mapped(reason, operation="attachments")
+                self.assert_maps(error, code, exit_code)
+
+    def test_ut_err_01_02_other_operations_map_the_whole_reason_table(self) -> None:
+        """UT-ERR-01.02: attachment-only reasons fail as E_PLUGIN_FAILED elsewhere."""
+        for reason, code, exit_code in REST_REASON_MAP:
+            with self.subTest(reason=reason):
+                error = self.mapped(reason, operation="query")
+                self.assert_maps(error, code, exit_code)
+
+    def test_ut_err_01_03_unknown_empty_or_non_string_reason_is_plugin_failed(self) -> None:
+        """UT-ERR-01.03: unknown/empty/non-string reason => E_PLUGIN_FAILED, never E_INTERNAL."""
+        for reason in ("unknown_reason", "", 0, None):
+            with self.subTest(reason=repr(reason)):
+                error = self.mapped(reason)
+                self.assert_maps(error, "E_PLUGIN_FAILED", 3)
+
+    def test_ut_err_01_04_plugin_cannot_choose_code_or_exit(self) -> None:
+        """UT-ERR-01.04: code/exit are the core's; plugin attributes and exceptions are ignored."""
+        plugin_error = PluginError(Reason.BUSY)
+        plugin_error.code = "E_INTERNAL"  # type: ignore[attr-defined]
+        plugin_error.exit_code = 1  # type: ignore[attr-defined]
+        plugin_error.exit = 1  # type: ignore[attr-defined]
+
+        def call():
+            raise plugin_error
+
+        with self.assertRaises(MailqueryError) as context:
+            call_driver("query", call, driver=DRIVER, internal=False)
+        self.assert_maps(context.exception, "E_CLIENT_BUSY", 5)
+
+        def forged():
+            raise MailqueryError("E_INTERNAL", "plugin-chosen internal error")
+
+        with self.assertRaises(MailqueryError) as forged_context:
+            call_driver("query", forged, driver=DRIVER, internal=False)
+        self.assert_maps(forged_context.exception, "E_PLUGIN_FAILED", 3)
+        self.assertNotIn("plugin-chosen internal error", forged_context.exception.message)
+
+    def test_ut_err_01_05_error_payload_keeps_the_documented_shape(self) -> None:
+        """UT-ERR-01.05: the error payload is {ok, command, error} with no generated_at."""
+        error = self.mapped(Reason.BUSY)
+        payload = error.to_payload("search")
+        self.assertEqual(set(payload), {"ok", "command", "error"})
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "search")
+        self.assertEqual(set(payload["error"]), {"code", "message", "hint"})
+        self.assertNotIn("generated_at", payload)
+
+
+# UT-ERR-02 — sanitization, limits, templates and logging (AC-16, AC-19)
+# --------------------------------------------------------------------------- #
+
+
+class PluginErrorSanitizationTests(_ReasonMappingCase):
+    def test_ut_err_02_01_hint_detail_and_log_message_are_byte_truncated_without_splitting(
+        self,
+    ) -> None:
+        """UT-ERR-02.01: 301/201/201-byte fields become ≤300/200/200 bytes UTF-8-safe."""
+        hint = "a" * 299 + "é"  # 299 + 2 = 301 bytes
+        detail = "b" * 199 + "é"  # 199 + 2 = 201 bytes
+        log_message = "c" * 199 + "é"  # 199 + 2 = 201 bytes
+        error = self.mapped(
+            Reason.BUSY, hint=hint, detail=detail, log_message=log_message
+        )
+        self.assertEqual(error.hint, "a" * 299)
+        self.assertLessEqual(len(error.hint.encode("utf-8")), 300)
+        assert error.log_message is not None
+        self.assertEqual(error.log_message, "c" * 199)
+        self.assertLessEqual(len(error.log_message.encode("utf-8")), 200)
+        detail_part = error.message.split(": ", 1)[1]
+        self.assertEqual(detail_part, "b" * 199)
+        self.assertLessEqual(len(detail_part.encode("utf-8")), 200)
+        for field in (error.hint, error.message, error.log_message):
+            self.assertNotIn("\ufffd", field)
+
+        # Boundary: a field that already fits is not touched.
+        exact = self.mapped(Reason.BUSY, hint="a" * 300)
+        self.assertEqual(exact.hint, "a" * 300)
+
+    def test_ut_err_02_02_control_characters_are_removed_from_error_fields(self) -> None:
+        """UT-ERR-02.02: NUL, CR, LF, ANSI and RLO are removed from hint/detail/log_message."""
+        for control in ("\x00", "\r", "\n", "\x1b[31m", "\u202e"):
+            with self.subTest(control=repr(control)):
+                error = self.mapped(
+                    Reason.BUSY,
+                    hint=f"h{control}h",
+                    detail=f"a{control}b",
+                    log_message=f"l{control}l",
+                )
+                self.assertEqual(error.hint, "hh")
+                self.assertEqual(error.message.split(": ", 1)[1], "ab")
+                assert error.log_message is not None
+                self.assertEqual(error.log_message, "ll")
+                for field in (error.hint, error.message, error.log_message):
+                    self.assertNotIn(control, field)
+
+    def test_ut_err_02_03_message_uses_the_reason_template_plus_sanitized_detail(self) -> None:
+        """UT-ERR-02.03: each §11.7 motive yields its template, then `: detail`."""
+        for reason, template in MESSAGE_TEMPLATES.items():
+            with self.subTest(reason=reason):
+                with_detail = self.mapped(
+                    reason, operation="attachments", detail="more detail"
+                )
+                self.assertEqual(with_detail.message, f"{template}: more detail")
+                without_detail = self.mapped(reason, operation="attachments")
+                self.assertEqual(without_detail.message, template)
+
+    def test_ut_err_02_06_default_hints_are_the_reason_or_code_hints(self) -> None:
+        """UT-ERR-02.06: plugin hint wins; otherwise the reason/code hint is used."""
+        expected = {
+            "not_local": "open the message",
+            "not_downloaded": "open the message",
+            "network": "check the network connection",
+            "unsupported": "install or declare a driver",
+            "smime": "S/MIME attachments cannot be extracted",
+            "corrupt": "corrupt",
+            "unreadable": "cannot be read",
+            "permission": "grant the required permissions",
+            "auth": "grant the required permissions",
+            "busy": "retry once",
+            "timeout": "doctor",
+        }
+        for reason, fragment in expected.items():
+            with self.subTest(reason=reason):
+                error = self.mapped(reason, operation="attachments")
+                self.assertIn(fragment, error.hint)
+
+        failed = self.mapped("unknown_reason")
+        self.assertIn('run "mailquery doctor"', failed.hint)
+
+        plugin_hint = self.mapped(Reason.BUSY, hint="the plugin says wait")
+        self.assertEqual(plugin_hint.hint, "the plugin says wait")
+
+        registry = BackendRegistry(entry_points=[], platform=sys.platform)
+        with self.assertRaises(MailqueryError) as unknown_context:
+            registry.info("not_installed_driver")
+        unknown_driver = unknown_context.exception
+        self.assertEqual(unknown_driver.code, "E_DRIVER_UNKNOWN")
+        self.assertIn("installed drivers:", unknown_driver.hint)
+        self.assertIn("pipx inject mailquery", unknown_driver.hint)
+
+
+# UT-ERR-03 — unmapped failures (AC-16)
+# --------------------------------------------------------------------------- #
+
+
+class PluginErrorFallbackTests(_ReasonMappingCase):
+    def test_ut_err_03_01_unmapped_exception_is_plugin_failed_without_traceback(self) -> None:
+        """UT-ERR-03.01: a plugin exception => E_PLUGIN_FAILED, plugin text never in the JSON."""
+
+        def call():
+            raise RuntimeError("plugin bug: internal secret")
+
+        with self.assertRaises(MailqueryError) as context:
+            call_driver("query", call, driver=DRIVER, internal=False)
+        error = context.exception
+        self.assert_maps(error, "E_PLUGIN_FAILED", 3)
+        rendered = json.dumps(error.to_payload("search"))
+        self.assertNotIn("RuntimeError", rendered)
+        self.assertNotIn("plugin bug", rendered)
+        self.assertNotIn("Traceback", rendered)
+        self.assertIsNotNone(error.log_message)
+
+    def test_ut_err_03_02_invalid_return_values_are_plugin_failed(self) -> None:
+        """UT-ERR-03.02: invalid plugin return types => E_PLUGIN_FAILED."""
+        cases = (
+            ("query", lambda: ["not a row"]),
+            ("query", lambda: {"rows": []}),
+            ("parse_native_id", lambda: 123),
+            ("attachments", lambda: [{"index": 1}]),
+            ("attachments", lambda: "not a list"),
+            ("load_body", lambda: {"attachments": "not a list"}),
+            ("attachment_names", lambda: [1, 2]),
+            ("find_message", lambda: ("row",)),
+        )
+        for operation, call in cases:
+            with self.subTest(operation=operation, value=repr(call())):
+                with self.assertRaises(MailqueryError) as context:
+                    call_driver(operation, call, driver=DRIVER, internal=False)
+                self.assert_maps(context.exception, "E_PLUGIN_FAILED", 3)
+
+
+class _MinimalNativeBackend:
+    """Injected native backend whose metadata operation raises an unexpected core error."""
+
+    driver = "apple_mail"
+    plugin_api = 1
+    native_order = "numeric"
+    labels_available = True
+    capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "numeric",
+    }
+    ACCOUNT = {
+        "uuid": "fake-native-uuid",
+        "label": "Fake",
+        "email": None,
+        "local": True,
+        "store_index": 0,
+        "labelled": True,
+    }
+    MAILBOX = {
+        "id": 1,
+        "account_uuid": "fake-native-uuid",
+        "name": "INBOX",
+        "path": "INBOX",
+        "url": "mailbox://fake/INBOX",
+        "is_inbox": True,
+        "is_aggregate": False,
+        "total": 0,
+        "unread": 0,
+    }
+
+    def describe(self) -> dict:
+        return {}
+
+    def accounts(self) -> list:
+        return [dict(self.ACCOUNT)]
+
+    def mailboxes(self, account_uuids=None) -> list:
+        return [dict(self.MAILBOX)]
+
+    def excluded_stores(self) -> list:
+        return []
+
+    def resolve_mailbox(self, account_uuid, ref):
+        return dict(self.MAILBOX)
+
+    def query(self, *args, **kwargs):
+        raise RuntimeError("core bug in the native driver")
+
+    def membership(self, uids):
+        return {}
+
+    def duplicate_counts(self, mailbox_ids):
+        return {}
+
+    def recipients(self, uids):
+        return {}
+
+    def attachment_names(self, uid):
+        return []
+
+    def attachments(self, uid):
+        return []
+
+    def attachment_stream(self, uid, index):
+        return iter(())
+
+    def find_message(self, uid):
+        return None
+
+    def load_body(self, row):
+        return {
+            "available": False,
+            "readable": False,
+            "partial": False,
+            "headers": {},
+            "body_text": "",
+            "attachments": [],
+            "source": {"emlx_path": None, "partial": False},
+            "warnings": [],
+        }
+
+    @staticmethod
+    def parse_uid(raw):
+        return int(raw)
+
+    @staticmethod
+    def parse_native_id(native_id):
+        return int(native_id)
+
+    def doctor_checks(self):
+        return []
+
+    def close(self) -> None:
+        pass
+
+
+class PluginErrorRuntimeTests(unittest.TestCase):
+    """CLI-level cases: logging rules, core-internal failures and timeout side effects."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-m05-")
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(_close_log_handlers)
+        self.home = Path(self._tmp.name) / "home"
+        self.home.mkdir()
+
+    # -- helpers ------------------------------------------------------------ #
+
+    def registry(self, plugin) -> BackendRegistry:
+        return BackendRegistry(
+            platform=sys.platform,
+            entry_points=[
+                *internal_entry_points(),
+                FakeEntryPoint(DRIVER, plugin=plugin),
+            ],
+        )
+
+    def use_plugin_config(self) -> None:
+        write_config(self.home, PLUGIN_ONLY_CONFIG)
+
+    def run_cli(self, *argv: str, registry=None, backend=None):
+        registry = registry if registry is not None else self.registry(FakePluginBackend)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.object(cli_mod, "BackendRegistry", lambda *a, **k: registry),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            code = cli_mod.main(list(argv), home=self.home, backend=backend)
+        raw = stdout.getvalue()
+        payload = json.loads(raw) if raw.strip() else None
+        return code, payload, stderr.getvalue()
+
+    def log_text(self) -> str:
+        return (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+
+    # -- UT-ERR-02.04/.05 ---------------------------------------------------- #
+
+    def test_ut_err_01_02_show_plugin_native_id_reason_is_mapped_in_the_cli(
+        self,
+    ) -> None:
+        """UT-ERR-01.02 (runtime): a plugin parse_native_id reason maps to the core code."""
+
+        def reject(native_id):
+            raise PluginError(Reason.INVALID_UID, "bad native id")
+
+        plugin = plugin_class(parse_native_id=staticmethod(reject))
+        self.use_plugin_config()
+        code, payload, _stderr = self.run_cli(
+            "show", f"{DRIVER}:bad", registry=self.registry(plugin)
+        )
+        self.assertEqual(code, 2)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_USAGE")
+        self.assertNotEqual(payload["error"]["code"], "E_INTERNAL")
+
+    def test_ut_err_02_04_the_log_records_the_sanitized_log_message_only(self) -> None:
+        """UT-ERR-02.04: the log gets log_message; hint and detail are never logged."""
+        plugin = plugin_factory(
+            failures={
+                "query": PluginError(
+                    Reason.BUSY,
+                    hint="HINT-SECRET",
+                    detail="DETAIL-SECRET",
+                    log_message="driver is busy (sanitized)",
+                )
+            }
+        )
+        self.use_plugin_config()
+        code, payload, _stderr = self.run_cli("search", registry=self.registry(plugin))
+        self.assertEqual(code, 5)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_CLIENT_BUSY")
+        log = self.log_text()
+        self.assertIn("driver is busy (sanitized)", log)
+        self.assertNotIn("HINT-SECRET", log)
+        self.assertNotIn("DETAIL-SECRET", log)
+        self.assertNotIn("Traceback", log)
+        self.assertIn("code=E_CLIENT_BUSY", log)
+
+    def test_ut_err_02_05_plugin_pii_never_reaches_the_log(self) -> None:
+        """UT-ERR-02.05: hint/detail PII stays out of the log; log_message is sanitized."""
+        dirty_log = "plugin failed\x00\r\n\x1b[31m at term"
+        plugin = plugin_factory(
+            failures={
+                "query": PluginError(
+                    Reason.NOT_LOCAL,
+                    hint="uid 83143 file.pdf /Users/me/secret account me@example.com term invoice",
+                    detail="uid 83143 file.pdf /Users/me/secret account me@example.com term invoice",
+                    log_message=dirty_log,
+                )
+            }
+        )
+        self.use_plugin_config()
+        code, _payload, _stderr = self.run_cli("search", registry=self.registry(plugin))
+        self.assertEqual(code, 3)
+        log = self.log_text()
+        self.assertIn("plugin failed at term", log)
+        for leaked in (
+            "83143",
+            "file.pdf",
+            "/Users/me/secret",
+            "me@example.com",
+            "invoice",
+            "\x00",
+            "\x1b",
+            "\r",
+        ):
+            self.assertNotIn(leaked, log)
+
+    # -- UT-ERR-03.03 -------------------------------------------------------- #
+
+    def test_ut_err_03_03_unexpected_core_failure_is_still_internal(self) -> None:
+        """UT-ERR-03.03: a native driver's unexpected exception stays E_INTERNAL (exit 1)."""
+        write_config(self.home, NATIVE_FAKE_CONFIG)
+        code, payload, _stderr = self.run_cli(
+            "search", backend=_MinimalNativeBackend()
+        )
+        self.assertEqual(code, 1)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_INTERNAL")
+        self.assertNotEqual(payload["error"]["code"], "E_PLUGIN_FAILED")
+        self.assertIn("Traceback", self.log_text())  # PRD 14: only E_INTERNAL traces
+
+    # -- UT-ERR-04.02 -------------------------------------------------------- #
+
+    def test_ut_err_04_02_timeout_leaves_no_partial_results_nor_state(self) -> None:
+        """UT-ERR-04.02: a metadata timeout fails `new` without messages[] or state.json."""
+        plugin = plugin_factory(delays={"query": 2.0})
+        self.use_plugin_config()
+        with mock.patch(
+            "mailquery.plugins.api.METADATA_TIMEOUT_SECONDS", 0.2
+        ):
+            code, payload, _stderr = self.run_cli("new", registry=self.registry(plugin))
+        self.assertEqual(code, 3)
+        assert payload is not None
+        self.assertEqual(payload["error"]["code"], "E_CLIENT_TIMEOUT")
+        self.assertNotIn("messages", payload)
+        self.assertNotIn("cursor", payload)
+        self.assertFalse((self.home / "state.json").exists())
+
+
+# UT-ERR-04 — metadata timeout (AC-17, RNF-16)
+# --------------------------------------------------------------------------- #
+
+
+class MetadataTimeoutTests(unittest.TestCase):
+    def test_ut_err_04_01_plugin_metadata_timeout_maps_to_client_timeout(self) -> None:
+        """UT-ERR-04.01: an injected short deadline fails the operation, without retries."""
+        calls: list[int] = []
+
+        def slow():
+            calls.append(1)
+            time.sleep(0.3)
+            return []
+
+        started = time.monotonic()
+        with mock.patch("mailquery.plugins.api.METADATA_TIMEOUT_SECONDS", 0.05):
+            with self.assertRaises(MailqueryError) as context:
+                call_driver("query", slow, driver=DRIVER, internal=False)
+        elapsed = time.monotonic() - started
+        self.assertEqual(context.exception.code, "E_CLIENT_TIMEOUT")
+        self.assertEqual(context.exception.exit_code, 3)
+        self.assertEqual(len(calls), 1, "no automatic retry")
+        self.assertLess(elapsed, 1.0, "the deadline is injected, not the 30 s default")
+        self.assertIsNotNone(context.exception.log_message)
+
+    def test_ut_err_04_03_operation_below_the_deadline_is_not_interrupted(self) -> None:
+        """UT-ERR-04.03: an operation under the deadline returns its value unchanged."""
+        rows = [{"uid": "A", "native_order_key": "1"}]
+
+        def fast():
+            time.sleep(0.01)
+            return list(rows)
+
+        self.assertEqual(
+            call_driver("query", fast, driver=DRIVER, internal=False, timeout=0.5),
+            rows,
+        )
+
+    def test_ut_err_04_04_native_metadata_operations_are_wrapped_too(self) -> None:
+        """UT-ERR-04.04: the native path checks the injected deadline inline (no worker thread)."""
+        main_thread = threading.get_ident()
+        observed: list[int] = []
+
+        def slow():
+            observed.append(threading.get_ident())
+            time.sleep(0.2)
+            return []
+
+        for driver in ("apple_mail", "outlook"):
+            with self.subTest(driver=driver):
+                with self.assertRaises(MailqueryError) as context:
+                    call_driver(
+                        "query", slow, driver=driver, internal=True, timeout=0.05
+                    )
+                self.assertEqual(context.exception.code, "E_CLIENT_TIMEOUT")
+                self.assertEqual(context.exception.exit_code, 3)
+                # Inline execution keeps the driver's SQLite/COM thread affinity.
+                self.assertEqual(observed[-1], main_thread)
 
 
 if __name__ == "__main__":
