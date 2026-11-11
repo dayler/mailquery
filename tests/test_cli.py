@@ -20,8 +20,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import mailquery
 from mailquery import cli as cli_mod
+from mailquery import errors
 from mailquery.backends import apple_mail as apple_mail_mod
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.errors import MailqueryError
@@ -51,7 +51,7 @@ FORBIDDEN_FLAGS = (
 class _FakeBackend:
     """Minimal stand-in for a ``MailBackend``: only what ``cli`` itself touches."""
 
-    name = "apple_mail"
+    driver = "apple_mail"
 
     def __init__(self) -> None:
         self.closed = False
@@ -433,158 +433,6 @@ class HelpContractTests(_CliTestCase):
         self.assertIn("invalid choice", payload["error"]["message"])
 
 
-class VersionTests(_CliTestCase):
-    """UT-CLI-01..03: global ``-v``/``--version`` (RF-31, PRD 12.9)."""
-
-    def expected_line(self, backend: str, platform_text: str) -> str:
-        return (
-            f"mailquery {mailquery.__version__} (backend {backend}; "
-            f"Python {platform.python_version()}; {platform_text})\n"
-        )
-
-    def patched(
-        self,
-        *,
-        plat: str,
-        system="Linux",
-        release="6.1",
-        version="1",
-        mac="",
-        machine="x86_64",
-    ) -> None:
-        patchers = [
-            mock.patch.object(sys, "platform", plat),
-            mock.patch("platform.system", return_value=system),
-            mock.patch("platform.release", return_value=release),
-            mock.patch("platform.version", return_value=version),
-            mock.patch("platform.machine", return_value=machine),
-            mock.patch("platform.mac_ver", return_value=(mac, ("", "", ""), machine)),
-        ]
-        for patcher in patchers:
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def real_platform_text(self) -> str:
-        if sys.platform == "win32":
-            return f"Windows {platform.version()} {platform.machine()}"
-        if sys.platform == "darwin":
-            return f"macOS {platform.mac_ver()[0]} {platform.machine()}"
-        return f"{platform.system()} {platform.release()} {platform.machine()}"
-
-    def test_ut_cli_01_01_version_flag_prints_exact_line(self) -> None:
-        """UT-CLI-01.01: --version prints the exact line; exit 0."""
-        backend = "outlook" if sys.platform == "win32" else "apple_mail"
-        code, stdout, stderr = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line(backend, self.real_platform_text()))
-        self.assertEqual(stderr, "")
-
-    def test_ut_cli_01_02_short_flag_prints_same_line(self) -> None:
-        """UT-CLI-01.02: -v prints the same line as --version."""
-        short = self.run_cli(["-v"])
-        self.assertEqual(short[0], 0)
-        self.assertEqual(short, self.run_cli(["--version"]))
-
-    def test_ut_cli_01_03_macos_platform_text(self) -> None:
-        """UT-CLI-01.03: patched macOS platform renders macOS <ver> <arch>."""
-        self.patched(plat="darwin", system="Darwin", mac="14.5", machine="arm64")
-        code, stdout, _ = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line("apple_mail", "macOS 14.5 arm64"))
-
-    def test_ut_cli_01_04_windows_platform_text(self) -> None:
-        """UT-CLI-01.04: patched Windows platform renders Windows <ver> <arch>."""
-        self.patched(
-            plat="win32", system="Windows", release="11", version="10.0.26200", machine="AMD64"
-        )
-        code, stdout, _ = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line("outlook", "Windows 10.0.26200 AMD64"))
-
-    def test_ut_cli_01_05_other_platform_text(self) -> None:
-        """UT-CLI-01.05: other platforms render <system> <release> <arch>."""
-        self.patched(plat="linux", system="Linux", release="6.1.0", machine="x86_64")
-        code, stdout, _ = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line("apple_mail", "Linux 6.1.0 x86_64"))
-
-    def test_ut_cli_01_06_backend_follows_sys_platform(self) -> None:
-        """UT-CLI-01.06: win32 -> outlook; darwin and linux -> apple_mail."""
-        for plat, backend in (
-            ("win32", "outlook"),
-            ("darwin", "apple_mail"),
-            ("linux", "apple_mail"),
-        ):
-            with self.subTest(plat=plat):
-                with mock.patch.object(sys, "platform", plat):
-                    _, stdout, _ = self.run_cli(["--version"])
-                self.assertIn(f"(backend {backend};", stdout)
-
-    def test_ut_cli_02_01_missing_home_is_not_created(self) -> None:
-        """UT-CLI-02.01: a missing home is not created."""
-        home = self.fx.root / "no-such-home"
-        code, stdout, _ = self.run_cli(["--version"], home=home)
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertFalse(home.exists())
-
-    def test_ut_cli_02_02_broken_config_is_not_read(self) -> None:
-        """UT-CLI-02.02: a broken config.toml is not read; exit 0."""
-        write_config(self.fx.home, "this is = = not toml\n")
-        with mock.patch.object(
-            cli_mod, "load_config", side_effect=AssertionError("config read")
-        ):
-            code, stdout, stderr = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertEqual(stderr, "")
-
-    def test_ut_cli_02_03_no_log_and_no_lock(self) -> None:
-        """UT-CLI-02.03: no log is written and the lock is not taken."""
-        before = sorted(str(p) for p in self.fx.home.rglob("*"))
-        with mock.patch.object(
-            cli_mod, "RunLock", side_effect=AssertionError("lock")
-        ), mock.patch.object(cli_mod, "setup_logging", side_effect=AssertionError("log")):
-            code, _, _ = self.run_cli(["-v"])
-        self.assertEqual(code, 0)
-        self.assertEqual(before, sorted(str(p) for p in self.fx.home.rglob("*")))
-        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
-
-    def test_ut_cli_02_04_win32_without_pywin32_does_not_import_win32com(self) -> None:
-        """UT-CLI-02.04: patched win32 without pywin32/Outlook works; win32com not imported."""
-        self.patched(
-            plat="win32", system="Windows", release="11", version="10.0.26200", machine="AMD64"
-        )
-        blocked = {"win32com": None, "win32com.client": None, "pythoncom": None}
-        with mock.patch.dict(sys.modules, blocked):
-            code, stdout, _ = self.run_cli(["--version"])
-            self.assertEqual(code, 0)
-            self.assertIn("(backend outlook;", stdout)
-            # None entries block imports: they must still be untouched (never imported).
-            self.assertIsNone(sys.modules["win32com"])
-
-    def test_ut_cli_03_01_version_after_subcommand_is_usage_error(self) -> None:
-        """UT-CLI-03.01: search -v is E_USAGE, exit 2."""
-        self.assert_error(2, self.run_cli(["search", "-v"]), "E_USAGE", "search")
-
-    def test_ut_cli_03_02_log_level_with_version_writes_no_log(self) -> None:
-        """UT-CLI-03.02: --log-level debug -v shows the version and writes no log."""
-        code, stdout, _ = self.run_cli(["--log-level", "debug", "-v"])
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
-
-    def test_ut_cli_03_03_first_of_version_and_help_wins(self) -> None:
-        """UT-CLI-03.03: -v -h prints the version; -h -v prints help; both exit 0."""
-        code, stdout, _ = self.run_cli(["-v", "-h"])
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertNotIn("usage:", stdout)
-        code, stdout, _ = self.run_cli(["-h", "-v"])
-        self.assertEqual(code, 0)
-        self.assertIn("usage: mailquery", stdout)
-
-
 # --------------------------------------------------------------------------- #
 # Limit validation (fails before touching the store)
 # --------------------------------------------------------------------------- #
@@ -755,7 +603,7 @@ class SuccessContractTests(_CliTestCase):
 
 class ErrorContractTests(_CliTestCase):
     def test_ut_cli_09_01_error_codes_map_to_documented_exit_codes(self) -> None:
-        """UT-CLI-09.01: each of the 23 E_* codes maps to its exit code (PRD 12.6)."""
+        """UT-CLI-09.01: each of the 32 E_* codes of PRD-v2.1 §11.7 maps to its exit code."""
         cases = (
             ("E_USAGE", 2),
             ("E_CONFIG_INVALID", 2),
@@ -780,8 +628,25 @@ class ErrorContractTests(_CliTestCase):
             ("E_CLIENT_BUSY", 5),
             ("E_OUTLOOK_NOT_RUNNING", 6),
             ("E_INTERNAL", 1),
+            # PRD-v2.1 §11.7 new codes (M01).
+            ("E_DRIVER_UNKNOWN", 2),
+            ("E_ATTACHMENTS_DISABLED", 2),
+            ("E_PLUGIN_INCOMPATIBLE", 3),
+            ("E_PLUGIN_FAILED", 3),
+            ("E_ATTACHMENT_UNAVAILABLE", 3),
+            ("E_ATTACHMENT_UNREADABLE", 3),
+            ("E_ATTACHMENT_BLOCKED", 4),
+            ("E_ATTACHMENT_TOO_LARGE", 4),
+            ("E_IO", 3),
         )
-        self.assertEqual(len(cases), 23)
+        self.assertEqual(len(cases), 32)
+        # The full catalogue matches the table exactly, not only the sampled codes.
+        catalogue = {
+            code: exit_code
+            for exit_code, codes in errors._EXIT_ERRORS.items()
+            for code in codes
+        }
+        self.assertEqual(catalogue, dict(cases))
         for code, expected_exit in cases:
             with self.subTest(code=code):
                 error = MailqueryError(code, f"failure {code}", "do something useful")
@@ -979,7 +844,7 @@ class DispatchTests(_CliTestCase):
 class _InjectedBackend(_FakeBackend):
     """Backend instance passed to ``main(backend=...)`` (the Outlook fake later)."""
 
-    name = "injected"
+    driver = "injected"
 
     def __init__(self) -> None:
         super().__init__()

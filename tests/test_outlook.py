@@ -874,7 +874,7 @@ class OutlookDetectionTests(_OutlookCliCase):
         """OL-02.06: a running instance ⇒ connection with GetActiveObject("Outlook.Application")."""
         fake = fk.FakeOutlook.default()
         backend = _backend(fake)
-        self.assertEqual(backend.name, "outlook")
+        self.assertEqual(backend.driver, "outlook")
         self.assertEqual(backend.describe()["strategy"], "com_readonly")
         connects = [e for e in fake.call_log if e.kind == "Connector"]
         self.assertEqual(

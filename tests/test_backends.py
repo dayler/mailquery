@@ -30,10 +30,12 @@ from tests.fixtures.make_fixtures import (
     build_store,
 )
 
-# Operations declared by PRD 9.3 / plan 4.3, exactly.
-EXPECTED_OPERATIONS = frozenset(
+# Operations and metadata declared by the backend protocol v1 (C1; PRD-v2.1 §6.1).
+EXPECTED_ABSTRACT_OPERATIONS = frozenset(
     {
-        "name",
+        "driver",
+        "plugin_api",
+        "capabilities",
         "describe",
         "accounts",
         "labels_available",
@@ -48,16 +50,20 @@ EXPECTED_OPERATIONS = frozenset(
         "find_message",
         "load_body",
         "parse_uid",
+        "parse_native_id",
         "doctor_checks",
         "close",
     }
 )
+#: Concrete members added by C1 on top of the abstract ones.
+EXPECTED_CONCRETE_OPERATIONS = frozenset({"native_order", "attachments", "attachment_stream"})
+EXPECTED_OPERATIONS = EXPECTED_ABSTRACT_OPERATIONS | EXPECTED_CONCRETE_OPERATIONS
 
 
 class MailBackendInterfaceTest(unittest.TestCase):
     def test_ut_be_03_01_declares_exactly_the_prd_operations(self) -> None:
-        """UT-BE-03.01: MailBackend declares exactly the PRD 9.3 operations."""
-        self.assertEqual(set(MailBackend.__abstractmethods__), EXPECTED_OPERATIONS)
+        """UT-BE-03.01: MailBackend declares exactly the protocol v1 operations (C1)."""
+        self.assertEqual(set(MailBackend.__abstractmethods__), EXPECTED_ABSTRACT_OPERATIONS)
         public = {
             member
             for member, _ in inspect.getmembers(MailBackend)
@@ -255,8 +261,8 @@ class AppleMailBackendContractTest(BackendContractMixin, unittest.TestCase):
         )
 
     def test_backend_identity_and_apple_mail_specifics(self) -> None:
-        """name, excluded_stores, labels_available and describe of the adapter."""
-        self.assertEqual(self.backend.name, "apple_mail")
+        """driver, excluded_stores, labels_available and describe of the adapter."""
+        self.assertEqual(self.backend.driver, "apple_mail")
         self.assertEqual(self.backend.excluded_stores(), [])
         self.assertTrue(self.backend.labels_available)
         info = self.backend.describe()
@@ -459,7 +465,7 @@ class GetBackendSelectionTest(unittest.TestCase):
         )
         self.addCleanup(backend.close)
         self.assertIsInstance(backend, OutlookBackend)
-        self.assertEqual(backend.name, "outlook")
+        self.assertEqual(backend.driver, "outlook")
         self.assertTrue(backend.labels_available)
         self.assertIn(
             "Exchange (ana.perez@example.com)",
@@ -475,7 +481,7 @@ class GetBackendSelectionTest(unittest.TestCase):
             with self.subTest(platform=platform):
                 backend = get_backend(platform=platform)
                 self.assertIsInstance(backend, AppleMailBackend)
-                self.assertEqual(backend.name, "apple_mail")
+                self.assertEqual(backend.driver, "apple_mail")
 
     def test_ut_be_01_02_apple_mail_kwargs_are_passed_through(self) -> None:
         """UT-BE-01.02: mail_root, accounts_db and tmp_root reach AppleMailBackend."""
