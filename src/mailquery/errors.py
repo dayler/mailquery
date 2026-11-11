@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Final
 
-# Exit code -> error codes (PRD 12.6). Exit code 0 means success and has no code.
+# Exit code -> error codes (PRD 12.6 and PRD-v2.1 §11.7). Exit 0 means success.
 _EXIT_ERRORS: Final[dict[int, tuple[str, ...]]] = {
     1: ("E_INTERNAL",),
     2: (
@@ -23,6 +23,8 @@ _EXIT_ERRORS: Final[dict[int, tuple[str, ...]]] = {
         "E_MAILBOX_NOT_FOUND",
         "E_BAD_TIME",
         "E_BAD_FILTER",
+        "E_DRIVER_UNKNOWN",
+        "E_ATTACHMENTS_DISABLED",
     ),
     3: (
         "E_STORE_NOT_FOUND",
@@ -32,8 +34,18 @@ _EXIT_ERRORS: Final[dict[int, tuple[str, ...]]] = {
         "E_CLIENT_UNSUPPORTED",
         "E_DEPENDENCY_MISSING",
         "E_CLIENT_TIMEOUT",
+        "E_PLUGIN_INCOMPATIBLE",
+        "E_PLUGIN_FAILED",
+        "E_ATTACHMENT_UNAVAILABLE",
+        "E_ATTACHMENT_UNREADABLE",
+        "E_IO",
     ),
-    4: ("E_UNBOUNDED_SCAN", "E_SCAN_TOO_LARGE"),
+    4: (
+        "E_UNBOUNDED_SCAN",
+        "E_SCAN_TOO_LARGE",
+        "E_ATTACHMENT_BLOCKED",
+        "E_ATTACHMENT_TOO_LARGE",
+    ),
     5: ("E_LOCKED", "E_DB_BUSY", "E_CLIENT_BUSY"),
     6: ("E_OUTLOOK_NOT_RUNNING",),
 }

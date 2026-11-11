@@ -70,3 +70,20 @@ def get_backend(
         accounts_db=accounts_db,
         tmp_root=tmp_root,
     )
+
+
+# The registry (C1) re-exported here so the CLI and ``doctor`` import one place.
+# It only knows the metadata contract: importing it never imports a backend.
+from mailquery.backends.registry import (  # noqa: E402 - after the selection helpers
+    BackendRegistry,
+    DriverMetadata,
+    package_version,
+)
+
+__all__ = [
+    "BackendRegistry",
+    "DriverMetadata",
+    "backend_class",
+    "get_backend",
+    "package_version",
+]
