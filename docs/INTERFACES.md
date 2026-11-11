@@ -770,6 +770,151 @@ tiene `bind_doctor_timeout`) un `finish` que escribe el informe con
 la línea `event=end` del log), hace `flush` de `stdout`, `stderr` y el log y
 termina con `os._exit(0)` (D-03).
 
+### `attachments/` (M06, C6)
+
+Núcleo **puro** de adjuntos (PRD-v2.1 §6.2 RF-43/RF-47/RF-48/RF-49, §10.3,
+§11.3 filas 8–15, AC-09/AC-10/AC-11 y parte de AC-15). Es la política que
+consumen M07 (límites/staging/caché) y M08 (`show`/`attachment`): **no escribe
+en disco, no lee la caché y no abre rutas**. Solo stdlib y el propio paquete
+(RNF-12). C6 congelado: catálogo de extensiones, reglas de bloqueo de
+nombre/contenido, orden de evaluación, `sanitized_name` y rutas de caché.
+
+Módulos: `catalog.py` (catálogo + NFKC), `blocking.py` (bloqueo de nombre y
+*magic bytes*), `sanitize.py` (nombre sanitizado y nombre visible), `paths.py`
+(rutas de caché) y `screening.py` (pantalla del mensaje completo). Todo se
+reexporta desde `mailquery.attachments` (`__all__`).
+
+#### Catálogo (§10.3.2)
+
+`CATALOG: dict[str, tuple[str, ...]]` (categoría → extensiones, minúsculas y con
+punto), `EXTENSION_CATEGORY: dict[str, str]` y `DANGEROUS_EXTENSIONS:
+frozenset[str]`:
+
+| Categoría | Extensiones |
+|---|---|
+| `executables` | `.exe .com .scr .pif .dll .sys .drv .ocx .cpl .app .bin .run .elf .dylib .so` |
+| `scripts` | `.bat .cmd .ps1 .psm1 .psd1 .vbs .vbe .js .jse .wsf .wsh .hta .sh .bash .zsh .ksh .csh .command .tool .applescript .scpt .workflow` |
+| `installers` | `.msi .msp .mst .msix .appx .pkg .mpkg .dmg .iso .img .deb .rpm .apk` |
+| `shortcuts` | `.lnk .url .scf .inf .reg .ins .isp .prf .terminal .desktop .webloc` |
+| `interpreters` | `.jar .jnlp .class .py .pyc .pyo .pyw .rb .pl .php .lua .tcl` |
+| `office_macros` | `.docm .dotm .xlsm .xltm .xlam .pptm .potm .ppam .sldm` |
+
+- `normalize_name(value) -> str` aplica **una sola vez**
+  `unicodedata.normalize("NFKC", value)`; la forma cruda se conserva aparte para
+  la regla de controles.
+- `dangerous_extension(name) -> (extension, categoría) | None` recorta puntos y
+  espacios finales y compara `case-insensitive` la extensión final y **todas las
+  encadenadas** (`factura.pdf.exe`, `reporte.pdf.bat.cmd`); los helpers esperan
+  un nombre ya normalizado. `is_dangerous_extension(name) -> bool`.
+- `reserved_name(name) -> str | None` devuelve la raíz reservada de Windows
+  (`con`, `prn`, `aux`, `nul`, `com1..9`, `lpt1..9`; parte antes del primer
+  punto, `case-insensitive`, ignorando espacios/puntos finales);
+  `is_reserved_name(name) -> bool`.
+
+#### Bloqueo de nombre (§10.3.1 punto 1)
+
+`classify_name(original_name) -> NameDecision`, puro y **sin lanzar error de
+usuario** (el motor de M07 decide el `code`). `NameDecision(blocked, reason,
+normalized_name, extension, category, detail)`; `detail` es
+`NAME_BLOCK_DETAIL = "has a dangerous filename pattern"` (§11.5 ejemplo C).
+Orden de reglas, la primera que dispara gana:
+
+1. `Cc`/`Cf`/`Cs`/`Co` en la forma **cruda** (NUL y RLO `\u202e` incluidos) ⇒
+   `reason="control_character"`.
+2. `/` o `\` en la forma normalizada ⇒ `path_separator`.
+3. segmento `..` ⇒ `parent_segment`.
+4. prefijo de unidad `[A-Za-z]:` ⇒ `drive_prefix`.
+5. cualquier `:` (evita NTFS ADS) ⇒ `alternate_data_stream`.
+6. extensión simple o encadenada del catálogo ⇒ `dangerous_extension`
+   (`extension`/`category` rellenos).
+7. raíz reservada de Windows ⇒ `reserved_name`.
+
+#### Bloqueo de contenido (§10.3.1 punto 2)
+
+`classify_content(first_block: bytes) -> ContentDecision(blocked, reason,
+signature, detail)`; `reason="executable_content"`, `detail =
+CONTENT_BLOCK_DETAIL = "has executable content"` (§11.5 ejemplo D). Firmas
+**solo en el offset 0** sobre una ventana de `CONTENT_INSPECTION_BYTES = 512`
+bytes (`MAGIC_SIGNATURES`): `MZ`, `\x7fELF`, Mach-O `FE ED FA CE` /
+`FE ED FA CF` / `CE FA ED FE` / `CF FA ED FE`, universal `CA FE BA BE` y `#!`.
+No es recursiva: ZIP/OLE/PDF/imágenes y firmas fuera del offset 0 no se
+inspeccionan (riesgo aceptado §15). Un flujo vacío (0 bytes) es válido y no
+tiene firma.
+
+#### Sanitización (§10.3.3) y nombre visible
+
+`sanitize_name(original_name, index) -> str` (determinista, independiente de la
+plataforma): NFKC única; vacío, solo espacios o solo puntos ⇒ `attachment`;
+recorte de espacios/puntos en los extremos y eliminación de puntos iniciales
+(dotfiles); cada espacio o `< > : " / \ | ? *` se sustituye por `_` **sin
+colapsar**; la extensión es el sufijo del último punto (si no es el primer
+carácter) limitada a `MAX_EXTENSION_BYTES = 20` bytes UTF-8; el nombre sin
+prefijo mide ≤ `MAX_NAME_BYTES = 150` bytes y el final (prefijo `NN_` incluido)
+≤ `MAX_SANITIZED_BYTES = 153`; con índice ≥ 100 el prefijo mide > 3 bytes y la
+raíz se reduce en la diferencia. Ningún truncado parte un carácter. El
+resultado **ya incluye** el prefijo `NN_`.
+
+`display_name(original_name, *, max_bytes=120) -> str` es la forma embebible en
+`message`/`warnings`/`hint`: sin segmentos de ruta, sin controles
+(`Cc/Cf/Cs/Co`) y truncada a `DISPLAY_NAME_MAX_BYTES = 120` bytes UTF-8.
+`truncate_utf8(value, max_bytes) -> str` es el truncado compartido sin partir
+caracteres.
+
+#### Rutas de caché (§10.3.3, D9)
+
+- `cache_root(home) -> Path` = `<home>/attachments`.
+- `message_dir(home, uid, *, platform=None) -> Path` =
+  `<home>/attachments/<driver>/<native_id>`; `uid` es el canónico
+  `"<driver>:<native_id>"` (C3) y el uid legado sin prefijo se resuelve con el
+  driver nativo. Si el componente `<native_id>` o la ruta completa (reservando
+  el presupuesto máximo de `sanitized_name`, 153 bytes) supera el límite, se
+  sustituye `<native_id>` por `uid.stable_identifier(uid)` (32 hex en
+  minúsculas = primeros 32 de `SHA-256(uid UTF-8)`). La reserva hace que el
+  directorio elegido sea **el mismo para todos los adjuntos del mensaje**.
+- `attachment_path(home, uid, sanitized_name, *, platform=None) -> Path` =
+  `message_dir(...) / sanitized_name`; recibe el nombre **ya prefijado** y nunca
+  antepone `NN_` otra vez (sin doble prefijo); exige un único componente de
+  ruta de ≤ 153 bytes.
+- `path_limits(home, *, platform=None) -> (component_max, path_max)`: en
+  `win32`, 255 bytes de componente y el presupuesto conservador de
+  `WINDOWS_PATH_BUDGET_BYTES = 240` de ruta; en POSIX, el `PC_NAME_MAX`/
+  `PC_PATH_MAX` reales del sistema de archivos de `home` (fallback 255/4096).
+  `platform` es **solo inyección de tests** (mismo patrón que `output.LOCAL_ZONE`).
+- Ninguna función crea directorios ni abre archivos; M07 los crea con
+  `0700`/`0600` y publica de forma atómica.
+
+#### Pantalla del mensaje completo (§10.3.1, §11.3 filas 11–14)
+
+`ScreenDecision(code, reason, index, name, detail)` con `ok` (`code is None`),
+`failed` y `blocked`; `index`/`name` identifican el adjunto causante y `detail`
+es el fragmento de mensaje del bloqueo. Códigos:
+`BLOCKED_CODE="E_ATTACHMENT_BLOCKED"`, `UNREADABLE_CODE="E_ATTACHMENT_UNREADABLE"`,
+`UNAVAILABLE_CODE="E_ATTACHMENT_UNAVAILABLE"` (M07/M08 los convierten en
+`MailqueryError`).
+
+- `screen_names(entries) -> ScreenDecision` evalúa los nombres de **todos** los
+  adjuntos del mensaje, en orden de índice, y devuelve el primero que dispara
+  una regla (**fila 11**, antes de los límites de M07). Se ejecuta con cualquier
+  `--index`. Una lista vacía devuelve una decisión `ok`: no es un bloqueo ni se
+  confunde con “sin adjuntos”.
+- `screen_content(entries, requested_indices, open_stream) -> ScreenDecision`
+  inspecciona **solo** los adjuntos solicitados (`--index N` ⇒ `[N]`; `--all` ⇒
+  `None` = todos) y devuelve bloqueo (fila 13), `E_ATTACHMENT_UNREADABLE` (error
+  de lectura del stream, fila 14) o `E_ATTACHMENT_UNAVAILABLE` con el motivo del
+  driver (`unavailable_reason` de la fila de metadatos: `not_local`,
+  `not_downloaded`, `unsupported`, `network`; `corrupt`/`smime`/`unreadable`
+  ⇒ unreadable). Precedencia: un bloqueo (fila 13) gana sobre las faltas de la
+  fila 14; entre faltas de la fila 14 se informa la primera en orden de índice.
+  `open_stream(index)` debe poder llamarse de nuevo para la extracción (M06
+  inspecciona y cierra su propio iterador; no entrega bytes parciales).
+- `read_first_block(stream) -> bytes` lee como máximo
+  `CONTENT_INSPECTION_BYTES = 512` y cierra el iterador; un flujo vacío devuelve
+  `b""`. Los errores de lectura los traduce `screen_content` a unreadable.
+- Frontera: la señal S/MIME/ilegible **del mensaje** (§11.3 fila 8, el driver
+  propaga el motivo aunque la lista quede vacía) y “0 adjuntos” (fila 9) son de
+  M08; M06 solo mapea el `unavailable_reason` de cada fila de metadatos. Las
+  funciones no escriben ni abren rutas de caché/staging (lo verifica UT-ATT-03.06).
+
 ## 4. Contrato JSON
 
 > M03 emite por fin el **`uid` string prefijado** `"<driver>:<native_id>"` en
