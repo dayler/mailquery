@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -151,5 +152,224 @@ class UidFormatTests(unittest.TestCase):
             stable_identifier("")
 
 
-if __name__ == "__main__":
+# --------------------------------------------------------------------------- #
+# UT-UID-02: prefixed uid in commands (M03, AC-05)
+# --------------------------------------------------------------------------- #
+
+
+def _run_cli(argv, *, home, mail_root=None, accounts_db=None, backend=None):
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        code = cli_mod.main(
+            list(argv),
+            home=home,
+            mail_root=mail_root,
+            accounts_db=accounts_db,
+            backend=backend,
+        )
+    text = stdout.getvalue()
+    return code, (json.loads(text) if text else None), stderr.getvalue()
+
+
+class CommandUidTests(unittest.TestCase):
+    """UT-UID-02: commands emit prefixed uids and accept the legacy native uid."""
+
+    def _fixture(self):
+        from tests.fixtures.make_fixtures import build_store, write_config
+
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        write_config(fx.home)
+        return fx
+
+    def _legacy_state(self, fx):
+        from tests.fixtures.make_fixtures import write_state
+
+        write_state(
+            fx.home,
+            {
+                "schema": 1,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": int((fx.now - timedelta(hours=2)).timestamp()),
+                    "last_uid": 1,
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": [],
+            },
+        )
+
+    def test_ut_uid_02_01_commands_emit_prefixed_uids_and_cursor(self) -> None:
+        """UT-UID-02.01: search/new/show emit uid strings with the native driver prefix."""
+        from tests.fixtures.make_fixtures import prefixed_uid
+
+        fx = self._fixture()
+        code, payload, _ = _run_cli(
+            ["search"], home=fx.home, mail_root=fx.mail_root, accounts_db=fx.accounts_db
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["messages"])
+        for message in payload["messages"]:
+            self.assertIsInstance(message["uid"], str)
+            self.assertTrue(message["uid"].startswith("apple_mail:"))
+        self.assertIn(prefixed_uid(2714), [m["uid"] for m in payload["messages"]])
+
+        code, payload, _ = _run_cli(
+            ["show", "2714"], home=fx.home, mail_root=fx.mail_root, accounts_db=fx.accounts_db
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["message"]["uid"], prefixed_uid(2714))
+
+        # First run: no previous cursor, current prefixed.
+        code, payload, _ = _run_cli(
+            ["new"], home=fx.home, mail_root=fx.mail_root, accounts_db=fx.accounts_db
+        )
+        self.assertEqual(code, 0)
+        self.assertIsNone(payload["cursor"]["previous"])
+        self.assertTrue(payload["cursor"]["current"]["last_uid"].startswith("apple_mail:"))
+        for message in payload["messages"]:
+            self.assertTrue(message["uid"].startswith("apple_mail:"))
+
+        # A migrated schema-1 cursor is reported prefixed in previous/current.
+        fx2 = self._fixture()
+        self._legacy_state(fx2)
+        code, payload, _ = _run_cli(
+            ["new", "--peek"], home=fx2.home, mail_root=fx2.mail_root, accounts_db=fx2.accounts_db
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["cursor"]["previous"]["last_uid"], prefixed_uid(1))
+        self.assertEqual(payload["cursor"]["current"]["last_uid"], prefixed_uid(1))
+
+    def test_ut_uid_02_02_order_uses_native_order_key(self) -> None:
+        """UT-UID-02.02: the total order uses the driver's native_order_key, not the uid text."""
+        from mailquery import search
+
+        class _Numeric:
+            driver = "apple_mail"
+            native_order = "numeric"
+
+        class _Text:
+            driver = "outlook"
+            native_order = "text"
+
+        rows = [
+            {"date_received": 100, "native_order_key": "10", "uid": "apple_mail:2"},
+            {"date_received": 100, "native_order_key": "2", "uid": "apple_mail:10"},
+        ]
+        self.assertEqual(search._native_order_key(_Numeric(), rows[0]), 10)
+        self.assertEqual(search._native_order_key(_Text(), rows[0]), "10")
+        self.assertEqual(
+            [row["native_order_key"] for row in search._ordered(rows, _Numeric(), descending=True)],
+            ["10", "2"],
+        )
+        self.assertEqual(
+            [row["native_order_key"] for row in search._ordered(rows, _Text(), descending=True)],
+            ["2", "10"],
+        )
+
+        # With the real fixture the numeric order is the 2.0.1 order.
+        from tests.fixtures.make_fixtures import prefixed_uid
+
+        fx = self._fixture()
+        code, payload, _ = _run_cli(
+            ["search", "--limit", "4"],
+            home=fx.home,
+            mail_root=fx.mail_root,
+            accounts_db=fx.accounts_db,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [message["uid"] for message in payload["messages"]],
+            [prefixed_uid(83170), prefixed_uid(83160), prefixed_uid(83150), prefixed_uid(83143)],
+        )
+
+    def test_ut_uid_02_03_legacy_input_is_resolved_with_the_native_driver(self) -> None:
+        """UT-UID-02.03: ``show 83143`` / ``show <EntryID>`` return the prefixed uid."""
+        from tests.fixtures.make_fixtures import prefixed_uid
+
+        fx = self._fixture()
+        code, payload, _ = _run_cli(
+            ["show", "83143"], home=fx.home, mail_root=fx.mail_root, accounts_db=fx.accounts_db
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["message"]["uid"], prefixed_uid(83143))
+
+        from mailquery.backends import get_backend
+        from tests.fakes import outlook as fake_outlook
+        from tests.fixtures.make_fixtures import write_config
+
+        fake = fake_outlook.FakeOutlook.default()
+        with tempfile.TemporaryDirectory(prefix="mailquery-uid-ol-") as tmp:
+            home = Path(tmp) / "home"
+            write_config(home, '[scope."ana.perez@example.com"]\n')
+            backend = get_backend(
+                platform="win32",
+                outlook_app=fake,
+                registry=fake.registry,
+                security_center=fake.security_center,
+                tmp_root=home / "tmp",
+            )
+            self.addCleanup(backend.close)
+            entry_id = fake.item("normal").entry_id
+            code, payload, _ = _run_cli(["show", entry_id], home=home, backend=backend)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["message"]["uid"], prefixed_uid(entry_id, "outlook"))
+
+    def test_ut_uid_02_04_malformed_and_unknown_uid_fail_before_home(self) -> None:
+        """UT-UID-02.04: malformed ⇒ E_USAGE; unknown driver ⇒ E_DRIVER_UNKNOWN; no home."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-uid-") as tmp:
+            missing_home = Path(tmp) / "home"
+            for uid in ("apple_mail:a/b", "outlook:" + "A" * 1025, "apple_mail:.hidden"):
+                with self.subTest(uid=uid[:30]):
+                    code, payload, _ = _run_cli(["show", uid], home=missing_home)
+                    self.assertEqual(code, 2)
+                    self.assertEqual(payload["error"]["code"], "E_USAGE")
+                    self.assertFalse(missing_home.exists())
+            code, payload, _ = _run_cli(["show", "graph:1"], home=missing_home)
+            self.assertEqual(code, 2)
+            self.assertEqual(payload["error"]["code"], "E_DRIVER_UNKNOWN")
+            self.assertFalse(missing_home.exists())
+
+    def test_ut_uid_02_05_installed_driver_not_declared_is_out_of_scope(self) -> None:
+        """UT-UID-02.05: an installed but undeclared driver ⇒ E_ACCOUNT_NOT_IN_SCOPE, not loaded."""
+        from tests.fixtures.make_fixtures import DEFAULT_CONFIG, write_config
+
+        with tempfile.TemporaryDirectory(prefix="mailquery-uid-") as tmp:
+            home = Path(tmp) / "home"
+            write_config(home, DEFAULT_CONFIG)
+            with mock.patch.object(
+                cli_mod, "get_backend", side_effect=AssertionError("driver loaded")
+            ):
+                code, payload, _ = _run_cli(
+                    ["show", "outlook:ABC123"],
+                    home=home,
+                    mail_root=Path(tmp) / "Mail",  # force Apple Mail (native driver)
+                )
+            self.assertEqual(code, 2)
+            self.assertEqual(payload["error"]["code"], "E_ACCOUNT_NOT_IN_SCOPE")
+            self.assertIn("config.toml", payload["error"]["hint"])
+
+    def test_ut_uid_02_06_read_only_commands_do_not_rewrite_a_legacy_state(self) -> None:
+        """UT-UID-02.06: search/show/mailboxes/doctor leave a schema-1 state.json untouched."""
+        from tests.fixtures.make_fixtures import write_config
+
+        fx = self._fixture()
+        write_config(fx.home)
+        self._legacy_state(fx)
+        path = fx.home / "state.json"
+        before = path.read_bytes()
+        for argv in (("search",), ("show", "2714"), ("mailboxes",), ("doctor", "--json")):
+            with self.subTest(argv=argv):
+                code, payload, stderr = _run_cli(
+                    argv,
+                    home=fx.home,
+                    mail_root=fx.mail_root,
+                    accounts_db=fx.accounts_db,
+                )
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(path.read_bytes(), before)
+
+
+if __name__ == "__main__":  # pragma: no cover - manual runs
     unittest.main()

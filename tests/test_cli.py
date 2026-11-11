@@ -41,6 +41,7 @@ from tests.fixtures.make_fixtures import (
     ICLOUD_LABEL,
     PREFIXED_CONFIG,
     build_store,
+    prefixed_uid,
     write_config,
     write_state,
 )
@@ -75,8 +76,13 @@ class _FakeBackend:
         self.closed = False
 
     @staticmethod
-    def check_state_uid(uid: object) -> None:
-        return None
+    def parse_native_id(native_id: str) -> int:
+        """Apple Mail native ids are integers (pure, offline)."""
+        if not native_id.lstrip("-").isdigit():
+            raise MailqueryError(
+                "E_USAGE", f"invalid uid part {native_id!r}: expected an integer"
+            )
+        return int(native_id)
 
     def describe(self) -> dict:
         return {}
@@ -814,6 +820,7 @@ class DispatchTests(_CliTestCase):
         self.assertIsNone(filters.until)
 
     def test_show_dispatch(self) -> None:
+        write_config(self.fx.home, DEFAULT_CONFIG)
         backend = _FakeBackend()
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
@@ -821,7 +828,10 @@ class DispatchTests(_CliTestCase):
             mock.patch.object(
                 cli_mod,
                 "run_show",
-                return_value={"message": {"uid": 83143}, "warnings": []},
+                return_value={
+                    "message": {"uid": prefixed_uid(83143)},
+                    "warnings": [],
+                },
             ) as run_mock,
         ):
             exit_code, stdout, _ = self.run_cli(["show", "83143"])
@@ -831,7 +841,9 @@ class DispatchTests(_CliTestCase):
         _, call_config, call_uid = run_mock.call_args.args
         self.assertEqual(call_config.home, self.fx.home)
         self.assertEqual(call_uid, 83143)
-        self.assertEqual(self.json_object(stdout)["message"], {"uid": 83143})
+        self.assertEqual(
+            self.json_object(stdout)["message"], {"uid": prefixed_uid(83143)}
+        )
 
     def test_new_dispatch_peek_and_limit(self) -> None:
         backend = _FakeBackend()
@@ -851,7 +863,10 @@ class DispatchTests(_CliTestCase):
         ):
             exit_code, stdout, _ = self.run_cli(["new", "--peek", "--limit", "7"])
         self.assertEqual(exit_code, 0)
-        state_mock.assert_called_once_with(self.fx.home, backend.check_state_uid)
+        state_mock.assert_called_once()
+        store_args, _store_kwargs = state_mock.call_args
+        self.assertEqual(store_args[0], self.fx.home)
+        self.assertTrue(callable(store_args[1]))
         self.assertEqual(run_mock.call_args.args[2], state_store)
         self.assertEqual(run_mock.call_args.kwargs, {"peek": True, "limit": 7})
         rendered = self.json_object(stdout)
@@ -868,11 +883,11 @@ class _InjectedBackend(_FakeBackend):
         super().__init__()
         self.parsed: list = []
 
-    def parse_uid(self, raw):
-        self.parsed.append(raw)
-        if not str(raw).isalnum():
-            raise MailqueryError("E_USAGE", f"invalid uid {raw!r}", "use a hex uid")
-        return str(raw).upper()
+    def parse_native_id(self, native_id: str) -> str:
+        self.parsed.append(native_id)
+        if not str(native_id).isalnum():
+            raise MailqueryError("E_USAGE", f"invalid uid {native_id!r}", "use a hex uid")
+        return str(native_id).upper()
 
     def doctor_checks(self) -> list[dict]:
         return [{"name": "fake_check", "ok": True, "detail": "from the backend"}]
@@ -946,15 +961,16 @@ class BackendInjectionTests(_CliTestCase):
             stdout = io.StringIO()
             with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
                 code = cli_mod.main(
-                    ["show", "not-hex!"], home=missing_home, backend=backend
+                    ["show", "not-hex"], home=missing_home, backend=backend
                 )
             self.assertEqual(code, 2)
             self.assertEqual(self.json_object(stdout.getvalue())["error"]["code"], "E_USAGE")
-            self.assertEqual(backend.parsed, ["not-hex!"])
+            self.assertEqual(backend.parsed, ["not-hex"])
             self.assertFalse(missing_home.exists())
             self.assertFalse(backend.closed)  # never obtained, never opened
 
     def test_show_passes_the_backend_uid_to_run_show(self) -> None:
+        write_config(self.fx.home, DEFAULT_CONFIG)
         backend = _InjectedBackend()
         with mock.patch.object(
             cli_mod, "run_show", return_value={"message": {}, "warnings": []}
@@ -1243,7 +1259,90 @@ class DoctorTests(_CliTestCase):
         payload = self._doctor()
         state = next(check for check in payload["checks"] if check["name"] == "state")
         self.assertTrue(state["ok"])
-        self.assertEqual(state["detail"], "cursor last_date_received=1700000000 last_uid=42")
+        self.assertEqual(
+            state["detail"],
+            "schema: 1 (migration pending); cursor last_date_received=1700000000 "
+            "last_uid=apple_mail:42",
+        )
+
+    def test_ut_st_06_06_doctor_reports_migration_pending_then_schema_2(self) -> None:
+        """UT-ST-06.06: ``doctor`` reports ``schema: 1 (migration pending)`` until it is persisted."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        write_state(
+            self.fx.home,
+            {
+                "schema": 1,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": 42,
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": [42],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertEqual(
+            state["detail"],
+            "schema: 1 (migration pending); cursor last_date_received=1700000000 "
+            "last_uid=apple_mail:42",
+        )
+
+        exit_code, _stdout, stderr = self.run_cli(["new"])
+        self.assertEqual(exit_code, 0, stderr)
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertTrue(state["detail"].startswith("schema: 2; cursor last_date_received="))
+        self.assertTrue(state["detail"].endswith("last_uid=apple_mail:83170"))
+
+    def test_ut_st_06_07_doctor_reports_pruned_ring_and_invalid_cursor_driver(self) -> None:
+        """UT-ST-06.07: ``doctor`` reports the ring pruning and the uninstalled cursor driver."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        write_state(
+            self.fx.home,
+            {
+                "schema": 2,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": "apple_mail:1",
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": ["graph:1", "graph:2"],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertIn(
+            "pruned 2 emitted uid(s) of uninstalled drivers: graph", state["detail"]
+        )
+
+        # A cursor of an uninstalled driver is E_STATE_CORRUPT (DP-03 lifecycle).
+        write_state(
+            self.fx.home,
+            {
+                "schema": 2,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": "graph:1",
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": [],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertFalse(state["ok"])
+        self.assertIn("E_STATE_CORRUPT", state["detail"])
+        self.assertIn("graph", state["detail"])
 
     def test_ut_cli_12_01_envelope_index_with_shm_opens_live_ro(self) -> None:
         """UT-CLI-12.01: -shm present => the live database is opened; strategy live_ro."""
@@ -1622,7 +1721,9 @@ class EndToEndContractTests(_CliTestCase):
         payload = self.json_object(stdout)
         self.assertTrue(payload["ok"])
         self.assertGreaterEqual(payload["count"], 1)
-        self.assertIn(2714, [message["uid"] for message in payload["messages"]])
+        self.assertIn(
+            prefixed_uid(2714), [message["uid"] for message in payload["messages"]]
+        )
 
     def test_invalid_since_is_a_bad_time_error(self) -> None:
         self._require_time_parser()
@@ -1643,7 +1744,7 @@ class EndToEndContractTests(_CliTestCase):
         payload = self.json_object(stdout)
         self.assertTrue(payload["ok"])
         message = payload["message"]
-        self.assertEqual(message["uid"], 83143)
+        self.assertEqual(message["uid"], prefixed_uid(83143))
         self.assertIn("headers", message)
         self.assertIn("source", message)
         self.assertIn("emlx_path", message["source"])

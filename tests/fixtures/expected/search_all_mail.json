@@ -6,7 +6,7 @@
   "hint": null,
   "messages": [
     {
-      "uid": 83170,
+      "uid": "apple_mail:83170",
       "message_id": "<missing-83170@fixture.example>",
       "duplicate_count": 1,
       "subject": "Missing body",
@@ -46,7 +46,7 @@
       }
     },
     {
-      "uid": 83160,
+      "uid": "apple_mail:83160",
       "message_id": "<gmail-83160@fixture.example>",
       "duplicate_count": 1,
       "subject": "Gmail labelled",
@@ -86,7 +86,7 @@
       }
     },
     {
-      "uid": 83150,
+      "uid": "apple_mail:83150",
       "message_id": "<flagged-83150@fixture.example>",
       "duplicate_count": 1,
       "subject": "Flagged reminder",
@@ -126,7 +126,7 @@
       }
     },
     {
-      "uid": 83143,
+      "uid": "apple_mail:83143",
       "message_id": "<duplicate-4@fixture.example>",
       "duplicate_count": 2,
       "subject": "Shared duplicate",
@@ -166,7 +166,7 @@
       }
     },
     {
-      "uid": 83210,
+      "uid": "apple_mail:83210",
       "message_id": "<photo-83210@fixture.example>",
       "duplicate_count": 1,
       "subject": "Gmail unread with photo",
@@ -206,7 +206,7 @@
       }
     },
     {
-      "uid": 2714,
+      "uid": "apple_mail:2714",
       "message_id": "<invoice-2714@fixture.example>",
       "duplicate_count": 1,
       "subject": "Invoice 2026-10",
@@ -251,7 +251,7 @@
       }
     },
     {
-      "uid": 83220,
+      "uid": "apple_mail:83220",
       "message_id": "",
       "duplicate_count": 1,
       "subject": "No global header",
@@ -291,7 +291,7 @@
       }
     },
     {
-      "uid": 83200,
+      "uid": "apple_mail:83200",
       "message_id": "<html-83200@fixture.example>",
       "duplicate_count": 1,
       "subject": "HTML only",
@@ -331,7 +331,7 @@
       }
     },
     {
-      "uid": 79658,
+      "uid": "apple_mail:79658",
       "message_id": "<factura-79658@fixture.example>",
       "duplicate_count": 1,
       "subject": "Factura septiembre",
@@ -371,7 +371,7 @@
       }
     },
     {
-      "uid": 83180,
+      "uid": "apple_mail:83180",
       "message_id": "<corrupt-83180@fixture.example>",
       "duplicate_count": 1,
       "subject": "Corrupt body",
@@ -411,7 +411,7 @@
       }
     },
     {
-      "uid": 830,
+      "uid": "apple_mail:830",
       "message_id": "<annual-830@fixture.example>",
       "duplicate_count": 1,
       "subject": "Annual report 2025",
@@ -451,7 +451,7 @@
       }
     },
     {
-      "uid": 83190,
+      "uid": "apple_mail:83190",
       "message_id": "<old-83190@fixture.example>",
       "duplicate_count": 1,
       "subject": "Very old mail",

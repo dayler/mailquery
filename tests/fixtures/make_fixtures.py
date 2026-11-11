@@ -593,6 +593,16 @@ def build_store(
     )
 
 
+def prefixed_uid(native_uid: int | str, driver: str = "apple_mail") -> str:
+    """Test-only helper: the prefixed uid a command emits for a fixture native uid.
+
+    PRD-v2.1 RF-40 makes every emitted uid ``"<driver>:<native_id>"``; the data
+    fixtures keep their native uids (Apple Mail integers) and the tests build the
+    expected JSON values with this helper.
+    """
+    return f"{driver}:{native_uid}"
+
+
 def write_config(home: Path, content: str = DEFAULT_CONFIG, filename: str = "config.toml") -> Path:
     """Write a ``config.toml`` under the fixture app home."""
     home = Path(home)

@@ -31,6 +31,7 @@ from tests.fixtures.make_fixtures import (
     UID_SMIME_ENCRYPTED,
     UID_SMIME_SIGNED,
     build_store,
+    prefixed_uid,
     write_config,
 )
 
@@ -197,12 +198,13 @@ class ReadOnlyStoreTest(unittest.TestCase):
         self.assertGreaterEqual(payloads["search"][0]["count"], 12)
         self.assertIn("checks", payloads["doctor"][0])
         self.assertIn("mailboxes", payloads["mailboxes"][0])
-        self.assertEqual(payloads["show"][0]["message"]["uid"], 2714)
-        self.assertEqual(payloads["show"][2]["message"]["uid"], 83170)
+        self.assertEqual(payloads["show"][0]["message"]["uid"], prefixed_uid(2714))
+        self.assertEqual(payloads["show"][2]["message"]["uid"], prefixed_uid(83170))
         # First run: emits the window and writes only the state; then nothing new.
         self.assertTrue(payloads["new"][0]["messages"])
         self.assertTrue(
-            {83160, 83170} <= {message["uid"] for message in payloads["new"][0]["messages"]}
+            {prefixed_uid(83160), prefixed_uid(83170)}
+            <= {message["uid"] for message in payloads["new"][0]["messages"]}
         )
         self.assertEqual(payloads["new"][1]["count"], 0)
         self.assertEqual(payloads["new"][2]["count"], 0)
