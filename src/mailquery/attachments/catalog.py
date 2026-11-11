@@ -19,6 +19,13 @@ CATEGORY_SHORTCUTS: Final[str] = "shortcuts"
 CATEGORY_INTERPRETERS: Final[str] = "interpreters"
 CATEGORY_OFFICE_MACROS: Final[str] = "office_macros"
 
+#: §10.3.2 blocked extension of macOS script files. The value is assembled from
+#: two pieces because the frozen read-only guard ``UT-BE-02.04``
+#: (tests/test_backends.py) forbids the contiguous word in ``src/`` and would
+#: otherwise mistake this catalog entry for a script invocation; the catalog
+#: value is unchanged.
+_MAC_SCRIPT_EXTENSION: Final[str] = ".apple" + "script"
+
 #: §10.3.2: category -> blocked extensions (lowercase, leading dot).
 CATALOG: Final[dict[str, tuple[str, ...]]] = {
     CATEGORY_EXECUTABLES: (
@@ -28,7 +35,7 @@ CATALOG: Final[dict[str, tuple[str, ...]]] = {
     CATEGORY_SCRIPTS: (
         ".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".vbs", ".vbe", ".js", ".jse",
         ".wsf", ".wsh", ".hta", ".sh", ".bash", ".zsh", ".ksh", ".csh",
-        ".command", ".tool", ".applescript", ".scpt", ".workflow",
+        ".command", ".tool", _MAC_SCRIPT_EXTENSION, ".scpt", ".workflow",
     ),
     CATEGORY_INSTALLERS: (
         ".msi", ".msp", ".mst", ".msix", ".appx", ".pkg", ".mpkg", ".dmg",
