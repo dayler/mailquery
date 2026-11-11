@@ -178,6 +178,11 @@ Reglas:
   (y `--version`) no importa sus módulos.
 - `uid.py` importa solo `errors` y stdlib: se puede validar un `uid` antes de
   crear el home, leer `config.toml` o abrir el store.
+- `attachments/**` importa solo stdlib, `errors`, `uid` y sus propios módulos.
+  M06 es puro (sin E/S) y M07 añade `engine.py`/`cache.py`, que toman
+  `config.AttachmentsConfig` y `MailBackend` por duck typing: **no** importan
+  `config`, `plugins`, `backends`, `cli`, `search`, `state`, `store` ni los
+  adaptadores (UT-ATT-01.09). `cli`/`search` son los consumidores (M08).
 
 ## 3. Contratos de módulos (firmas estables)
 
@@ -1065,6 +1070,214 @@ es el fragmento de mensaje del bloqueo. Códigos:
   propaga el motivo aunque la lista quede vacía) y “0 adjuntos” (fila 9) son de
   M08; M06 solo mapea el `unavailable_reason` de cada fila de metadatos. Las
   funciones no escriben ni abren rutas de caché/staging (lo verifica UT-ATT-03.06).
+
+### `attachments/engine.py` y `attachments/cache.py` (M07, C7)
+
+Motor de recuperación local: límites, aciertos de caché, staging y publicación
+atómica (PRD-v2.1 RF-45/RF-47/RF-49/RF-51, §10.1, §10.4, §11.2, §11.3 filas
+11–15, AC-12/AC-13/AC-15/AC-20 y RNF-13/RNF-14). Es el contrato **C7 congelado**
+que consumen M08 (comando `attachment` y `show.attachments`) y los adaptadores
+M09/M10. El motor no abre el store ni resuelve la cuenta; tampoco compone el
+JSON: devuelve los registros de §11.2 y deja `uid`, `output_dir`, `count` y
+`warnings[]` a `cli.py` (M08). Solo stdlib y el propio paquete: no importa
+`mailquery.config`, `mailquery.plugins` ni `mailquery.backends` (el guard
+UT-ATT-01.09 prohíbe `plugins` y los módulos de comando/backend).
+
+#### API del motor (congelada)
+
+```python
+class AttachmentResult(TypedDict):
+    index: int
+    original_name: str
+    sanitized_name: str
+    saved: bool          # siempre True en un éxito (§11.2)
+    cached: bool
+    path: str            # ruta absoluta del archivo servido
+    size_bytes: int
+    sha256: str
+
+class AttachmentsEngine:
+    def __init__(
+        self,
+        home: str | Path,
+        config: AttachmentLimits,          # config.AttachmentsConfig (M02), duck typing
+        driver: AttachmentDriver,          # MailBackend cargado (C1), duck typing
+        clock: Callable[[], float] | None = None,   # solo inyección de tests
+    ) -> None: ...
+
+    def recover(
+        self,
+        uid: str,
+        indices: Sequence[int] | None = None,
+        *,
+        force: bool = False,
+        deadline: Callable[[], float | None] | None = None,
+        entries: Iterable[Mapping[str, object]] | None = None,
+    ) -> list[AttachmentResult]: ...
+```
+
+- `uid` es el canónico `"<driver>:<native_id>"` (C3); el motor obtiene el uid
+  legado para el driver con `driver.parse_native_id(<native_id>)`.
+- `indices=None` ⇒ `--all`; `indices=[N]` ⇒ `--index N`. La validación de
+  argumentos y del rango es de M08 (§11.3 filas 1, 10); el motor la repite de
+  forma defensiva con `E_USAGE`.
+- `entries` son las filas `AttachmentMetadataRow` (C1) que M08 ya obtuvo y
+  mapeó con la envoltura de M05: pasándolas, el motor **no repite**
+  `driver.attachments()`. Sin ellas (uso directo del motor o tests) el motor
+  hace la llamada.
+- `deadline` es una **factoría** que devuelve el instante absoluto (en unidades
+  del `clock`) en que expira la extracción de **un** adjunto, o `None` sin
+  límite. El motor la invoca una vez por adjunto, antes de leer su primer
+  bloque, y el mismo instante acota la pantalla de contenido y la extracción.
+  M08 pasa `lambda: time.monotonic() + 120` (RNF-16: 120 s por adjunto,
+  también en `--all`); al vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3), staging limpio
+  y sin archivos nuevos. El motor **no** fija políticas de tiempo por sí solo.
+- Resultado: un registro §11.2 por adjunto solicitado, en orden de índice y
+  con `path` absoluto. Un fallo no devuelve registros parciales.
+- `output_dir` de M08 = `attachments.paths.message_dir(home, uid)`.
+
+#### Flujo interno (§11.3)
+
+1. Metadatos (si `entries` no se pasó) y validación de forma; filas inválidas ⇒
+   `E_PLUGIN_FAILED` (exit 3).
+2. `screen_names(rows)`: nombres de **todo** el mensaje, antes de servir caché
+   (fila 11) ⇒ `E_ATTACHMENT_BLOCKED` (exit 4).
+3. `max_count` si `indices is None` (fila 12). Incluye los aciertos de caché;
+   no aplica a `--index`.
+4. Lookup de caché de cada adjunto solicitado (regular + tamaño esperado). El
+   tamaño real de los aciertos cuenta para `max_total_size_mb`.
+5. Límites con tamaño conocido (fila 12), por adjunto y acumulado ⇒
+   `E_ATTACHMENT_TOO_LARGE` (exit 4) **antes de escribir**.
+6. `screen_content(rows, misses, open_stream)`: primer bloque decodificado solo
+   de los adjuntos que se van a extraer (fila 13/14); bloqueo ⇒
+   `E_ATTACHMENT_BLOCKED`; ilegible/no disponible ⇒ su código. Los aciertos no
+   se re-validan por contenido (RF-45, §10.3.1).
+7. Extracción a staging de los misses: `magic bytes` ya validados, `sha256`
+   incremental y corte por límite si el tamaño era desconocido (fila 13/14/15).
+8. Verificación final de los aciertos: un archivo borrado o cambiado de tamaño
+   durante la ejecución se re-extrae **una** vez (RF-51) con nueva pantalla de
+   contenido; si la re-extracción falla, se devuelve el error del motivo.
+9. Publicación atómica por archivo (`os.replace`) y registros §11.2.
+
+Antes del paso 9 no queda ningún archivo nuevo ni parcial en la caché ni
+temporales propios en `tmp/` (RNF-14). Un fallo de E/S a mitad de publicación
+puede dejar archivos nuevos **completos** (riesgo aceptado §15); nunca
+parciales. La caché previa se conserva si el aborto ocurre antes de publicar.
+
+#### Semántica de caché y `--force` (RF-45, RF-51)
+
+- Acierto: existe un archivo **regular** en la ruta determinista y (si el
+  driver informa `size_bytes`) su tamaño coincide ⇒ `saved: true, cached: true`
+  con `size_bytes`/`sha256` del archivo existente y **sin** re-extraer.
+- Tamaño esperado distinto ⇒ miss y re-extracción.
+- `--force` ignora la caché, re-extrae y reemplaza atómicamente
+  (`cached: false`).
+- Symlink, directorio o dispositivo en la ruta ⇒ miss; la publicación no sigue
+  un symlink (`os.replace` sustituye el enlace) y un directorio destino no se
+  puede reemplazar ⇒ `E_IO` (riesgo aceptado).
+- Un fallo de E/S/permiso al leer la caché se trata como miss (caché
+  best-effort). `cached: true` significa "existía y no se pidió `--force`", no
+  "verificado"; `sha256` es el del archivo servido.
+- Sin barrido, purga, TTL, daemon ni validación integral al arrancar o durante
+  la ejecución; un archivo borrado por el cron externo se re-extrae una vez. La
+  app solo limpia su **propio** staging huérfano (`tmp/staging/`); no toca
+  `tmp/plugin-<driver>/` ni cachés del backend.
+- Tamaño de los límites: 1 MiB = 1.048.576 bytes; un valor **estrictamente
+  mayor** excede. Los límites se evalúan sobre el conjunto que la invocación
+  devuelve (los aciertos cuentan con su tamaño real). Exceso con tamaño
+  conocido ⇒ falla antes de escribir; desconocido ⇒ aborta al detectarlo,
+  limpia staging y conserva la caché previa. Con varios fallos en `--all` se
+  informa el primero en orden de índice.
+
+#### Staging, permisos y publicación (RNF-13/RNF-14)
+
+- Staging: `<home>/tmp/staging/session-<opaco>/` creado de forma perezosa (una
+  invocación con solo aciertos no escribe nada); directorios `0700` y archivos
+  `0600` en POSIX, nombre opaco (sin `original_name`), `fsync` antes de
+  publicar y `os.replace` al directorio del mensaje. La sesión se borra en un
+  `finally`; al abrir el área se descartan las sesiones huérfanas propias.
+- Caché: `<home>/attachments/<driver>/<native_id>/<sanitized_name>` con
+  `<home>/attachments`, `<driver>` y `<native_id>` en `0700`; archivos `0600`
+  sin `+x`. En Windows se hereda la ACL del perfil y **no se relajan**
+  permisos (`_SECURE_PERMISSIONS = False`).
+- `tmp/` y `attachments/` deben estar en el mismo sistema de archivos; si no,
+  la publicación falla con `E_IO` (DP-01) sin mecanismo alternativo.
+- Costuras de test: `attachments.cache._SECURE_PERMISSIONS`, `_chmod`,
+  `_ensure_private_dir`, `_create_staging_file`, `_write_chunk` y
+  `_atomic_replace` permiten inyectar `EACCES`/`ENOSPC` fallos de `os.replace`
+  sin parchear el módulo `os` global (mismo patrón que `output.LOCAL_ZONE`).
+
+#### API de caché (congelada para M08)
+
+```python
+# attachments/cache.py
+def cached_path(
+    home: str | Path, uid: str, original_name: str, index: int,
+    *, platform: str | None = None,
+) -> Path | None: ...
+
+class CacheHit:                  # frozen dataclass
+    path: Path
+    size_bytes: int
+    sha256: str
+
+class AttachmentCache:
+    def __init__(self, home: str | Path, uid: str, *, platform: str | None = None) -> None: ...
+    def message_dir(self) -> Path: ...
+    def path_for(self, original_name: str, index: int) -> Path: ...
+    def lookup(self, original_name: str, index: int, *, expected_size: int | None = None) -> CacheHit | None: ...
+    def verify(self, hit: CacheHit) -> bool: ...
+    def ensure_message_dir(self) -> Path: ...          # crea 0700; solo al publicar
+    def staging(self) -> StagingArea: ...
+    def publish(self, staged: StagedAttachment, original_name: str, index: int) -> Path: ...
+
+class StagingArea:
+    def __enter__(self) -> "StagingArea": ...
+    def __exit__(self, *exc_info: object) -> None: ...
+    def new_file(self) -> StagedAttachment: ...
+    def close(self) -> None: ...
+
+class StagedAttachment:
+    path: Path
+    size_bytes: int
+    sha256: str
+    def append(self, chunk: bytes) -> None: ...
+    def finish(self) -> None: ...
+    def publish(self, target: Path) -> None: ...
+    def discard(self) -> None: ...
+```
+
+- `cached_path(...)` es el contrato de `show.attachments[].cached_path`
+  (AC-07): devuelve la ruta determinista solo si el destino es un **archivo
+  regular** (`lstat`, sin seguir symlinks); no crea, no abre ni lee nada. La
+  regla de nombre (`classify_name`) la aplica `show` (M08), no este helper.
+  `platform` es solo inyección de tests (M06/D9).
+- M08 **no** debe reimplementar `stat`/symlink: `output_dir` =
+  `message_dir(home, uid)` y `cached_path` = `cache.cached_path(...)`.
+- M09/M10 no usan `AttachmentCache`: reciben `legacy_uid` y devuelven metadatos
+  y bytes decodificados; nunca escriben en la caché (RF-47).
+
+#### Errores del motor (C7, §11.7) y precedencia DP-01
+
+| Código | Exit | Cuándo |
+|---|---|---|
+| `E_ATTACHMENT_BLOCKED` | 4 | Nombre peligroso de cualquier adjunto (fila 11) o *magic bytes* ejecutables de un adjunto a extraer (fila 13); mensaje/hint de §11.5 C/D. |
+| `E_ATTACHMENT_TOO_LARGE` | 4 | `max_count`/`max_file_size_mb`/`max_total_size_mb`; plantillas de §11.3 (límite, índice y nombre cuando corresponde) y hint con `--index` para `--all`. |
+| `E_ATTACHMENT_UNAVAILABLE` | 3 | `unavailable_reason`/`reason` del driver `not_local`, `not_downloaded`, `unsupported`, `network` (plantillas de §11.7). |
+| `E_ATTACHMENT_UNREADABLE` | 3 | `corrupt`/`smime`/`unreadable` o error de lectura del stream; antes de publicar. |
+| `E_PERMISSION` | 3 | Permisos del driver o de la caché/staging (`EACCES`). |
+| `E_IO` | 3 | E/S al escribir el staging, publicar o por `tmp/` y `attachments/` en sistemas de archivos distintos (DP-01). |
+| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por M08. |
+| `E_CLIENT_BUSY` | 5 | `reason=busy` del driver (reintentable). |
+| `E_PLUGIN_FAILED` | 3 | `reason` desconocido o metadatos inválidos del driver; nunca `E_INTERNAL` en la frontera de plugin. |
+| `E_USAGE` | 2 | Índice solicitado fuera de rango o uid inválido (defensivo; M08 valida antes). |
+
+**Precedencia DP-01:** los fallos de E/S de caché/staging son `E_IO` y
+`E_PERMISSION` queda para permisos; la fila de `E_PERMISSION` de §11.7 que
+menciona E/S de caché está superada por DP-01, §11.3 fila 15 y AC-12. Los
+`message`/`hint` pueden contener uid y nombre (dueño: núcleo); el
+`log_message` nunca contiene uid, `native_id`, nombres, rutas ni cuentas
+(RNF-15). El motor no emite log (`event=end` es de M08).
 
 ## 4. Contrato JSON
 

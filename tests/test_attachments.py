@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import errno
 import hashlib
+import os
 import re
+import stat
 import sys
 import tempfile
 import unicodedata
@@ -22,6 +25,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import mailquery.attachments.cache as attachment_cache
 from mailquery.attachments import (
     BLOCKED_CODE,
     CATALOG,
@@ -36,8 +40,10 @@ from mailquery.attachments import (
     UNAVAILABLE_CODE,
     UNREADABLE_CODE,
     WINDOWS_PATH_BUDGET_BYTES,
+    AttachmentsEngine,
     attachment_path,
     cache_root,
+    cached_path,
     classify_content,
     classify_name,
     dangerous_extension,
@@ -52,8 +58,16 @@ from mailquery.attachments import (
     screen_names,
     truncate_utf8,
 )
+from mailquery.config import AttachmentsConfig
+from mailquery.errors import MailqueryError
 from mailquery.uid import stable_identifier
 
+from tests.fakes.attachment_driver import (
+    DriverFailure,
+    FakeAttachment,
+    FakeAttachmentDriver,
+    chunks_of,
+)
 from tests.fixtures import attachment_samples as samples
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
@@ -739,6 +753,1020 @@ class AttachmentAvailabilityTests(unittest.TestCase):
         self.assertEqual(decision.code, UNAVAILABLE_CODE)
         self.assertEqual((decision.index, decision.name), (2, "notas.pdf"))
         self.assertEqual(decision.reason, "not_local")
+
+
+# ---------------------------------------------------------------------------
+# M07 engine helpers: temporary application homes, cache seeding and asserts.
+# ---------------------------------------------------------------------------
+
+#: One MiB as fixed by §13.3 (1 MB = 1.048.576 bytes).
+MIB = 1_048_576
+
+
+class FakeClock:
+    """Injectable monotonic clock for the M07 ``deadline`` tests."""
+
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _new_home(tmp: str) -> Path:
+    return Path(tmp) / "home"
+
+
+def _engine(
+    home: Path,
+    driver: object,
+    *,
+    config: AttachmentsConfig | None = None,
+    clock: "FakeClock | None" = None,
+) -> AttachmentsEngine:
+    return AttachmentsEngine(home, config or AttachmentsConfig(), driver, clock=clock)
+
+
+def _cache_file(home: Path, uid: str, original_name: str, index: int) -> Path:
+    return attachment_path(home, uid, sanitize_name(original_name, index))
+
+
+def _seed_cache(home: Path, uid: str, original_name: str, index: int, data: bytes) -> Path:
+    path = _cache_file(home, uid, original_name, index)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def _tree_files(root: Path) -> dict[str, bytes]:
+    if not root.exists():
+        return {}
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _staging_files(home: Path) -> list[Path]:
+    root = home / "tmp" / "staging"
+    if not root.exists():
+        return []
+    return [path for path in root.rglob("*") if path.is_file()]
+
+
+def _staging_sessions(home: Path) -> list[Path]:
+    root = home / "tmp" / "staging"
+    if not root.exists():
+        return []
+    return [path for path in root.iterdir() if path.is_dir()]
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _cache_files(home: Path) -> list[Path]:
+    return [path for path in (home / "attachments").rglob("*") if path.is_file()]
+
+
+def _assert_no_staging(test: unittest.TestCase, home: Path) -> None:
+    test.assertEqual(_staging_files(home), [])
+    test.assertEqual(_staging_sessions(home), [])
+
+
+class AttachmentLimitTests(unittest.TestCase):
+    """UT-ATT-06: ``[attachments]`` limits (AC-13, RF-49, §11.3 row 12)."""
+
+    def test_ut_att_06_01_boundary_is_strictly_greater_in_mib(self) -> None:
+        """UT-ATT-06.01 B: the exact limit passes; one byte more exceeds ."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            exact = b"a" * MIB
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=exact)])
+            engine = _engine(
+                home,
+                driver,
+                config=AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=2),
+            )
+            records = engine.recover("fake:1", [1])
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["size_bytes"], MIB)
+            self.assertEqual(records[0]["sha256"], _sha256(exact))
+            self.assertEqual(
+                _cache_file(home, "fake:1", "factura.pdf", 1).read_bytes(), exact
+            )
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=b"a", known_size=MIB + 1)]
+            )
+            engine = _engine(
+                home,
+                driver,
+                config=AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=2),
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                engine.recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_TOO_LARGE")
+            self.assertEqual(caught.exception.exit_code, 4)
+            self.assertEqual(driver.stream_opens, [])
+            self.assertFalse((home / "attachments").exists())
+
+    def test_ut_att_06_02_known_file_size_fails_before_writing(self) -> None:
+        """UT-ATT-06.02 N: a known oversized file fails before writing anything."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("big.pdf", data=b"x", known_size=2 * MIB)]
+            )
+            engine = _engine(
+                home,
+                driver,
+                config=AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=10),
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                engine.recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_TOO_LARGE")
+            self.assertEqual(caught.exception.exit_code, 4)
+            for fragment in ("max_file_size_mb=1", "attachment 1", "'big.pdf'", "MiB"):
+                self.assertIn(fragment, caught.exception.message)
+            self.assertIn("max_file_size_mb in ~/.mailquery/config.toml", caught.exception.hint)
+            self.assertFalse((home / "attachments").exists())
+            self.assertEqual(driver.stream_opens, [])
+            _assert_no_staging(self, home)
+
+    def test_ut_att_06_03_total_counts_cache_hits_with_real_size(self) -> None:
+        """UT-ATT-06.03 N: ``max_total_size_mb`` counts real sizes of cache hits."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            hit_data = b"h" * (MIB + MIB // 2)
+            seeded = _seed_cache(home, "fake:1", "uno.pdf", 1, hit_data)
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=hit_data),
+                    FakeAttachment("dos.pdf", data=b"d" * MIB),
+                ]
+            )
+            engine = _engine(
+                home,
+                driver,
+                config=AttachmentsConfig(max_file_size_mb=10, max_total_size_mb=2),
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                engine.recover("fake:1", None)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_TOO_LARGE")
+            self.assertIn("max_total_size_mb=2", caught.exception.message)
+            self.assertIn("attachment(s) total", caught.exception.message)
+            self.assertIn("--index", caught.exception.hint)
+            self.assertEqual(seeded.read_bytes(), hit_data)
+            self.assertEqual(_cache_files(home), [seeded])
+            self.assertEqual(driver.opens(2), 0)
+
+    def test_ut_att_06_04_max_count_only_applies_to_all_and_counts_hits(self) -> None:
+        """UT-ATT-06.04 N: ``max_count`` only applies to ``--all`` and counts hits."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            first = b"1" * 32
+            _seed_cache(home, "fake:1", "uno.pdf", 1, first)
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=first),
+                    FakeAttachment("dos.pdf", data=b"2" * 32),
+                ]
+            )
+            config = AttachmentsConfig(max_count=1)
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver, config=config).recover("fake:1", None)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_TOO_LARGE")
+            self.assertIn("max_count=1", caught.exception.message)
+            self.assertIn("2 attachment(s)", caught.exception.message)
+            self.assertEqual(driver.stream_opens, [])
+            records = _engine(home, driver, config=config).recover("fake:1", [2])
+            self.assertEqual(len(records), 1)
+            self.assertFalse(records[0]["cached"])
+
+    def test_ut_att_06_05_unknown_size_aborts_during_streaming_and_keeps_cache(self) -> None:
+        """UT-ATT-06.05 N: an unknown size that exceeds aborts, cleans staging and keeps cache."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            previous = b"previous-cache"
+            seeded = _seed_cache(home, "fake:1", "big.pdf", 1, previous)
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment(
+                        "big.pdf",
+                        chunks=[b"a" * MIB, b"b"],
+                        known_size=None,
+                    )
+                ]
+            )
+            engine = _engine(
+                home,
+                driver,
+                config=AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=10),
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                engine.recover("fake:1", [1], force=True)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_TOO_LARGE")
+            self.assertIn("max_file_size_mb=1", caught.exception.message)
+            self.assertEqual(seeded.read_bytes(), previous)
+            self.assertEqual(_cache_files(home), [seeded])
+            _assert_no_staging(self, home)
+
+    def test_ut_att_06_06_limit_messages_and_hints(self) -> None:
+        """UT-ATT-06.06 P: the §11.3 templates include limit, index and name."""
+        cases = (
+            (
+                "file",
+                [FakeAttachment("big.pdf", data=b"", known_size=2 * MIB)],
+                [1],
+                AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=10),
+                "max_file_size_mb=1",
+                False,
+            ),
+            (
+                "total",
+                [
+                    FakeAttachment("uno.pdf", data=b"x" * MIB),
+                    FakeAttachment("dos.pdf", data=b"y" * MIB),
+                ],
+                None,
+                AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=1),
+                "max_total_size_mb=1",
+                True,
+            ),
+            (
+                "count",
+                [
+                    FakeAttachment("uno.pdf", data=b"x"),
+                    FakeAttachment("dos.pdf", data=b"y"),
+                ],
+                None,
+                AttachmentsConfig(max_count=1),
+                "max_count=1",
+                True,
+            ),
+        )
+        for label, attachments, indices, config, fragment, wants_index_hint in cases:
+            with self.subTest(label), tempfile.TemporaryDirectory(
+                prefix="mailquery-m07-"
+            ) as tmp:
+                home = _new_home(tmp)
+                driver = FakeAttachmentDriver(attachments)
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver, config=config).recover("fake:1", indices)
+                error = caught.exception
+                self.assertEqual(error.code, "E_ATTACHMENT_TOO_LARGE")
+                self.assertIn(fragment, error.message)
+                if label != "count":
+                    self.assertIn("MiB", error.message)
+                self.assertEqual("--index" in error.hint, wants_index_hint)
+
+    def test_ut_att_06_07_blocked_name_precedes_known_size_limit(self) -> None:
+        """UT-ATT-06.07 N: names are evaluated before limits (§11.3 rows 11-12)."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("evil.exe", data=b"harmless"),
+                    FakeAttachment("big.pdf", data=b"", known_size=2 * MIB),
+                ]
+            )
+            engine = _engine(
+                home,
+                driver,
+                config=AttachmentsConfig(max_file_size_mb=1, max_total_size_mb=10),
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                engine.recover("fake:1", [2])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_BLOCKED")
+            self.assertEqual(caught.exception.exit_code, 4)
+            self.assertIn("evil.exe", caught.exception.message)
+            self.assertIn("dangerous filename pattern", caught.exception.message)
+            self.assertEqual(driver.stream_opens, [])
+            self.assertFalse((home / "attachments").exists())
+
+
+class AttachmentStagingTests(unittest.TestCase):
+    """UT-ATT-07: staging and atomic publication (AC-12, RNF-14)."""
+
+    def test_ut_att_07_01_staging_is_private_and_cache_appears_only_on_publish(self) -> None:
+        """UT-ATT-07.01 P: the first extraction writes first in ``tmp/staging``."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            payload = b"%PDF-1.7\n" + b"x" * 2048
+            target = _cache_file(home, "fake:1", "factura.pdf", 1)
+            observed: dict[str, object] = {}
+
+            def hook(index: int, number: int) -> None:
+                if index != 1:
+                    return
+                sessions = _staging_sessions(home)
+                if not sessions:
+                    return
+                staged = [path for path in sessions[0].rglob("*") if path.is_file()]
+                observed["session_mode"] = _mode(sessions[0])
+                observed["file_mode"] = _mode(staged[0]) if staged else None
+                observed["published"] = target.exists()
+
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=payload)], on_chunk=hook
+            )
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(observed["session_mode"], 0o700)
+            self.assertEqual(observed["file_mode"], 0o600)
+            self.assertFalse(observed["published"])
+            self.assertFalse(records[0]["cached"])
+            self.assertTrue(records[0]["saved"])
+            self.assertEqual(target.read_bytes(), payload)
+            _assert_no_staging(self, home)
+
+    def test_ut_att_07_02_abort_before_publication_leaves_no_files(self) -> None:
+        """UT-ATT-07.02 N: content, limit or read aborts leave no partial cache/staging."""
+        cases = (
+            (
+                "content",
+                FakeAttachment("factura.pdf", data=samples.mz_bytes()),
+                None,
+                "E_ATTACHMENT_BLOCKED",
+            ),
+            (
+                "metadata_reason",
+                FakeAttachment("factura.pdf", data=b"ok", unavailable_reason="not_local"),
+                None,
+                "E_ATTACHMENT_UNAVAILABLE",
+            ),
+            (
+                "driver_permission",
+                FakeAttachment("factura.pdf", data=b"ok"),
+                {"open:1": DriverFailure("permission")},
+                "E_PERMISSION",
+            ),
+            (
+                "read_during_extraction",
+                FakeAttachment(
+                    "factura.pdf",
+                    chunks=[b"%PDF-1.7" + b"x" * 600, b"y" * 400],
+                ),
+                {
+                    "read:1": OSError("device disappeared"),
+                    "read_after:1": 1,
+                },
+                "E_ATTACHMENT_UNREADABLE",
+            ),
+        )
+        for label, attachment, failures, expected_code in cases:
+            with self.subTest(label), tempfile.TemporaryDirectory(
+                prefix="mailquery-m07-"
+            ) as tmp:
+                home = _new_home(tmp)
+                previous = b"previous-cache"
+                seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, previous)
+                driver = FakeAttachmentDriver([attachment], failures=failures)
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1], force=True)
+                self.assertEqual(caught.exception.code, expected_code)
+                self.assertEqual(seeded.read_bytes(), previous)
+                self.assertEqual(_cache_files(home), [seeded])
+                _assert_no_staging(self, home)
+
+    def test_ut_att_07_03_replace_failure_is_io_without_publication(self) -> None:
+        """UT-ATT-07.03 N: an ``os.replace`` failure is ``E_IO`` without publication."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"new")])
+            with mock.patch.object(
+                attachment_cache,
+                "_atomic_replace",
+                side_effect=OSError(errno.EIO, "Input/output error"),
+            ):
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_IO")
+            self.assertEqual(caught.exception.exit_code, 3)
+            self.assertFalse(_cache_file(home, "fake:1", "factura.pdf", 1).exists())
+            self.assertEqual(_cache_files(home), [])
+            _assert_no_staging(self, home)
+
+    def test_ut_att_07_04_success_publishes_every_requested_file(self) -> None:
+        """UT-ATT-07.04 P: a correct extraction publishes all files with size and SHA-256."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            first = b"%PDF-1.7\n" + b"a" * 700
+            second = "Factura de octubre: 12,50 €\n".encode("utf-8")
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("factura.pdf", data=first),
+                    FakeAttachment("notas.txt", data=second),
+                ]
+            )
+            records = _engine(home, driver).recover("fake:1", None)
+            self.assertEqual([record["index"] for record in records], [1, 2])
+            for record, payload in zip(records, (first, second)):
+                self.assertTrue(record["saved"])
+                self.assertFalse(record["cached"])
+                path = Path(record["path"])
+                self.assertTrue(path.is_file())
+                self.assertEqual(path.read_bytes(), payload)
+                self.assertEqual(record["size_bytes"], len(payload))
+                self.assertEqual(record["sha256"], _sha256(payload))
+            _assert_no_staging(self, home)
+
+    def test_ut_att_07_05_failed_replace_keeps_previous_file_and_retry_works(self) -> None:
+        """UT-ATT-07.05 B: a failed publication keeps the old file intact and retry works."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            previous = b"previous-cache"
+            seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, previous)
+            replacement = b"replacement-bytes"
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=replacement)]
+            )
+            with mock.patch.object(
+                attachment_cache,
+                "_atomic_replace",
+                side_effect=OSError(errno.EIO, "Input/output error"),
+            ):
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1], force=True)
+            self.assertEqual(caught.exception.code, "E_IO")
+            self.assertEqual(seeded.read_bytes(), previous)
+            self.assertEqual(_cache_files(home), [seeded])
+            _assert_no_staging(self, home)
+            records = _engine(home, driver).recover("fake:1", [1], force=True)
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(seeded.read_bytes(), replacement)
+
+    def test_ut_att_07_06_permission_errors_are_mapped_without_partials(self) -> None:
+        """UT-ATT-07.06 N: ``EACCES`` in cache dir or staging file is ``E_PERMISSION``."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"ok")])
+            real_ensure = attachment_cache._ensure_private_dir
+
+            def deny_cache(path: Path) -> None:
+                if "attachments" in str(path):
+                    raise PermissionError(errno.EACCES, "Permission denied")
+                real_ensure(path)
+
+            with mock.patch.object(
+                attachment_cache, "_ensure_private_dir", side_effect=deny_cache
+            ):
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_PERMISSION")
+            self.assertEqual(caught.exception.exit_code, 3)
+            self.assertEqual(_cache_files(home), [])
+            _assert_no_staging(self, home)
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"ok")])
+            with mock.patch.object(
+                attachment_cache,
+                "_create_staging_file",
+                side_effect=PermissionError(errno.EACCES, "Permission denied"),
+            ):
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_PERMISSION")
+            self.assertEqual(_cache_files(home), [])
+            _assert_no_staging(self, home)
+
+    def test_ut_att_07_07_enospc_is_io_without_partials(self) -> None:
+        """UT-ATT-07.07 N: ``ENOSPC`` while writing staging is ``E_IO`` without partials."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"ok")])
+            with mock.patch.object(
+                attachment_cache,
+                "_write_chunk",
+                side_effect=OSError(errno.ENOSPC, "No space left on device"),
+            ):
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_IO")
+            self.assertEqual(caught.exception.exit_code, 3)
+            self.assertEqual(_cache_files(home), [])
+            _assert_no_staging(self, home)
+
+
+class AttachmentCacheTests(unittest.TestCase):
+    """UT-ATT-08: cache hits, ``--force`` and expected size (AC-12/AC-20)."""
+
+    def test_ut_att_08_01_cache_hit_returns_existing_file_without_reextracting(self) -> None:
+        """UT-ATT-08.01 P: the second invocation is a hit with the file's size and SHA-256."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            payload = b"cached-payload"
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=payload)])
+            first = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(first[0]["cached"])
+            opens_after_first = driver.opens(1)
+            with mock.patch.object(
+                attachment_cache,
+                "_atomic_replace",
+                side_effect=AssertionError("a cache hit must not publish"),
+            ):
+                second = _engine(home, driver).recover("fake:1", [1])
+            self.assertTrue(second[0]["cached"])
+            self.assertTrue(second[0]["saved"])
+            self.assertEqual(second[0]["size_bytes"], len(payload))
+            self.assertEqual(second[0]["sha256"], _sha256(payload))
+            self.assertEqual(second[0]["path"], first[0]["path"])
+            self.assertEqual(driver.opens(1), opens_after_first)
+
+    def test_ut_att_08_02_force_reextracts_and_replaces(self) -> None:
+        """UT-ATT-08.02 P: ``--force`` re-extracts and returns ``cached: false``."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            target_name = "factura.pdf"
+            target = _seed_cache(home, "fake:1", target_name, 1, b"old-bytes")
+            driver = FakeAttachmentDriver([FakeAttachment(target_name, data=b"new-bytes")])
+            opens_before = driver.opens(1)
+            records = _engine(home, driver).recover("fake:1", [1], force=True)
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(target.read_bytes(), b"new-bytes")
+            self.assertEqual(records[0]["sha256"], _sha256(b"new-bytes"))
+            self.assertGreater(driver.opens(1), opens_before)
+
+    def test_ut_att_08_03_expected_size_mismatch_is_a_miss(self) -> None:
+        """UT-ATT-08.03 B: a driver expected size mismatch re-extracts the file."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            _seed_cache(home, "fake:1", "factura.pdf", 1, b"short")
+            payload = b"x" * 1000
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=payload)])
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(Path(records[0]["path"]).read_bytes(), payload)
+            self.assertEqual(driver.opens(1), 2)
+
+    def test_ut_att_08_04_blocked_message_never_serves_cache(self) -> None:
+        """UT-ATT-08.04 P: a blocked message serves no cache even if files exist."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            seeded = _seed_cache(home, "fake:1", "evil.exe", 1, b"previous")
+            safe = _seed_cache(home, "fake:1", "factura.pdf", 2, b"safe-cache")
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("evil.exe", data=b"harmless"),
+                    FakeAttachment("factura.pdf", data=b"safe"),
+                ]
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [2])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_BLOCKED")
+            self.assertEqual(seeded.read_bytes(), b"previous")
+            self.assertEqual(safe.read_bytes(), b"safe-cache")
+            self.assertEqual(driver.stream_opens, [])
+
+    def test_ut_att_08_05_non_regular_cache_entry_is_a_miss(self) -> None:
+        """UT-ATT-08.05 N: a symlink or directory cache entry is a miss; links are not followed."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            home.mkdir(parents=True)
+            victim = home / "victim.txt"
+            victim.write_bytes(b"victim-bytes")
+            link = _cache_file(home, "fake:1", "factura.pdf", 1)
+            link.parent.mkdir(parents=True)
+            try:
+                link.symlink_to(victim)
+            except (OSError, NotImplementedError):  # pragma: no cover - Windows privileges
+                self.skipTest("symlinks are not available on this host")
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"new")])
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(victim.read_bytes(), b"victim-bytes")
+            self.assertFalse(link.is_symlink())
+            self.assertEqual(link.read_bytes(), b"new")
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            directory = _cache_file(home, "fake:1", "factura.pdf", 1)
+            directory.mkdir(parents=True)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"new")])
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_IO")
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(list(directory.iterdir()), [])
+
+    def test_ut_att_08_06_published_path_is_the_frozen_cache_layout(self) -> None:
+        """UT-ATT-08.06 P: the published path is the deterministic cache path (no double prefix)."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            uid = "fake:abc"
+            self.assertIsNone(cached_path(home, uid, "factura.pdf", 1))
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"data")])
+            records = _engine(home, driver).recover(uid, [1])
+            expected = home / "attachments" / "fake" / "abc" / "01_factura.pdf"
+            self.assertEqual(records[0]["sanitized_name"], "01_factura.pdf")
+            self.assertEqual(records[0]["sanitized_name"].count("01_"), 1)
+            self.assertTrue(os.path.isabs(records[0]["path"]))
+            self.assertEqual(Path(records[0]["path"]), expected)
+            self.assertEqual(Path(records[0]["path"]).parent, message_dir(home, uid))
+            self.assertEqual(cached_path(home, uid, "factura.pdf", 1), expected)
+            expected.unlink()
+            self.assertIsNone(cached_path(home, uid, "factura.pdf", 1))
+
+
+class AttachmentPermissionTests(unittest.TestCase):
+    """UT-ATT-09: cache/staging permissions (AC-12, RNF-13)."""
+
+    def test_ut_att_09_01_posix_modes_are_private(self) -> None:
+        """UT-ATT-09.01 P: directories are 0700 and files 0600 without ``+x``."""
+        if os.name != "posix":  # pragma: no cover - Windows hosts
+            self.skipTest("POSIX file modes only")
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            observed: dict[str, int] = {}
+
+            def hook(index: int, number: int) -> None:
+                sessions = _staging_sessions(home)
+                if not sessions:
+                    return
+                staged = [path for path in sessions[0].rglob("*") if path.is_file()]
+                if staged:
+                    observed["session"] = _mode(sessions[0])
+                    observed["file"] = _mode(staged[0])
+
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=b"payload")], on_chunk=hook
+            )
+            _engine(home, driver).recover("fake:1", [1])
+            for directory in (
+                home,
+                home / "tmp",
+                home / "tmp" / "staging",
+                home / "attachments",
+                home / "attachments" / "fake",
+                message_dir(home, "fake:1"),
+            ):
+                self.assertEqual(_mode(directory), 0o700, directory)
+            target = _cache_file(home, "fake:1", "factura.pdf", 1)
+            self.assertEqual(_mode(target), 0o600)
+            self.assertEqual(_mode(target) & 0o111, 0)
+            self.assertEqual(observed["session"], 0o700)
+            self.assertEqual(observed["file"], 0o600)
+
+    def test_ut_att_09_02_windows_inherits_profile_acl_without_relaxing(self) -> None:
+        """UT-ATT-09.02 P: on Windows the profile ACL is inherited and never relaxed."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"payload")])
+            with mock.patch.object(
+                attachment_cache, "_SECURE_PERMISSIONS", False
+            ), mock.patch.object(attachment_cache.os, "chmod") as chmod:
+                records = _engine(home, driver).recover("fake:1", [1])
+            chmod.assert_not_called()
+            self.assertTrue(Path(records[0]["path"]).is_file())
+            self.assertEqual(Path(records[0]["path"]).read_bytes(), b"payload")
+
+    def test_ut_att_09_03_previous_cache_survives_failed_reextraction(self) -> None:
+        """UT-ATT-09.03 N: a cached file keeps its hash and size if extraction fails."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            previous = b"previous-cache-bytes"
+            seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, previous)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=samples.mz_bytes())]
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1], force=True)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_BLOCKED")
+            self.assertEqual(seeded.read_bytes(), previous)
+            self.assertEqual(seeded.stat().st_size, len(previous))
+            self.assertEqual(_sha256(seeded.read_bytes()), _sha256(previous))
+            self.assertEqual(cached_path(home, "fake:1", "factura.pdf", 1), seeded)
+            _assert_no_staging(self, home)
+
+
+class AttachmentEphemeralCacheTests(unittest.TestCase):
+    """UT-ATT-10: ephemeral cache and concurrent deletion (AC-20, RF-51)."""
+
+    def test_ut_att_10_01_empty_cache_is_not_an_error(self) -> None:
+        """UT-ATT-10.01 P: a missing or empty cache is extracted, not an error."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            self.assertIsNone(cached_path(home, "fake:1", "uno.pdf", 1))
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=b"one"),
+                    FakeAttachment("dos.pdf", data=b"two"),
+                ]
+            )
+            records = _engine(home, driver).recover("fake:1", None)
+            self.assertEqual(len(records), 2)
+            self.assertEqual([record["cached"] for record in records], [False, False])
+            self.assertTrue(all(Path(record["path"]).is_file() for record in records))
+
+    def test_ut_att_10_02_deleted_cache_file_is_re_extracted_once(self) -> None:
+        """UT-ATT-10.02 P: a file deleted before or during the run is re-extracted once."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            target = _cache_file(home, "fake:1", "factura.pdf", 1)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"payload")])
+            _engine(home, driver).recover("fake:1", [1])
+            target.unlink()
+            opens_before = driver.opens(1)
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertTrue(target.is_file())
+            self.assertEqual(driver.opens(1) - opens_before, 2)
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            one = FakeAttachment("uno.pdf", data=b"one")
+            two = FakeAttachment("dos.pdf", data=b"two")
+            driver = FakeAttachmentDriver([one, two])
+            _engine(home, driver).recover("fake:1", None)
+            _cache_file(home, "fake:1", "dos.pdf", 2).unlink()
+
+            def hook(index: int, number: int) -> None:
+                if index != 2:
+                    return
+                _cache_file(home, "fake:1", "dos.pdf", 2).unlink(missing_ok=True)
+                _cache_file(home, "fake:1", "uno.pdf", 1).unlink(missing_ok=True)
+
+            racing = FakeAttachmentDriver([one, two], on_chunk=hook)
+            records = _engine(home, racing).recover("fake:1", None)
+            self.assertEqual([record["cached"] for record in records], [False, False])
+            self.assertTrue(all(Path(record["path"]).is_file() for record in records))
+            self.assertEqual(racing.opens(1), 2)
+
+    def test_ut_att_10_03_reextraction_after_deletion_failure_is_unavailable(self) -> None:
+        """UT-ATT-10.03 N: a failed re-extraction after deletion is ``E_ATTACHMENT_UNAVAILABLE``."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            target = _cache_file(home, "fake:1", "factura.pdf", 1)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"payload")])
+            _engine(home, driver).recover("fake:1", [1])
+            target.unlink()
+            driver.failures["open:1"] = DriverFailure("not_local")
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNAVAILABLE")
+            self.assertFalse(target.exists())
+
+    def test_ut_att_10_04_cache_is_never_swept_or_inspected(self) -> None:
+        """UT-ATT-10.04 N: no sweep, purge or content inspection of the cache."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            home.mkdir(parents=True)
+            unrelated = home / "attachments" / "other" / "xyz" / "01_keep.pdf"
+            unrelated.parent.mkdir(parents=True)
+            unrelated.write_bytes(b"keep")
+            plugin_tmp = home / "tmp" / "plugin-fake" / "data.bin"
+            plugin_tmp.parent.mkdir(parents=True)
+            plugin_tmp.write_bytes(b"plugin")
+            config = home / "config.toml"
+            config.write_text("[attachments]\nmax_count = 50\n", encoding="utf-8")
+            state = home / "state.json"
+            state.write_text('{"schema": 2}\n', encoding="utf-8")
+            snapshot = {path: path.read_bytes() for path in (unrelated, plugin_tmp, config, state)}
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"payload")])
+            _engine(home, driver).recover("fake:1", [1])
+            for path, data in snapshot.items():
+                self.assertEqual(path.read_bytes(), data, path)
+            self.assertTrue(unrelated.is_file())
+            self.assertTrue(plugin_tmp.is_file())
+
+    def test_ut_att_10_05_plugin_lifecycle_keeps_cache_bytes(self) -> None:
+        """UT-ATT-10.05 P: DP-03 keeps config, state and cache bytes across plugin updates."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            home.mkdir(parents=True)
+            config = home / "config.toml"
+            config.write_text("[attachments]\nmax_count = 50\n", encoding="utf-8")
+            state = home / "state.json"
+            state.write_text('{"schema": 2}\n', encoding="utf-8")
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"payload")])
+            _engine(home, driver).recover("fake:1", [1])
+            cache_snapshot = _tree_files(home / "attachments")
+            config_bytes = config.read_bytes()
+            state_bytes = state.read_bytes()
+            driver.version = "0.2.0"  # plugin update within API 1
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertTrue(records[0]["cached"])
+            self.assertEqual(_tree_files(home / "attachments"), cache_snapshot)
+            self.assertEqual(config.read_bytes(), config_bytes)
+            self.assertEqual(state.read_bytes(), state_bytes)
+            self.assertTrue(_cache_file(home, "fake:1", "factura.pdf", 1).is_file())
+
+
+class AttachmentDriverReasonTests(unittest.TestCase):
+    """UT-ATT-11: driver reasons and errors during extraction (AC-15)."""
+
+    def test_ut_att_11_01_unavailable_reasons_map_to_unavailable(self) -> None:
+        """UT-ATT-11.01 N: unavailability reasons map to ``E_ATTACHMENT_UNAVAILABLE``."""
+        cases = (
+            ("not_local", "is not available in the local store"),
+            ("not_downloaded", "is not available in the local store"),
+            ("unsupported", "cannot be recovered by driver 'fake'"),
+            ("network", "could not be retrieved from its origin"),
+        )
+        for reason, fragment in cases:
+            with self.subTest(reason), tempfile.TemporaryDirectory(
+                prefix="mailquery-m07-"
+            ) as tmp:
+                home = _new_home(tmp)
+                driver = FakeAttachmentDriver(
+                    [FakeAttachment("factura.pdf", data=b"ok")],
+                    failures={"open:1": DriverFailure(reason)},
+                )
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+                self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNAVAILABLE")
+                self.assertEqual(caught.exception.exit_code, 3)
+                self.assertIn(fragment, caught.exception.message)
+                self.assertTrue(caught.exception.hint)
+                self.assertEqual(_cache_files(home), [])
+                _assert_no_staging(self, home)
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=b"ok", unavailable_reason="not_local")]
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNAVAILABLE")
+            self.assertIn("is not available in the local store", caught.exception.message)
+
+    def test_ut_att_11_02_unreadable_and_smime_reasons(self) -> None:
+        """UT-ATT-11.02 N: corrupt/S/MIME/read failures are ``E_ATTACHMENT_UNREADABLE``."""
+        cases = (
+            ("corrupt", "is corrupt or unreadable"),
+            ("unreadable", "is corrupt or unreadable"),
+            ("smime", "is S/MIME protected and cannot be extracted"),
+        )
+        for reason, fragment in cases:
+            with self.subTest(reason), tempfile.TemporaryDirectory(
+                prefix="mailquery-m07-"
+            ) as tmp:
+                home = _new_home(tmp)
+                driver = FakeAttachmentDriver(
+                    [FakeAttachment("factura.pdf", data=b"ok")],
+                    failures={"open:1": DriverFailure(reason)},
+                )
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+                self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNREADABLE")
+                self.assertEqual(caught.exception.exit_code, 3)
+                self.assertIn(fragment, caught.exception.message)
+                if reason == "smime":
+                    self.assertIn("S/MIME", caught.exception.hint)
+                self.assertEqual(_cache_files(home), [])
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=b"ok")],
+                failures={
+                    "read:1": OSError("device disappeared"),
+                    "read_after:1": 0,
+                },
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNREADABLE")
+            self.assertIn("is corrupt or unreadable", caught.exception.message)
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=b"ok", unavailable_reason="corrupt")]
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNREADABLE")
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([])
+            self.assertEqual(_engine(home, driver).recover("fake:1", None), [])
+
+    def test_ut_att_11_03_driver_errors_propagate_with_their_code(self) -> None:
+        """UT-ATT-11.03 N: driver permission/busy/failed errors keep their code and exit."""
+        cases = (
+            (DriverFailure("permission"), "E_PERMISSION", 3),
+            (DriverFailure("busy"), "E_CLIENT_BUSY", 5),
+            (DriverFailure("boom"), "E_PLUGIN_FAILED", 3),
+        )
+        for failure, code, exit_code in cases:
+            with self.subTest(code), tempfile.TemporaryDirectory(
+                prefix="mailquery-m07-"
+            ) as tmp:
+                home = _new_home(tmp)
+                driver = FakeAttachmentDriver(
+                    [FakeAttachment("factura.pdf", data=b"ok")],
+                    failures={"open:1": failure},
+                )
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+                self.assertEqual(caught.exception.code, code)
+                self.assertEqual(caught.exception.exit_code, exit_code)
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            wrapped = MailqueryError(
+                "E_PLUGIN_FAILED", "attachment reading failed", "run doctor", "plugin failed"
+            )
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=b"ok")],
+                failures={"open:1": wrapped},
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertIs(caught.exception, wrapped)
+
+    def test_ut_att_11_04_all_failure_has_no_partial_results(self) -> None:
+        """UT-ATT-11.04 P: one failing attachment of ``--all`` leaves no partial results."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            cached = b"cached-one"
+            seeded = _seed_cache(home, "fake:1", "uno.pdf", 1, cached)
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=cached),
+                    FakeAttachment("dos.pdf", data=b"two"),
+                ],
+                failures={"open:2": DriverFailure("not_local")},
+            )
+            entries = driver.attachments("1")
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", None, entries=entries)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNAVAILABLE")
+            self.assertEqual(driver.metadata_calls(), 1)
+            self.assertEqual(seeded.read_bytes(), cached)
+            self.assertEqual(_cache_files(home), [seeded])
+            _assert_no_staging(self, home)
+
+    def test_ut_att_11_05_all_reports_first_failure_in_index_order(self) -> None:
+        """UT-ATT-11.05 N: ``--all`` reports the first failing index, not the last one."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=b"one"),
+                    FakeAttachment("dos.pdf", data=b"two"),
+                    FakeAttachment("tres.pdf", data=b"three"),
+                ],
+                failures={
+                    "open:2": DriverFailure("not_local"),
+                    "open:3": DriverFailure("corrupt"),
+                },
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", None)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNAVAILABLE")
+            self.assertIn("attachment 2", caught.exception.message)
+            self.assertNotIn("attachment 3", caught.exception.message)
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            payload = b"x" * 20
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=payload, chunks=chunks_of(payload, 10)),
+                    FakeAttachment("dos.pdf", data=payload, chunks=chunks_of(payload, 10)),
+                    FakeAttachment("tres.pdf", data=payload, chunks=chunks_of(payload, 10)),
+                ],
+                failures={
+                    "read:2": DriverFailure("not_local"),
+                    "read_after:2": 1,
+                    "read:3": DriverFailure("corrupt"),
+                    "read_after:3": 1,
+                },
+            )
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", None)
+            self.assertEqual(caught.exception.code, "E_ATTACHMENT_UNAVAILABLE")
+            self.assertIn("attachment 2", caught.exception.message)
+
+    def test_ut_att_11_06_deadline_expiry_is_client_timeout(self) -> None:
+        """UT-ATT-11.06 N: the injected extraction deadline expires as ``E_CLIENT_TIMEOUT``."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
+            home = _new_home(tmp)
+            clock = FakeClock(now=100.0)
+            payload = b"x" * 4000
+
+            def hook(index: int, number: int) -> None:
+                clock.advance(100.0)
+
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=payload)], on_chunk=hook
+            )
+            engine = _engine(home, driver, clock=clock)
+            with self.assertRaises(MailqueryError) as caught:
+                engine.recover(
+                    "fake:1", [1], deadline=lambda: clock.now + 120.0
+                )
+            self.assertEqual(caught.exception.code, "E_CLIENT_TIMEOUT")
+            self.assertEqual(caught.exception.exit_code, 3)
+            self.assertIn("did not respond within the timeout", caught.exception.message)
+            self.assertEqual(_cache_files(home), [])
+            _assert_no_staging(self, home)
 
 
 if __name__ == "__main__":
