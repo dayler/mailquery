@@ -133,10 +133,10 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 
 | ID | Fila de §0.2 | Milestone(s) que la implementan | Evidencia principal | Estado |
 |---|---|---|---|---|
-| RC-01 | No objetivos / clientes soportados | M01, M02, M04 | AC-01, AC-03, AC-04; `INTERFACES.md` (API 1 y registro) | 🟡 |
+| RC-01 | No objetivos / clientes soportados | M01, M02, M04 | AC-01, AC-03, AC-04; `INTERFACES.md` (API 1 y registro) | 🟢 |
 | RC-02 | Invariante de solo lectura (I-1) | M06, M07, M09, M10 | AC-12; TC-03 y OL-30 extendidos a `attachment` | 🟡 |
 | RC-03 | Red del núcleo y de plugins | M01, M02, M05 | AC-02, AC-18; capacidades en `doctor`; `threat-model.md` | 🟡 |
-| RC-04 | Selección de backend (`[scope."<driver>:<cuenta>"]`) | M02, M04 | AC-03, AC-04; UT-DRV-01..03 y UT-MD-01..07 | 🟡 |
+| RC-04 | Selección de backend (`[scope."<driver>:<cuenta>"]`) | M02, M04 | AC-03, AC-04; UT-DRV-01..03 y UT-MD-01..07 | 🟢 |
 | RC-05 | Tipo y formato de `uid` | M01, M03 | AC-05, AC-06; UT-UID-01/02, UT-ST-06/07; goldens de uid | 🟢 |
 | RC-06 | Modelo de mensaje: adjuntos | M06, M07, M08 | AC-07, AC-09, AC-10, AC-11; UT-ATT-01..05, UT-ATC-01 | 🟡 |
 | RC-07 | Bytes de adjuntos en Outlook (COM) | M10 | AC-10, AC-12, AC-15; UT-OL-ATT-02; `INTERFACES.md` y `threat-model.md` | ⚪ |
@@ -149,7 +149,7 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 | RC-14 | `--version` | M01, M11 | AC-18; UT-PL-03; README/`SKILL.md` | 🟡 |
 | RC-15 | Catálogo de warnings | M02, M08 | Sin warnings nuevos; AC-15 (bloqueo = error exit 4); tests de warnings | 🟡 |
 | RC-16 | Instalación y dependencias | M01, M11 | AC-01; PKG-02, INS-SMOKE-01; entry points y `pipx inject` | 🟡 |
-| RC-17 | Logs | M04, M05, M08, M10 | AC-19; UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | ⚪ |
+| RC-17 | Logs | M04, M05, M08, M10 | AC-19; UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | 🟡 |
 | RC-18 | Errores y timeouts de Windows | M10 | AC-17; UT-OL-ATT-03; SMOKE-ATT (Windows) | ⚪ |
 | RC-19 | Operación con el harness | M11 | AC-21; `skills/mailquery/SKILL.md`, READMEs y recetas | ⚪ |
 | RC-20 | Configuración | M02 | AC-03, AC-14; UT-DRV-04; `config.example.toml` | 🟢 |
