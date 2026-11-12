@@ -27,7 +27,15 @@ import unittest
 from pathlib import Path
 
 from tests.fixtures.make_fixtures import (
+    DEFAULT_CONFIG,
     ICLOUD_LABEL,
+    LIMIT_1MB_CONFIG,
+    UID_ATTACH_BIG,
+    UID_ATTACH_EMPTY,
+    UID_ATTACH_EXECUTABLE,
+    UID_ATTACH_HOSTILE_RESERVED,
+    UID_ATTACH_PARTIAL,
+    UID_ATTACH_SMIME,
     UID_SMIME_ENCRYPTED,
     UID_SMIME_SIGNED,
     build_store,
@@ -77,8 +85,9 @@ class ReadOnlyStoreTest(unittest.TestCase):
     """PRD §20 read-only gate: hashes and mtimes unchanged, no new store files."""
 
     def setUp(self) -> None:
-        # Extended store: WAL-mode Envelope Index with -wal/-shm, S/MIME, deleted rows...
-        self.fx = build_store(extended=True)
+        # Extended store: WAL-mode Envelope Index with -wal/-shm, S/MIME, deleted
+        # rows... plus the M09 attachment fixtures (``attachments=True``).
+        self.fx = build_store(extended=True, attachments=True)
         self.addCleanup(self.fx.cleanup)
         # Default fixture config declares the three accounts (two extra folders).
         write_config(self.fx.home)
@@ -218,6 +227,58 @@ class ReadOnlyStoreTest(unittest.TestCase):
         self.assertEqual(code, 2)
         assert payload is not None
         self.assertEqual(payload["error"]["code"], "E_ACCOUNT_NOT_IN_SCOPE")
+        self.assert_store_unchanged()
+
+    def test_tc_03_02_attachment_flows_leave_the_store_untouched(self) -> None:
+        """TC-03 (M09): attachment success, cache, blocked, limit, S/MIME and empty leave it untouched."""
+        scenarios = [
+            (("attachment", prefixed_uid(2714), "--index", "1"), 0, None),
+            (("attachment", prefixed_uid(2714), "--index", "1"), 0, None),  # cached
+            (("attachment", prefixed_uid(UID_ATTACH_EMPTY), "--index", "1"), 0, None),
+            (
+                ("attachment", prefixed_uid(UID_ATTACH_HOSTILE_RESERVED), "--all"),
+                4,
+                "E_ATTACHMENT_BLOCKED",
+            ),
+            (
+                ("attachment", prefixed_uid(UID_ATTACH_EXECUTABLE), "--index", "2"),
+                4,
+                "E_ATTACHMENT_BLOCKED",
+            ),
+            (
+                ("attachment", prefixed_uid(UID_ATTACH_SMIME), "--index", "1"),
+                3,
+                "E_ATTACHMENT_UNREADABLE",
+            ),
+            (
+                ("attachment", prefixed_uid(UID_ATTACH_PARTIAL), "--index", "2"),
+                3,
+                "E_ATTACHMENT_UNAVAILABLE",
+            ),
+        ]
+        for argv, expected_exit, expected_code in scenarios:
+            with self.subTest(argv=argv):
+                code, payload, _stderr = self.run_cli(*argv)
+                self.assertEqual(code, expected_exit, payload)
+                if expected_code is None:
+                    self.assert_ok(code, payload, "attachment")
+                else:
+                    assert payload is not None
+                    self.assertIs(payload.get("ok"), False)
+                    self.assertEqual(payload["error"]["code"], expected_code)
+                self.assert_store_unchanged()
+
+        # Known-size limit: needs its own config (restored before finishing).
+        write_config(self.fx.home, LIMIT_1MB_CONFIG)
+        with self.subTest(argv=("attachment", prefixed_uid(UID_ATTACH_BIG), "--index", "1")):
+            code, payload, _stderr = self.run_cli(
+                "attachment", prefixed_uid(UID_ATTACH_BIG), "--index", "1"
+            )
+            self.assertEqual(code, 4, payload)
+            assert payload is not None
+            self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_TOO_LARGE")
+            self.assert_store_unchanged()
+        write_config(self.fx.home, DEFAULT_CONFIG)
         self.assert_store_unchanged()
 
     def test_doctor_human_report_does_not_touch_the_store(self) -> None:
