@@ -415,6 +415,32 @@ def main(
     accounts_db: Path | None = None,
     backend: Any = None,
 ) -> int:
+    """Run one command, return the process exit code and release log handlers.
+
+    The log file handler must not outlive the run: on Windows an open handle
+    blocks deleting the run's temporary home (test cleanup), and in-process
+    callers would leak descriptors.
+    """
+    try:
+        return _main(
+            argv,
+            home=home,
+            mail_root=mail_root,
+            accounts_db=accounts_db,
+            backend=backend,
+        )
+    finally:
+        _close_logging_handlers()
+
+
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    home: Path | None = None,
+    mail_root: Path | None = None,
+    accounts_db: Path | None = None,
+    backend: Any = None,
+) -> int:
     """Run one command and return the process exit code (never raises).
 
     ``home``, ``mail_root``, ``accounts_db`` and ``backend`` are test-only

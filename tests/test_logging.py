@@ -111,6 +111,21 @@ class PermissionTests(_LogHomeTestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600, path.name)
 
 
+    def test_ut_log_02_03_log_handle_is_released_after_a_run(self) -> None:
+        """UT-LOG-02.03: a finished run leaves no open log file (Windows-safe cleanup)."""
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        code = cli_mod.main(["search"], home=fx.home, mail_root=fx.mail_root)
+        self.assertEqual(code, 0)
+        handlers = [
+            handler
+            for handler in logging.getLogger("mailquery").handlers
+            if isinstance(handler, logging.FileHandler)
+        ]
+        self.assertEqual(handlers, [])
+        self.assertTrue((fx.home / "logs" / "mailquery.log").is_file())
+
+
 class FormatTests(_LogHomeTestCase):
     def test_ut_log_03_01_line_has_comma_milliseconds_level_logger_and_run(self) -> None:
         """UT-LOG-03.01: YYYY-MM-DD HH:MM:SS,mmm LEVEL logger run=..."""
