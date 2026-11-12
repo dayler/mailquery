@@ -1,4 +1,10 @@
-# Interfaz interna y reglas de trabajo — mailquery 2.0.1
+# Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
+
+> **Estado del contrato:** implementado en la rama de integración del delta
+> (PRD-v2.1) y **no publicado**. El paquete conserva la versión vigente
+> (`mailquery.__version__` = 2.0.1); el `3.0.0` es futuro y no se ha publicado.
+> Este documento describe el contrato tal como lo implementan M01–M10 y lo
+> cierra M11, sin bump de versión, sin tag de release y sin merge a `main`.
 
 Documento de coordinación para el equipo de implementación y guía de
 desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) y manda sobre
@@ -39,6 +45,15 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   ├── accounts.py                 # Apple Mail: etiquetas de cuenta (Accounts4.sqlite ro)
 │   ├── store.py                    # Apple Mail: Envelope Index ro + mapeo de mailboxes
 │   ├── emlx.py                     # Apple Mail: resolución uid->ruta + parseo .emlx
+│   ├── attachments/                # motor de adjuntos (C6/C7): catálogo, bloqueo, sanitización, caché
+│   │   ├── __init__.py
+│   │   ├── catalog.py              # catálogo de extensiones peligrosas (§10.3.2)
+│   │   ├── blocking.py             # bloqueo de nombre y magic bytes (§10.3.1)
+│   │   ├── sanitize.py             # sanitized_name determinista (§10.3.3)
+│   │   ├── paths.py                # message_dir/attachment_path + fallback 32 hex (D9)
+│   │   ├── screening.py            # pantalla del mensaje completo (§11.3 filas 11–14)
+│   │   ├── engine.py               # AttachmentsEngine.recover (M07)
+│   │   └── cache.py                # staging, publicación atómica y --force (M07)
 │   ├── plugins/                    # API pública de plugin (API 1; lo único que importa un plugin externo)
 │   │   ├── __init__.py             # reexporta la API 1 (estable)
 │   │   └── api.py                  # PLUGIN_API, Reason, PluginError, PluginContext, capacidades
@@ -59,7 +74,10 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     ├── fakes/
     │   ├── outlook.py              # Outlook falso en memoria (OOM, CallLog, escenarios)
     │   ├── plugin.py               # doble de plugin API 1 + entry points inyectables (M01)
+    │   ├── attachment_backend.py   # backend de adjuntos inyectable (M08)
     │   └── run_cli.py              # lanzador en subprocess: fake + cli.main(argv, backend=…)
+    ├── test_attachments.py         # UT-ATT-01..11: bloqueo, sanitización, límites, staging y caché
+    ├── test_multidriver.py         # UT-MD-01..07: merge, orden total y cursor multi-driver
     ├── test_plugins.py             # UT-PL-01..04: API 1, registro de drivers, --version, ficheros de plugin
     ├── test_uid.py                 # UT-UID-01: formato y parseo del uid prefijado
     ├── test_backends.py            # contrato de MailBackend, get_backend, AppleMailBackend
@@ -76,15 +94,16 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     ├── test_readonly.py            # obligatorio y bloqueante
     ├── test_integration.py         # flujos completos y goldens
     ├── test_install_scripts.py     # instaladores (install.sh / install.ps1; UT-INS-01)
-    ├── test_packaging.py           # pyproject.toml, versión y entry points (TC-06, PKG-01)
+    ├── test_packaging.py           # pyproject.toml, versión y entry points (TC-06, PKG-01/02)
     └── test_smoke.py               # SMOKE contra el cliente real, solo lectura; se salta donde no aplica
 ```
 
-`outlook.py`, `outlook_com.py` y `tests/fakes/` llegan en la fase W3: con ellos
-`get_backend(platform="win32")` da `mailboxes`, `search` (metadatos) y `show`.
-La fase W4 completa Outlook: `new` (uids hex en `state.json`), `--text`,
-`--to`/`--cc` acotados (RF-17), `doctor` (§B.8) y exit 6 de punta a punta; los
-5 comandos tienen todos sus flags en ambos backends.
+Los dos adaptadores internos (`apple_mail`, `outlook`) implementan el protocolo
+v1 completo, incluidos `parse_native_id` y las operaciones de adjuntos, y se
+registran por el mismo grupo de entry points que un plugin. Los **seis**
+comandos (`doctor`, `mailboxes`, `search`, `new`, `show`, `attachment`) tienen
+todos sus flags en ambos backends; `attachment` solo recupera adjuntos ya
+presentes en el store local.
 
 Reglas globales:
 
@@ -388,7 +407,7 @@ instanciado son `E_PLUGIN_FAILED` o el código mapeado por §11.7.
 
 Protocolo de backend v1 (C1). `Uid = str` es el uid de contrato
 (`"<driver>:<native_id>"`, la forma que emite el núcleo); `LegacyUid = int | str`
-es el alias del uid nativo que intercambian los adaptadores internos (entero en
+es el alias del uid nativo que intercambian los adaptadores internos (un `int` en
 Apple Mail, hex en mayúsculas en Outlook) — M03 lo mantiene para no romper
 M01/M02 (D1) y la prefijación ocurre solo en `search.py`/`cli.py`.
 `MessageRow` incluye `native_order_key: str`
@@ -613,7 +632,7 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   `SaveAsFile` —la **única** operación de escritura del proxy—, usada solo para
   materializar en staging un adjunto **ya descargado**; `GetTemporaryFilePath`
   no se autoriza (el path lo controla el núcleo) y el `object_model_guard` no
-  se amplía en 3.0.0. Sobre
+  se amplía en el futuro 3.0.0 (no publicado). Sobre
   objetos de `pywin32` llama directamente a `IDispatch.Invoke` con el DISPID
   cacheado por tipo y miembro (por objeto en los `Item`), sin el coste de la
   información de tipos del dispatch dinámico; el fake sigue pasando por `getattr`.
@@ -650,15 +669,15 @@ helpers de Apple Mail que antes vivían en `search.py`, con el mismo orden,
 warnings y reintento (`store.run_query`). Extras propios (fuera de la
 interfaz): `store`, `labels`, `connection`, `tables` (propiedades),
 `prepare()` (valida la conexión y detecta las tablas) y dos métodos estáticos:
-`parse_uid` (uid legado de entrada, hasta M04) y `parse_native_id` (entero). Declara `driver = "apple_mail"`, `plugin_api = 1` y capacidades
+`parse_uid` (uid legado de entrada, hasta M04) y `parse_native_id` (un `int`). Declara `driver = "apple_mail"`, `plugin_api = 1` y capacidades
 `network=false, readonly="structural", body_local=true, attachments="local",
 native_order="numeric"`; cada fila de listado lleva `native_order_key = str(uid)`.
 Los dos métodos estáticos de parseo:
 
-- `parse_uid(raw) -> int`: uid legado de entrada, entero (`E_USAGE` si no);
+- `parse_uid(raw) -> int`: uid legado de entrada como `int` (`E_USAGE` si no);
   puro y sin I/O. Se mantiene hasta M04 (D1).
-- `parse_native_id(native_id) -> int`: parte nativa de un uid prefijado,
-  entero; puro y sin I/O. `show` lo usa antes de abrir el store.
+- `parse_native_id(native_id) -> int`: parte nativa de un uid prefijado, un
+  `int`; puro y sin I/O. `show` lo usa antes de abrir el store.
 - `check_state_uid` se retira en M03; la validación del estado vive en
   `state.py`.
 
@@ -925,7 +944,7 @@ candidatos (`[search].max_scan`). Los mensajes con fecha nula, ≤ 0 o futura
 **Primera corrida de `new`** (PRD §12.3): sin cursor guardado emite, en orden
 ascendente y respetando `--limit`, los mensajes de `[D − lookback, D]` (`D` =
 fecha del más reciente válido del alcance) y añade `W_FIRST_RUN` al final de
-`warnings`; el cursor avanza al último emitido (no hay baseline vacío).
+`warnings`; el cursor avanza al último emitido (no hay una primera corrida vacía).
 `[new].lookback` de la config actual aplica de inmediato.
 **Warnings de alcance** (todas las corridas de `search`, `new`, `show` y
 `mailboxes`), en este orden (PRD §12.3, paso 6): `W_NO_ACCOUNTS` (si no queda
@@ -1415,27 +1434,16 @@ menciona E/S de caché está superada por DP-01, §11.3 fila 15 y AC-12. Los
 
 ## 4. Contrato JSON
 
-> M03 emite por fin el **`uid` string prefijado** `"<driver>:<native_id>"` en
-> `search`/`new`/`show` y en `state.json` (`schema: 2`), con migración
-> determinista desde `schema: 1` y aceptación del uid legado en la entrada
-> (PRD-v2.1 RF-40, §10.2, AC-05/AC-06). `native_order_key` sigue siendo
-> interno (viaja en la fila del backend, no se emite). Los goldens con uid
-> cambian **solo** en el uid; la forma de `show.attachments` y el chequeo
-> `driver` de `doctor` son de M08/M02. En entradas de `show` se acepta además el
-> uid legado (entero Apple Mail, hex mayúsculas Outlook), resuelto con el
-> driver nativo; los warnings de 2.0.1 que citan el uid mantienen el valor
-> nativo (no son contrato de este milestone).
->
-> M04 **no cambia la forma** del JSON de `search`/`new`: la única diferencia es
-> que pueden aparecer mensajes de varios drivers en la misma lista, fusionados y
-> ordenados por `(date_received, driver, native_order_key)` (DESC en
-> `search`, ASC en `new`), con `duplicate_count` calculado dentro de cada driver
-> (PRD-v2.1 §10.2.7-9). El log `event=start` añade `drivers=` (fuera del
-> contrato JSON). **M08** cierra la forma de `show.attachments` para todos los
-> drivers: `{index, name, cached_path}` (AC-07) y el driver con
-> `attachments: "none"` devuelve `[]`; es la única edición de forma/valor de
-> esos goldens (M09/M10 no los reescriben). M08 añade el comando `attachment`
-> con el payload de §11.2 y el `event=end` con conteos (§12.1).
+Contrato final del delta (PRD-v2.1 §11.5 y PRD.md §12.5). Todo `uid` emitido es
+el string prefijado `"<driver>:<native_id>"`; `state.json` usa `schema: 2` y
+migra desde `schema: 1`; `show.message.attachments[]` es
+`{index, name, cached_path}` y el comando `attachment` devuelve el payload de
+§11.2. El error se mantiene cerrado en `{code, message, hint}`. `native_order_key`
+es interno (viaja en la fila del backend y no se emite), y el log añade
+`drivers=` al `event=start` (fuera del contrato JSON). El orden total es
+`(date_received, driver, native_order_key)` y no hay deduplicación cross-driver.
+Los ejemplos de abajo son la forma final; los goldens de
+`tests/fixtures/expected/` son su referencia ejecutable.
 
 Resumen de coordinación; el contrato completo es el PRD §12.5. Los ejemplos
 están compactados en una línea por brevedad: la salida real es JSON
@@ -1611,7 +1619,7 @@ sustituido** por el PRD v1.x §12.3 y §23.3 (ver `search.py` en §3).
 3. Validación solo con fixtures sintéticos (nunca el store real).
 4. Licencia MIT, titular `Ariel Dayler Salzar Hinojosa`, año 2026.
 5. **(Sustituida, histórico v1.x)** Primera corrida de `new` (sin
-   `state.json`): baseline sin emisión; fijaba el cursor en el mensaje más reciente del alcance, siembra el anillo
+   `state.json`) sin emisión; fijaba el cursor en el mensaje más reciente del alcance, siembra el anillo
    `emitted_uids` con los uids del alcance dentro de la ventana
    `[cursor_date - lookback, cursor_date]` (para que la siguiente corrida no
    los re-emita) y emite `W_FIRST_RUN`. Con cursor existente: candidatos
@@ -1815,12 +1823,22 @@ fixture son bytes fijos, así que `size_bytes` y `sha256` son estables; las
 rutas se normalizan a `<ROOT>`. Los goldens existentes de `show`/`search`/`new`
 no cambian en M09 (M08 es su dueño).
 
+`tests/fixtures/expected/outlook/attachment_saved.json`, `attachment_cached.json`,
+`attachment_unavailable.json` y `attachment_blocked.json` (M10, TC-09) son los
+flujos de adjuntos de Outlook sobre `FakeOutlook`; `attachment_cached`
+documenta la corrida de siembra y las rutas se normalizan con la misma
+normalización que los demás goldens (`<MESSAGE_DIR>` para el directorio del
+mensaje).
+
 `tests/test_integration.py` también ejecuta, en **ambos backends** (store
 sintético con `DEFAULT_CONFIG` y `FakeOutlook.item_matrix()` con
 `INBOX/Facturas` declarada), cada comando `mailquery` de los bloques de código
-de `docs/recipes/` (TC-04, `<uid>` sustituido según el plan §7.4) y compara el
-conjunto recursivo de claves JSON de `search`, `new`, `show`, `mailboxes`, un
-error y `doctor --json` (TC-05).
+de `docs/recipes/` (TC-04; `<uid>` = un mensaje con adjunto conocido cuando el
+comando es `attachment`) y compara el conjunto recursivo de claves JSON de
+`search`, `new`, `show`, `mailboxes`, `attachment` (éxito y error), un error y
+`doctor --json` (TC-05). El mismo archivo contiene las pruebas de documentación
+`DOC-01..06` y `TC-07` (7 ayudas, ayuda de `attachment`, ausencia de marcas
+obsoletas y coherencia entre READMEs, recetas, SKILL, config y ayudas).
 
 ### 8.5 Outlook falso (`tests/fakes/`)
 
@@ -1839,7 +1857,7 @@ cada comando de datos da `E_OUTLOOK_NOT_RUNNING` y `doctor` sale con exit 0).
 `tests/fakes/run_cli.py` ejecuta `cli.main` con el fake en un subprocess
 (tests del vigilante, que termina el proceso con `os._exit`). El gate de solo
 lectura de Outlook (OL-30, `test_outlook.OutlookReadOnlyGateTests`) barre los
-5 comandos con todos sus flags sobre todos los escenarios y exige miembros ⊆
+6 comandos con todos sus flags sobre todos los escenarios y exige miembros ⊆
 lista blanca, 0 asignaciones, 0 mutaciones y ningún código que §B.7 excluye.
 
 Para regenerarlos tras un cambio **intencional** del contrato:
@@ -1857,13 +1875,18 @@ PRD (§23.3) lo exige; regenerar no sustituye la revisión.
 
 `.github/workflows/tests.yml`:
 
+- Disparo **solo por PR** del lote (`pull_request` a `develop`/`main`); no hay
+  `push` ni tag en esta fase. `concurrency` con `cancel-in-progress` (un push
+  nuevo al PR cancela el run anterior) y `timeout-minutes: 30` por job.
 - Job `unittest`: `ubuntu-latest`, `macos-latest` y `windows-latest` ×
-  Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`). Ejecuta
+  Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`) = 12 jobs. Ejecuta
   `python -m unittest discover -s tests -t . -v`; `pywin32` se instala solo en
-  Windows. La suite completa debe pasar en los 3 SO (RNF-10).
-- Job `install-scripts`: valida y ejecuta en seco los instaladores
-  (`scripts/install.sh` en ubuntu y macOS, el instalador de PowerShell en
-  Windows).
+  Windows. La suite completa debe pasar en los 3 SO (RNF-10). La matriz **no**
+  instala el paquete: los casos de entry points usan metadata inyectada o se
+  saltan con motivo (PKG-01/02).
+- Job `install-scripts` (3 OS): valida y ejecuta en seco los instaladores
+  (`scripts/install.sh` y `skills/install.sh` en ubuntu/macOS, los `.ps1` en
+  Windows). Total: **15 jobs** por corrida de lote.
 
 ### 8.7 Git (D-01)
 

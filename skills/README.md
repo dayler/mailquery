@@ -63,13 +63,24 @@ sharing them across harnesses); Claude Code only reads `~/.claude/skills` and
 - Windows: classic Outlook open with the same user; otherwise
   `E_OUTLOOK_NOT_RUNNING` (exit 6).
 - At least one account declared in `~/.mailquery/config.toml`
-  (`%USERPROFILE%\.mailquery\config.toml` on Windows).
+  (`%USERPROFILE%\.mailquery\config.toml` on Windows), as a
+  `[scope."<driver>:<account>"]` block (the prefix may be omitted for the native driver).
+- External backend plugins are installed explicitly into the same pipx environment:
+  `pipx inject mailquery <plugin-package>`. The skill then sees their drivers through
+  `mailquery -v` and `mailquery doctor`, and `show`/`attachment` route the `uid` by its
+  `<driver>:` prefix.
+
+The skill documents the six commands (`doctor`, `mailboxes`, `search`, `new`, `show`,
+`attachment`), the opaque `uid` string, `show.attachments` and the local attachment
+recovery contract (blocked whole message, cache under `~/.mailquery/attachments/`, never
+open or execute the recovered files).
 
 ## Verification
 
 Restart the harness session so it discovers the skill, then run `mailquery doctor` and
 `mailquery mailboxes`. In Claude Code invoke it with `/mailquery`; in DSH it appears in
-the skill catalog.
+the skill catalog. To check the new surface, compare `mailquery -v` (the `drivers:` part)
+and `mailquery attachment --help` with `skills/mailquery/SKILL.md`.
 
 ## Maintenance
 

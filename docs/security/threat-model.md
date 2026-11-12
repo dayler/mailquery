@@ -4,7 +4,7 @@
 **Documento:** anexo técnico de seguridad (no forma parte del alcance de `PRD-v2.1`).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** propuesta para aprobación. No implementado.
+**Estado:** implementado en la rama de integración del delta (PRD-v2.1), **no publicado**: la versión vigente del paquete es 2.0.1 y el 3.0.0 es futuro y no se ha publicado.
 **Ámbito:** amenazas derivadas del **contenido** del correo (texto, HTML, URLs, imágenes, firmas, adjuntos) y del uso de la salida de `mailquery` por un harness de agentes. No cubre la seguridad del proveedor de correo, del cliente de escritorio ni del endpoint; esas capas se mencionan solo como mitigaciones externas.
 
 **Documentos relacionados:** [`PRD.md`](../PRD.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); [`PRD-v2.1.md`](../PRD-v2.1.md) (plugins y adjuntos); [`PRD-content-hardening.md`](../PRD-content-hardening.md) (mini-PRD A2–A5); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
@@ -77,7 +77,7 @@ La frontera relevante es **`mailquery` → harness**: todo lo que sale de `mailq
 - **Sanitización parcial:** [`sanitize_text`](../../src/mailquery/output.py#L26) elimina ANSI y controles C0/DEL, normaliza fin de línea y conserva `\n`/`\t`; se aplica a `body_text` y a los snippets.
 - **Cabeceras limitadas:** `show` expone solo `From`, `To`, `Cc`, `Subject`, `Date` y `Message-ID` ([`_show_headers`](../../src/mailquery/search.py#L1250)); no expone `Reply-To`, `List-Unsubscribe` ni cabeceras completas.
 - **Adjuntos:** bloqueo por nombre, extensión y *magic bytes*; staging, permisos `0600` y caché efímera ([PRD-v2.1](../PRD-v2.1.md)).
-- **Excepción COM de Outlook (3.0.0):** el proxy de solo lectura autoriza
+- **Excepción COM de Outlook (futuro 3.0.0, no publicado):** el proxy de solo lectura autoriza
   `Attachment.SaveAsFile` únicamente para materializar en staging un adjunto
   **ya descargado**; no se resuelven referencias, no se descarga contenido y el
   archivo temporal se valida (regular, dentro de su sesión, no symlink) y se
@@ -103,7 +103,7 @@ excepción queda acotada así:
 - **Limpieza garantizada:** el archivo y la sesión se borran en `finally`, al
   cerrar el backend y, si un cuelgue terminó el proceso, en la siguiente
   invocación (barrido de sesiones huérfanas propias).
-- **OMG:** `object_model_guard` **no** se amplía en 3.0.0; un aviso del Object
+- **OMG:** `object_model_guard` **no** se amplía en el futuro 3.0.0 (no publicado); un aviso del Object
   Model Guard sigue tratándose como cualquier denegación de COM (timeout o
   `E_PERMISSION`) y el riesgo se acepta.
 - **Límite:** el host macOS no puede verificar la materialización real; el
@@ -193,6 +193,24 @@ G-01 a G-04 son los que cubre el [mini-PRD de endurecimiento](../PRD-content-har
 ## 9. Adjuntos, imágenes y firmas
 
 - **Adjuntos:** la extracción es inerte; el bloqueo es una red de seguridad, no un antivirus. El harness no debe abrirlos automáticamente ni ejecutarlos. En Outlook la extracción usa la excepción COM de §4.2 (copia de un adjunto ya local a un staging privado y efímero, nunca una descarga).
+- **Bloqueo del mensaje completo:** si cualquier adjunto tiene un nombre peligroso,
+  una extensión del catálogo o *magic bytes* ejecutables, `mailquery attachment`
+  falla con `E_ATTACHMENT_BLOCKED` (exit 4) y no escribe **ningún** archivo del
+  mensaje, ni con `--index` ni con `--all`. No hay resultados parciales ni caché
+  servida para ese mensaje; el harness no debe reintentarlo.
+- **Caché y staging:** los adjuntos recuperados viven bajo
+  `~/.mailquery/attachments/<driver>/<native_id>/` (directorios 0700, archivos 0600
+  en POSIX, ACL del perfil en Windows) y el staging bajo `~/.mailquery/tmp/`. La
+  publicación es atómica y no sigue symlinks; la caché es efímera y no se valida ni
+  purga al arrancar (limpieza externa). El contenido sigue siendo no confiable
+  aunque el archivo se haya copiado correctamente.
+- **Frontera de plugins (ADR-22):** un plugin de backend externo ejecuta código en el
+  proceso y puede usar red si declara `network: true`; instalarlo
+  (`pipx inject mailquery <paquete>`) es el consentimiento. El núcleo no lo sandboxea
+  ni lee sus archivos `<driver>.toml`/`logs/<driver>.log`; `mailquery doctor` muestra
+  las capacidades declaradas (`network`, `readonly`, `body_local`, `attachments`,
+  `native_order`) para que el harness decida. Un S/MIME no se extrae
+  (`E_ATTACHMENT_UNREADABLE`), nunca se reporta como “sin adjuntos”.
 - **Imágenes:** `mailquery` no carga imágenes remotas ni inline; si se extrae una imagen como adjunto, sigue siendo contenido no confiable (puede contener QR, texto o exploits del parser de imagen). No analizarla con visión/OCR sin petición explícita.
 - **Firmas:** son texto y enlaces como el resto del cuerpo; mismas reglas. Las firmas con imágenes remotas no se cargan.
 

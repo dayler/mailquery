@@ -10,6 +10,11 @@
 
     Requirements: Python >= 3.11 and pipx (this script installs pipx when missing).
 
+    Backend plugins are separate packages installed explicitly into the same pipx
+    environment: 'pipx inject mailquery <plugin-package>'; installing the plugin is
+    the consent and 'mailquery doctor' shows its capabilities. The configuration
+    template documents the [attachments] block used by 'mailquery attachment'.
+
     On Windows mailquery reads Outlook (classic, 16.0) through COM: the package
     depends on pywin32, which pipx installs automatically. When the installation
     ends, the script checks that pywin32 can be imported from the pipx venv and
@@ -309,3 +314,5 @@ if ($ConfigCreated) {
 Write-Log "  - Edit ~/.mailquery/config.toml and declare at least one account."
 Write-Log "  - Verify: mailquery doctor && mailquery mailboxes"
 Write-Log "  - Query:  mailquery search --since 1w"
+Write-Log "  - Plugins: pipx inject mailquery <plugin-package> (declared by their driver)"
+Write-Log "  - Attachments: mailquery attachment <uid> --index 1 (see the [attachments] block)"
