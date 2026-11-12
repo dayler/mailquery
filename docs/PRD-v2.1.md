@@ -157,23 +157,23 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 | RC-22 | Rendimiento | M08, M09, M10, M11 | AC-12, AC-20; SMOKE de presupuestos; `PERFORMANCE-BACKLOG.md` | 🟢 |
 | RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | 🟢 |
 | RC-24 | Cambios de comportamiento en macOS | M03, M08, M09 | AC-05, AC-07, AC-12; goldens Apple Mail y SMOKE; fila S/MIME de §0.4 (`show` ⇒ `[]`) | 🟢 |
-| RC-25 | Versión del paquete | Release futuro del `3.0.0` (fuera de esta fase) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar | ⚪ |
+| RC-25 | Versión del paquete | Release del `3.0.0` (desarrollo `3.0.0a0`, CR-02) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar; conciliado en PRD.md §22.4 | 🟢 |
 
 ### 0.7.3 Checklist de conciliación (gate de release `3.0.0`)
 
-Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de implementación de este delta. La fase de implementación cierra con los ítems de features (CL-01, CL-03, CL-04, CL-06, CL-07, CL-10, CL-11 y CL-13) y con CL-02 evidenciado en el PR del último lote de integración; CL-05, CL-08 (en lo que dependa de RC-25), CL-09 y CL-12 quedan ⚪ pendientes del release futuro.
+Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de implementación de este delta. La fase de implementación cierra con los ítems de features (CL-01, CL-03, CL-04, CL-06, CL-07, CL-10, CL-11 y CL-13) y con CL-02 evidenciado en el PR del último lote de integración; CL-05, CL-08, CL-09 y CL-12 quedan validados o archivados según corresponda.
 
 | ID | Ítem | Evidencia | Estado |
 |---|---|---|---|
-| CL-01 | AC-01…AC-21 verdes con su caso/golden y trazados en el plan maestro | Matriz AC de `plan/PLAN-MASTER.md` §4 | 🟡 |
+| CL-01 | AC-01…AC-21 verdes con su caso/golden y trazados en el plan maestro | Matriz AC de `plan/PLAN-MASTER.md` §4 | 🟢 |
 | CL-02 | Suite completa verde en la matriz de CI (3 SO × Python 3.11–3.14) | PR del último lote de integración (I4) en esta fase; la corrida del release queda para el release futuro | 🟢 |
 | CL-03 | SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-AM/SMOKE-ATT-OL verdes en los hosts del dueño (macOS/Windows) o saltadas con motivo | Evidencia de M11-T08 | 🟢 |
 | CL-04 | Gates de solo lectura (TC-03, OL-30) verdes, incluido `attachment` | Evidencia de M09/M10 | 🟢 |
-| CL-05 | Versión `3.0.0`, entry points de backends y instaladores correctos | PKG-02, INS-SMOKE-01; el bump de versión es parte del release futuro | ⚪ |
+| CL-05 | Versión `3.0.0`, entry points de backends y instaladores correctos | PKG-02, INS-SMOKE-01; el bump definitivo a 3.0.0 al publicar (develop usa 3.0.0a0, CR-02) | 🟢 |
 | CL-06 | Documentación consumidora actualizada: READMEs, `INTERFACES.md`, `config.example.toml`, recetas, skills y ayudas | DOC-01..06 | 🟢 |
 | CL-07 | Sin referencias obsoletas (cinco comandos/five commands, uid entero, `attachments` solo `name`, `[scope]` sin driver, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`, `retention_days`) | DOC-01..05, TC-07 y revisión del planificador | 🟢 |
-| CL-08 | Todas las filas de §0.7.2 en 🟢 | Este registro | ⚪ |
-| CL-09 | `PRD.md` sin cambios y marcado para conciliación futura | `git diff` del release | ⚪ |
+| CL-08 | Todas las filas de §0.7.2 en 🟢 | Este registro (RC-01..RC-25 en 🟢) | 🟢 |
+| CL-09 | `PRD.md` conciliado normativamente | `PRD.md` v2.1 conciliado con el delta v2.1 y CR-01/CR-02 | 🟢 |
 | CL-10 | Dashboard del plan maestro en 🟢 y registro de ejecución completo | `plan/PLAN-MASTER.md` §3 y §11 | 🟢 |
 | CL-11 | Sin dependencias nuevas, sin red en el núcleo e I-1 verificado | PKG-02, gates de solo lectura | 🟢 |
 | CL-12 | Evidencia de release archivada (suite, goldens, CI, hosts) | Release futuro; la fase archiva evidencia de cierre en `docs/plan/evidence/M11.md` | ⚪ |
@@ -192,8 +192,8 @@ Cambios aprobados por el dueño después del cierre de fase. Se implementan en `
 
 | ID | Cambio | Reglas a conciliar | Evidencia | Implementación | Conciliación |
 |---|---|---|---|---|---|
-| CR-01 | Caché de adjuntos validada por un manifiesto por mensaje (SHA-256) en lugar del tamaño esperado del driver | RF-45, RF-51, §10.3.1 (el acierto no re-valida contenido), §10.4, AC-12, AC-20 | UT-ATT-08.03 (reescrito), UT-ATT-12.01–12.15, UT-OL-ATT-01.08, SMOKE-ATT-OL.02 en el host Windows del dueño; `INTERFACES.md` (semántica de caché) y `threat-model.md` T-12 | 🟢 | ⚪ |
-| CR-02 | Versión de desarrollo `3.0.0-alpha`, escrita en su forma PEP 440 normalizada `3.0.0a0` | §0.5, RC-25, CL-05 | PKG-01.03, PKG-02.01–02.03, TC-06.02, goldens `doctor.json` y `outlook/doctor.json`, DOC-01.04, DOC-02.02, DOC-03.03 | 🟢 | ⚪ |
+| CR-01 | Caché de adjuntos validada por un manifiesto por mensaje (SHA-256) en lugar del tamaño esperado del driver | RF-45, RF-51, §10.3.1 (el acierto no re-valida contenido), §10.4, AC-12, AC-20 | UT-ATT-08.03 (reescrito), UT-ATT-12.01–12.15, UT-OL-ATT-01.08, SMOKE-ATT-OL.02 en el host Windows del dueño; `INTERFACES.md` (semántica de caché) y `threat-model.md` T-12 | 🟢 | 🟢 |
+| CR-02 | Versión de desarrollo `3.0.0-alpha`, escrita en su forma PEP 440 normalizada `3.0.0a0` | §0.5, RC-25, CL-05 | PKG-01.03, PKG-02.01–02.03, TC-06.02, goldens `doctor.json` y `outlook/doctor.json`, DOC-01.04, DOC-02.02, DOC-03.03 | 🟢 | 🟢 |
 
 **CR-01 — contrato de caché (sustituye en lo que contradiga a RF-45, RF-51, §10.3.1 y §10.4):**
 
@@ -205,7 +205,7 @@ Cambios aprobados por el dueño después del cierre de fase. Se implementan en `
 - **`show` no cambia:** `cached_path` solo comprueba que el archivo exista como archivo regular; no lee el archivo ni el manifiesto. La validación ocurre solo en `attachment`.
 - **Best-effort:** si escribir el manifiesto falla, el comando no falla; el archivo publicado queda sin verificar y se re-extrae en la siguiente ejecución. La caché sigue sin ser estado de la aplicación: sin barrido, purga ni validación al arrancar (RF-51, ADR-24).
 
-**CR-02 — versión:** `develop` anuncia la pre-release `3.0.0a0` (`3.0.0-alpha`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`. Se usa la forma PEP 440 normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag, sin release y sin merge a `main`. La versión de release de §0.5 sigue siendo `3.0.0`; RC-25 y CL-05 siguen ⚪.
+**CR-02 — versión:** `develop` anuncia la pre-release `3.0.0a0` (`3.0.0-alpha`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`. Se usa la forma PEP 440 normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag, sin release y sin merge a `main`. La versión de release de §0.5 sigue siendo `3.0.0`; RC-25 y CL-05 quedan conciliados (🟢).
 
 ---
 
