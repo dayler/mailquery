@@ -134,6 +134,9 @@ def _all_installed(driver: str) -> bool:
     return bool(driver)
 
 
+MESSAGE_DIR_RE = re.compile(r"(/attachments/[a-z0-9_]+/)([^/]+)")
+
+
 def _normalize(value: object, root: Path) -> object:
     """Replace run-dependent values so payloads can be compared to goldens."""
     if isinstance(value, dict):
@@ -153,7 +156,11 @@ def _normalize(value: object, root: Path) -> object:
         text = EMAIL_DATE_RE.sub("<EMAIL_DATE>", text)
         text = text.replace(str(root), "<ROOT>")
         # Goldens use "/" on every OS: normalize separators after the root swap.
-        return text.replace("\\", "/")
+        text = text.replace("\\", "/")
+        # Windows uses the stable 32-hex directory when the real cache path
+        # exceeds its conservative budget (D9); the message directory is not
+        # platform-independent, so goldens keep it as a placeholder.
+        return MESSAGE_DIR_RE.sub(r"\1<MESSAGE_DIR>", text)
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) >= 1_000_000_000:
         return "<EPOCH>"
     return value

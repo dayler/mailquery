@@ -51,7 +51,7 @@
       {
         "index": 1,
         "name": "invoice-2026-10.pdf",
-        "cached_path": "<ROOT>/home/attachments/apple_mail/2714/01_invoice-2026-10.pdf"
+        "cached_path": "<ROOT>/home/attachments/apple_mail/<MESSAGE_DIR>/01_invoice-2026-10.pdf"
       }
     ],
     "partial": false,

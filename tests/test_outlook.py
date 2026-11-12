@@ -4140,6 +4140,9 @@ def _attachment_uid(fake: fk.FakeOutlook, key: str) -> str:
     return fake.item(key).entry_id
 
 
+_MESSAGE_DIR_RE = __import__("re").compile(r"(/attachments/[a-z0-9_]+/)([^/]+)")
+
+
 def _normalize_golden(value: object, root: Path) -> object:
     """Run-independent view of an Outlook payload (same rules as the TC-02 goldens)."""
     if isinstance(value, dict):
@@ -4152,7 +4155,10 @@ def _normalize_golden(value: object, root: Path) -> object:
         return [_normalize_golden(item, root) for item in value]
     if isinstance(value, str):
         text = _ISO_RE.sub("<ISO>", value)
-        return text.replace(str(root), "<ROOT>").replace("\\", "/")
+        text = text.replace(str(root), "<ROOT>").replace("\\", "/")
+        # The message directory is a native id on macOS and the stable 32-hex
+        # fallback when the Windows path budget is exceeded (D9): placeholder it.
+        return _MESSAGE_DIR_RE.sub(r"\1<MESSAGE_DIR>", text)
     return value
 
 

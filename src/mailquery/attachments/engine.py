@@ -235,9 +235,16 @@ class _Deadlines:
             raise _DeadlineExpired()
 
     def wrap(self, index: int, stream: Iterable[bytes]) -> Iterator[bytes]:
-        """Yield the driver chunks after checking the deadline of each one."""
+        """Yield the driver chunks after checking the deadline of each one.
+
+        The underlying driver iterator is always closed, also when this wrapper
+        is closed early (screen/limit/deadline aborts): the Outlook adapter keeps
+        a materialized file open while its stream is suspended, and on Windows an
+        open handle blocks deleting its staging session.
+        """
+        iterator = iter(stream)
         try:
-            for chunk in stream:
+            for chunk in iterator:
                 self.check(index)
                 yield chunk
         except (GeneratorExit, StopIteration):
@@ -245,6 +252,13 @@ class _Deadlines:
         except Exception as exc:  # recorded so the screen can map the real reason
             self._faults[index] = exc
             raise
+        finally:
+            close = getattr(iterator, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:  # pragma: no cover - cleanup must not mask a failure
+                    pass
 
     def note(self, index: int, exc: Exception) -> None:
         """Record a driver exception raised while opening the stream."""
@@ -414,29 +428,35 @@ class AttachmentsEngine:
             try:
                 tracker.start(index)
                 tracker.check(index)
-                for chunk in tracker.wrap(
+                wrapped = tracker.wrap(
                     index, self._driver.attachment_stream(legacy_uid, index)
-                ):
-                    if not chunk:
-                        continue
-                    staged_file.append(chunk)
-                    written += len(chunk)
-                    if written > max_file_bytes:
-                        raise _max_file_error(
-                            canonical,
-                            index,
-                            row["name"],
-                            int(self._config.max_file_size_mb),
-                            written,
-                        )
-                    total = projected_total(index, written)
-                    if total > max_total_bytes:
-                        raise _max_total_error(
-                            canonical,
-                            len(requested),
-                            int(self._config.max_total_size_mb),
-                            total,
-                        )
+                )
+                try:
+                    for chunk in wrapped:
+                        if not chunk:
+                            continue
+                        staged_file.append(chunk)
+                        written += len(chunk)
+                        if written > max_file_bytes:
+                            raise _max_file_error(
+                                canonical,
+                                index,
+                                row["name"],
+                                int(self._config.max_file_size_mb),
+                                written,
+                            )
+                        total = projected_total(index, written)
+                        if total > max_total_bytes:
+                            raise _max_total_error(
+                                canonical,
+                                len(requested),
+                                int(self._config.max_total_size_mb),
+                                total,
+                            )
+                finally:
+                    close = getattr(wrapped, "close", None)
+                    if close is not None:
+                        close()
             except _DeadlineExpired:
                 raise _timeout_error(canonical, index, row["name"]) from None
             except MailqueryError:
