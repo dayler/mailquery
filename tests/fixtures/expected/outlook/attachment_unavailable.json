@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "command": "attachment",
+  "error": {
+    "code": "E_ATTACHMENT_UNAVAILABLE",
+    "message": "attachment 1 ('enlace.pdf') of message outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10CEF524CF40F4132E6F8352DA3DF940CF61020506FD783E1B9F8171353586998F5C47570A49F4379EFC2BED5745523A3FCBF9 is not available in the local store",
+    "hint": "open the message in the email client so it downloads the attachment to disk, then retry"
+  }
+}

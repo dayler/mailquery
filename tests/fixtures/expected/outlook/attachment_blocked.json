@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "command": "attachment",
+  "error": {
+    "code": "E_ATTACHMENT_BLOCKED",
+    "message": "message outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10779316FA79B1ADF3EDD79646294A88E48E739DF038E4918CE1C79329AEB3DF457DE3B5D6561BEA8DC6899068B2475866F1AC was blocked: attachment 1 ('presupuesto.pdf') has executable content",
+    "hint": "notify the user to inspect the message and its attachments in the email client at their own risk; do not retry the same request"
+  }
+}

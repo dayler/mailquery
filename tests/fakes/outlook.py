@@ -27,9 +27,11 @@ signed 32-bit ``hresult``, the real code in ``excepinfo[5]`` when ``hresult`` is
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import threading
 import uuid as _uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from email.utils import format_datetime
@@ -118,6 +120,12 @@ OL_OTHER_ACCOUNT = 5
 
 OL_HEADER_ONLY = 0
 OL_FULL_ITEM = 1
+# OlAttachmentType (Microsoft docs): a by-value attachment is a copy of the file
+# stored in the item; the other values are links, embedded messages or OLE objects.
+OL_BY_VALUE = 1
+OL_BY_REFERENCE = 4
+OL_EMBEDDED_ITEM = 5
+OL_OLE = 6
 
 OL_TO = 1
 OL_CC = 2
@@ -248,7 +256,16 @@ OOM_MEMBERS: dict[str, dict[str, str | None]] = {
         "PropertyAccessor": "PropertyAccessor",
     },
     "Attachments": {"Count": None, "Item": "Attachment"},
-    "Attachment": {"FileName": None, "DisplayName": None, "PropertyAccessor": "PropertyAccessor"},
+    "Attachment": {
+        "FileName": None,
+        "DisplayName": None,
+        "PropertyAccessor": "PropertyAccessor",
+        # M10 COM exception (PRD-v2.1 §0.2): Size/Type are local metadata and
+        # SaveAsFile is the single allowed materialization operation.
+        "Size": None,
+        "Type": None,
+        "SaveAsFile": None,
+    },
     "Recipients": {"Count": None, "Item": "Recipient"},
     "Recipient": {"Name": None, "Type": None, "PropertyAccessor": "PropertyAccessor"},
 }
@@ -262,7 +279,7 @@ FORBIDDEN_MEMBERS = frozenset(
         "Dispatch", "DispatchEx", "EnsureDispatch", "Forward", "GetExchangeDistributionList",
         "GetExchangeUser", "Logoff", "Logon", "MarkAsTask", "MarkForDownload", "Move",
         "PrintOut", "Quit", "Remove", "RemoveAll", "Reply", "ReplyAll", "Resolve",
-        "ResolveAll", "Save", "SaveAs", "SaveAsFile", "Send", "SetProperties", "SetProperty",
+        "ResolveAll", "Save", "SaveAs", "Send", "SetProperties", "SetProperty",
         "ShowCategoriesDialog",
     }
 )
@@ -823,6 +840,16 @@ class AttachmentSpec:
     name: str
     hidden: bool | None = None  # None: PR_ATTACHMENT_HIDDEN absent (visible)
     display_name: str | None = None
+    #: Decoded bytes written by ``SaveAsFile`` (M10); an empty attachment is valid.
+    content: bytes = b""
+    #: Local size reported by the ``Size`` property; ``None`` derives it from ``content``.
+    size: int | None = None
+    #: OlAttachmentType of the attachment (a by-value copy unless a test says otherwise).
+    attachment_type: int = OL_BY_VALUE
+    #: HRESULT raised by ``SaveAsFile`` (permission, corrupt, not downloaded...).
+    save_error: int | None = None
+    #: Materialization shape instead of a regular file: ``"symlink"`` or ``"directory"``.
+    save_as: str | None = None
 
 
 @dataclass(eq=False)
@@ -1498,7 +1525,8 @@ class FakeAttachments(_ComObject):
 
 class FakeAttachment(_ComObject):
     _KIND = "Attachment"
-    _PROPS = ("FileName", "DisplayName", "PropertyAccessor")
+    _PROPS = ("FileName", "DisplayName", "PropertyAccessor", "Size", "Type")
+    _METHODS = ("SaveAsFile",)
 
     def __init__(self, runtime: _Runtime, spec: AttachmentSpec) -> None:
         super().__init__(runtime)
@@ -1509,6 +1537,38 @@ class FakeAttachment(_ComObject):
 
     def _get_DisplayName(self) -> str:
         return self._spec.display_name or self._spec.name
+
+    def _get_Size(self) -> int:
+        if self._spec.size is not None:
+            return int(self._spec.size)
+        return len(self._spec.content)
+
+    def _get_Type(self) -> int:
+        return int(self._spec.attachment_type)
+
+    def _call_SaveAsFile(self, path: Any) -> None:
+        """Materialize the local attachment into ``path`` (the M10 COM exception).
+
+        Stands in for ``Attachment.SaveAsFile``: writes the decoded bytes to the
+        backend-provided staging path, or raises the configured COM error. The
+        mailbox mutation counters stay at zero: this is an explicit, whitelisted
+        copy of an already-downloaded attachment, not a change to the store.
+        """
+        spec = self._spec
+        if spec.save_error is not None:
+            raise make_com_error(spec.save_error, wrapped=True)
+        target = Path(str(path))
+        if spec.save_as == "directory":
+            target.mkdir(parents=True, exist_ok=True)
+            return
+        if spec.save_as == "symlink":
+            outside = target.parent / "materialized-outside.bin"
+            outside.write_bytes(spec.content)
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            os.symlink(outside, target)
+            return
+        target.write_bytes(spec.content)
 
     def _get_PropertyAccessor(self) -> FakePropertyAccessor:
         spec = self._spec
@@ -2187,6 +2247,147 @@ class FakeOutlook:
         return fake
 
 
+    @classmethod
+    def attachments_matrix(cls) -> "FakeOutlook":
+        """Every attachment case of annex B.4 in one cached Exchange account (M10).
+
+        Deterministic (fixed dates, EntryIDs derived from the fixed record key and
+        the creation order) so the TC-09 goldens are stable. Only the ``local``
+        item is materializable; the other cases exercise availability reasons,
+        S/MIME/unreadable signals and the COM materialization exceptions.
+        """
+        fake = cls()
+        exchange = fake.add_exchange_account(
+            "exchange",
+            "ana.perez@example.com",
+            record_key=bytes.fromhex("D70DBCF61C2A4B6E9A51E0C3B2A49F10"),
+        )
+        inbox = exchange.inbox
+        assert inbox is not None
+        me = ("Ana Pérez", "ana.perez@example.com")
+
+        def add(key: str, **fields: Any) -> ItemSpec:
+            fields.setdefault("subject", key.replace("_", " ").capitalize())
+            fields.setdefault("sender", ("Proveedor SA", "facturas@proveedor.example"))
+            fields.setdefault("to", [me])
+            fields.setdefault("received", _utc(2026, 11, 2, 13, 54, 9))
+            fields.setdefault("sent", _utc(2026, 11, 2, 13, 54, 3))
+            fields.setdefault("body", f"Cuerpo de {key}.\r\n")
+            return inbox.add_message(key, **fields)
+
+        add(
+            "local",
+            attachments=[
+                AttachmentSpec(
+                    "factura-2026-10.pdf",
+                    content=b"%PDF-1.4\nFactura de octubre 2026\n",
+                )
+            ],
+        )
+        add(
+            "two_same",
+            attachments=[
+                AttachmentSpec("recibo.pdf", content=b"recibo-A"),
+                AttachmentSpec("recibo.pdf", content=b"recibo-B"),
+                AttachmentSpec("otros.pdf", content=b"otros"),
+            ],
+        )
+        add(
+            "hidden",
+            attachments=[
+                AttachmentSpec("image001.png", hidden=True, content=b"PNG"),
+                AttachmentSpec("visible.pdf", content=b"%PDF-1.4 visible"),
+            ],
+        )
+        add(
+            "header_only",
+            download_state=OL_HEADER_ONLY,
+            attachments=[AttachmentSpec("no-descargado.pdf", content=b"")],
+        )
+        add(
+            "smime",
+            message_class="IPM.Note.SMIME",
+            body="",
+            html="",
+            attachments=[AttachmentSpec("smime.p7m", content=b"smime")],
+        )
+        add(
+            "unopenable",
+            openable=False,
+            attachments=[AttachmentSpec("informe.xlsx", content=b"xlsx")],
+        )
+        add(
+            "by_reference",
+            attachments=[
+                AttachmentSpec(
+                    "enlace.pdf", attachment_type=OL_BY_REFERENCE, size=0
+                )
+            ],
+        )
+        add(
+            "embedded",
+            attachments=[
+                AttachmentSpec(
+                    "mensaje-adjunto.msg", attachment_type=OL_EMBEDDED_ITEM, size=0
+                )
+            ],
+        )
+        add(
+            "ole",
+            attachments=[AttachmentSpec("objeto.doc", attachment_type=OL_OLE, size=0)],
+        )
+        add("empty", attachments=[AttachmentSpec("vacio.txt", content=b"")])
+        add(
+            "executable",
+            attachments=[
+                AttachmentSpec("presupuesto.pdf", content=b"MZ\x90\x00 ejecutable")
+            ],
+        )
+        add(
+            "denied",
+            attachments=[
+                AttachmentSpec(
+                    "privado.pdf", content=b"%PDF-1.4", save_error=E_ACCESSDENIED
+                )
+            ],
+        )
+        add(
+            "corrupt",
+            attachments=[
+                AttachmentSpec("roto.pdf", content=b"%PDF-1.4", save_error=E_FAIL)
+            ],
+        )
+        add(
+            "partial_failure",
+            attachments=[
+                AttachmentSpec("bueno.pdf", content=b"%PDF-1.4 bueno"),
+                AttachmentSpec(
+                    "malo.pdf", content=b"%PDF-1.4 malo", save_error=E_FAIL
+                ),
+            ],
+        )
+        add(
+            "gone",
+            attachments=[
+                AttachmentSpec(
+                    "perdido.pdf", content=b"%PDF-1.4", save_error=MAPI_E_NOT_FOUND
+                )
+            ],
+        )
+        add(
+            "invalid_staging",
+            attachments=[
+                AttachmentSpec(
+                    "enlace-sucio.pdf",
+                    content=b"%PDF-1.4",
+                    save_as="symlink",
+                )
+            ],
+        )
+        add("no_attachments")
+        return fake
+
+
 def _transport_headers(spec: ItemSpec) -> str:
     def address(name: str, smtp: str | None) -> str:
         return f"{name} <{smtp}>" if smtp else name
@@ -2220,6 +2421,7 @@ SCENARIOS: dict[str, Callable[[], FakeOutlook]] = {
     "store_matrix": FakeOutlook.store_matrix,
     "folder_matrix": FakeOutlook.folder_matrix,
     "item_matrix": FakeOutlook.item_matrix,
+    "attachments_matrix": FakeOutlook.attachments_matrix,
     "not_running": lambda: _with(FakeOutlook.default(), running=False),
     "unregistered": lambda: _with(FakeOutlook.default(), registry=FakeRegistry.unregistered()),
     "old_version": lambda: _with(FakeOutlook.default(), registry=FakeRegistry.outlook(15)),
