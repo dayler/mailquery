@@ -4,7 +4,7 @@ The double stands in for a ``MailBackend`` (C1) at the attachment boundary
 fixed by ``backends/base.py``: it exposes ``driver``, ``parse_native_id``,
 ``attachments(uid)`` and ``attachment_stream(uid, index)`` and never touches
 the application home, the attachment cache or the staging area (the core owns
-every byte written; PRD-v2.1 RF-47/RNF-13). Every reachable failure is
+every byte written; PRD RF-47/RNF-13). Every reachable failure is
 injected from the test:
 
 * metadata failures through ``FakeAttachmentDriver(metadata_error=...)`` or

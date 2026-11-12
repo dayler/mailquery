@@ -1,4 +1,4 @@
-"""Public plugin API 1 (PRD-v2.1 §6.1 RF-38, §9.3; plan §5.1 C1).
+"""Public plugin API 1.
 
 This module is the frozen core surface an external backend plugin needs: the
 ``PLUGIN_API`` version, the closed ``Reason`` enum, :class:`PluginError` (the
@@ -6,7 +6,7 @@ plugin brings ``reason``/``hint``/``detail``/``log_message``; the core owns
 ``code``/``exit``), :class:`PluginContext` (``home`` and ``tmp_dir``) and the
 capability/driver-metadata types the registry validates.
 
-M05 adds the **core-side** error protocol (PRD-v2.1 §11.7, RF-50) that every
+It also holds the **core-side** error protocol that every
 driver call goes through: :func:`call_driver` (single wrapper: deadline,
 ``reason``→``code``/``exit`` mapping, sanitization, invalid-return detection)
 and :func:`wrap_driver` (the transparent proxy the query engine uses). The
@@ -17,12 +17,11 @@ a core failure stays ``E_INTERNAL`` (exit 1). Timeouts are tested with an
 injectable deadline (``METADATA_TIMEOUT_SECONDS``): external plugins run in a
 daemon worker thread, the built-in drivers run inline (their SQLite/COM objects
 are thread-affine) and their elapsed time is checked on return; Outlook keeps
-its COM watchdog (RNF-16, plan D3).
+its COM watchdog.
 
 An external plugin must import only this package from mailquery. It must not
-import the backends, the store or any other internal module (PRD-v2.1 §9.3,
-RNF-12). The backend protocol itself (operations and exact signatures) is
-documented in ``docs/INTERFACES.md`` and implemented by ``MailBackend``.
+import the backends, the store or any other internal module. The backend
+protocol itself (operations and exact signatures) is defined by ``MailBackend``.
 """
 
 from __future__ import annotations
@@ -39,20 +38,20 @@ from typing import Any, Final, Literal, NotRequired, TypedDict, TypeVar
 from mailquery import output
 from mailquery.errors import MailqueryError
 
-#: Version of the plugin contract; closed for the 3.x line (ADR-27).
+#: Version of the plugin contract; closed for the 3.x line.
 PLUGIN_API: Final[int] = 1
 
-#: ``importlib.metadata`` entry point group every backend registers in (RF-35).
+#: ``importlib.metadata`` entry point group every backend registers in.
 ENTRY_POINT_GROUP: Final[str] = "mailquery.backends"
 
 #: Driver names are file-system and log safe: ``<driver>.toml``, ``logs/<driver>.log``.
 DRIVER_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"[a-z0-9_]{1,64}")
 DRIVER_NAME_MAX_LENGTH: Final[int] = 64
 
-#: Built-in driver names; an external plugin may not reuse them (RF-35).
+#: Built-in driver names; an external plugin may not reuse them.
 RESERVED_DRIVER_NAMES: Final[frozenset[str]] = frozenset({"apple_mail", "outlook"})
 
-#: Capability keys every plugin must declare (RF-38); closed set.
+#: Capability keys every plugin must declare; closed set.
 CAPABILITY_KEYS: Final[tuple[str, ...]] = (
     "network",
     "readonly",
@@ -65,14 +64,14 @@ READONLY_MODES: Final[frozenset[str]] = frozenset({"structural", "promise"})
 ATTACHMENTS_MODES: Final[frozenset[str]] = frozenset({"local", "remote", "none"})
 NATIVE_ORDERS: Final[frozenset[str]] = frozenset({"numeric", "text"})
 
-#: Metadata deadline per driver operation (RNF-16). Read on every call so a test
+#: Metadata deadline per driver operation. Read on every call so a test
 #: can inject a short deadline with ``mock.patch`` and never wait 30 s.
 METADATA_TIMEOUT_SECONDS: Final[float] = 30.0
 
-#: Extraction deadline per attachment (RNF-16, implemented by M08).
+#: Extraction deadline per attachment (enforced by the ``attachment`` command).
 EXTRACTION_TIMEOUT_SECONDS: Final[float] = 120.0
 
-#: UTF-8 byte limits of the plugin-owned error fields (§11.7, T02).
+#: UTF-8 byte limits of the plugin-owned error fields.
 HINT_MAX_BYTES: Final[int] = 300
 DETAIL_MAX_BYTES: Final[int] = 200
 LOG_MESSAGE_MAX_BYTES: Final[int] = 200
@@ -101,7 +100,7 @@ METADATA_OPERATIONS: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: Operations whose ``reason`` uses the attachment context of §11.7.
+#: Operations whose ``reason`` uses the attachment mapping context.
 ATTACHMENT_OPERATIONS: Final[frozenset[str]] = frozenset(
     {"attachment_names", "attachments", "attachment_stream", "unreadable_attachments"}
 )
@@ -112,7 +111,7 @@ NativeOrder = Literal["numeric", "text"]
 
 
 class Reason(str, Enum):
-    """Closed ``reason`` enum of the plugin error protocol (PRD-v2.1 §11.7)."""
+    """Closed ``reason`` enum of the plugin error protocol."""
 
     INVALID_UID = "invalid_uid"
     NOT_FOUND = "not_found"
@@ -130,7 +129,7 @@ class Reason(str, Enum):
 
 
 class Capabilities(TypedDict):
-    """Capability map every driver declares (RF-38, AC-02)."""
+    """Capability map every driver declares."""
 
     network: bool
     readonly: ReadOnlyMode
@@ -143,7 +142,7 @@ class DriverMetadata(TypedDict):
     """Metadata of one installed driver, resolved without opening the mail client.
 
     ``internal`` is added by the registry: built-in drivers (``apple_mail``,
-    ``outlook``) are filtered by platform for ``--version`` (DP-02); external
+    ``outlook``) are filtered by platform for ``--version``; external
     plugins are always listed.
     """
 
@@ -156,7 +155,7 @@ class DriverMetadata(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class PluginContext:
-    """Paths the core hands to a plugin; the plugin owns its files (RF-39)."""
+    """Paths the core hands to a plugin; the plugin owns its files."""
 
     home: Path
     tmp_dir: Path
@@ -167,8 +166,7 @@ class PluginError(Exception):
 
     ``hint`` (English, ≤ 300 bytes), ``detail`` (≤ 200 bytes) and ``log_message``
     (≤ 200 bytes) must not contain PII, uids, paths or accounts; the core
-    sanitizes them and never lets the plugin choose the error ``code``/``exit``
-    (PRD-v2.1 §11.7, RF-50).
+    sanitizes them and never lets the plugin choose the error ``code``/``exit``.
     """
 
     def __init__(
@@ -204,10 +202,10 @@ def _reason_value(reason: Reason | str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Core-owned error protocol (M05, PRD-v2.1 §11.7, RF-50, RNF-15/RNF-16)
+# Core-owned error protocol
 # --------------------------------------------------------------------------- #
 
-#: Closed ``reason`` -> core ``code`` map for attachment operations (§11.7).
+#: Closed ``reason`` -> core ``code`` map for attachment operations.
 _ATTACHMENT_REASON_CODES: Final[dict[str, str]] = {
     "invalid_uid": "E_USAGE",
     "not_found": "E_USAGE",
@@ -224,7 +222,7 @@ _ATTACHMENT_REASON_CODES: Final[dict[str, str]] = {
     "timeout": "E_CLIENT_TIMEOUT",
 }
 
-#: Closed ``reason`` -> core ``code`` map for every other operation (§11.7).
+#: Closed ``reason`` -> core ``code`` map for every other operation.
 _METADATA_REASON_CODES: Final[dict[str, str]] = {
     **_ATTACHMENT_REASON_CODES,
     "not_local": "E_PLUGIN_FAILED",
@@ -236,8 +234,8 @@ _METADATA_REASON_CODES: Final[dict[str, str]] = {
     "unreadable": "E_PLUGIN_FAILED",
 }
 
-#: Core-owned English message templates per reason (§11.7). The plugin never words it.
-#: ``invalid_uid``/``not_found`` have no motive template in §11.7; the core words
+#: Core-owned English message templates per reason. The plugin never words it.
+#: ``invalid_uid``/``not_found`` have no motive template; the core words
 #: their ``E_USAGE`` message itself.
 _MESSAGE_TEMPLATES: Final[dict[str, str]] = {
     "invalid_uid": "invalid message id",
@@ -255,7 +253,7 @@ _MESSAGE_TEMPLATES: Final[dict[str, str]] = {
     "timeout": "did not respond within the timeout",
 }
 
-#: Default hint of an attachment motive when the plugin brings none (§11.7).
+#: Default hint of an attachment motive when the plugin brings none.
 _REASON_HINTS: Final[dict[str, str]] = {
     "not_local": (
         "open the message in the mail client so it downloads the attachment, then retry"
@@ -270,7 +268,7 @@ _REASON_HINTS: Final[dict[str, str]] = {
     "unreadable": "the attachment cannot be read; open it in the mail client",
 }
 
-#: Default actionable hint per core code (English; §11.7 hint column).
+#: Default actionable hint per core code (English).
 _CODE_HINTS: Final[dict[str, str]] = {
     "E_PLUGIN_FAILED": 'run "mailquery doctor" and check the driver entry for details',
     "E_CLIENT_TIMEOUT": (
@@ -298,7 +296,7 @@ class _DeadlineExceeded(Exception):
 
 
 def sanitize_error_field(value: Any, max_bytes: int) -> str:
-    """Sanitize one plugin-owned error field (PRD-v2.1 §11.7, T02).
+    """Sanitize one plugin-owned error field.
 
     Removes ANSI escapes, C0/C1 controls (newlines and tabs included), format
     characters and bidi overrides, then truncates to ``max_bytes`` UTF-8 bytes
@@ -394,12 +392,12 @@ def _timeout_error(driver: str) -> MailqueryError:
 def map_plugin_error(
     exc: PluginError, *, driver: str, attachments: bool
 ) -> MailqueryError:
-    """Translate a plugin :class:`PluginError` to a core-owned error (§11.7).
+    """Translate a plugin :class:`PluginError` to a core-owned error.
 
     The core owns ``code``/``exit`` and the message template; the plugin only
     contributes its closed ``reason`` plus the sanitized ``hint``/``detail``/
     ``log_message``. An unknown/invalid reason is ``E_PLUGIN_FAILED``; the
-    error object never carries the plugin ``code``/``exit`` (UT-ERR-01).
+    error object never carries the plugin ``code``/``exit``.
     """
     reason = _reason_text(getattr(exc, "reason", None))
     detail = sanitize_error_field(getattr(exc, "detail", ""), DETAIL_MAX_BYTES)
@@ -426,8 +424,8 @@ def map_plugin_error(
 def _run_with_deadline(call: Callable[[], _T], deadline: float) -> _T:
     """Run ``call`` in a daemon thread and wait at most ``deadline`` seconds.
 
-    A plugin thread that does not answer cannot be killed (PRD-v2.1 §15 lists it
-    as an accepted risk): it is a daemon, so the process exits anyway, and the
+    A plugin thread that does not answer cannot be killed (an accepted
+    limitation): it is a daemon, so the process exits anyway, and the
     command fails without partial results. The worker re-raises the plugin's own
     exception in the caller thread.
     """
@@ -459,7 +457,7 @@ def _check_elapsed(driver: str, started: float, deadline: float) -> None:
     """Native drivers run inline: report the timeout after the call returns.
 
     The built-in SQLite/COM objects are thread-affine, so moving them to a
-    worker thread would break every command; RNF-16's hard guarantee is kept for
+    worker thread would break every command; the hard deadline is kept for
     external plugins (daemon thread) and Outlook keeps its COM watchdog.
     """
     if time.monotonic() - started > deadline:
@@ -545,7 +543,7 @@ def _valid_body(value: Any) -> bool:
     )
 
 
-#: Return-value validators of the protocol operations (UT-ERR-03.02). External
+#: Return-value validators of the protocol operations. External
 #: drivers must return these shapes; invalid data is ``E_PLUGIN_FAILED``.
 _RESULT_VALIDATORS: Final[dict[str, Callable[[Any], bool]]] = {
     "accounts": _valid_mapping_rows,
@@ -581,7 +579,7 @@ def call_driver(
     internal: bool | None = None,
     timeout: float | None = None,
 ) -> _T:
-    """Single wrapper for every driver operation (M05-T01/T03; C5).
+    """Single wrapper for every driver operation.
 
     The ``code``/``exit`` belong to the closed core set: a :class:`PluginError`
     is mapped by ``reason`` and operation context (attachment vs. the rest), an
@@ -597,8 +595,8 @@ def call_driver(
     )
     deadline = METADATA_TIMEOUT_SECONDS if timeout is None else float(timeout)
     if is_internal:
-        # Inline call: the built-in SQLite/COM objects are thread-affine (known
-        # limit of RNF-16, documented in INTERFACES); Outlook keeps RF-33.
+        # Inline call: the built-in SQLite/COM objects are thread-affine, so the
+        # deadline is only checked after the call; Outlook keeps its COM watchdog.
         started = time.monotonic()
         value = call()
         _check_elapsed(driver, started, deadline)

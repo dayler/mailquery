@@ -1,4 +1,4 @@
-"""Unit tests for the multi-driver engine (UT-MD-01..07; PRD-v2.1 §6.1, §10.2).
+"""Unit tests for the multi-driver engine (UT-MD-01..07; PRD §6.5, §11.2).
 
 Two layers are covered:
 
@@ -368,7 +368,7 @@ class DriverLifecycleTest(MultiDriverCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-MD-02 — merge and total order (AC-04, §10.2.7)
+# UT-MD-02 — merge and total order (AC-04, PRD §11.3)
 # --------------------------------------------------------------------------- #
 
 
@@ -502,7 +502,7 @@ class MergeOrderTest(MultiDriverCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-MD-03 — mailboxes composition (AC-04, §10.2.9)
+# UT-MD-03 — mailboxes composition (AC-04, PRD §11.3)
 # --------------------------------------------------------------------------- #
 
 
@@ -553,7 +553,7 @@ class MailboxesMergeTest(MultiDriverCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-MD-04 — global cursor and lookback (AC-04, §10.2.8)
+# UT-MD-04 — global cursor and lookback (AC-04, PRD §11.2)
 # --------------------------------------------------------------------------- #
 
 
@@ -693,7 +693,7 @@ class LimitsMergeTest(MultiDriverCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-MD-06 — multi-driver log (AC-19, §12.1)
+# UT-MD-06 — multi-driver log (AC-19, PRD §14)
 # --------------------------------------------------------------------------- #
 
 

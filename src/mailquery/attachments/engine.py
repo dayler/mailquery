@@ -1,50 +1,49 @@
-"""Attachment recovery engine: limits, cache hits, staging and publication (M07, C7).
+"""Attachment recovery engine: limits, cache hits, staging and publication.
 
-This module completes the attachment policy started in M06 and is the contract
-M08–M10 consume (PRD-v2.1 RF-43/RF-45–RF-49/RF-51, §10.3, §10.4, §11.2,
-§11.3 rows 11–15, AC-12/AC-13/AC-15/AC-20). It owns, in this order:
+This module completes the attachment policy of the pure screening layer and is
+the contract the commands and backend adapters consume. It owns, in this order:
 
-1. the **name screen of every attachment of the message** (M06 ``screen_names``,
+1. the **name screen of every attachment of the message** (``screen_names``,
    before serving any cache hit);
 2. the **limits with known sizes** (``max_count`` only for ``--all``, including
    cache hits; ``max_file_size_mb``; ``max_total_size_mb``; 1 MiB = 1 048 576
    bytes; strictly greater exceeds);
 3. the **cache lookup** (regular file whose name, size and SHA-256 match the
-   per-message manifest, CR-01; the driver's expected size only feeds the
+   per-message manifest; the driver's expected size only feeds the
    limits) used to report ``cached: true`` and to count real hit sizes; an
    unverified entry at the path is never served: it is replaced on success and
    removed when the recovery fails;
 4. the **first-block content screen of the attachments that will be extracted**
-   (M06 ``screen_content``), mapped with the §11.7 core templates;
+   (``screen_content``), mapped with the core message templates;
 5. the **staging extraction** (opaque files under ``tmp/staging``, hash and
    *magic bytes* already validated) and the **atomic publication**
    (``os.replace`` per file) into ``~/.mailquery/attachments/``.
 
 Nothing is written before step 4 succeeds for every requested attachment; a
 failure before publication leaves no new or partial file in the cache and no
-temporary file of this run in ``tmp/`` (RNF-14). A cache hit never re-validates
+temporary file of this run in ``tmp/``. A cache hit never re-validates
 content; ``--force`` re-extracts and replaces atomically. Driver exceptions are
-expected to arrive already mapped by the M05 wrapper: this module only maps the
+expected to arrive already mapped by the driver wrapper: this module only maps the
 ``unavailable_reason`` metadata field (a data value) and defensively duck-types
 ``reason``-bearing exceptions, because ``attachments/**`` must not import
-``mailquery.plugins`` (UT-ATT-01.09).
+``mailquery.plugins``.
 
-Frozen for M08–M10:
+Stable interface:
 
 * ``AttachmentsEngine(home, config, driver, clock=None)`` where ``config`` is a
-  duck-typed ``AttachmentsConfig`` (M02), ``driver`` a ``MailBackend`` (C1) and
+  duck-typed ``AttachmentsConfig``, ``driver`` a ``MailBackend`` and
   ``clock`` an injectable monotonic clock (tests only).
 * ``recover(uid, indices=None, *, force=False, deadline=None, entries=None)``
-  returning the §11.2 records; ``indices=None`` means ``--all``; ``entries``
+  returning the ``attachment`` records; ``indices=None`` means ``--all``; ``entries``
   are the driver metadata rows already fetched/validated by the command (the
   engine never repeats that call when they are given).
 * ``deadline`` is a zero-argument factory returning the absolute instant (in
   ``clock`` units) at which the extraction of **one** attachment expires, or
   ``None`` for no policy; it is invoked once per attachment, before its first
   block is screened, and the same instant bounds screening and extraction.
-  M08 passes ``lambda: time.monotonic() + 120`` (RNF-16); a ``None`` deadline
-  means the engine imposes no time policy.
-* ``attachments.cache.cached_path(...)`` is the frozen helper for
+  The ``attachment`` command passes ``lambda: time.monotonic() + 120``; a
+  ``None`` deadline means the engine imposes no time policy.
+* ``attachments.cache.cached_path(...)`` is the stable helper for
   ``show.attachments[].cached_path`` (regular files only).
 """
 
@@ -76,19 +75,19 @@ from mailquery.attachments.screening import (
 from mailquery.errors import MailqueryError
 from mailquery.uid import parse_uid
 
-#: One MiB as fixed by the PRD (§13.3): all ``[attachments]`` limits use it.
+#: One MiB: all ``[attachments]`` limits use it.
 MIB: Final[int] = 1_048_576
 
-#: §11.5 C/D hint of a blocked message.
+#: Hint of a blocked message.
 _BLOCKED_HINT: Final[str] = (
     "notify the user to inspect the message and its attachments in the email "
     "client at their own risk; do not retry the same request"
 )
-#: §11.3 reference hint for the attachment indexes.
+#: Hint pointing to the attachment indexes.
 _INDEX_HINT: Final[str] = (
     "run `mailquery show <uid>` to list the attachment indexes"
 )
-#: §11.7 hint of ``E_CLIENT_TIMEOUT``.
+#: Hint of ``E_CLIENT_TIMEOUT``.
 _TIMEOUT_HINT: Final[str] = (
     'run "mailquery doctor" and do not retry in a loop'
 )
@@ -96,9 +95,9 @@ _TIMEOUT_HINT: Final[str] = (
 _ATTACHMENT_ERROR_LOG: Final[str] = "attachment could not be recovered"
 
 #: ``reason`` → ``(code, message fragment, hint)`` for the attachment operations.
-#: Mirrors the §11.7 mapping table without importing ``mailquery.plugins`` (M05
-#: maps runtime driver exceptions before they reach this engine; this table also
-#: maps the ``unavailable_reason`` metadata field).
+#: Mirrors the core reason mapping without importing ``mailquery.plugins`` (the
+#: driver wrapper maps runtime driver exceptions before they reach this engine;
+#: this table also maps the ``unavailable_reason`` metadata field).
 _REASON_RULES: Final[dict[str, tuple[str, str, str]]] = {
     "not_local": (
         UNAVAILABLE_CODE,
@@ -174,7 +173,7 @@ _ERROR_LOG: Final[dict[str, str]] = {
 
 
 class AttachmentResult(TypedDict):
-    """One ``attachment`` JSON record (§11.2): ``saved`` is always true on success."""
+    """One ``attachment`` JSON record: ``saved`` is always true on success."""
 
     index: int
     original_name: str
@@ -187,7 +186,7 @@ class AttachmentResult(TypedDict):
 
 
 class AttachmentLimits(Protocol):
-    """Duck-typed ``config.AttachmentsConfig`` (M02/C2); the engine imports no config."""
+    """Duck-typed ``config.AttachmentsConfig``; the engine imports no config."""
 
     max_file_size_mb: int
     max_total_size_mb: int
@@ -195,7 +194,7 @@ class AttachmentLimits(Protocol):
 
 
 class AttachmentDriver(Protocol):
-    """Duck-typed ``MailBackend`` attachment surface (C1); no backend import."""
+    """Duck-typed ``MailBackend`` attachment surface; no backend import."""
 
     driver: str
 
@@ -277,10 +276,11 @@ class _Deadlines:
 
 
 class AttachmentsEngine:
-    """Limits, staging, cache and atomic publication for one loaded driver (M07).
+    """Limits, staging, cache and atomic publication for one loaded driver.
 
-    The engine does not open the store and does not decide validation rows 1–10
-    (§11.3): the command resolves the uid, the driver and the message first and
+    The engine does not open the store and does not perform the request
+    validation that precedes screening: the command resolves the uid, the
+    driver and the message first and
     may pass the already validated metadata rows through ``entries``.
     """
 
@@ -323,7 +323,7 @@ class AttachmentsEngine:
         ``uid`` is the canonical ``"<driver>:<native_id>"`` string; ``indices``
         is ``None`` for ``--all`` or the ``--index`` 1-based positions. With
         ``entries`` the engine skips its own metadata call (the command already
-        fetched and mapped the rows). Returns one §11.2 record per requested
+        fetched and mapped the rows). Returns one ``attachment`` record per requested
         attachment in index order, or raises :class:`MailqueryError`; a failure
         never returns partial records and never leaves staging files.
         """
@@ -347,7 +347,7 @@ class AttachmentsEngine:
 
         cache = AttachmentCache(self._home, canonical)
 
-        # CR-01: hits are verified against the per-message manifest (name, size
+        # Hits are verified against the per-message manifest (name, size
         # and SHA-256); the driver's expected size only feeds the limits below.
         manifest = cache.read_manifest()
         hits: dict[int, CacheHit] = {}
@@ -397,7 +397,7 @@ class AttachmentsEngine:
         indices: set[int],
         manifest: Manifest,
     ) -> None:
-        """Remove unverified cache entries after a failed recovery (CR-01).
+        """Remove unverified cache entries after a failed recovery.
 
         Best-effort: a removal or manifest failure never masks the original
         error. Registered (verified) files are never touched here.
@@ -563,7 +563,7 @@ class AttachmentsEngine:
 
             # The external cron may delete a cached file while this run is
             # extracting the other attachments: verify the hits once, near the
-            # end, and re-extract a vanished/mutated one a single time (RF-51).
+            # end, and re-extract a vanished/mutated one a single time.
             broken = [
                 index for index in sorted(hits) if not cache.verify(hits[index])
             ]
@@ -598,7 +598,7 @@ class AttachmentsEngine:
             if published:
                 # Register what was published, also when a later publication
                 # failed. Best-effort: an unregistered file is unverified on the
-                # next run and is re-extracted, never served (CR-01).
+                # next run and is re-extracted, never served.
                 try:
                     cache.write_manifest(staging, manifest)
                 except Exception:
@@ -608,7 +608,7 @@ class AttachmentsEngine:
     # -- driver access ------------------------------------------------------ #
 
     def _legacy_uid(self, canonical: str, native_id: str) -> object:
-        """Native uid handed to the driver operations (C1)."""
+        """Native uid handed to the driver operations."""
         try:
             return self._driver.parse_native_id(native_id)
         except MailqueryError:
@@ -622,7 +622,7 @@ class AttachmentsEngine:
     def _metadata(
         self, canonical: str, legacy_uid: object
     ) -> Iterable[Mapping[str, object]]:
-        """Driver attachment metadata (C1); the command normally supplies it."""
+        """Driver attachment metadata; the command normally supplies it."""
         try:
             return self._driver.attachments(legacy_uid)
         except MailqueryError:
@@ -640,7 +640,7 @@ class AttachmentsEngine:
         name: str,
         exc: Exception,
     ) -> MailqueryError | None:
-        """Map a driver exception to the §11.7 attachment code (defensive)."""
+        """Map a driver exception to the core attachment code (defensive)."""
         if isinstance(exc, MailqueryError):
             return exc
         if isinstance(exc, _DeadlineExpired):
@@ -663,7 +663,7 @@ class AttachmentsEngine:
         by_index: Mapping[int, Mapping[str, object]] | None = None,
         tracker: _Deadlines | None = None,
     ) -> MailqueryError:
-        """Build the user-facing error of a failed M06 screen decision."""
+        """Build the user-facing error of a failed screen decision."""
         index = decision.index
         name = decision.name or ""
         if decision.code == BLOCKED_CODE:
@@ -690,7 +690,7 @@ class AttachmentsEngine:
 def _normalize_entries(
     entries: Iterable[Mapping[str, object]],
 ) -> list[dict[str, object]]:
-    """Validate the C1 metadata rows and return them sorted by 1-based index."""
+    """Validate the driver metadata rows and return them sorted by 1-based index."""
     normalized: list[dict[str, object]] = []
     seen: set[int] = set()
     for row in entries:
@@ -740,7 +740,7 @@ def _requested_indices(
     indices: Sequence[int] | None,
     uid: str,
 ) -> list[int]:
-    """Resolve ``--index``/``--all`` against the metadata indexes (§11.3 row 10)."""
+    """Resolve ``--index``/``--all`` against the metadata indexes."""
     available = [int(row["index"]) for row in rows]
     if indices is None:
         return available
@@ -816,7 +816,7 @@ def _mib_ceil(size_bytes: int) -> int:
 
 
 def _reason_of(exc: Exception) -> str | None:
-    """Duck-typed ``PluginError.reason`` (M05); no ``mailquery.plugins`` import."""
+    """Duck-typed ``PluginError.reason``; no ``mailquery.plugins`` import."""
     reason = getattr(exc, "reason", None)
     if reason is None:
         return None

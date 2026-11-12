@@ -6,7 +6,7 @@
 **Publicación:** el `3.0.0` incluirá más features además de estas dos; su implementación se acumula en `develop` y este delta **no se publica por separado**. El bump de versión, el tag y el release se hacen cuando se complete el resto del alcance del `3.0.0` (§0.5, §0.7.3).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** borrador para aprobación. Decisiones de producto de §0.6 aprobadas por el dueño el 2026-11-11. No implementado.
+**Estado:** conciliado en [`PRD.md`](PRD.md) v2.1 el 2026-11-12; sin publicar. **§1–§15 son históricos y sin valor normativo:** la fuente de verdad es `PRD.md`. §0.7 sigue operativo como gate del release `3.0.0` y se archiva al publicarlo.
 **Alcance:** exclusivamente dos features: (1) plugins de backend mediante entry points; (2) recuperación local de adjuntos con `mailquery attachment`. El resto del producto no cambia salvo lo declarado en §0.2.
 
 ---
@@ -125,7 +125,7 @@ En Windows, `3.0.0` cambia exactamente esto; el resto debe quedar idéntico:
 | 🟢 | Implementado y conciliado (evidencia verde) |
 | 🔴 | Bloqueado (se registra el motivo y la fecha) |
 
-Una fila pasa a 🟢 solo con su milestone cerrado, sus AC verdes y la evidencia registrada. La conciliación con `PRD.md` (CL-09) permanece ⚪ por diseño hasta la tarea futura.
+Una fila pasa a 🟢 solo con su milestone cerrado, sus AC verdes y la evidencia registrada. La conciliación con `PRD.md` (CL-09) se cierra con las verificaciones de [`plan/PLAN-RECONCILIATION-FIX.md`](plan/PLAN-RECONCILIATION-FIX.md).
 
 ### 0.7.2 Registro de conciliación (tabla de supresión §0.2)
 
@@ -157,11 +157,11 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 | RC-22 | Rendimiento | M08, M09, M10, M11 | AC-12, AC-20; SMOKE de presupuestos; `PERFORMANCE-BACKLOG.md` | 🟢 |
 | RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | 🟢 |
 | RC-24 | Cambios de comportamiento en macOS | M03, M08, M09 | AC-05, AC-07, AC-12; goldens Apple Mail y SMOKE; fila S/MIME de §0.4 (`show` ⇒ `[]`) | 🟢 |
-| RC-25 | Versión del paquete | Release del `3.0.0` (desarrollo `3.0.0a0`, CR-02) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar; conciliado en PRD.md §22.4 | 🟢 |
+| RC-25 | Versión del paquete | Release futuro del `3.0.0` (fuera de esta fase) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar | ⚪ |
 
 ### 0.7.3 Checklist de conciliación (gate de release `3.0.0`)
 
-Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de implementación de este delta. La fase de implementación cierra con los ítems de features (CL-01, CL-03, CL-04, CL-06, CL-07, CL-10, CL-11 y CL-13) y con CL-02 evidenciado en el PR del último lote de integración; CL-05, CL-08, CL-09 y CL-12 quedan validados o archivados según corresponda.
+Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de implementación de este delta. La fase de implementación cierra con los ítems de features (CL-01, CL-03, CL-04, CL-06, CL-07, CL-10, CL-11 y CL-13) y con CL-02 evidenciado en el PR del último lote de integración; CL-05, CL-08 (en lo que dependa de RC-25) y CL-12 quedan ⚪ pendientes del release futuro; CL-09 se cierra con la conciliación de `PRD.md` v2.1.
 
 | ID | Ítem | Evidencia | Estado |
 |---|---|---|---|
@@ -169,11 +169,11 @@ Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de
 | CL-02 | Suite completa verde en la matriz de CI (3 SO × Python 3.11–3.14) | PR del último lote de integración (I4) en esta fase; la corrida del release queda para el release futuro | 🟢 |
 | CL-03 | SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-AM/SMOKE-ATT-OL verdes en los hosts del dueño (macOS/Windows) o saltadas con motivo | Evidencia de M11-T08 | 🟢 |
 | CL-04 | Gates de solo lectura (TC-03, OL-30) verdes, incluido `attachment` | Evidencia de M09/M10 | 🟢 |
-| CL-05 | Versión `3.0.0`, entry points de backends y instaladores correctos | PKG-02, INS-SMOKE-01; el bump definitivo a 3.0.0 al publicar (develop usa 3.0.0a0, CR-02) | 🟢 |
+| CL-05 | Versión `3.0.0`, entry points de backends y instaladores correctos | PKG-02, INS-SMOKE-01; el bump de versión es parte del release futuro | ⚪ |
 | CL-06 | Documentación consumidora actualizada: READMEs, `INTERFACES.md`, `config.example.toml`, recetas, skills y ayudas | DOC-01..06 | 🟢 |
 | CL-07 | Sin referencias obsoletas (cinco comandos/five commands, uid entero, `attachments` solo `name`, `[scope]` sin driver, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`, `retention_days`) | DOC-01..05, TC-07 y revisión del planificador | 🟢 |
-| CL-08 | Todas las filas de §0.7.2 en 🟢 | Este registro (RC-01..RC-25 en 🟢) | 🟢 |
-| CL-09 | `PRD.md` conciliado normativamente | `PRD.md` v2.1 conciliado con el delta v2.1 y CR-01/CR-02 | 🟢 |
+| CL-08 | Todas las filas de §0.7.2 en 🟢 | Este registro | ⚪ |
+| CL-09 | `PRD.md` conciliado: cambian solo las reglas de §0.2 y las de CR-01/CR-02; el resto es idéntico a v1.3 (redefinido el 2026-11-12, `PLAN-MASTER.md` §11) | Verificaciones V1–V8 de `plan/PLAN-RECONCILIATION-FIX.md` | 🟢 |
 | CL-10 | Dashboard del plan maestro en 🟢 y registro de ejecución completo | `plan/PLAN-MASTER.md` §3 y §11 | 🟢 |
 | CL-11 | Sin dependencias nuevas, sin red en el núcleo e I-1 verificado | PKG-02, gates de solo lectura | 🟢 |
 | CL-12 | Evidencia de release archivada (suite, goldens, CI, hosts) | Release futuro; la fase archiva evidencia de cierre en `docs/plan/evidence/M11.md` | ⚪ |
@@ -183,7 +183,7 @@ Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de
 
 1. El orquestador actualiza §0.7.2 y §0.7.3 al cerrar cada milestone, antes de marcarlo 🟢 en el plan maestro; ambos documentos deben coincidir.
 2. Un cambio del plan que altere el alcance de una fila obliga a actualizar esta tabla en el mismo cambio.
-3. La conciliación con `PRD.md` (aplicar §0.2, renumerar AC, retirar el delta) no forma parte de este plan; cuando se haga, esta sección se sustituye por el registro histórico correspondiente.
+3. La conciliación con `PRD.md` se hizo el 2026-11-12 (`PRD.md` v2.1; los AC conservan sus IDs porque v1.3 no usa AC-xx). El registro y el checklist siguen operativos como gate del release hasta publicar `3.0.0`; después se archivan.
 4. Los cambios aprobados después del cierre de fase se registran en §0.7.5 hasta su conciliación.
 
 ### 0.7.5 Cambios posteriores al cierre (pendientes de conciliación)
@@ -205,7 +205,7 @@ Cambios aprobados por el dueño después del cierre de fase. Se implementan en `
 - **`show` no cambia:** `cached_path` solo comprueba que el archivo exista como archivo regular; no lee el archivo ni el manifiesto. La validación ocurre solo en `attachment`.
 - **Best-effort:** si escribir el manifiesto falla, el comando no falla; el archivo publicado queda sin verificar y se re-extrae en la siguiente ejecución. La caché sigue sin ser estado de la aplicación: sin barrido, purga ni validación al arrancar (RF-51, ADR-24).
 
-**CR-02 — versión:** `develop` anuncia la pre-release `3.0.0a0` (`3.0.0-alpha`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`. Se usa la forma PEP 440 normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag, sin release y sin merge a `main`. La versión de release de §0.5 sigue siendo `3.0.0`; RC-25 y CL-05 quedan conciliados (🟢).
+**CR-02 — versión:** `develop` anuncia la pre-release `3.0.0a0` (`3.0.0-alpha`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`. Se usa la forma PEP 440 normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag, sin release y sin merge a `main`. La versión de release de §0.5 sigue siendo `3.0.0`; RC-25 y CL-05 siguen ⚪.
 
 ---
 

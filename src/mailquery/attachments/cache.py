@@ -1,31 +1,31 @@
-"""Attachment cache, staging area and atomic publication (M07, C7).
+"""Attachment cache, staging area and atomic publication.
 
-Filesystem half of the attachment milestone (PRD-v2.1 RF-45/RF-47/RF-51,
-§10.1, §10.4, §11.3 row 15, RNF-13/RNF-14). :class:`AttachmentCache` owns the
+Filesystem half of the attachment core. :class:`AttachmentCache` owns the
 read side (cache hit detection, ``sha256`` of the served file, the regular-file
 rule of ``show``) and the publication side (private directories, ``os.replace``
 of a staged file, the per-message manifest).
 
 Cache hits are validated against the **per-message manifest**
-``<message_dir>/.manifest.json`` (PRD-v2.1 §0.7.5, CR-01): every published
-attachment is registered with its ``sanitized_name``, ``size_bytes`` and the
+``<message_dir>/.manifest.json``: every published attachment is registered
+with its ``sanitized_name``, ``size_bytes`` and the
 ``sha256`` computed while it was staged (bytes that already passed the name and
 content screen). A hit is a regular file at the deterministic path whose entry
 matches name, size and SHA-256; the driver's expected size is never compared
 (Outlook reports ``Attachment.Size`` with MAPI overhead). Every other entry at
 the path is *unverified*: it is never served and the engine replaces or removes
 it. The message directory and its parents up to ``attachments/`` must be real
-directories (never a symlink or junction). :class:`StagingArea` owns the core staging directory under
+directories (never a symlink or junction). :class:`StagingArea` owns the core
+staging directory under
 ``~/.mailquery/tmp/staging/``: opaque session and file names, ``0700``
 directories and ``0600`` files on POSIX, removal in ``finally`` and cleanup of
 the core's own orphan sessions (never plugin directories nor backend caches).
 
 Nothing here decides policy or composes user-facing messages beyond mapping
-filesystem failures to ``E_IO``/``E_PERMISSION`` (DP-01; §11.3 row 15): the
+filesystem failures to ``E_IO``/``E_PERMISSION``: the
 engine decides limits, screening and cache semantics.
 
 Permissions: ``_SECURE_PERMISSIONS`` is ``False`` on Windows, where the profile
-ACL is inherited and never relaxed (RNF-13); tests patch it to exercise the
+ACL is inherited and never relaxed; tests patch it to exercise the
 Windows branch on POSIX. The test seams ``_chmod``, ``_ensure_private_dir``,
 ``_create_staging_file``, ``_write_chunk`` and ``_atomic_replace`` exist so a
 failure can be injected without patching the ``os`` module globally.
@@ -49,13 +49,13 @@ from mailquery.attachments.paths import attachment_path, cache_root, message_dir
 from mailquery.attachments.sanitize import sanitize_name
 from mailquery.errors import MailqueryError
 
-#: Name of the core staging directory under ``~/.mailquery/tmp`` (§10.1).
+#: Name of the core staging directory under ``~/.mailquery/tmp``.
 STAGING_DIR_NAME: Final[str] = "staging"
 _SESSION_PREFIX: Final[str] = "session-"
 _FILE_SUFFIX: Final[str] = ".part"
 _HASH_CHUNK_BYTES: Final[int] = 1024 * 1024
 
-#: Per-message manifest of the published attachments (CR-01). Sanitized names
+#: Per-message manifest of the published attachments. Sanitized names
 #: always start with ``NN_``, so the leading dot never collides with one.
 MANIFEST_NAME: Final[str] = ".manifest.json"
 MANIFEST_VERSION: Final[int] = 1
@@ -65,13 +65,13 @@ _SHA256_HEX: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}")
 #: ``IO_REPARSE_TAG_NAME_SURROGATE`` bit: symlinks and junctions on Windows.
 _NAME_SURROGATE_BIT: Final[int] = 0x20000000
 
-#: POSIX permissions are applied only where the platform supports them (RNF-13).
+#: POSIX permissions are applied only where the platform supports them.
 _SECURE_PERMISSIONS: bool = os.name != "nt"
 
 
 @dataclass(frozen=True, slots=True)
 class CacheHit:
-    """A verified cached file that can be served without re-extraction (RF-45)."""
+    """A verified cached file that can be served without re-extraction."""
 
     path: Path
     size_bytes: int
@@ -80,7 +80,7 @@ class CacheHit:
 
 @dataclass(frozen=True, slots=True)
 class ManifestEntry:
-    """One registered attachment of the per-message manifest (CR-01)."""
+    """One registered attachment of the per-message manifest."""
 
     sanitized_name: str
     size_bytes: int
@@ -99,11 +99,11 @@ def cached_path(
     *,
     platform: str | None = None,
 ) -> Path | None:
-    """Return the served cache path of one attachment, or ``None`` (RF-43, C7).
+    """Return the served cache path of one attachment, or ``None``.
 
-    Frozen contract for M08: ``show`` computes ``message.attachments[].cached_path``
+    Stable contract: ``show`` computes ``message.attachments[].cached_path``
     with this function. The path is the deterministic
-    ``<home>/attachments/<driver>/<native_id>/<sanitized_name>`` built by M06;
+    ``<home>/attachments/<driver>/<native_id>/<sanitized_name>`` built by ``paths``;
     it is returned only when the entry is a **regular file** (``lstat``-based, so
     a symlink, directory or device is not cache). The name-safety rule
     (``classify_name``) belongs to ``show``, not to this helper, and nothing is
@@ -165,7 +165,7 @@ class StagedAttachment:
         self._finished = True
 
     def publish(self, target: Path) -> None:
-        """Atomically move the finished file to ``target`` (RF-45, RNF-14)."""
+        """Atomically move the finished file to ``target``."""
         self.finish()
         _reject_non_regular_target(target)
         try:
@@ -192,7 +192,7 @@ class StagedAttachment:
 
 
 class StagingArea:
-    """Core staging session under ``<home>/tmp/staging`` (M07; §10.1, RNF-14).
+    """Core staging session under ``<home>/tmp/staging``.
 
     The root is created lazily on the first staged file, so a pure cache-hit
     invocation writes nothing. Each run gets one opaque session directory
@@ -264,10 +264,10 @@ class StagingArea:
 
 
 class AttachmentCache:
-    """Read side and publication side of ``~/.mailquery/attachments`` (RF-45, C7).
+    """Read side and publication side of ``~/.mailquery/attachments``.
 
-    ``uid`` is the canonical ``"<driver>:<native_id>"`` string (C3); the path is
-    always the M06 ``message_dir``/``attachment_path`` result, so the layout is
+    ``uid`` is the canonical ``"<driver>:<native_id>"`` string; the path is
+    always the ``message_dir``/``attachment_path`` result, so the layout is
     deterministic and shared with ``show``. No function here creates anything
     until :meth:`ensure_message_dir` (publication) or :meth:`staging` is used.
     """
@@ -337,14 +337,14 @@ class AttachmentCache:
         index: int,
         manifest: Manifest | None = None,
     ) -> CacheHit | None:
-        """Return the cached file as a verified hit, or ``None`` for a miss (RF-45).
+        """Return the cached file as a verified hit, or ``None`` for a miss.
 
         A hit requires real message directories, a regular file at the
         deterministic path (``lstat``: symlink, directory or device are misses)
         and a manifest entry with the same ``sanitized_name``, the same size
         and the same SHA-256 as the file. The driver's expected size is never
         compared. Any filesystem error while probing/hashing the cache is a
-        miss too (best-effort cache, RF-51), so a file deleted by the external
+        miss too (best-effort cache), so a file deleted by the external
         cron is re-extracted once.
         """
         if manifest is None:
@@ -378,7 +378,7 @@ class AttachmentCache:
         return True
 
     def verify(self, hit: CacheHit) -> bool:
-        """Re-check a hit before serving it (tolerates concurrent deletion, RF-51)."""
+        """Re-check a hit before serving it (tolerates concurrent deletion)."""
         try:
             info = os.stat(hit.path, follow_symlinks=False)
         except OSError:
@@ -444,7 +444,7 @@ class AttachmentCache:
         return target
 
     def write_manifest(self, staging: StagingArea, manifest: Manifest) -> None:
-        """Atomically replace the message manifest with ``manifest`` (CR-01).
+        """Atomically replace the message manifest with ``manifest``.
 
         The document is staged (``0600``) and published with ``os.replace``
         like an attachment. An empty manifest removes the file instead.
@@ -521,7 +521,7 @@ class AttachmentCache:
 
 
 def _chmod(path: Path, mode: int) -> None:
-    """Apply a POSIX mode; on Windows the profile ACL is inherited (RNF-13)."""
+    """Apply a POSIX mode; on Windows the profile ACL is inherited."""
     if not _SECURE_PERMISSIONS:
         return
     try:
@@ -566,7 +566,7 @@ def _reject_non_regular_target(target: Path) -> None:
     """A directory (or other non-regular entry) at the cache path is an I/O failure.
 
     ``os.replace`` onto a directory raises ``IsADirectoryError`` on POSIX but
-    ``PermissionError`` on Windows; DP-01 keeps ``E_PERMISSION`` for permission
+    ``PermissionError`` on Windows; ``E_PERMISSION`` is kept for permission
     problems, so classify a directory explicitly as ``E_IO``.
     """
     try:
@@ -644,7 +644,7 @@ def _open_no_follow(path: Path):  # type: ignore[no-untyped-def]
 
 
 def _parse_manifest(document: object) -> Manifest:
-    """Validate a manifest document; malformed entries are dropped (CR-01)."""
+    """Validate a manifest document; malformed entries are dropped."""
     if not isinstance(document, Mapping):
         return {}
     if document.get("version") != MANIFEST_VERSION:
@@ -688,7 +688,7 @@ def _hash_file(path: Path) -> tuple[str, int]:
 
 
 def _map_os_error(exc: OSError, operation: str) -> MailqueryError:
-    """Map a filesystem failure to ``E_PERMISSION``/``E_IO`` (DP-01, §11.3 row 15)."""
+    """Map a filesystem failure to ``E_PERMISSION``/``E_IO``."""
     if isinstance(exc, PermissionError):
         return MailqueryError(
             "E_PERMISSION",

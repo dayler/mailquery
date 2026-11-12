@@ -46,7 +46,7 @@ def version_line_regex(backend: str) -> str:
     """Regex of the current ``mailquery -v`` line (M11: derived from ``__version__``).
 
     The line keeps the base prefix, the native ``backend <driver>`` and the additive
-    ``; drivers: <driver> <version>, ...`` part (PRD-v2.1 §11.9); the expected version
+    ``; drivers: <driver> <version>, ...`` part (PRD §12.9); the expected version
     is always ``mailquery.__version__`` so the tests never pin a literal.
     """
     version = re.escape(mailquery.__version__)

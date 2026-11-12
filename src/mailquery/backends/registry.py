@@ -1,7 +1,6 @@
-"""Backend registry: entry-point discovery, contract validation and lazy loading (C1).
+"""Backend registry: entry-point discovery, contract validation and lazy loading.
 
-The registry is the only place that knows how drivers are discovered (PRD-v2.1
-§6.1 RF-35, §11.7, AC-01/AC-02; plan §5.1 C1):
+The registry is the only place that knows how drivers are discovered:
 
 * it discovers the ``mailquery.backends`` entry point group with
   :mod:`importlib.metadata` and merges a static fallback for the built-in
@@ -18,8 +17,8 @@ The registry is the only place that knows how drivers are discovered (PRD-v2.1
 * built-in drivers are listed from a static metadata table, so their metadata
   never imports ``mailquery.backends.apple_mail`` / ``outlook``.
 
-The module imports only the standard library and the ``mailquery`` package
-(RNF-12): it never imports a backend implementation, the store or the CLI.
+The module imports only the standard library and the ``mailquery`` package:
+it never imports a backend implementation, the store or the CLI.
 """
 
 from __future__ import annotations
@@ -53,7 +52,7 @@ INTERNAL_TARGETS: Final[dict[str, str]] = {
     "outlook": "mailquery.backends.outlook:OutlookBackend",
 }
 
-#: Capability maps declared by the built-in drivers (RF-38; M09/M10 keep them).
+#: Capability maps declared by the built-in drivers.
 INTERNAL_CAPABILITIES: Final[dict[str, Capabilities]] = {
     "apple_mail": {
         "network": False,
@@ -119,7 +118,7 @@ def _entry_point_version(entry_point: Any) -> str:
 
 
 def _internal_available(driver: str, platform: str) -> bool:
-    """DP-02: list an internal driver only on the platform it serves for ``--version``."""
+    """List an internal driver only on the platform it serves for ``--version``."""
     if driver == "outlook":
         return platform == "win32"
     return platform != "win32"
@@ -219,7 +218,7 @@ class BackendRegistry:
     # -- validation and loading --------------------------------------------- #
 
     def declared(self, drivers: Iterable[str]) -> list[DriverMetadata]:
-        """Validated metadata of the given drivers, in the requested order (M02 config)."""
+        """Validated metadata of the given drivers, in the requested order."""
         return [self.info(driver) for driver in drivers]
 
     def info(self, driver: str) -> DriverMetadata:
@@ -260,7 +259,7 @@ class BackendRegistry:
         built-in drivers are instantiated without arguments. An entry point that
         already returns a backend instance is used as is. A constructor failure
         is ``E_PLUGIN_INCOMPATIBLE`` (exit 3): the driver was declared but could
-        not start, and the command must fail without partial results (M04).
+        not start, and the command must fail without partial results.
         """
         metadata = self.info(driver)
         loaded = self.load(driver)
@@ -384,7 +383,7 @@ def _import_target(target: str) -> Any:
 
 
 def _validated_capabilities(driver: str, capabilities: Any) -> Capabilities:
-    """Validate the closed capability map of one driver (AC-02, RF-38)."""
+    """Validate the closed capability map of one driver."""
     hint = (
         "declare network, readonly, body_local, attachments and native_order "
         "with the values of the API 1 contract"

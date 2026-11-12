@@ -1,12 +1,12 @@
 """Attachment core: catalog, blocking, sanitization, paths, screening and engine.
 
-Public API of milestones M06 (C6, PRD-v2.1 §10.3) and M07 (C7, §10.1/§10.4/
-§11.3 rows 11-15). M06 is the pure policy layer: it never writes files, never
-reads the cache and never opens a path. M07 adds the filesystem engine
+Public API of the attachment core. The policy layer (catalog, blocking,
+sanitization, paths, screening) is pure: it never writes files, never reads the
+cache and never opens a path. On top of it sit the filesystem engine
 (:class:`AttachmentsEngine`) and the cache/staging layer
-(:class:`AttachmentCache`, :class:`StagingArea`) consumed by M08
-(``show``/``attachment``) and by the M09/M10 adapters. Only stdlib and the
-mailquery package are imported (RNF-12).
+(:class:`AttachmentCache`, :class:`StagingArea`), consumed by the ``show`` and
+``attachment`` commands and by the backend adapters. Only stdlib and the
+mailquery package are imported.
 """
 
 from __future__ import annotations
@@ -156,14 +156,14 @@ __all__ = [
     "read_first_block",
     "screen_content",
     "screen_names",
-    # cache/staging (M07)
+    # cache/staging
     "STAGING_DIR_NAME",
     "AttachmentCache",
     "CacheHit",
     "StagedAttachment",
     "StagingArea",
     "cached_path",
-    # engine (M07)
+    # engine
     "MIB",
     "AttachmentDriver",
     "AttachmentLimits",

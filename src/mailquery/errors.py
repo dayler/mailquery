@@ -3,14 +3,14 @@
 Every user-facing failure is represented by a :class:`MailqueryError` carrying
 a stable ``E_*`` code (the contract consumed by the agent harness), a human
 message and an actionable hint. The CLI maps each error to its exit code
-(PRD section 12.6) and renders it as a JSON object on ``stdout``.
+and renders it as a JSON object on ``stdout``.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-# Exit code -> error codes (PRD 12.6 and PRD-v2.1 §11.7). Exit 0 means success.
+# Exit code -> error codes. Exit 0 means success.
 _EXIT_ERRORS: Final[dict[int, tuple[str, ...]]] = {
     1: ("E_INTERNAL",),
     2: (
@@ -68,7 +68,7 @@ class MailqueryError(Exception):
 
     ``code`` is the stable machine-readable identifier, ``message`` the short
     explanation and ``hint`` an actionable suggestion shown to the harness.
-    ``log_message`` is the same text without the data PRD 14 forbids in the log
+    ``log_message`` is the same text without the data that must not reach the log
     (paths, folders, accounts, terms, uids...); the log writes it when present
     and ``message`` otherwise.
     """
@@ -96,7 +96,7 @@ class MailqueryError(Exception):
         return f"{self.code}: {self.message}"
 
     def to_payload(self, command: str) -> dict:
-        """Render this error as the JSON error contract (PRD 12.5)."""
+        """Render this error as the JSON error contract."""
         return {
             "ok": False,
             "command": command,

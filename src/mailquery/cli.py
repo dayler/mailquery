@@ -3,7 +3,7 @@
 Only this module writes to ``stdout``/``stderr``. It parses ``argv`` with
 ``argparse`` (``-h``/``--help`` is the documented non-JSON exception), loads
 the configuration, sets up logging, takes the run lock, dispatches one of the
-six commands and renders either success or a JSON error object (PRD 12).
+six commands and renders either success or a JSON error object.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ from mailquery.state import RunLock, StateStore
 
 COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
 # Backend check that the resolution of the ``[scope]`` blocks depends on, by
-# backend name (PRD 12.8; annex A.7 and B.8).
+# backend name.
 _RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
 #: Mail client named by the doctor text report, by backend name.
 _CLIENT_NAMES = {"apple_mail": "Apple Mail", "outlook": "Outlook"}
@@ -202,7 +202,7 @@ class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
 
 
 class _AttachmentHelpFormatter(_HelpFormatter):
-    """Attachment help: 17-column help texts and the literal wraps of PRD-v2.1 §11.4."""
+    """Attachment help: 17-column help texts with literal line wraps."""
 
     def __init__(self, prog: str) -> None:
         argparse.RawDescriptionHelpFormatter.__init__(
@@ -210,15 +210,15 @@ class _AttachmentHelpFormatter(_HelpFormatter):
         )
 
     def _split_lines(self, text: str, width: int) -> list[str]:
-        # §11.4 fixes the line breaks of the attachment help: preserve the
-        # explicit newlines and do not re-wrap (every line stays under 100 cols).
+        # The attachment help has fixed line breaks: preserve the explicit
+        # newlines and do not re-wrap (every line stays under 100 cols).
         return text.splitlines()
 
     def _format_action(self, action: argparse.Action) -> str:
         if isinstance(action, argparse._SubParsersAction):
             return super()._format_action(action)
         # Keep the help column at 17 even with short invocations (``<uid>``,
-        # ``--all``): the PRD §11.4 block uses that alignment.
+        # ``--all``).
         self._action_max_length = max(self._action_max_length, 15)
         return super()._format_action(action)
 
@@ -257,7 +257,7 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 
 def _version_line() -> str:
-    """Return the ``--version`` line (RF-31, PRD 12.9) without touching any backend."""
+    """Return the ``--version`` line without touching any backend."""
     import platform  # lazy: pulls _wmi on Windows, only needed for --version
 
     if sys.platform == "win32":
@@ -456,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_parser.set_defaults(command="show")
     _style_parser(show_parser, root=False)
-    # The format is validated by AppleMailBackend.parse_uid in main(), not by argparse (PRD 12.4).
+    # The format is validated by AppleMailBackend.parse_uid in main(), not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
     attachment_parser = subparsers.add_parser(
@@ -473,7 +473,7 @@ def build_parser() -> argparse.ArgumentParser:
     _style_parser(attachment_parser, root=False)
     attachment_parser._positionals.title = "Positional arguments"  # noqa: SLF001
     # ``--index``/``--all`` are mutually exclusive and the value is validated in
-    # main() (row 1 of §11.3) to keep the literal error texts.
+    # main() to keep the literal error texts.
     attachment_parser.add_argument(
         "--index",
         metavar="N",
@@ -540,7 +540,7 @@ def _main(
     injection points; they are not CLI flags nor environment variables of the
     public contract. ``mail_root`` or ``accounts_db`` select Apple Mail on any
     OS; ``backend`` is an already built instance (the Outlook fake); otherwise
-    the backend of the platform is selected (RF-26).
+    the backend of the platform is selected.
     """
     configure_streams()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
@@ -554,7 +554,7 @@ def _main(
     command = str(args.command)
     registry = BackendRegistry()
     if command == "attachment":
-        # Row 1 of §11.3: exactly one of --index/--all and a positive --index,
+        # Exactly one of --index/--all and a positive --index,
         # before the home exists, the config is read or the store is opened.
         try:
             args.attachment_indices = _attachment_selection(args)
@@ -562,7 +562,7 @@ def _main(
             return _report_error(exc, command)
     if command in ("show", "attachment"):
         # Before the home is created, the config is read or the store is opened:
-        # generic uid syntax plus the installed driver (PRD-v2.1 §11.3 row 2) and,
+        # generic uid syntax plus the installed driver and,
         # for the native driver, its ``parse_native_id`` (pure, offline).
         try:
             args.uid, args.uid_driver, args.uid_native_id = _parse_command_uid(
@@ -629,7 +629,7 @@ def _parse_command_uid(
     backend: Any,
     registry: BackendRegistry,
 ) -> tuple[Any, str, str]:
-    """Validate the command uid before creating the home (PRD-v2.1 §11.3 row 2, AC-05).
+    """Validate the command uid before creating the home.
 
     Returns ``(native_uid_or_None, driver, native_id)``: the native uid of the
     platform driver (ready for the backend) or ``None`` when the prefix belongs
@@ -657,7 +657,7 @@ def _parse_command_uid(
 def _require_command_driver_in_scope(
     args: argparse.Namespace, config: Config, native_name: str
 ) -> None:
-    """``show``/``attachment``: the uid's driver must be declared in ``[scope]`` (RF-36).
+    """``show``/``attachment``: the uid's driver must be declared in ``[scope]``.
 
     Runs after ``config.toml`` is read and before any driver is opened: an
     installed driver with no ``[scope]`` block is ``E_ACCOUNT_NOT_IN_SCOPE``
@@ -671,7 +671,7 @@ def _require_command_driver_in_scope(
 
 
 def _platform_override(mail_root: Path | None, accounts_db: Path | None) -> str | None:
-    """Apple Mail on any OS when a test passes its store locations (plan 4.2)."""
+    """Apple Mail on any OS when a test passes its store locations."""
     return "darwin" if (mail_root is not None or accounts_db is not None) else None
 
 
@@ -690,7 +690,7 @@ def _make_backend(
 
 
 def _bind_command(backend: Any, command: str) -> None:
-    """Tell a backend which command runs (Outlook's D-03 watchdog reports it on a timeout)."""
+    """Tell a backend which command runs (Outlook's COM watchdog reports it on a timeout)."""
     bind = getattr(backend, "bind_command", None)
     if callable(bind):
         bind(command)
@@ -714,7 +714,7 @@ def _close_backend(backend: Any) -> None:
 def _declared_driver_names(config: "Config", native_name: str) -> tuple[str, ...]:
     """Declared drivers of the command, with the native fallback of a config with no blocks.
 
-    RF-36 opens only the declared drivers; a config with no ``[scope]`` block keeps
+    Only the declared drivers are opened; a config with no ``[scope]`` block keeps
     the 2.0.1 behavior (the native driver is the default driver, used for
     discovery and ``W_NO_ACCOUNTS``). The order is the one of
     ``config.declared_drivers`` (native first, then the explicit blocks).
@@ -737,7 +737,7 @@ def _open_drivers(
     registry: BackendRegistry,
     describe: bool = True,
 ) -> dict[str, Any]:
-    """Open the drivers the command consults (M04-T01/T05).
+    """Open the drivers the command consults.
 
     The native driver is the injected/platform backend; every other declared
     driver is loaded and instantiated by the registry (API 1: the entry point is
@@ -768,10 +768,10 @@ def _validate_command_native_id(
 ) -> None:
     """Validate the native part of a plugin ``show``/``attachment`` uid with the parser.
 
-    The plugin receives only ``<native_id>`` (RF-40) and validates it with
+    The plugin receives only ``<native_id>`` and validates it with
     ``parse_native_id``; the CLI runs that check after loading the declared
-    driver (PRD-v2.1 §11.3 row 5) and hands the result to ``run_show``. The call
-    goes through the M05 driver wrapper: a plugin ``reason`` (``invalid_uid``,
+    driver and hands the result to ``run_show``. The call
+    goes through the ``call_driver`` wrapper: a plugin ``reason`` (``invalid_uid``,
     ``not_found``, ...) becomes the core code/exit and an unmapped failure is
     ``E_PLUGIN_FAILED``, never ``E_INTERNAL``.
     """
@@ -859,7 +859,7 @@ def _run_command(
                 describe=command != "attachment",
             )
             if command == "attachment":
-                # Row 5 of §11.3: the loaded driver must be able to materialize
+                # The loaded driver must be able to materialize
                 # attachments before any store is opened.
                 _require_attachment_capabilities(
                     opened.get(str(getattr(args, "uid_driver", "") or native_name)),
@@ -1017,7 +1017,7 @@ def _execute(
 
 
 def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
-    """Row 1 of §11.3: exactly one of ``--index``/``--all`` and a positive integer index."""
+    """Exactly one of ``--index``/``--all`` and a positive integer index."""
     has_index = getattr(args, "index", None) is not None
     if has_index == bool(getattr(args, "all", False)):
         raise MailqueryError(
@@ -1040,7 +1040,7 @@ def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
 
 
 def _require_attachments_enabled(config: Config) -> None:
-    """Row 4 of §11.3: ``[attachments].enabled`` only gates the ``attachment`` command."""
+    """``[attachments].enabled`` only gates the ``attachment`` command."""
     if config.attachments.enabled:
         return
     raise MailqueryError(
@@ -1053,7 +1053,7 @@ def _require_attachments_enabled(config: Config) -> None:
 
 
 def _require_attachment_capabilities(instance: Any, driver: str) -> None:
-    """Row 5 of §11.3: only a driver that can materialize attachments may continue."""
+    """Only a driver that can materialize attachments may continue."""
     capabilities = getattr(instance, "capabilities", None) or {}
     mode = str(capabilities.get("attachments", "local"))
     if mode not in ("none", "remote"):
@@ -1079,7 +1079,7 @@ def _attachment_not_found(uid: str) -> MailqueryError:
 
 
 def _attachment_out_of_range(uid: str, index: int, count: int) -> MailqueryError:
-    """``E_USAGE`` of the §11.5 example G (row 10 of §11.3)."""
+    """``E_USAGE`` for an attachment index outside ``1..count`` of the message."""
     return MailqueryError(
         "E_USAGE",
         f"attachment index {index} is out of range: message {uid} has "
@@ -1110,12 +1110,13 @@ def _run_attachment(
     drivers: Mapping[str, Any],
     native: str | None,
 ) -> dict:
-    """Rows 6–15 of §11.3 for the ``attachment`` command (M08/C8).
+    """Run the ``attachment`` command on the opened driver of the uid.
 
     The CLI resolves the account/scope, checks the message and its attachment
-    indexes (rows 6–10) and hands the extraction to the M07 engine (rows 11–15)
-    with the 120 s deadline of RNF-16. The success payload is the §11.2 contract;
-    the engine returns one record per requested attachment.
+    indexes and hands the extraction to ``AttachmentsEngine`` with the 120 s
+    ``EXTRACTION_TIMEOUT_SECONDS`` deadline. The success payload carries ``uid``,
+    ``output_dir``, ``count``, ``attachments`` and ``warnings``; the engine returns
+    one record per requested attachment.
     """
     driver = str(getattr(args, "uid_driver", "") or "")
     native_uid = getattr(args, "uid", None)
@@ -1147,8 +1148,8 @@ def _run_attachment(
             "declare the account in ~/.mailquery/config.toml",
             "the message belongs to an account that is not declared",
         )
-    # Row 8: the driver may raise the protocol error when the message is
-    # S/MIME or unreadable (convention C8/C9); the core maps it through M05.
+    # The driver may raise the protocol error when the message is S/MIME or
+    # unreadable; the ``wrap_driver`` wrapper maps it to a core error.
     entries = list(wrapped.attachments(native_uid) or [])
     if not entries:
         raise MailqueryError(
@@ -1334,10 +1335,10 @@ def _run_doctor(
 def _bind_doctor_timeout(
     backend: Any, run: "_DoctorRun", json_output: bool, logger: Any, client: str
 ) -> None:
-    """D-03 in ``doctor`` (Outlook): on a COM timeout, complete the report and exit 0.
+    """``doctor`` (Outlook): on a COM timeout, complete the report and exit 0.
 
     The hook runs in the watchdog thread while the main thread is blocked in
-    COM: it completes the checks per PRD 12.8 (the running check with the
+    COM: it completes the checks (the running check with the
     timeout text, its dependents ``not evaluated``), writes the report in the
     ``checks[]`` order, flushes and ends the process with ``os._exit(0)``.
     """
@@ -1438,7 +1439,7 @@ def _render_doctor_report(payload: dict, *, client: str = "Apple Mail") -> str:
 
 
 class _DoctorRun:
-    """Progress of one ``doctor`` run, shared with the D-03 timeout hook.
+    """Progress of one ``doctor`` run, shared with the COM timeout hook.
 
     ``checks`` holds the finished common checks by name, ``backend_checks`` the
     backend's once they are done and ``config`` the parsed ``config.toml``.
@@ -1455,7 +1456,7 @@ class _DoctorRun:
         self.checks[name] = {"name": name, "ok": bool(ok), "detail": str(detail)}
 
     def ordered(self) -> list[dict]:
-        """Common checks around the backend's, in the order of PRD 12.8."""
+        """``python``, ``home``, ``driver``, the backend's, then ``config``, ``state``, ``lock``."""
         result = [
             self.checks[name] for name in ("python", "home", "driver") if name in self.checks
         ]
@@ -1468,7 +1469,7 @@ class _DoctorRun:
     def after_timeout(
         self, backend: Any, backend_checks: list[dict] | None, detail: str
     ) -> list[dict]:
-        """The report after a COM timeout (PRD 12.8), without calling the mail client again.
+        """The report after a COM timeout, without calling the mail client again.
 
         With ``backend_checks`` the timeout hit a backend check: the ``config``
         resolution then depends on a failed check and is ``not evaluated``.
@@ -1489,9 +1490,9 @@ def _collect_doctor_checks(
     *,
     registry: BackendRegistry | None = None,
 ) -> list[dict]:
-    """Common checks plus ``backend.doctor_checks()``, in the order of PRD 12.8.
+    """Common checks plus ``backend.doctor_checks()``, in report order.
 
-    Evaluation order (D-03): the checks that never call the mail client first
+    Evaluation order: the checks that never call the mail client first
     (``python``, ``home``, ``config`` syntax, ``driver``, ``state``, ``lock``),
     then the backend checks and last the ``config`` resolution.
     """
@@ -1513,12 +1514,12 @@ def _collect_doctor_checks(
                 problems.append(f"missing {directory.name or directory}")
                 continue
             if windows:
-                continue  # POSIX modes are meaningless on Windows (D-04)
+                continue  # POSIX modes are meaningless on Windows
             mode = stat.S_IMODE(directory.stat().st_mode)
             if mode != 0o700:
                 problems.append(f"{directory.name or directory} mode={oct(mode)}")
         if windows and not problems:
-            # Windows: the home must exist and be writable (probe file, D-04).
+            # Windows: the home must exist and be writable (probe file).
             probe = home_path / "tmp" / f".doctor-probe-{os.getpid()}"
             try:
                 probe.write_bytes(b"")
@@ -1617,7 +1618,7 @@ def _backend_driver_name(backend: Any) -> str:
 
 
 def _bool_text(value: Any) -> str:
-    """``true``/``false`` for the doctor detail (PRD-v2.1 §11.6)."""
+    """``true``/``false`` for the doctor detail."""
     if value is True:
         return "true"
     if value is False:
@@ -1626,7 +1627,7 @@ def _bool_text(value: Any) -> str:
 
 
 def _format_driver_metadata(metadata: dict[str, Any]) -> str:
-    """One ``driver`` detail entry: api, package version and the capability map (§11.6)."""
+    """One ``driver`` detail entry: api, package version and the capability map."""
     capabilities = metadata.get("capabilities") or {}
     return (
         f"{metadata.get('driver')} (api={metadata.get('plugin_api')}; "
@@ -1640,7 +1641,7 @@ def _format_driver_metadata(metadata: dict[str, Any]) -> str:
 
 
 def _driver_failure_detail(driver: str, exc: Exception) -> str:
-    """Failure entry of the ``driver`` check: reason and hint of the error (§11.6)."""
+    """Failure entry of the ``driver`` check: reason and hint of the error."""
     if isinstance(exc, MailqueryError):
         hint = f" (hint: {exc.hint})" if exc.hint else ""
         return f"{driver}: {exc.code}: {exc.message}{hint}"
@@ -1667,7 +1668,7 @@ def _native_driver_metadata(backend: Any, registry: BackendRegistry) -> dict[str
 
 
 def _record_driver_check(run: _DoctorRun, backend: Any, registry: BackendRegistry) -> None:
-    """``driver``: every declared driver is installed with a valid API 1 contract (§11.6).
+    """``driver``: every declared driver is installed with a valid API 1 contract.
 
     The native driver of the platform (the backend under diagnosis) is listed
     first when a ``[scope]`` block has no prefix; the explicitly declared drivers
@@ -1707,15 +1708,15 @@ def _record_driver_check(run: _DoctorRun, backend: Any, registry: BackendRegistr
 
 
 def _record_config_check(run: _DoctorRun, backend: Any) -> None:
-    """``config``: syntax plus the resolution of the ``[scope]`` blocks (PRD 12.8, RF-25).
+    """``config``: syntax plus the resolution of the ``[scope]`` blocks.
 
-    The resolution depends first on the ``driver`` check (M02) and then on a
-    check of the backend (annex A.7 / B.8); when one failed, the mail client is
+    The resolution depends first on the ``driver`` check and then on a
+    check of the backend; when one failed, the mail client is
     not called and the detail says ``not evaluated: <check> failed``. Blocks of
-    a driver other than the native one keep their account resolution for the
-    multi-driver phase, so they are only reported as declared. A declared
+    a driver other than the native one are not resolved here, so they are only
+    reported as declared. A declared
     account that resolves to an excluded store (Outlook) adds
-    ``W_STORE_EXCLUDED`` to the detail, which keeps ``ok=true`` (PRD 15.3).
+    ``W_STORE_EXCLUDED`` to the detail, which keeps ``ok=true``.
     """
     by_name = {str(check.get("name")): check for check in run.backend_checks or []}
     dependency = _RESOLUTION_DEPENDENCY.get(str(getattr(backend, "driver", "")))
@@ -1776,8 +1777,8 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
             else:
                 for entry in config.scopes:
                     if entry.driver is not None and entry.driver != native:
-                        # M04 resolves the accounts of every declared driver; in
-                        # this phase the ``driver`` check already validated it.
+                        # Accounts of a non-native driver are not resolved here; the
+                        # ``driver`` check already validated that driver.
                         lines.append(f"{entry.key} → declared for driver {entry.driver}")
                         continue
                     try:
@@ -1801,7 +1802,7 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
                             f"{entry.key} → {scope.account_label} ({scope.account_uuid}): "
                             + ", ".join(["INBOX"] + folders)
                         )
-            # W_STORE_EXCLUDED of each declared excluded store, once (PRD 15.3).
+            # W_STORE_EXCLUDED of each declared excluded store, once.
             lines.extend(_store_excluded_warning(entry) for entry in excluded)
             if problems:
                 run.record("config", False, "; ".join(problems))
@@ -1829,11 +1830,11 @@ def _log_error(logger: Any, command: str, error: MailqueryError) -> None:
     if logger is None:
         return
     # Never log message/hint: they may contain account emails, folders or paths.
-    # ``log_message`` is the text without that data (PRD 14); fall back to the
+    # ``log_message`` is the text without that data; fall back to the
     # plain message only when the error carries no sanitized variant.
     text = error.log_message if error.log_message is not None else error.message
     if error.code == "E_INTERNAL" and error.__traceback__ is not None:
-        # PRD 14: an E_INTERNAL (a COM failure included) also logs its traceback.
+        # An E_INTERNAL (a COM failure included) also logs its traceback.
         # Only the frames and the exception type: the message is already sanitized above.
         import traceback  # lazy: only needed when logging an E_INTERNAL
 

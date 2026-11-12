@@ -1,7 +1,7 @@
-"""Deterministic attachment name sanitization (M06, C6).
+"""Deterministic attachment name sanitization.
 
 ``sanitize_name`` turns an allowed ``original_name`` into the safe, deterministic
-and idempotent-representation of PRD-v2.1 §10.3.3: the final name already
+and idempotent representation: the final name already
 carries the ``NN_`` prefix, so the cache path must never add it again. The
 function is pure and platform independent; the same ``(original_name, index)``
 always produces the same ``sanitized_name``.
@@ -16,16 +16,16 @@ from __future__ import annotations
 import unicodedata
 from typing import Final
 
-#: Extension budget, dot included (§10.3.3).
+#: Extension budget, dot included.
 MAX_EXTENSION_BYTES: Final[int] = 20
-#: Name without the ``NN_`` prefix: root + extension (§13.3).
+#: Name without the ``NN_`` prefix: root + extension.
 MAX_NAME_BYTES: Final[int] = 150
-#: Final name, ``NN_`` prefix included (§10.3.3, §13.3).
+#: Final name, ``NN_`` prefix included.
 MAX_SANITIZED_BYTES: Final[int] = 153
-#: Embedded name budget in ``message``/``warnings``/``hint`` (§10.3.3 note).
+#: Embedded name budget in ``message``/``warnings``/``hint``.
 DISPLAY_NAME_MAX_BYTES: Final[int] = 120
 
-#: Characters replaced one by one with ``_`` (never collapsed, §10.3.3).
+#: Characters replaced one by one with ``_`` (never collapsed).
 SUBSTITUTION_CHARACTERS: Final[frozenset[str]] = frozenset(' <>:"/\\|?*')
 
 _CONTROL_CATEGORIES: Final[frozenset[str]] = frozenset({"Cc", "Cf", "Cs", "Co"})
@@ -44,7 +44,7 @@ def truncate_utf8(value: str, max_bytes: int) -> str:
 
 
 def sanitize_name(original_name: str, index: int) -> str:
-    """Return the deterministic ``sanitized_name`` of §10.3.3 for ``index`` (1-based).
+    """Return the deterministic ``sanitized_name`` for ``index`` (1-based).
 
     NFKC is applied once; empty/blank/dot-only names become ``attachment``;
     leading/trailing spaces and dots are trimmed and leading dots removed; each
@@ -84,7 +84,7 @@ def display_name(
 ) -> str:
     """Return the embeddable form of a name: no controls, no path segments, <= 120 bytes.
 
-    §10.3.3 note: names embedded in ``message``/``warnings``/``hint`` are shown
+    Names embedded in ``message``/``warnings``/``hint`` are shown
     without controls, without path segments and truncated to 120 bytes.
     """
     if not isinstance(original_name, str):

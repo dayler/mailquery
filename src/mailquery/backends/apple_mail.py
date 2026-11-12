@@ -1,7 +1,7 @@
 """Apple Mail backend: adapter over ``store.py``, ``emlx.py`` and ``accounts.py``.
 
 Holds the SQL and the Apple-Mail-specific helpers that used to live in
-``search.py`` (PRD 9.2, 9.3, A.3-A.7). The adapter adds no behavior of its own:
+``search.py``. The adapter adds no behavior of its own:
 the queries, their ordering, the warnings and the retry through
 :func:`mailquery.store.run_query` are the ones the CLI has always used. The
 ``Envelope Index`` is only queried through the read-only connection owned by
@@ -58,7 +58,7 @@ _ROW_COLUMNS = (
 
 _PLACEHOLDER_CHUNK = 500
 
-# Apple Mail uids are plain integers (PRD 12.4).
+# Apple Mail uids are plain integers.
 _UID_PATTERN = re.compile(r"[+-]?[0-9]+")
 
 
@@ -299,17 +299,17 @@ class AppleMailBackend(MailBackend):
         }
 
     def attachments(self, uid: Any) -> list[dict[str, Any]]:
-        """Ordered attachment metadata of one message (C1, M09; RF-43/RF-46/RF-47).
+        """Ordered attachment metadata of one message.
 
         A readable ``.emlx`` lists one row per MIME attachment part (index 1..N
         in part order, original name, decoded size and availability). S/MIME
-        messages (encrypted or signed) raise ``E_ATTACHMENT_UNREADABLE`` — the
-        message-level signal of the C8/C9 convention: ``show`` returns ``[]`` and
-        ``attachment`` reports row 8 before "no attachments". A missing or
-        unreadable body falls back to the ``Envelope Index`` names as 2.0.1 did,
-        with ``unavailable_reason="not_local"``. ``.partial.emlx`` parts are
-        externalized: their file is resolved best-effort (``unsupported`` when it
-        cannot be verified, PRD-v2.1 §15). Never writes: only reads the store.
+        messages (encrypted or signed) raise ``E_ATTACHMENT_UNREADABLE`` — a
+        message-level signal: ``show`` returns ``[]`` and ``attachment`` reports
+        it before "no attachments". A missing or unreadable body falls back to
+        the ``Envelope Index`` names, with ``unavailable_reason="not_local"``.
+        ``.partial.emlx`` parts are externalized: their file is resolved
+        best-effort (``unsupported`` when it cannot be verified). Never writes:
+        only reads the store.
         """
         native_uid = _native_uid(uid)
         found = self.find_message(native_uid)
@@ -336,7 +336,7 @@ class AppleMailBackend(MailBackend):
         ]
 
     def attachment_stream(self, uid: Any, index: int) -> Iterable[bytes]:
-        """Decoded bytes of attachment ``index`` of one message (C1, M09-T03).
+        """Decoded bytes of attachment ``index`` of one message.
 
         Reads the local ``.emlx`` (or the verifiable externalized file of a
         ``.partial.emlx``) and yields decoded chunks; never writes and never
@@ -356,7 +356,7 @@ class AppleMailBackend(MailBackend):
 
     @staticmethod
     def parse_uid(raw: Any) -> int:
-        """Validate the ``show`` uid of Apple Mail: an integer (PRD 12.4).
+        """Validate the ``show`` uid of Apple Mail: an integer.
 
         Pure and offline: ``cli`` calls it before it creates the home, reads the
         config or opens the store. ``0`` and negative integers are valid uids
@@ -373,7 +373,7 @@ class AppleMailBackend(MailBackend):
 
     @staticmethod
     def parse_native_id(native_id: str) -> int:
-        """Validate the native part of a prefixed uid: an integer (C1, RF-40).
+        """Validate the native part of a prefixed uid: an integer.
 
         Pure and offline. The core splits ``"<driver>:<native_id>"`` at the first
         ``:`` and hands only ``native_id`` to the adapter; ``0`` and negative
@@ -391,7 +391,7 @@ class AppleMailBackend(MailBackend):
     def doctor_checks(self) -> list[dict[str, Any]]:
         """``store``, ``envelope_index``, ``schema``, ``readonly_strategy``, ``accounts_db``.
 
-        Same texts and dependencies as PRD A.7: ``envelope_index`` needs
+        Dependencies: ``envelope_index`` needs
         ``store``; ``schema`` and ``readonly_strategy`` need ``envelope_index``.
         The store opened for the checks is closed before returning; the
         resolution of ``[scope]`` blocks (``config``) is a common check.
@@ -760,7 +760,7 @@ def _native_uid(uid: Any) -> int:
 def _emlx_path(
     store: "EnvelopeStore", mailbox: "Mailbox | None", native_uid: int
 ) -> Path | None:
-    """``.emlx`` path of one message; resolution failures are a miss (M09)."""
+    """``.emlx`` path of one message; resolution failures are a miss."""
     if mailbox is None:  # pragma: no cover - the store maps every message row
         return None
     try:
@@ -772,7 +772,7 @@ def _emlx_path(
 def _stored_attachment_rows(
     connection: sqlite3.Connection, tables: frozenset[str], native_uid: int
 ) -> list[dict[str, Any]]:
-    """``Envelope Index`` attachment names when the body cannot be read (2.0.1).
+    """``Envelope Index`` attachment names when the body cannot be read.
 
     The core reports them as ``not_local``: the names are known but the bytes
     cannot be recovered locally; ``show`` keeps ``W_ATTACHMENTS_UNAVAILABLE``.
@@ -791,7 +791,7 @@ def _stored_attachment_rows(
 
 
 def _smime_unreadable(native_uid: int) -> MailqueryError:
-    """``E_ATTACHMENT_UNREADABLE`` message-level signal of S/MIME messages (C8/C9)."""
+    """``E_ATTACHMENT_UNREADABLE`` message-level signal of S/MIME messages."""
     return MailqueryError(
         "E_ATTACHMENT_UNREADABLE",
         f"message uid {native_uid} is S/MIME protected and cannot be extracted",

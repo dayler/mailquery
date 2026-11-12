@@ -1,11 +1,11 @@
-"""Attachment cache paths (M06, C6).
+"""Attachment cache paths.
 
 ``message_dir``/``attachment_path`` build the deterministic
-``~/.mailquery/attachments/<driver>/<native_id>/<sanitized_name>`` path of
-PRD-v2.1 §10.3.3 without touching the disk. When the path (or the ``<native_id>``
+``~/.mailquery/attachments/<driver>/<native_id>/<sanitized_name>`` path
+without touching the disk. When the path (or the ``<native_id>``
 component) would exceed the platform limit, the component is replaced by the
 stable 32-hex identifier of ``SHA-256(uid UTF-8)`` exposed by
-:func:`mailquery.uid.stable_identifier` (D9: conservative 240-byte path budget on
+:func:`mailquery.uid.stable_identifier` (conservative 240-byte path budget on
 Windows, the real POSIX component/``PATH_MAX`` limits elsewhere).
 
 ``message_dir`` reserves the maximum ``sanitized_name`` budget when it decides
@@ -27,7 +27,7 @@ from mailquery.uid import split_uid, stable_identifier
 
 #: Directory under the application home that holds the attachment cache.
 ATTACHMENTS_DIR_NAME: Final[str] = "attachments"
-#: Conservative full-path budget on Windows (§10.3.3, D9).
+#: Conservative full-path budget on Windows.
 WINDOWS_PATH_BUDGET_BYTES: Final[int] = 240
 #: Per-component limit used when ``pathconf`` is unavailable.
 POSIX_COMPONENT_MAX_FALLBACK: Final[int] = 255
@@ -46,7 +46,7 @@ def path_limits(home: str | Path, *, platform: str | None = None) -> tuple[int, 
 
     ``platform`` is a test injection point (defaults to ``sys.platform``): on
     ``win32`` the conservative 240-byte path budget and the 255-byte component
-    limit of D9 apply; elsewhere the real ``PC_NAME_MAX``/``PC_PATH_MAX`` of the
+    limit apply; elsewhere the real ``PC_NAME_MAX``/``PC_PATH_MAX`` of the
     filesystem that contains ``home`` are used.
     """
     current = sys.platform if platform is None else platform
@@ -63,7 +63,7 @@ def message_dir(
 ) -> Path:
     """Return the attachment directory of ``uid`` without creating it.
 
-    ``uid`` is the canonical ``"<driver>:<native_id>"`` string (C3); a legacy
+    ``uid`` is the canonical ``"<driver>:<native_id>"`` string; a legacy
     unprefixed uid resolves with the native driver. ``<native_id>`` is replaced
     by :func:`stable_identifier` when the component or the full path (reserving
     the maximum sanitized filename) would exceed the platform limit.

@@ -16,7 +16,7 @@ def backend_class(*, platform: str | None = None) -> "type[MailBackend]":
     """Backend class that :func:`get_backend` would build for ``platform``.
 
     Nothing is instantiated or opened, so static members such as
-    ``parse_uid`` can be used before the mail client is touched (PRD 12.4).
+    ``parse_uid`` can be used before the mail client is touched.
     """
     current = sys.platform if platform is None else platform
     if current == "win32":
@@ -41,7 +41,7 @@ def get_backend(
     accounts_db: Path | None = None,
     tmp_root: Path | None = None,
 ) -> "MailBackend":
-    """Select the backend by platform (RF-26): ``win32`` is Outlook, anything else Apple Mail.
+    """Select the backend by platform: ``win32`` is Outlook, anything else Apple Mail.
 
     The Outlook module is imported lazily and only for ``win32``, so no other platform
     ever imports ``win32com``. ``outlook_app``, ``registry``, ``security_center`` and
@@ -72,7 +72,7 @@ def get_backend(
     )
 
 
-# The registry (C1) re-exported here so the CLI and ``doctor`` import one place.
+# The registry re-exported here so the CLI and ``doctor`` import one place.
 # It only knows the metadata contract: importing it never imports a backend.
 from mailquery.backends.registry import (  # noqa: E402 - after the selection helpers
     BackendRegistry,

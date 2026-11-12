@@ -281,7 +281,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($IsWindowsHost) {
-    # Final check (PRD 13.2): pywin32 importable from the pipx venv and Outlook backend selected.
+    # Final check: pywin32 importable from the pipx venv and Outlook backend selected.
     $hint = "run: pipx reinstall mailquery"
     $venvPython = Get-PipxVenvPython
     if (-not $venvPython) {

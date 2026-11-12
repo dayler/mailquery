@@ -1,7 +1,7 @@
 """Installable-looking plugin double for the API 1 contract (M01; extended by M04).
 
 The double represents an external backend whose author only imports the public
-package :mod:`mailquery.plugins` (PRD-v2.1 §9.3, plan §7.4): it must not import
+package :mod:`mailquery.plugins` (PRD §9.2, plan §7.4): it must not import
 ``mailquery.backends`` nor the store. Tests inject its metadata through
 :class:`FakeEntryPoint` so the registry and ``--version`` can be exercised
 without ``pip install`` (CI never installs the package; plan §7.5).

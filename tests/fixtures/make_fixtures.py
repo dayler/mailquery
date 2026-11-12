@@ -106,7 +106,7 @@ class FixtureAttachment:
     carries no decoded content and the bytes live in a separate file under
     ``Data/<shards>/Attachments/<uid>/<name>``. ``external_file=False`` writes no
     such file, so the adapter reports ``unsupported`` (not verifiable in
-    production; PRD-v2.1 §15). ``corrupt`` writes an invalid base64 payload so
+    production; PRD §23.1). ``corrupt`` writes an invalid base64 payload so
     the MIME part cannot be decoded.
     """
 
@@ -877,7 +877,7 @@ def build_store(
 def prefixed_uid(native_uid: int | str, driver: str = "apple_mail") -> str:
     """Test-only helper: the prefixed uid a command emits for a fixture native uid.
 
-    PRD-v2.1 RF-40 makes every emitted uid ``"<driver>:<native_id>"``; the data
+    PRD RF-40 makes every emitted uid ``"<driver>:<native_id>"``; the data
     fixtures keep their native uids (Apple Mail integers) and the tests build the
     expected JSON values with this helper.
     """

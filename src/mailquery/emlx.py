@@ -1,4 +1,4 @@
-"""``.emlx`` path resolution and MIME parsing (PRD 9.5, 17).
+"""``.emlx`` path resolution and MIME parsing.
 
 Resolves ``uid -> path`` with an O(1) formula (version uuid + decimal shards),
 falls back to a recursive search only when the formula misses, and parses the
@@ -26,7 +26,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: Header names copied from the MIME block into :class:`EmlxMessage.headers`.
 HEADER_NAMES: tuple[str, ...] = ("From", "To", "Cc", "Subject", "Date", "Message-ID")
 
-#: Warning codes shared with the CLI JSON contract (INTERFACES section 4).
+#: Warning codes shared with the CLI JSON contract.
 W_EMLX_MISSING = "W_EMLX_MISSING"
 W_EMLX_CORRUPT = "W_EMLX_CORRUPT"
 W_BODY_UNREADABLE = "W_BODY_UNREADABLE"
@@ -370,7 +370,7 @@ def _decode_part(part: Message) -> str:
 
 
 def _attachment_names(message: Message) -> tuple[str, ...]:
-    """Original names of the attachment parts, one entry per part (M09, RF-43).
+    """Original names of the attachment parts, one entry per part.
 
     A message may carry two attachments with the same name; the ``index`` of
     ``show``/``attachment`` is the part position, so names are not deduplicated
@@ -405,15 +405,15 @@ def _smime_kind(message: Message) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
-# Attachment parts (M09: C1 ``attachments``/``attachment_stream`` support)
+# Attachment parts (``attachments``/``attachment_stream`` support)
 # --------------------------------------------------------------------------- #
 
-#: Chunk size used to hand decoded attachment bytes to the core (M09-T03).
+#: Chunk size used to hand decoded attachment bytes to the core.
 ATTACHMENT_CHUNK_SIZE: int = 64 * 1024
 
 
 class AttachmentReadError(Exception):
-    """A local attachment cannot be read; ``reason`` follows PRD-v2.1 §11.7.
+    """A local attachment cannot be read; ``reason`` is a closed plugin error reason.
 
     ``not_local`` / ``unsupported`` map to ``E_ATTACHMENT_UNAVAILABLE`` and
     ``corrupt`` / ``unreadable`` to ``E_ATTACHMENT_UNREADABLE`` (the core builds
@@ -427,14 +427,14 @@ class AttachmentReadError(Exception):
 
 @dataclass(frozen=True)
 class EmlxAttachment:
-    """Ordered attachment metadata of one ``.emlx`` (M09, RF-43/RF-46/RF-47).
+    """Ordered attachment metadata of one ``.emlx``.
 
     ``index`` is the 1-based part position shared by ``show`` and ``attachment``;
     ``native_order_key`` is that position as text (Apple Mail orders attachments
-    numerically, C1); ``size_bytes`` is the decoded size (or the externalized
+    numerically); ``size_bytes`` is the decoded size (or the externalized
     file size) when known; ``unavailable_reason`` is ``None`` for a local
     attachment, ``corrupt`` for an undecodable MIME part and ``unsupported`` for
-    an externalized part whose file is not verifiable (PRD-v2.1 §15).
+    an externalized part whose file is not verifiable.
     ``part_path`` is the multipart position used to find externalized files.
     """
 
@@ -449,7 +449,7 @@ class EmlxAttachment:
 
 @dataclass(frozen=True)
 class EmlxAttachments:
-    """Result of :func:`parse_attachments` (M09)."""
+    """Result of :func:`parse_attachments`."""
 
     path: Path
     partial: bool
@@ -464,7 +464,7 @@ def parse_attachments(path: Path, *, native_uid: int | None = None) -> EmlxAttac
 
     A readable body lists one item per MIME part with a filename, in part order.
     ``.partial.emlx`` messages externalize their attachments: each item is
-    resolved against the Apple Mail layout (best effort, PRD-v2.1 §15) and is
+    resolved against the Apple Mail layout (best effort) and is
     ``unsupported`` when the file cannot be verified. Corrupt base64 payloads
     are ``corrupt``. An absent or unparseable file comes back with
     ``readable=False`` (the adapter falls back to the ``Envelope Index`` names).
@@ -493,7 +493,7 @@ def parse_attachments(path: Path, *, native_uid: int | None = None) -> EmlxAttac
 def attachment_stream(
     path: Path, index: int, *, native_uid: int | None = None
 ) -> Iterator[bytes]:
-    """Decoded bytes of the attachment ``index`` (1-based) in chunks (M09-T03).
+    """Decoded bytes of the attachment ``index`` (1-based) in chunks.
 
     Inline payloads are base64/quoted-printable-decoded; externalized parts of a
     ``.partial.emlx`` stream the raw file found by :func:`external_attachment_path`.
@@ -535,7 +535,7 @@ def external_attachment_path(
 
     Apple Mail keeps the parts under ``Data/<shards>/Attachments/<uid>/<part>/``
     next to ``Messages/`` ([partial-emlx-converter layout]); the layout is not
-    verified in production (PRD-v2.1 §15), so several candidates are tried and a
+    verified in production, so several candidates are tried and a
     miss means ``unsupported``. Only regular files are accepted (no symlinks).
     """
     if native_uid is None or not name:
@@ -627,7 +627,7 @@ def _attachment_items(
     partial: bool,
     native_uid: int | None,
 ) -> tuple[EmlxAttachment, ...]:
-    """Build the ordered attachment items of a readable message (M09)."""
+    """Build the ordered attachment items of a readable message."""
     items: list[EmlxAttachment] = []
     for part_path, part, name in _attachment_identity(message):
         index = len(items) + 1
@@ -704,7 +704,7 @@ def _decode_attachment_part(part: Message) -> bytes:
         if not compact:
             return b""
         # Strict validation: Python's e-mail decoder tolerates invalid base64 and
-        # would return garbage, hiding a corrupt part (M09 ``corrupt`` reason).
+        # would return garbage, hiding a corrupt part (``corrupt`` reason).
         return base64.b64decode(compact, validate=True)
     payload = part.get_payload(decode=True)
     if payload is None:

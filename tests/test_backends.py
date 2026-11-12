@@ -50,7 +50,7 @@ from tests.fixtures.make_fixtures import (
     write_config,
 )
 
-# Operations and metadata declared by the backend protocol v1 (C1; PRD-v2.1 §6.1).
+# Operations and metadata declared by the backend protocol v1 (C1; PRD §6.5).
 EXPECTED_ABSTRACT_OPERATIONS = frozenset(
     {
         "driver",

@@ -4382,7 +4382,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
 
 
 class OutlookAttachmentMaterializationTests(_AttachmentCase):
-    """UT-OL-ATT-02: COM materialization, staging and cleanup (AC-10/AC-12, §15)."""
+    """UT-OL-ATT-02: COM materialization, staging and cleanup (AC-10/AC-12, PRD §23.1)."""
 
     def test_ut_ol_att_02_01_local_attachment_is_materialized_in_staging(self) -> None:
         """UT-OL-ATT-02.01: SaveAsFile writes a 0600 regular file under a 0700 staging session."""

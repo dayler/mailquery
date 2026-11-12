@@ -38,7 +38,7 @@ MAILBOX_ID = 1
 NATIVE_UID = 83143
 MESSAGE_ID = "<attachment-83143@fixture.example>"
 
-#: Default ordered attachment metadata (the three attachments of §11.5 example A).
+#: Default ordered attachment metadata (the three attachments of PRD §12.5 example A).
 DEFAULT_ATTACHMENTS: list[dict[str, Any]] = [
     {
         "index": 1,

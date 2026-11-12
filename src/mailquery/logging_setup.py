@@ -1,7 +1,7 @@
 """Logging setup: plain text, rotation by size, never in ``stdout``.
 
 ``stdout`` is reserved for the JSON contract; every diagnostic goes to
-``~/.mailquery/logs/mailquery.log`` (PRD 14). The format is log4j-like and
+``~/.mailquery/logs/mailquery.log``. The format is log4j-like and
 includes the ``run=`` correlation id so a harness call can be traced.
 """
 
@@ -12,10 +12,10 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-# ``asctime`` without a date format renders ``YYYY-MM-DD HH:MM:SS,mmm`` (PRD 14).
+# ``asctime`` without a date format renders ``YYYY-MM-DD HH:MM:SS,mmm``.
 LOG_FORMAT = "%(asctime)s %(levelname)-5s %(name)s run=%(run_id)s %(message)s"
 
-BACKUP_COUNT = 5  # rotated files kept (PRD 14, fixed)
+BACKUP_COUNT = 5  # rotated files kept (fixed)
 DEFAULT_MAX_SIZE_MB = 10
 
 LEVELS: dict[str, int] = {

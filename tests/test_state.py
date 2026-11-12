@@ -1,4 +1,4 @@
-"""Tests for :mod:`mailquery.state` (PRD.md 11.2, 18, 21.3; PRD-v2.1 §10.2.5-6).
+"""Tests for :mod:`mailquery.state` (PRD.md 11.2, 18, 21.3; PRD §11.2).
 
 Covers the atomic ``state.json`` lifecycle (defaults, roundtrip, 0600 mode,
 corruption), the schema-1 to schema-2 uid migration (UT-ST-06/07), the ``new``
@@ -375,7 +375,7 @@ class StateStoreTest(unittest.TestCase):
 
 
 class MigrationTest(unittest.TestCase):
-    """UT-ST-06.01-.03: schema-1 uid migration by value type (PRD-v2.1 §10.2.5, D8)."""
+    """UT-ST-06.01-.03: schema-1 uid migration by value type (PRD §11.2, D8)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
@@ -477,7 +477,7 @@ class MigrationTest(unittest.TestCase):
 
 
 class Schema2ValidationTest(unittest.TestCase):
-    """UT-ST-07: schema-2 validation and ring pruning (PRD-v2.1 §10.2.6)."""
+    """UT-ST-07: schema-2 validation and ring pruning (PRD §11.2)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
@@ -625,7 +625,7 @@ class Schema2ValidationTest(unittest.TestCase):
 
 
 class RecordNewTest(unittest.TestCase):
-    """Cursor advancement, ring cap and ordering semantics (PRD-v2.1 §10.2.7)."""
+    """Cursor advancement, ring cap and ordering semantics (PRD §11.3)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
@@ -856,7 +856,7 @@ class RunLockTest(unittest.TestCase):
 
 
 class PeekThroughRunNewTest(unittest.TestCase):
-    """``--peek`` must not persist the cursor (PRD 18, 12.3; PRD-v2.1 UT-ST-06.04/.05)."""
+    """``--peek`` must not persist the cursor (PRD 18, 12.3; plan UT-ST-06.04/.05)."""
 
     _PREFIXED_WINDOW = {
         "apple_mail:83143",

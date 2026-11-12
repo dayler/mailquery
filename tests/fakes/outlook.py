@@ -266,7 +266,7 @@ OOM_MEMBERS: dict[str, dict[str, str | None]] = {
         "FileName": None,
         "DisplayName": None,
         "PropertyAccessor": "PropertyAccessor",
-        # M10 COM exception (PRD-v2.1 §0.2): Size/Type are local metadata and
+        # M10 COM exception (PRD §4): Size/Type are local metadata and
         # SaveAsFile is the single allowed materialization operation.
         "Size": None,
         "Type": None,

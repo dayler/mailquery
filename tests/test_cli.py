@@ -265,7 +265,7 @@ class HelpContractTests(_CliTestCase):
         return stdout
 
     def test_ut_atc_09_01_root_help_lists_six_commands_and_exit_line(self) -> None:
-        """UT-ATC-09.01: root --help lists the six commands and the §11.1 exit line."""
+        """UT-ATC-09.01: root --help lists the six commands and the PRD §12.7 exit line."""
         unused_home = self.fx.root / "unused-home"
         code, stdout, stderr = self.run_cli(["--help"], home=unused_home)
         self.assertEqual(code, 0)
@@ -300,7 +300,7 @@ class HelpContractTests(_CliTestCase):
         self.assertFalse(unused_home.exists(), "--help must not touch the filesystem")
 
     def test_ut_atc_09_02_attachment_help_matches_the_prd(self) -> None:
-        """UT-ATC-09.02: ``attachment --help`` is the literal text of PRD-v2.1 §11.4."""
+        """UT-ATC-09.02: ``attachment --help`` is the literal text of PRD §12.7."""
         stdout = self.help_text("attachment")
         self.assertEqual(stdout, _ATTACHMENT_HELP_EXPECTED)
         self.assert_human_readable(stdout)
@@ -645,7 +645,7 @@ class SuccessContractTests(_CliTestCase):
 
 class ErrorContractTests(_CliTestCase):
     def test_ut_cli_09_01_error_codes_map_to_documented_exit_codes(self) -> None:
-        """UT-CLI-09.01: each of the 32 E_* codes of PRD-v2.1 §11.7 maps to its exit code."""
+        """UT-CLI-09.01: each of the 32 E_* codes of PRD §12.6 maps to its exit code."""
         cases = (
             ("E_USAGE", 2),
             ("E_CONFIG_INVALID", 2),
@@ -670,7 +670,7 @@ class ErrorContractTests(_CliTestCase):
             ("E_CLIENT_BUSY", 5),
             ("E_OUTLOOK_NOT_RUNNING", 6),
             ("E_INTERNAL", 1),
-            # PRD-v2.1 §11.7 new codes (M01).
+            # PRD §12.6 new codes (M01).
             ("E_DRIVER_UNKNOWN", 2),
             ("E_ATTACHMENTS_DISABLED", 2),
             ("E_PLUGIN_INCOMPATIBLE", 3),
@@ -1502,7 +1502,7 @@ class DoctorTests(_CliTestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DRV-05 — doctor `driver` check (AC-02, AC-18, PRD-v2.1 §11.6)
+# UT-DRV-05 — doctor `driver` check (AC-02, AC-18, PRD §12.8)
 # --------------------------------------------------------------------------- #
 
 MACOS_DRIVER_ORDER = [
@@ -2128,7 +2128,7 @@ class AttachmentArgumentTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_02_01_exactly_one_mode_is_required(self) -> None:
-        """UT-ATC-02.01: no mode or both ⇒ E_USAGE with the §11.3 literal text."""
+        """UT-ATC-02.01: no mode or both ⇒ E_USAGE with the PRD §12.11 literal text."""
         for argv in (
             ["attachment", self.UID],
             ["attachment", self.UID, "--index", "1", "--all"],
@@ -2143,7 +2143,7 @@ class AttachmentArgumentTests(AttachmentTestBase):
                 )
 
     def test_ut_atc_02_02_invalid_index_values(self) -> None:
-        """UT-ATC-02.02: ``--index`` 0/-1/abc/1.5 ⇒ the §11.3 literal error."""
+        """UT-ATC-02.02: ``--index`` 0/-1/abc/1.5 ⇒ the PRD §12.11 literal error."""
         for value in ("0", "-1", "abc", "1.5"):
             with self.subTest(value=value):
                 payload = self.assert_error(
@@ -2295,7 +2295,7 @@ class AttachmentArgumentTests(AttachmentTestBase):
         )
 
     def test_ut_atc_02_09_adjacent_row_precedence(self) -> None:
-        """UT-ATC-02.09: §11.3 row order is respected on its adjacent-row boundaries."""
+        """UT-ATC-02.09: PRD §12.11 row order is respected on its adjacent-row boundaries."""
         # Row 10 (index range) before row 11 (name blocking).
         backend = self.attachment_backend(
             attachments=[
@@ -2415,7 +2415,7 @@ class AttachmentValidationTests(AttachmentTestBase):
                 self.assertNotIn("has no attachments", payload["error"]["message"])
 
     def test_ut_atc_03_04_index_out_of_range_text(self) -> None:
-        """UT-ATC-03.04: ``--index N > M`` ⇒ the §11.5 example G message and hint."""
+        """UT-ATC-03.04: ``--index N > M`` ⇒ the PRD §12.5 example G message and hint."""
         backend = self.attachment_backend()
         payload = self.assert_error(
             2,
@@ -2490,7 +2490,7 @@ class AttachmentJsonCacheTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_04_01_exact_json_contract(self) -> None:
-        """UT-ATC-04.01: the §11.2 JSON shape with an absolute output_dir and eight fields."""
+        """UT-ATC-04.01: the PRD §12.11 JSON shape with an absolute output_dir and eight fields."""
         backend = self.attachment_backend()
         code, stdout, _ = self.run_attachment(
             ["attachment", self.UID, "--index", "2"], backend
@@ -2553,7 +2553,7 @@ class AttachmentJsonCacheTests(AttachmentTestBase):
         )
 
     def test_ut_atc_04_03_blocked_message_text_and_no_files(self) -> None:
-        """UT-ATC-04.03: a blocked message ⇒ E_ATTACHMENT_BLOCKED (exit 4) with §11.5 C/D text."""
+        """UT-ATC-04.03: a blocked message ⇒ E_ATTACHMENT_BLOCKED (exit 4) with PRD §12.5 C/D text."""
         backend = self.attachment_backend(
             attachments=[
                 {"index": 1, "name": "factura.pdf", "size_bytes": 8,
@@ -2694,7 +2694,7 @@ class AttachmentReasonTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_06_01_unavailable_reasons(self) -> None:
-        """UT-ATC-06.01: not_local/not_downloaded/unsupported/network ⇒ the §11.7 message/hint."""
+        """UT-ATC-06.01: not_local/not_downloaded/unsupported/network ⇒ the PRD §12.6 message/hint."""
         cases = {
             "not_local": "is not available in the local store",
             "not_downloaded": "is not available in the local store",

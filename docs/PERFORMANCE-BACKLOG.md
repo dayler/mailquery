@@ -9,7 +9,7 @@ Medición **histórica** del 2026-11-04, `develop` @ `11b81fa`, Mac del dueño, 
 (`backend apple_mail`). Store: 3 cuentas, 44 carpetas, 148.054 mensajes (Gmail
 30/137.873; iCloud 10/10.178; `On My Device` 4/3).
 
-## Presupuestos de adjuntos (PRD-v2.1 §12.2)
+## Presupuestos de adjuntos (PRD §19)
 
 Presupuesto p95 de `mailquery attachment` (delta no publicado; la versión vigente
 del paquete es 2.0.1):
@@ -71,7 +71,7 @@ Se re-miden en el host macOS del dueño los presupuestos de §12.2 y los de
 `SMOKE-NEW.07` (`mailboxes` y `show`). Los resultados se registran aquí y en
 `docs/plan/evidence/M11.md` (la escribe el orquestador); si el host no puede
 medir la extracción real de Outlook, queda como deuda/host pendiente y no bloquea
-el cierre (PRD-v2.1 §15).
+el cierre (PRD §23.1).
 
 Medición del 2026-11-11, worktree de M11 (`feature/prd-v2.1-w3` + docs M11),
 Mac del dueño, macOS 27.0.1 arm64, Python 3.12.13, versión `__version__` = 2.0.1,
@@ -91,7 +91,7 @@ Los dos fallos de `SMOKE-NEW.07` (`mailboxes`, `show`) son la **deuda conocida**
 del host macOS del dueño (plan maestro §7.6); no son fallos nuevos del delta y
 M11 los registra sin convertirlos en criterio de aceptación. La extracción real
 de Outlook (materialización COM) sigue pendiente del host Windows del dueño
-(riesgo aceptado, PRD-v2.1 §15).
+(riesgo aceptado, PRD §23.1).
 
 ## Impacto
 
@@ -116,7 +116,7 @@ contadores intactos.
 
 - [`PRD.md` §19](PRD.md) — presupuestos p95.
 - [`tests/test_smoke.py`](../tests/test_smoke.py) — SMOKE-NEW.07 y SMOKE-ATT.
-- [`PRD-v2.1.md` §12.2](PRD-v2.1.md) — presupuestos de `attachment`.
+- [`PRD.md` §19](PRD.md) — presupuestos de `attachment`.
 - [`src/mailquery/search.py`](../src/mailquery/search.py) — `run_mailboxes`.
 - [`src/mailquery/cli.py`](../src/mailquery/cli.py) — `duration_ms` de `event=end`.
 - [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3 —

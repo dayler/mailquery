@@ -1,6 +1,6 @@
 """Synthetic attachment samples for the M06 tests (UT-ATT-01..05).
 
-The tables mirror PRD-v2.1 §10.3.1, §10.3.2 and §10.3.3 literally and are kept
+The tables mirror PRD §10.3.1, §10.3.2 and §10.3.3 literally and are kept
 independent from ``mailquery.attachments`` so a regression in the catalog or in
 the name rules cannot make its own test pass. No sample touches the disk: the
 content helpers only build ``bytes`` and the ``entry``/``entries`` helpers only
@@ -13,7 +13,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Content samples (§10.3.1 point 2): signatures that block the whole message.
+# Content samples (PRD §10.3.1 point 2): signatures that block the whole message.
 # ---------------------------------------------------------------------------
 
 #: Mach-O 32/64 in its four byte-order flavours plus the universal/fat header.
@@ -99,15 +99,15 @@ def text_bytes() -> bytes:
 
 
 def empty_bytes() -> bytes:
-    """Return the zero-byte stream that §10.3.1 declares valid."""
+    """Return the zero-byte stream that PRD §10.3.1 declares valid."""
     return b""
 
 
 # ---------------------------------------------------------------------------
-# Name samples (§10.3.1 point 1 and §10.3.2).
+# Name samples (PRD §10.3.1 point 1 and §10.3.2).
 # ---------------------------------------------------------------------------
 
-#: The dangerous-extension catalog of §10.3.2, category by category (literal copy).
+#: The dangerous-extension catalog of PRD §10.3.2, category by category (literal copy).
 EXPECTED_CATALOG: dict[str, tuple[str, ...]] = {
     "executables": (
         ".exe", ".com", ".scr", ".pif", ".dll", ".sys", ".drv", ".ocx", ".cpl",
@@ -143,7 +143,7 @@ DANGEROUS_EXTENSION_NAMES: tuple[str, ...] = tuple(
     for extension in extensions
 )
 
-#: Chained extensions: the final one or any intermediate segment blocks (§10.3.1).
+#: Chained extensions: the final one or any intermediate segment blocks (PRD §10.3.1).
 CHAINED_EXTENSION_NAMES: tuple[str, ...] = (
     "factura.pdf.exe",
     "reporte.pdf.bat.cmd",
@@ -181,7 +181,7 @@ CONTROL_NAMES: dict[str, str] = {
     "invoice\ue000.pdf": "Co (private use)",
 }
 
-#: Windows-reserved device names, any casing, with harmless extensions (§10.3.1).
+#: Windows-reserved device names, any casing, with harmless extensions (PRD §10.3.1).
 RESERVED_NAMES: tuple[str, ...] = (
     "CON", "con", "PRN", "AUX", "NUL",
     *(f"COM{number}" for number in range(1, 10)),
@@ -195,7 +195,7 @@ NON_RESERVED_NAMES: tuple[str, ...] = (
     "CONSOLE.pdf", "COM10.txt", "LPT0.txt", "com1x.pdf", "auxiliar.docx",
 )
 
-#: NFKC variants that normalize into a name rule (§10.3.1, one normalization pass).
+#: NFKC variants that normalize into a name rule (PRD §10.3.1, one normalization pass).
 NFKC_NAMES: dict[str, str] = {
     "\uff23\uff2f\uff2e": "reserved_name",
     "\uff43\uff4f\uff4e.\uff54\uff58\uff54": "reserved_name",
@@ -204,7 +204,7 @@ NFKC_NAMES: dict[str, str] = {
     "\uff23\uff1aevil.pdf": "drive_prefix",
 }
 
-#: Names explicitly allowed by §10.3.2/§10.3.3 (no rule fires).
+#: Names explicitly allowed by PRD §10.3.2/§10.3.3 (no rule fires).
 SAFE_NAMES: tuple[str, ...] = (
     "Factura Octubre 2026.pdf",
     "présupuesto #3.docx",
@@ -215,14 +215,14 @@ SAFE_NAMES: tuple[str, ...] = (
     "photo.JPG",
 )
 
-#: ``(original_name, index, expected_sanitized_name)`` for §10.3.3.
+#: ``(original_name, index, expected_sanitized_name)`` for PRD §10.3.3.
 SANITIZE_CASES: tuple[tuple[str, int, str], ...] = (
     (" invoice.pdf ", 1, "01_invoice.pdf"),
     ("Factura Octubre 2026.pdf", 2, "02_Factura_Octubre_2026.pdf"),
     ("présupuesto #3.docx", 3, "03_présupuesto_#3.docx"),
 )
 
-#: Names whose display form removes path segments and controls (note §10.3.3).
+#: Names whose display form removes path segments and controls (note PRD §10.3.3).
 DISPLAY_NAME_CASES: tuple[tuple[str, str], ...] = (
     ("Factura Octubre 2026.pdf", "Factura Octubre 2026.pdf"),
     ("../Users/.ssh/CON.\u202efdp.exe", "CON.fdp.exe"),

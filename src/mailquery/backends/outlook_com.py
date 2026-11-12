@@ -1,22 +1,22 @@
-"""COM access to classic Outlook (annex B.2, B.7; plan 4.4, D-03).
+"""COM access to classic Outlook.
 
 This is the ONLY module that imports ``win32com``, ``pythoncom`` or
 ``pywintypes``, and it does so lazily inside functions: importing it on Linux or
-macOS never touches pywin32 (UT-BE-02).
+macOS never touches pywin32.
 
 What it provides:
 
-* Client detection in the order of PRD 12.6 (:func:`connect`): pywin32
+* Client detection (:func:`connect`), in this order: pywin32
   importable, ``HKCR\\Outlook.Application\\CurVer`` registered and >= 16.0, then a
   running instance obtained with ``GetActiveObject`` only. Outlook is never
-  launched (ADR-13).
+  launched.
 * The pywin32 cache confined to ``<home>/tmp/gen_py`` (``win32com.__gen_path__``
   set before ``win32com.client`` is imported; dynamic dispatch).
 * :class:`ReadOnlyCom`, the read-only proxy with the explicit whitelist
-  :data:`READONLY_MEMBERS` (annex B.2 point 2).
-* The D-03 watchdog (:class:`Watchdog`): one daemon thread; every COM call made
+  :data:`READONLY_MEMBERS`.
+* The COM watchdog (:class:`Watchdog`): one daemon thread; every COM call made
   through the proxy is bounded by :data:`CALL_TIMEOUT_SECONDS`.
-* COM error mapping (annex B.7): one retry after 100 ms for transient
+* COM error mapping: one retry after 100 ms for transient
   rejections, then ``E_CLIENT_BUSY``; ``E_ACCESSDENIED`` is ``E_PERMISSION``;
   anything else is :class:`ComCallError` (``E_INTERNAL`` carrying the HRESULT,
   which the backend may catch for the expected cases).
@@ -24,7 +24,7 @@ What it provides:
   (:func:`get_drive_type`) and the SecurityCenter2 antivirus query
   (:class:`WmiSecurityCenter`).
 
-Test seams (plan 4.2, W3 design note): the ``outlook_app`` connector, the
+Test seams: the ``outlook_app`` connector, the
 ``registry`` and ``security_center`` objects, the ``pywin32`` flag, the
 module-level :data:`CALL_TIMEOUT_SECONDS` and :func:`get_drive_type`.
 """
@@ -52,9 +52,9 @@ from mailquery.logging_setup import get_logger
 PROG_ID = "Outlook.Application"
 MIN_MAJOR_VERSION = 16
 
-#: D-03 / RF-33 deadline of one COM call, in seconds (patched by tests and run_cli).
+#: Deadline of one COM call, in seconds (patched by tests and run_cli).
 CALL_TIMEOUT_SECONDS = 30.0
-#: Delay before the single retry of a transient rejection (annex B.7).
+#: Delay before the single retry of a transient rejection.
 RETRY_DELAY_SECONDS = 0.1
 
 HKCR = "HKCR"
@@ -89,12 +89,12 @@ DRIVE_REMOVABLE = 2
 DRIVE_FIXED = 3
 DRIVE_REMOTE = 4
 
-#: Detail of the running ``doctor`` check when a COM call times out (PRD 12.8, literal).
+#: Detail of the running ``doctor`` check when a COM call times out.
 DOCTOR_TIMEOUT_DETAIL = (
     "timeout after 30 s: Outlook did not respond (possible security prompt)"
 )
 
-# Outlook Object Model Guard policies (annex B.6; W3 design note section 8). Group
+# Outlook Object Model Guard policies. Group
 # Policy values of Outlook 2016+ (user configuration); the PromptOOM* values apply
 # only with AdminSecurityMode = 3 ("use Outlook Security Group Policy").
 OOM_POLICY_KEY = r"Software\Policies\Microsoft\Office\16.0\Outlook\Security"
@@ -136,7 +136,7 @@ HINT_READONLY = (
 )
 
 # --------------------------------------------------------------------------- #
-# Read-only whitelist (annex B.2 point 2; W3 design note section 2)
+# Read-only whitelist
 # --------------------------------------------------------------------------- #
 
 #: ``{kind: {member: returned kind or None}}``. A member whose entry names a kind
@@ -144,7 +144,7 @@ HINT_READONLY = (
 #: match; anything else, every assignment and every ``_``/dunder name is
 #: ``E_INTERNAL`` before reaching COM. Collections are read with ``Count`` and
 #: ``Item(i)`` only. The address book (``AddressEntry``, ``GetExchangeUser``...)
-#: is never whitelisted (annex B.4).
+#: is never whitelisted.
 READONLY_MEMBERS: dict[str, dict[str, str | None]] = {
     "Application": {"Version": None, "Session": "NameSpace"},
     "NameSpace": {"Stores": "Stores", "Accounts": "Accounts", "GetItemFromID": "Item"},
@@ -197,8 +197,8 @@ READONLY_MEMBERS: dict[str, dict[str, str | None]] = {
         "FileName": None,
         "DisplayName": None,
         "PropertyAccessor": "PropertyAccessor",
-        # M10 COM exception (PRD-v2.1 §0.2, §15): the only writing operation the
-        # read-only proxy allows, used for an already-downloaded local attachment.
+        # COM exception for attachments: ``SaveAsFile`` is the only writing operation
+        # the read-only proxy allows, used for an already-downloaded local attachment.
         "Size": None,
         "Type": None,
         "SaveAsFile": None,
@@ -339,7 +339,7 @@ def hresult_of(exc: BaseException) -> int | None:
 
 
 def map_com_error(exc: BaseException) -> MailqueryError:
-    """Final mapping of a COM error (annex B.7), after any retry."""
+    """Final mapping of a COM error, after any retry."""
     code = hresult_of(exc)
     if code in TRANSIENT_HRESULTS:
         return client_busy()
@@ -349,14 +349,14 @@ def map_com_error(exc: BaseException) -> MailqueryError:
 
 
 # --------------------------------------------------------------------------- #
-# Watchdog (D-03)
+# Watchdog
 # --------------------------------------------------------------------------- #
 
 ExpireHandler = Callable[["Watchdog", float], None]
 
 
 class Watchdog:
-    """One daemon thread bounding every COM call (D-03, RF-33).
+    """One daemon thread bounding every COM call.
 
     The proxy arms a deadline of :data:`CALL_TIMEOUT_SECONDS` (or ``timeout``)
     when a COM call starts and disarms it when the call returns, so Python time
@@ -365,7 +365,7 @@ class Watchdog:
     (:func:`default_on_expire`) ends the process.
 
     ``command`` is the running command (set by the backend's ``bind_command``);
-    ``doctor_handler`` is the D-03 doctor-mode hook: when ``command`` is
+    ``doctor_handler`` is the doctor-mode hook: when ``command`` is
     ``"doctor"`` and it is set, the default handler calls
     ``doctor_handler(seconds)`` instead, which must complete the report and end
     the process with exit 0 (``OutlookBackend.bind_doctor_timeout``).
@@ -444,7 +444,7 @@ class Watchdog:
 
 
 def default_on_expire(watchdog: Watchdog, seconds: float) -> None:
-    """D-03 expiry outside ``doctor``: report ``E_CLIENT_TIMEOUT`` and ``os._exit(3)``.
+    """Watchdog expiry outside ``doctor``: report ``E_CLIENT_TIMEOUT`` and ``os._exit(3)``.
 
     Writes the error JSON (stdout) and its summary (stderr) exactly as the CLI
     does, logs the error, flushes stdout, stderr and the log, and ends the
@@ -480,12 +480,12 @@ def _flush_everything() -> None:
             pass
 
 
-#: The process-wide watchdog (a single daemon thread, D-03).
+#: The process-wide watchdog (a single daemon thread).
 WATCHDOG = Watchdog()
 
 
 def call_com(watchdog: Watchdog, call: Callable[[], Any]) -> Any:
-    """Run one COM call under the watchdog with the retry and mapping of annex B.7."""
+    """Run one COM call under the watchdog with the retry and the COM error mapping."""
     retried = False
     while True:
         try:
@@ -502,7 +502,7 @@ def call_com(watchdog: Watchdog, call: Callable[[], Any]) -> Any:
 
 
 # --------------------------------------------------------------------------- #
-# Read-only proxy (annex B.2 point 2)
+# Read-only proxy
 # --------------------------------------------------------------------------- #
 
 
@@ -581,7 +581,7 @@ def _raw_dispatch(target: Any) -> Any:
     pywin32's dynamic ``CDispatch`` fetches type information for every new object
     and looks names up through it: several cross-process round trips per
     member. The proxy calls ``IDispatch::Invoke`` directly instead (one round
-    trip), with the DISPID looked up once (verified on the host, design note).
+    trip), with the DISPID looked up once (verified on the host).
     """
     if type(target).__name__ == "PyIDispatch":
         return target
@@ -647,7 +647,7 @@ def _wrap(value: Any, kind: str | None, watchdog: Watchdog) -> Any:
 
 
 # --------------------------------------------------------------------------- #
-# Detection and connection (PRD 12.6)
+# Detection and connection
 # --------------------------------------------------------------------------- #
 
 
@@ -656,7 +656,7 @@ def import_pywin32(gen_path: Path) -> Any:
 
     ``win32com.__gen_path__`` (and the ``win32com.gen_py`` package path) are set
     before ``win32com.client`` is imported, so the generated-code cache never
-    goes to ``%TEMP%`` (annex B.2 point 6). Dispatch stays dynamic. Any import
+    goes to ``%TEMP%``. Dispatch stays dynamic. Any import
     failure is ``E_DEPENDENCY_MISSING``.
     """
     try:
@@ -714,7 +714,7 @@ def _policy_dword(registry: Any, name: str) -> int | None:
 
 
 def oom_policy(registry: Any) -> tuple[str, int] | None:
-    """The Outlook security policy that decides programmatic access, or ``None`` (annex B.6).
+    """The Outlook security policy that decides programmatic access, or ``None``.
 
     Read-only. Only with ``AdminSecurityMode = 3`` do the ``PromptOOM*`` values
     apply. ``PromptOOMAddressInformationAccess`` covers what mailquery reads
@@ -763,7 +763,7 @@ def outlook_major_version(registry: Any) -> int | None:
 
 
 def check_registration(registry: Any) -> int:
-    """Step 2 of PRD 12.6: registered and >= 16.0, else ``E_CLIENT_UNSUPPORTED``."""
+    """Second detection step: registered and >= 16.0, else ``E_CLIENT_UNSUPPORTED``."""
     major = outlook_major_version(registry)
     if major is None:
         raise client_unsupported("classic Outlook is not registered in COM")
@@ -782,13 +782,13 @@ def connect(
     gen_path: Path | None = None,
     watchdog: Watchdog | None = None,
 ) -> ReadOnlyCom:
-    """Detect classic Outlook (PRD 12.6) and return the read-only Application proxy.
+    """Detect classic Outlook and return the read-only Application proxy.
 
     ``outlook_app`` is the connector (``GetActiveObject(prog_id)``); without it,
     pywin32's ``win32com.client`` is imported (cache in ``gen_path``) and used.
     ``pywin32`` fixes the result of the pywin32 check (default: ``True`` with an
     injected connector, else the real import). Never ``Dispatch``/``DispatchEx``
-    or ``EnsureDispatch``: Outlook is never launched (ADR-13).
+    or ``EnsureDispatch``: Outlook is never launched.
     """
     guard = watchdog if watchdog is not None else WATCHDOG
     if pywin32 is False:
@@ -822,7 +822,7 @@ def connect(
 def get_drive_type(root: str) -> int:
     """``GetDriveTypeW`` of a drive root such as ``"Z:\\\\"`` (``DRIVE_REMOTE`` = 4).
 
-    Used to detect network PSTs (annex B.3); a removable disk is local. Outside
+    Used to detect network PSTs; a removable disk is local. Outside
     Windows it returns ``DRIVE_UNKNOWN``.
     """
     import ctypes
@@ -834,7 +834,7 @@ def get_drive_type(root: str) -> int:
 
 
 class WmiSecurityCenter:
-    """Read-only WMI query of ``root\\SecurityCenter2`` ``AntiVirusProduct`` (annex B.6).
+    """Read-only WMI query of ``root\\SecurityCenter2`` ``AntiVirusProduct``.
 
     Same interface as the injected ``security_center`` of the tests:
     :meth:`antivirus_products` returns ``[{"displayName", "productState"}]`` and

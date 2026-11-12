@@ -1,10 +1,10 @@
-"""Dangerous-extension catalog and single-pass name normalization (M06, C6).
+"""Dangerous-extension catalog and single-pass name normalization.
 
-The catalog is the literal blocklist of PRD-v2.1 §10.3.2, grouped by category.
+The catalog is the literal blocklist of dangerous extensions, grouped by category.
 The comparison is case-insensitive and runs on the NFKC-normalized name, which
 is normalized **exactly once** (:func:`normalize_name`); callers keep the raw
 form separately for the control-character rule. These helpers are pure and use
-only the standard library (RNF-12).
+only the standard library.
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ CATEGORY_SHORTCUTS: Final[str] = "shortcuts"
 CATEGORY_INTERPRETERS: Final[str] = "interpreters"
 CATEGORY_OFFICE_MACROS: Final[str] = "office_macros"
 
-#: §10.3.2 blocked extension of macOS script files. The value is assembled from
-#: two pieces because the frozen read-only guard ``UT-BE-02.04``
-#: (tests/test_backends.py) forbids the contiguous word in ``src/`` and would
+#: Blocked extension of macOS script files. The value is assembled from
+#: two pieces because the read-only guard test in
+#: ``tests/test_backends.py`` forbids the contiguous word in ``src/`` and would
 #: otherwise mistake this catalog entry for a script invocation; the catalog
 #: value is unchanged.
 _MAC_SCRIPT_EXTENSION: Final[str] = ".apple" + "script"
 
-#: §10.3.2: category -> blocked extensions (lowercase, leading dot).
+#: Category -> blocked extensions (lowercase, leading dot).
 CATALOG: Final[dict[str, tuple[str, ...]]] = {
     CATEGORY_EXECUTABLES: (
         ".exe", ".com", ".scr", ".pif", ".dll", ".sys", ".drv", ".ocx", ".cpl",
@@ -55,19 +55,19 @@ CATALOG: Final[dict[str, tuple[str, ...]]] = {
     ),
 }
 
-#: Flat blocklist: every dangerous extension of §10.3.2.
+#: Flat blocklist: every dangerous extension of the catalog.
 DANGEROUS_EXTENSIONS: Final[frozenset[str]] = frozenset(
     extension for extensions in CATALOG.values() for extension in extensions
 )
 
-#: Extension -> category (§10.3.2).
+#: Extension -> category.
 EXTENSION_CATEGORY: Final[dict[str, str]] = {
     extension: category
     for category, extensions in CATALOG.items()
     for extension in extensions
 }
 
-#: Windows device names reserved by the file-system rules (§10.3.1 point 1).
+#: Windows device names reserved by the file-system rules.
 _RESERVED_ROOTS: Final[frozenset[str]] = frozenset(
     {"con", "prn", "aux", "nul"}
     | {f"com{number}" for number in range(1, 10)}
@@ -86,10 +86,10 @@ def dangerous_extension(name: str) -> tuple[str, str] | None:
     """Return ``(extension, category)`` for a simple or chained dangerous suffix.
 
     ``name`` is expected to be already NFKC-normalized. Trailing dots and spaces
-    are trimmed first (§10.3.1 point 1); every ``.``-separated segment after the
+    are trimmed first; every ``.``-separated segment after the
     first one is compared case-insensitively, so ``factura.pdf.exe`` and
     ``reporte.pdf.bat.cmd`` both block. ``None`` means the name is not in the
-    catalog (the blocklist is not exhaustive; §15 accepted risk).
+    catalog (the blocklist is not exhaustive; accepted risk).
     """
     if not isinstance(name, str):
         raise TypeError(f"attachment name must be a str, not {type(name).__name__}")
@@ -105,14 +105,14 @@ def dangerous_extension(name: str) -> tuple[str, str] | None:
 
 
 def is_dangerous_extension(name: str) -> bool:
-    """Whether ``name`` ends with (or chains) an extension of §10.3.2."""
+    """Whether ``name`` ends with (or chains) a dangerous extension of the catalog."""
     return dangerous_extension(name) is not None
 
 
 def reserved_name(name: str) -> str | None:
     """Return the lowercased Windows reserved root of ``name``, or ``None``.
 
-    The root is the part before the first dot, case-insensitive (§10.3.1 point 1).
+    The root is the part before the first dot, case-insensitive.
     Trailing dots/spaces and spaces around the root are ignored because Windows
     strips them before the reserved-name check.
     """

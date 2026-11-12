@@ -2046,7 +2046,7 @@ class SkillDocumentationTest(_DocumentationCase):
 
 class HelpDocumentationTest(_DocumentationCase):
     def test_doc_05_01_root_help_lists_six_commands_and_the_exit_line(self) -> None:
-        """DOC-05.01: the root help lists the six commands and the §11.1 exit line."""
+        """DOC-05.01: the root help lists the six commands and the PRD §12.7 exit line."""
         text = _all_help_texts()["mailquery"]
         self.assertIn("Commands:", text)
         for command in COMMANDS:
@@ -2055,7 +2055,7 @@ class HelpDocumentationTest(_DocumentationCase):
         self.assertIn(_EXPECTED_EXIT_LINE, _normalized(text))
 
     def test_doc_05_02_attachment_help_matches_the_prd(self) -> None:
-        """DOC-05.02: `attachment --help` matches PRD-v2.1 §11.4."""
+        """DOC-05.02: `attachment --help` matches PRD §12.7."""
         text = _all_help_texts()["attachment"]
         normalized = _normalized(text)
         self.assertIn(
@@ -2159,7 +2159,7 @@ class UserDocumentationTest(_DocumentationCase):
                 self.assertTrue(_help_text(argv).strip())
 
     def test_tc_07_02_attachment_help_matches_the_prd(self) -> None:
-        """TC-07.02: `attachment --help` matches PRD-v2.1 §11.4."""
+        """TC-07.02: `attachment --help` matches PRD §12.7."""
         normalized = _normalized(_all_help_texts()["attachment"])
         self.assertIn("usage: mailquery attachment [-h] (--index N | --all) [--force] <uid>", normalized)
         self.assertIn("E_ATTACHMENT_BLOCKED (exit 4)", normalized)
