@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import hashlib
 import inspect
+import io
+import json
 import os
 import subprocess
 import sys
@@ -13,12 +17,16 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from mailquery import cli
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.base import MailBackend
 from mailquery.errors import MailqueryError
 from tests.fixtures.make_fixtures import (
     ACCOUNT_ICLOUD,
+    DEFAULT_CONFIG,
     EXTENDED_MAILBOX_URLS,
+    HOSTILE_ATTACHMENT_NAMES,
+    LIMIT_1MB_CONFIG,
     MAILBOX_ICLOUD_ARCHIVO,
     MAILBOX_ICLOUD_CLIENTES_FACTURAS,
     MAILBOX_ICLOUD_FACTURAS,
@@ -27,7 +35,19 @@ from tests.fixtures.make_fixtures import (
     MAILBOX_ICLOUD_PROYECTOS_INBOX,
     MAILBOX_ICLOUD_SLASH_NAME,
     MAILBOX_URLS,
+    PAYLOAD_EMPTY,
+    PAYLOAD_PDF_FACTURA,
+    PAYLOAD_PDF_FACTURA_2,
+    PAYLOAD_PDF_OCTUBRE,
+    PAYLOAD_SAFE_TEXT,
+    SHORT_UNICODE_ATTACHMENT_NAME,
+    UID_ATTACH_EMPTY,
+    UID_ATTACH_EXECUTABLE,
+    UID_ATTACH_MULTI,
+    UID_ATTACH_UNICODE,
     build_store,
+    prefixed_uid,
+    write_config,
 )
 
 # Operations and metadata declared by the backend protocol v1 (C1; PRD-v2.1 §6.1).
@@ -504,6 +524,184 @@ class GetBackendSelectionTest(unittest.TestCase):
             return  # selection of Outlook is covered by W3-T03 (UT-BE-01.01)
         with self.assertRaises(ImportError):
             get_backend(platform="win32")
+
+
+# --------------------------------------------------------------------------- #
+# M09 — UT-AM-01/02: Apple Mail attachments over the synthetic fixture
+# --------------------------------------------------------------------------- #
+
+
+class AppleMailAttachmentCommandTest(unittest.TestCase):
+    """UT-AM-01/02: blocking, indexes, names and sanitization with real fixtures.
+
+    The cases drive ``cli.main`` over ``build_store(attachments=True)`` so the
+    whole path (backend metadata + core screening + cache) runs on the M09
+    fixture; each test gets its own store so cached files never leak between cases.
+    """
+
+    def setUp(self) -> None:
+        self.fx = build_store(attachments=True)
+        self.addCleanup(self.fx.cleanup)
+        write_config(self.fx.home, DEFAULT_CONFIG)
+
+    def run_cli(self, *args: str) -> tuple[int, dict | None]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = cli.main(
+                list(args),
+                home=self.fx.home,
+                mail_root=self.fx.mail_root,
+                accounts_db=self.fx.accounts_db,
+            )
+        raw = stdout.getvalue()
+        return code, json.loads(raw) if raw.strip() else None
+
+    def cache_files(self) -> list[Path]:
+        base = self.fx.home / "attachments"
+        return sorted(path for path in base.rglob("*") if path.is_file())
+
+    def run_blocked(self, *args: str, fragment: str = "dangerous filename pattern") -> dict:
+        code, payload = self.run_cli(*args)
+        self.assertEqual(code, 4, payload)
+        assert payload is not None
+        self.assertIs(payload["ok"], False)
+        error = payload["error"]
+        self.assertEqual(error["code"], "E_ATTACHMENT_BLOCKED")
+        self.assertIn(fragment, error["message"])
+        self.assertIn("do not retry", error["hint"])
+        self.assertEqual(self.cache_files(), [], "a blocked message must not write files")
+        return payload
+
+    def test_ut_am_01_01_hostile_and_safe_attachment_block_every_request(self) -> None:
+        """UT-AM-01.01: --index safe, --index hostile and --all all fail (exit 4)."""
+        uid = prefixed_uid(HOSTILE_ATTACHMENT_NAMES[0][0])  # traversal + safe index 1
+        for argv in (
+            ("attachment", uid, "--index", "1"),
+            ("attachment", uid, "--index", "2"),
+            ("attachment", uid, "--all"),
+        ):
+            with self.subTest(argv=argv):
+                self.run_blocked(*argv)
+        self.assertEqual(self.cache_files(), [])
+
+    def test_ut_am_01_02_every_hostile_filename_pattern_blocks_the_message(self) -> None:
+        """UT-AM-01.02: traversal, separators, '..', C:, ADS, RLO, reserved and chained ext."""
+        for uid, hostile in HOSTILE_ATTACHMENT_NAMES:
+            with self.subTest(hostile=hostile):
+                payload = self.run_blocked("attachment", prefixed_uid(uid), "--index", "1")
+                # The blocked attachment is reported by index; the display name is
+                # sanitized for the message (no path segment, no controls).
+                self.assertIn("attachment 2", payload["error"]["message"])
+                self.assertNotIn("\n", payload["error"]["message"])
+
+    def test_ut_am_01_03_executable_content_blocks_the_whole_message(self) -> None:
+        """UT-AM-01.03: an MZ payload blocks --all; the safe attachment is not written."""
+        payload = self.run_blocked(
+            "attachment", prefixed_uid(UID_ATTACH_EXECUTABLE), "--all", fragment="executable content"
+        )
+        self.assertIn("attachment 2 ('presupuesto.pdf')", payload["error"]["message"])
+        self.assertIn("has executable content", payload["error"]["message"])
+
+    def test_ut_am_01_04_unrequested_hostile_name_still_blocks_the_message(self) -> None:
+        """UT-AM-01.04: --index of the safe attachment is blocked by an unrequested hostile name."""
+        uid = prefixed_uid(HOSTILE_ATTACHMENT_NAMES[6][0])  # reserved CON.fdp.exe at index 2
+        self.run_blocked("attachment", uid, "--index", "1")
+        self.assertEqual(self.cache_files(), [])
+
+    def test_ut_am_01_05_all_allowed_attachments_are_recovered(self) -> None:
+        """UT-AM-01.05: a message with only allowed attachments is extracted correctly."""
+        code, payload = self.run_cli("attachment", prefixed_uid(UID_ATTACH_MULTI), "--all")
+        self.assertEqual(code, 0, payload)
+        assert payload is not None
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual([entry["index"] for entry in payload["attachments"]], [1, 2, 3])
+        payloads = [PAYLOAD_PDF_FACTURA, PAYLOAD_PDF_OCTUBRE, PAYLOAD_PDF_FACTURA_2]
+        for entry, content in zip(payload["attachments"], payloads):
+            self.assertIs(entry["saved"], True)
+            self.assertIs(entry["cached"], False)
+            self.assertEqual(entry["size_bytes"], len(content))
+            self.assertEqual(entry["sha256"], hashlib.sha256(content).hexdigest())
+            path = Path(entry["path"])
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.read_bytes(), content)
+
+    # -- UT-AM-02 ---------------------------------------------------------- #
+
+    def test_ut_am_02_01_repeated_names_keep_stable_indexes_and_distinct_files(self) -> None:
+        """UT-AM-02.01: three attachments, two with the same name: indexes 1..3, distinct files."""
+        code, payload = self.run_cli("attachment", prefixed_uid(UID_ATTACH_MULTI), "--all")
+        self.assertEqual(code, 0, payload)
+        assert payload is not None
+        entries = payload["attachments"]
+        self.assertEqual(
+            [entry["original_name"] for entry in entries],
+            ["factura.pdf", "Factura Octubre 2026.pdf", "factura.pdf"],
+        )
+        self.assertEqual(
+            [entry["sanitized_name"] for entry in entries],
+            ["01_factura.pdf", "02_Factura_Octubre_2026.pdf", "03_factura.pdf"],
+        )
+        paths = [entry["path"] for entry in entries]
+        self.assertEqual(len(set(paths)), 3)
+        for entry in entries:
+            self.assertEqual(Path(entry["path"]).name, entry["sanitized_name"])
+
+    def test_ut_am_02_02_show_and_attachment_share_index_and_original_name(self) -> None:
+        """UT-AM-02.02: show and attachment return the same index and original name."""
+        code, shown = self.run_cli("show", prefixed_uid(UID_ATTACH_MULTI))
+        self.assertEqual(code, 0, shown)
+        assert shown is not None
+        code, recovered = self.run_cli("attachment", prefixed_uid(UID_ATTACH_MULTI), "--all")
+        self.assertEqual(code, 0, recovered)
+        assert recovered is not None
+        self.assertEqual(
+            [(entry["index"], entry["name"]) for entry in shown["message"]["attachments"]],
+            [(entry["index"], entry["original_name"]) for entry in recovered["attachments"]],
+        )
+
+    def test_ut_am_02_03_unicode_and_long_names_are_sanitized_deterministically(self) -> None:
+        """UT-AM-02.03: NFKC/replacements and the 153-byte limit on Unicode/long names."""
+        uid = prefixed_uid(UID_ATTACH_UNICODE)
+        code, first = self.run_cli("attachment", uid, "--all")
+        self.assertEqual(code, 0, first)
+        assert first is not None
+        self.assertEqual(
+            first["attachments"][0]["sanitized_name"], "01_Facturación_ñ.pdf"
+        )
+        long_name = first["attachments"][1]["sanitized_name"]
+        self.assertLessEqual(len(long_name.encode("utf-8")), 153)
+        self.assertTrue(long_name.startswith("02_"))
+        self.assertTrue(long_name.endswith(".pdf"))
+        # Deterministic: a second invocation returns the same names and paths.
+        code, second = self.run_cli("attachment", uid, "--all", "--force")
+        self.assertEqual(code, 0, second)
+        assert second is not None
+        self.assertEqual(
+            [entry["sanitized_name"] for entry in first["attachments"]],
+            [entry["sanitized_name"] for entry in second["attachments"]],
+        )
+        self.assertEqual(
+            [entry["path"] for entry in first["attachments"]],
+            [entry["path"] for entry in second["attachments"]],
+        )
+        for entry in first["attachments"]:
+            self.assertTrue(Path(entry["path"]).is_file())
+
+    def test_ut_am_02_04_show_cached_path_points_to_the_published_regular_file(self) -> None:
+        """UT-AM-02.04: after extraction, show returns the absolute cached path of the file."""
+        uid = prefixed_uid(UID_ATTACH_MULTI)
+        code, recovered = self.run_cli("attachment", uid, "--index", "1")
+        self.assertEqual(code, 0, recovered)
+        assert recovered is not None
+        published = Path(recovered["attachments"][0]["path"])
+        code, shown = self.run_cli("show", uid)
+        self.assertEqual(code, 0, shown)
+        assert shown is not None
+        cached_path = shown["message"]["attachments"][0]["cached_path"]
+        self.assertEqual(cached_path, str(published))
+        self.assertTrue(Path(cached_path).is_file())
+        self.assertFalse(Path(cached_path).is_symlink())
 
 
 class ImportBoundaryTest(unittest.TestCase):

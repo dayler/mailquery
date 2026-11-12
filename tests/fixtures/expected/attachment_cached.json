@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "attachment",
+  "uid": "apple_mail:83301",
+  "output_dir": "<ROOT>/home/attachments/apple_mail/83301",
+  "count": 1,
+  "attachments": [
+    {
+      "index": 2,
+      "original_name": "Factura Octubre 2026.pdf",
+      "sanitized_name": "02_Factura_Octubre_2026.pdf",
+      "saved": true,
+      "cached": true,
+      "path": "<ROOT>/home/attachments/apple_mail/83301/02_Factura_Octubre_2026.pdf",
+      "size_bytes": 59,
+      "sha256": "9ead96e0efdc3db6c3bee638bd4dc2e541a67a4f2bba812acf476d4527ce455e"
+    }
+  ],
+  "warnings": []
+}

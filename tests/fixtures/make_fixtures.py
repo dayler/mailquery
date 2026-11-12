@@ -84,6 +84,40 @@ FAKE_COUNTERS: dict[int, tuple[int, int]] = {
 ME = ("Fixture User", "me@fixture.example")
 
 
+#: Payloads of the M09 attachment fixtures (fixed bytes: sizes and sha256 are stable).
+PAYLOAD_PDF_FACTURA = b"%PDF-1.4\n1 0 obj\n<< fixture factura de octubre >>\nendobj\n"
+PAYLOAD_PDF_OCTUBRE = b"%PDF-1.4\n1 0 obj\n<< fixture Factura Octubre 2026 >>\nendobj\n"
+PAYLOAD_PDF_FACTURA_2 = b"%PDF-1.4\n1 0 obj\n<< fixture factura duplicada >>\nendobj\n"
+PAYLOAD_SAFE_TEXT = b"texto seguro sin firma\n"
+PAYLOAD_EXECUTABLE = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xffexec-fixture"
+PAYLOAD_EMPTY = b""
+PAYLOAD_BIG = b"X" * (1536 * 1024)  # 1.5 MiB (M09-T05/T06: known-size limit)
+PAYLOAD_PARTIAL_LOCAL = b"%PDF-1.4\nexternalized fixture attachment\n"
+PAYLOAD_PARTIAL_UNVERIFIABLE = b"%PDF-1.4\nexternalized fixture missing on disk\n"
+PAYLOAD_UNICODE = b"%PDF-1.4\nunicode fixture\n"
+PAYLOAD_CORRUPT = b"payload ignored by the corrupt fixture"
+
+
+@dataclass(frozen=True)
+class FixtureAttachment:
+    """One attachment of a fixture message (M09).
+
+    ``externalized`` marks the attachment of a ``.partial.emlx``: the MIME part
+    carries no decoded content and the bytes live in a separate file under
+    ``Data/<shards>/Attachments/<uid>/<name>``. ``external_file=False`` writes no
+    such file, so the adapter reports ``unsupported`` (not verifiable in
+    production; PRD-v2.1 §15). ``corrupt`` writes an invalid base64 payload so
+    the MIME part cannot be decoded.
+    """
+
+    name: str
+    payload: bytes = b"synthetic attachment payload"
+    externalized: bool = False
+    external_file: bool = True
+    external_payload: bytes | None = None
+    corrupt: bool = False
+
+
 @dataclass(frozen=True)
 class FixtureMessage:
     """One row of the synthetic ``messages`` table plus its .emlx payload."""
@@ -113,6 +147,9 @@ class FixtureMessage:
     smime: str | None = None
     # attachments rows without a MIME part in the .emlx (DB-only).
     attachment_rows: tuple[str, ...] = ()
+    # M09: ordered attachment parts with their payload and externalization; when
+    # empty, ``attachment_names`` keeps the 2.0.1 shared synthetic payload.
+    attachments: tuple[FixtureAttachment, ...] = ()
     # When True, date_received/date_sent in the DB come from ``date_value``
     # (None -> NULL) instead of now - age. The .emlx still uses ``age``.
     date_override: bool = False
@@ -436,6 +473,230 @@ EXTENDED_MESSAGES: tuple[FixtureMessage, ...] = (
     ),
 )
 
+# --------------------------------------------------------------------------- #
+# M09 attachment fixtures (build_store(attachments=True) only)
+# --------------------------------------------------------------------------- #
+
+#: Three attachments with two repeated names (TC-08 goldens, UT-AM-02.01).
+UID_ATTACH_MULTI = 83301
+#: One hostile filename per message (index 1 is always a safe attachment).
+UID_ATTACH_HOSTILE_TRAVERSAL = 83310
+UID_ATTACH_HOSTILE_SEPARATOR = 83311
+UID_ATTACH_HOSTILE_PARENT = 83312
+UID_ATTACH_HOSTILE_DRIVE = 83313
+UID_ATTACH_HOSTILE_ADS = 83314
+UID_ATTACH_HOSTILE_RLO = 83315
+UID_ATTACH_HOSTILE_RESERVED = 83316
+UID_ATTACH_HOSTILE_DOUBLE_EXT = 83317
+#: Safe attachment at index 1, ``MZ`` executable content at index 2 (TC-08.04).
+UID_ATTACH_EXECUTABLE = 83320
+#: A 0-byte attachment is valid (UT-AM-03.07).
+UID_ATTACH_EMPTY = 83321
+#: ``.partial.emlx``: externalized attachment available on disk (index 1) and
+#: externalized attachment whose file is missing (index 2, ``unsupported``).
+UID_ATTACH_PARTIAL = 83322
+#: A 1.5 MiB attachment for the ``max_file_size_mb`` limit (TC-08.05).
+UID_ATTACH_BIG = 83323
+#: Unicode and long filenames for the sanitization case (UT-AM-02.03).
+UID_ATTACH_UNICODE = 83324
+#: S/MIME encrypted message with an ``attachments`` row (UT-AM-03.05).
+UID_ATTACH_SMIME = 83325
+#: Missing ``.emlx`` with a DB attachment row (``not_local``, UT-AM-03.02).
+UID_ATTACH_MISSING_EMLX = 83326
+#: A MIME part whose base64 payload cannot be decoded (``corrupt``, UT-AM-03.06).
+UID_ATTACH_CORRUPT = 83327
+
+#: ``(uid, hostile filename)`` pairs: UT-AM-01.02 evaluates every pattern.
+HOSTILE_ATTACHMENT_NAMES: tuple[tuple[int, str], ...] = (
+    (UID_ATTACH_HOSTILE_TRAVERSAL, "../../../etc/passwd"),
+    (UID_ATTACH_HOSTILE_SEPARATOR, "subdir\\archivo.pdf"),
+    (UID_ATTACH_HOSTILE_PARENT, "carpeta/../archivo.pdf"),
+    (UID_ATTACH_HOSTILE_DRIVE, "C:factura.pdf"),
+    (UID_ATTACH_HOSTILE_ADS, "factura.pdf:stream"),
+    (UID_ATTACH_HOSTILE_RLO, "factura\u202efdp.exe"),
+    (UID_ATTACH_HOSTILE_RESERVED, "CON.fdp.exe"),
+    (UID_ATTACH_HOSTILE_DOUBLE_EXT, "reporte.pdf.bat.cmd"),
+)
+
+#: Long Unicode filename: 180 bytes of root plus the ``.pdf`` extension.
+LONG_UNICODE_ATTACHMENT_NAME = "\u6587\u6863" * 60 + ".pdf"
+#: Unicode filename kept short (NFKC keeps ``Facturación ñ``).
+SHORT_UNICODE_ATTACHMENT_NAME = "Facturaci\u00f3n \u00f1.pdf"
+
+
+def _safe_attachment_pdf() -> FixtureAttachment:
+    return FixtureAttachment("seguro.pdf", b"%PDF-1.4\nsafe fixture attachment\n")
+
+
+def _hostile_message(uid: int, hostile: str) -> FixtureMessage:
+    return FixtureMessage(
+        uid=uid,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject=f"Hostile attachment {uid}",
+        sender=("Fixture", "hostile@fixture.example"),
+        age=timedelta(hours=3),
+        body="This message carries a hostile attachment name.",
+        attachments=(
+            _safe_attachment_pdf(),
+            FixtureAttachment(hostile, b"%PDF-1.4\nhostile fixture attachment\n"),
+        ),
+        global_id=uid,
+        message_id_header=f"<hostile-{uid}@fixture.example>",
+    )
+
+
+ATTACHMENT_MESSAGES: tuple[FixtureMessage, ...] = (
+    FixtureMessage(
+        uid=UID_ATTACH_MULTI,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Three attachments",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=2),
+        body="Adjuntamos la factura, el PDF de octubre y la factura duplicada.",
+        attachments=(
+            FixtureAttachment("factura.pdf", PAYLOAD_PDF_FACTURA),
+            FixtureAttachment("Factura Octubre 2026.pdf", PAYLOAD_PDF_OCTUBRE),
+            FixtureAttachment("factura.pdf", PAYLOAD_PDF_FACTURA_2),
+        ),
+        global_id=301,
+        message_id_header="<attach-multi-83301@fixture.example>",
+    ),
+    _hostile_message(UID_ATTACH_HOSTILE_TRAVERSAL, HOSTILE_ATTACHMENT_NAMES[0][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_SEPARATOR, HOSTILE_ATTACHMENT_NAMES[1][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_PARENT, HOSTILE_ATTACHMENT_NAMES[2][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_DRIVE, HOSTILE_ATTACHMENT_NAMES[3][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_ADS, HOSTILE_ATTACHMENT_NAMES[4][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_RLO, HOSTILE_ATTACHMENT_NAMES[5][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_RESERVED, HOSTILE_ATTACHMENT_NAMES[6][1]),
+    _hostile_message(UID_ATTACH_HOSTILE_DOUBLE_EXT, HOSTILE_ATTACHMENT_NAMES[7][1]),
+    FixtureMessage(
+        uid=UID_ATTACH_EXECUTABLE,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Executable attachment",
+        sender=("Ejecutables", "exe@fixture.example"),
+        age=timedelta(hours=4),
+        body="The second attachment has executable content.",
+        attachments=(
+            FixtureAttachment("seguro.txt", PAYLOAD_SAFE_TEXT),
+            FixtureAttachment("presupuesto.pdf", PAYLOAD_EXECUTABLE),
+        ),
+        global_id=302,
+        message_id_header="<attach-exe-83320@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_EMPTY,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Empty attachment",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=5),
+        body="The attachment is empty (0 bytes).",
+        attachments=(FixtureAttachment("vacio.txt", PAYLOAD_EMPTY),),
+        global_id=303,
+        message_id_header="<attach-empty-83321@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_PARTIAL,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Partial message with externalized attachments",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=6),
+        partial=True,
+        body="The attachments were externalized to disk.",
+        attachments=(
+            FixtureAttachment(
+                "disponible.pdf",
+                PAYLOAD_PARTIAL_LOCAL,
+                externalized=True,
+                external_payload=PAYLOAD_PARTIAL_LOCAL,
+            ),
+            FixtureAttachment(
+                "no-disponible.pdf",
+                PAYLOAD_PARTIAL_UNVERIFIABLE,
+                externalized=True,
+                external_file=False,
+                external_payload=PAYLOAD_PARTIAL_UNVERIFIABLE,
+            ),
+        ),
+        global_id=304,
+        message_id_header="<attach-partial-83322@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_BIG,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Large attachment",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=7),
+        size=len(PAYLOAD_BIG),
+        body="The attachment is about 1.5 MiB.",
+        attachments=(FixtureAttachment("grande.dat", PAYLOAD_BIG),),
+        global_id=305,
+        message_id_header="<attach-big-83323@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_UNICODE,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Unicode and long attachment names",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=8),
+        body="The attachment names are Unicode and long.",
+        attachments=(
+            FixtureAttachment(SHORT_UNICODE_ATTACHMENT_NAME, PAYLOAD_UNICODE),
+            FixtureAttachment(LONG_UNICODE_ATTACHMENT_NAME, PAYLOAD_UNICODE),
+        ),
+        global_id=306,
+        message_id_header="<attach-unicode-83324@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_SMIME,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Encrypted S/MIME with attachment row",
+        sender=("Secure", "secure@fixture.example"),
+        age=timedelta(hours=9),
+        smime="encrypted",
+        attachment_rows=("smime.p7m",),
+        global_id=307,
+        message_id_header="<attach-smime-83325@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_MISSING_EMLX,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Missing emlx with attachment row",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=10),
+        missing_emlx=True,
+        attachment_rows=("ghost.pdf",),
+        global_id=308,
+        message_id_header="<attach-missing-83326@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_ATTACH_CORRUPT,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Corrupt attachment payload",
+        sender=("Adjuntos", "adjuntos@fixture.example"),
+        age=timedelta(hours=11),
+        body="The attachment payload is not valid base64.",
+        attachments=(FixtureAttachment("roto.pdf", PAYLOAD_CORRUPT, corrupt=True),),
+        global_id=309,
+        message_id_header="<attach-corrupt-83327@fixture.example>",
+    ),
+)
+
+#: Config with the M09 ``max_file_size_mb`` limit (TC-08.05).
+LIMIT_1MB_CONFIG = f"""\
+[attachments]
+max_file_size_mb = 1
+max_total_size_mb = 200
+max_count = 50
+
+[scope."{ICLOUD_LABEL}"]
+mailbox_list = ["Facturas", "Archivo"]
+
+[scope."{GMAIL_LABEL}"]
+
+[scope."{LOCAL_LABEL}"]
+"""
+
+
 # A uid that exists on disk but has no row in the Envelope Index (orphan .emlx).
 ORPHAN_UID = 99999
 
@@ -496,6 +757,15 @@ class FixturePaths:
     * 90160 date_received NULL, 90161 = 0, 90162 = 1e20, 90163 = now + 30 days.
     * ``wal_path`` / ``shm_path``: the Envelope Index is in WAL journal mode and
       both ``Envelope Index-wal`` and ``Envelope Index-shm`` exist on disk.
+
+    ``build_store(attachments=True)`` adds the M09 attachment fixtures (``uid``
+    constants ``UID_ATTACH_*``; ``HOSTILE_ATTACHMENT_NAMES`` lists the hostile
+    names): three attachments with a repeated name, one hostile filename per
+    message, executable content, an empty attachment, a ``.partial.emlx`` with a
+    verifiable and a non-verifiable externalized attachment, a 1.5 MiB file,
+    Unicode/long names, S/MIME with an attachment row, a missing ``.emlx`` with a
+    DB row and a corrupt base64 payload. The default and extended stores are
+    unchanged (the flag only adds messages).
     """
 
     root: Path
@@ -508,6 +778,7 @@ class FixturePaths:
     mailboxes: dict[str, int] = field(default_factory=dict)
     messages: tuple[FixtureMessage, ...] = ()
     extended: bool = False
+    attachments: bool = False
     # Extended store only (None otherwise): the WAL-mode Envelope Index sidecars.
     wal_path: Path | None = None
     shm_path: Path | None = None
@@ -525,13 +796,18 @@ class FixturePaths:
 
 
 def build_store(
-    root: str | Path | None = None, *, now: datetime | None = None, extended: bool = False
+    root: str | Path | None = None,
+    *,
+    now: datetime | None = None,
+    extended: bool = False,
+    attachments: bool = False,
 ) -> FixturePaths:
     """Build a complete synthetic Mail store and return its paths.
 
     When ``root`` is ``None`` a new temporary directory is created (the caller
     owns it and can call :meth:`FixturePaths.cleanup`). ``extended=True`` adds
-    the edge-case data documented on :class:`FixturePaths`.
+    the edge-case data documented on :class:`FixturePaths`; ``attachments=True``
+    adds the M09 attachment fixtures. Both default to ``False`` (2.0.1 data).
     """
     if now is None:
         now = datetime.now()
@@ -549,7 +825,11 @@ def build_store(
         directory.mkdir(parents=True, exist_ok=True)
 
     _write_persistence_info(mail_root)
-    messages = DEFAULT_MESSAGES + EXTENDED_MESSAGES if extended else DEFAULT_MESSAGES
+    messages = DEFAULT_MESSAGES
+    if extended:
+        messages += EXTENDED_MESSAGES
+    if attachments:
+        messages += ATTACHMENT_MESSAGES
     for message in messages:
         _write_emlx_files(mail_root, message, now)
     _write_orphan_emlx(mail_root, now)
@@ -588,6 +868,7 @@ def build_store(
         mailboxes=mailboxes,
         messages=messages,
         extended=extended,
+        attachments=attachments,
         wal_path=wal_path,
         shm_path=shm_path,
     )
@@ -678,6 +959,45 @@ def _write_persistence_info(mail_root: Path) -> None:
     (mail_root / "PersistenceInfo.plist").write_bytes(plistlib.dumps(payload))
 
 
+def _attachments_of(message: FixtureMessage) -> tuple[FixtureAttachment, ...]:
+    """Ordered attachment parts of a fixture message.
+
+    New M09 fixtures declare them explicitly. Legacy fixtures keep
+    ``attachment_names`` (2.0.1): they share the same synthetic payload and, in a
+    ``.partial.emlx``, their content is also written as an externalized file.
+    """
+    if message.attachments:
+        return message.attachments
+    external_payload = b"synthetic externalized attachment\n"
+    return tuple(
+        FixtureAttachment(
+            name,
+            externalized=message.partial,
+            external_payload=external_payload if message.partial else None,
+        )
+        for name in message.attachment_names
+    )
+
+
+def _attachment_db_names(message: FixtureMessage) -> list[str]:
+    """Names inserted in the Envelope Index ``attachments`` table (in order)."""
+    return [attachment.name for attachment in _attachments_of(message)] + list(
+        message.attachment_rows
+    )
+
+
+def _corrupt_attachment_part(name: str) -> "Message":
+    """A MIME part whose declared base64 payload is invalid (corrupt fixture)."""
+    from email.message import Message as _Message
+
+    part = _Message()
+    part.add_header("Content-Type", "application/octet-stream", name=name)
+    part.add_header("Content-Disposition", "attachment", filename=name)
+    part.add_header("Content-Transfer-Encoding", "base64")
+    part.set_payload("!!! not valid base64 !!!")
+    return part
+
+
 def _emlx_bytes(message: FixtureMessage, received: datetime) -> bytes:
     if message.corrupt_emlx:
         return CORRUPT_EMLX_BYTES
@@ -716,12 +1036,18 @@ def _emlx_bytes(message: FixtureMessage, received: datetime) -> bytes:
         )
         del email["Content-Type"]
         email["Content-Type"] = 'multipart/signed; protocol="application/pkcs7-signature"; micalg=sha-256'
-    for name in message.attachment_names:
+    for attachment in _attachments_of(message):
+        if attachment.corrupt:
+            if not email.is_multipart():
+                email.make_mixed()
+            email.attach(_corrupt_attachment_part(attachment.name))
+            continue
+        payload = b"" if attachment.externalized else attachment.payload
         email.add_attachment(
-            b"synthetic attachment payload",
+            payload,
             maintype="application",
             subtype="octet-stream",
-            filename=name,
+            filename=attachment.name,
         )
     payload = email.as_bytes(policy=SMTP)
     trailer = plistlib.dumps(
@@ -754,15 +1080,25 @@ def _write_emlx_files(mail_root: Path, message: FixtureMessage, now: datetime) -
     target = mailbox_dir / VERSION_UUID / emlx_relative_path(message.uid, partial=message.partial)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(_emlx_bytes(message, received))
-    if message.partial and message.attachment_names:
+    externalized = [
+        attachment for attachment in _attachments_of(message) if attachment.externalized
+    ]
+    if message.partial and externalized:
         attachments_dir = (
             mailbox_dir / VERSION_UUID / "Data" / Path(*emlx_shard_parts(message.uid)) / "Attachments" / str(message.uid)
         )
         if not emlx_shard_parts(message.uid):
             attachments_dir = mailbox_dir / VERSION_UUID / "Data" / "Attachments" / str(message.uid)
         attachments_dir.mkdir(parents=True, exist_ok=True)
-        for name in message.attachment_names:
-            (attachments_dir / name).write_bytes(b"synthetic externalized attachment\n")
+        for attachment in externalized:
+            if not attachment.external_file:
+                continue
+            content = (
+                attachment.external_payload
+                if attachment.external_payload is not None
+                else attachment.payload
+            )
+            (attachments_dir / attachment.name).write_bytes(content)
 
 
 def _write_orphan_emlx(mail_root: Path, now: datetime) -> None:
@@ -914,10 +1250,10 @@ def _write_envelope_index(
                     "INSERT INTO labels (message_id, mailbox_id) VALUES (?, ?)",
                     (message.uid, label_mailbox),
                 )
-            for name in message.attachment_names + message.attachment_rows:
+            for position, name in enumerate(_attachment_db_names(message), start=1):
                 connection.execute(
                     "INSERT INTO attachments (message, attachment_id, name) VALUES (?, ?, ?)",
-                    (message.uid, f"att-{message.uid}-{name}", name),
+                    (message.uid, f"att-{message.uid}-{position}", name),
                 )
         connection.commit()
     finally:
