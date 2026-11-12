@@ -1776,6 +1776,12 @@ def _normalized(text: str) -> str:
     return " ".join(text.split())
 
 
+#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a0``).
+_VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
+#: ``mailquery 3.0.0`` presented as the final release (a pre-release such as
+#: ``3.0.0a0`` is not the published 3.0.0).
+_FINAL_3_0_0 = r"mailquery 3\.0\.0(?!(?:a|b|rc)\d)"
+
 #: Stale patterns the 2.1 documentation retires (plan §9.3, CL-07).
 _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
     "five commands": re.compile(r"five commands", re.IGNORECASE),
@@ -1785,7 +1791,7 @@ _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
         r"\b(?:integer|entero)\b[^\n.]{0,40}\buid\b"
     ),
     "attachments name-only": re.compile(r'"attachments"\s*:\s*\[\{\s*"name"'),
-    "published 3.0.0": re.compile(r"mailquery 3\.0\.0"),
+    "published 3.0.0": re.compile(_FINAL_3_0_0),
     "baseline": re.compile(r"\bbaseline\b", re.IGNORECASE),
     "retention_days": re.compile(r"retention_days(?! was replaced by max_size_mb)"),
     "--out": re.compile(r"--out\b"),
@@ -1980,13 +1986,13 @@ class DocumentationCoherenceTest(_DocumentationCase):
         """DOC-03.03: version examples use `__version__` with `drivers:` and never 3.0.0 as current."""
         for path in (README_EN, README_ES):
             text = _read(path)
-            lines = re.findall(r"mailquery \d+\.\d+\.\d+ \([^\n]*\)", text)
+            lines = re.findall(rf"mailquery {_VERSION} \([^\n]*\)", text)
             with self.subTest(document=path.name):
                 self.assertTrue(lines, f"{path.name} shows no version example")
                 for line in lines:
                     self.assertIn("drivers:", line)
                     self.assertIn(__version__, line)
-                self.assertNotRegex(text, r"mailquery 3\.0\.0")
+                self.assertNotRegex(text, _FINAL_3_0_0)
                 if "3.0.0" in text:
                     self.assertRegex(
                         text,

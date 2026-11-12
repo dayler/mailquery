@@ -2,7 +2,7 @@
 
 > **Estado del contrato:** implementado en la rama de integración del delta
 > (PRD-v2.1) y **no publicado**. El paquete anuncia
-> `mailquery.__version__` = 3.0.0 en `develop`, todavía sin tag de release ni
+> `mailquery.__version__` = 3.0.0a0 (3.0.0-alpha, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como lo implementan
 > M01–M10 y lo cierra M11.
 
@@ -558,7 +558,11 @@ en mayúsculas sin abrir COM. Implementa §9.3 según el anexo B:
   ordenada de los adjuntos **visibles** (los `PR_ATTACHMENT_HIDDEN` no se
   listan), `index` 1..N compartido con `show` y `attachment`, `name` original
   (`FileName`, si no `DisplayName`), `size_bytes` de la propiedad local `Size`
-  (o `None`) y `native_order_key` = índice en hex mayúsculas de 4 dígitos. La
+  (o `None`) y `native_order_key` = índice en hex mayúsculas de 4 dígitos.
+  `Size` (`PR_ATTACH_SIZE`) incluye el overhead de propiedades MAPI: es una cota
+  superior de los bytes decodificados, nunca su valor exacto (18848 frente a
+  15099 en un host real); el núcleo solo la usa para los límites previos a la
+  extracción y nunca para validar la caché (CR-01). La
   disponibilidad se decide **solo con propiedades locales del item**, sin
   descargar nada ni usar red: `Attachment.Type` = `olByValue` (1) es una copia
   local; `olByReference` (4) no guarda bytes en el store y exigiría traerlos de
@@ -1297,8 +1301,11 @@ class AttachmentsEngine:
    (fila 11) ⇒ `E_ATTACHMENT_BLOCKED` (exit 4).
 3. `max_count` si `indices is None` (fila 12). Incluye los aciertos de caché;
    no aplica a `--index`.
-4. Lookup de caché de cada adjunto solicitado (regular + tamaño esperado). El
-   tamaño real de los aciertos cuenta para `max_total_size_mb`.
+4. Lookup de caché de cada adjunto solicitado contra el manifiesto del mensaje
+   (archivo regular + `sanitized_name`, tamaño y SHA-256 registrados; CR-01).
+   El tamaño esperado del driver **no** se compara: solo alimenta los límites
+   del paso 5. Lo que ocupe la ruta sin ser un acierto queda **sin verificar**.
+   El tamaño real de los aciertos cuenta para `max_total_size_mb`.
 5. Límites con tamaño conocido (fila 12), por adjunto y acumulado ⇒
    `E_ATTACHMENT_TOO_LARGE` (exit 4) **antes de escribir**.
 6. `screen_content(rows, misses, open_stream)`: primer bloque decodificado solo
@@ -1310,27 +1317,55 @@ class AttachmentsEngine:
 8. Verificación final de los aciertos: un archivo borrado o cambiado de tamaño
    durante la ejecución se re-extrae **una** vez (RF-51) con nueva pantalla de
    contenido; si la re-extracción falla, se devuelve el error del motivo.
-9. Publicación atómica por archivo (`os.replace`) y registros §11.2.
+9. Publicación atómica por archivo (`os.replace`), registro de cada archivo
+   publicado en el manifiesto (escritura atómica, best-effort) y registros §11.2.
 
 Antes del paso 9 no queda ningún archivo nuevo ni parcial en la caché ni
 temporales propios en `tmp/` (RNF-14). Un fallo de E/S a mitad de publicación
 puede dejar archivos nuevos **completos** (riesgo aceptado §15); nunca
-parciales. La caché previa se conserva si el aborto ocurre antes de publicar.
+parciales. La caché previa **verificada** se conserva si el aborto ocurre antes
+de publicar; una entrada **sin verificar** se elimina (CR-01).
 
-#### Semántica de caché y `--force` (RF-45, RF-51)
+#### Semántica de caché y `--force` (RF-45, RF-51; CR-01)
 
-- Acierto: existe un archivo **regular** en la ruta determinista y (si el
-  driver informa `size_bytes`) su tamaño coincide ⇒ `saved: true, cached: true`
-  con `size_bytes`/`sha256` del archivo existente y **sin** re-extraer.
-- Tamaño esperado distinto ⇒ miss y re-extracción.
-- `--force` ignora la caché, re-extrae y reemplaza atómicamente
-  (`cached: false`).
-- Symlink, directorio o dispositivo en la ruta ⇒ miss; la publicación no sigue
-  un symlink (`os.replace` sustituye el enlace) y un directorio destino no se
-  puede reemplazar ⇒ `E_IO` (riesgo aceptado).
+- **Manifiesto por mensaje:** `<message_dir>/.manifest.json` (`0600`), escrito
+  de forma atómica (staging + `os.replace`) bajo el lock de ejecución:
+  `{"version": 1, "entries": {"<index>": {"sanitized_name", "size_bytes",
+  "sha256"}}}`. El `sha256` es el calculado al escribir en staging, es decir,
+  de bytes que ya pasaron la pantalla de nombre y de *magic bytes*. Los nombres
+  saneados empiezan por `NN_`, así que el punto inicial nunca colisiona.
+- Acierto: directorios reales, archivo **regular** en la ruta determinista y
+  entrada del manifiesto con el mismo `sanitized_name`, el mismo tamaño (filtro
+  sin hash) y el mismo SHA-256 del archivo ⇒ `saved: true, cached: true` con
+  `size_bytes`/`sha256` del archivo existente y **sin** re-extraer. El tamaño
+  esperado del driver **nunca** se compara (en Outlook `Attachment.Size`
+  incluye el overhead MAPI).
+- **Sin verificar:** sin manifiesto, sin entrada, otro nombre, tamaño o SHA-256
+  distinto, o manifiesto ilegible, con otra versión, mayor de 1 MiB, enlazado o
+  no regular. Nunca se sirve. Se re-extrae con pantalla completa: si sale bien,
+  `os.replace` lo sustituye (no se borra antes) y se registra; si falla
+  (bloqueo, no disponible, límite, timeout, E/S), se elimina con `os.unlink`
+  (un enlace se borra a sí mismo, nunca su destino; un directorio nunca se
+  borra recursivamente) y se quita su entrada; el error original se devuelve
+  igual (borrado best-effort).
+- `--force` re-extrae y reemplaza atómicamente (`cached: false`) sin calcular
+  hashes por adelantado; solo si falla verifica la entrada previa para decidir:
+  verificada ⇒ se conserva; sin verificar ⇒ se elimina.
+- Si escribir el manifiesto falla, el comando no falla: el archivo publicado
+  queda sin registrar y la siguiente ejecución lo re-extrae.
+- Directorios: `attachments/`, `<driver>/` y `<native_id>/` deben ser
+  directorios reales; un symlink o una junction de Windows en cualquiera ⇒ no
+  hay acierto, no se borra nada y la publicación falla con `E_IO` sin escribir.
+- Symlink, directorio o dispositivo en la ruta ⇒ sin verificar; la publicación
+  no sigue un symlink (`os.replace` sustituye el enlace) y un directorio
+  destino no se puede reemplazar ⇒ `E_IO` (riesgo aceptado). En Windows, un
+  archivo abierto por otra aplicación impide el reemplazo ⇒ `E_IO`.
 - Un fallo de E/S/permiso al leer la caché se trata como miss (caché
-  best-effort). `cached: true` significa "existía y no se pidió `--force`", no
-  "verificado"; `sha256` es el del archivo servido.
+  best-effort). `cached: true` significa "existía, su SHA-256 coincide con el
+  registrado y no se pidió `--force`"; `sha256` es el del archivo servido.
+- `show` (`cached_path`) **no** valida: solo comprueba que el archivo exista
+  como archivo regular; no lee el archivo ni el manifiesto. Puede informar la
+  ruta de un archivo que `attachment` luego trata como sin verificar.
 - Sin barrido, purga, TTL, daemon ni validación integral al arrancar o durante
   la ejecución; un archivo borrado por el cron externo se re-extrae una vez. La
   app solo limpia su **propio** staging huérfano (`tmp/staging/`); no toca
@@ -1374,15 +1409,30 @@ class CacheHit:                  # frozen dataclass
     size_bytes: int
     sha256: str
 
+class ManifestEntry:             # frozen dataclass (CR-01)
+    sanitized_name: str
+    size_bytes: int
+    sha256: str
+
+Manifest = dict[int, ManifestEntry]
+MANIFEST_NAME = ".manifest.json"
+MANIFEST_VERSION = 1
+
 class AttachmentCache:
     def __init__(self, home: str | Path, uid: str, *, platform: str | None = None) -> None: ...
     def message_dir(self) -> Path: ...
     def path_for(self, original_name: str, index: int) -> Path: ...
-    def lookup(self, original_name: str, index: int, *, expected_size: int | None = None) -> CacheHit | None: ...
+    def manifest_path(self) -> Path: ...
+    def read_manifest(self) -> Manifest: ...            # nunca lanza; inválido ⇒ {}
+    def lookup(self, original_name: str, index: int, manifest: Manifest | None = None) -> CacheHit | None: ...
+    def occupied(self, original_name: str, index: int) -> bool: ...
     def verify(self, hit: CacheHit) -> bool: ...
-    def ensure_message_dir(self) -> Path: ...          # crea 0700; solo al publicar
+    def directories_are_real(self) -> bool: ...         # sin symlink/junction
+    def ensure_message_dir(self) -> Path: ...          # crea 0700; solo al publicar; enlace ⇒ E_IO
     def staging(self) -> StagingArea: ...
     def publish(self, staged: StagedAttachment, original_name: str, index: int) -> Path: ...
+    def write_manifest(self, staging: StagingArea, manifest: Manifest) -> None: ...
+    def discard_unverified(self, original_name: str, index: int) -> bool: ...  # nunca lanza
 
 class StagingArea:
     def __enter__(self) -> "StagingArea": ...
@@ -1567,7 +1617,7 @@ y después de `schema` (macOS) / `stores` (Windows) como hasta ahora.
 primero si hay bloques sin prefijo),
 `<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>; body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`,
 unidos por `; `; la versión es la de la distribución (`package_version()`,
-`3.0.0` en esta fase) y el nativo se obtiene del backend seleccionado (así el
+`3.0.0a0` en esta fase) y el nativo se obtiene del backend seleccionado (así el
 fake de Outlook sobre `platform="win32"` reporta `outlook` en cualquier host).
 Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒
 `; no declared drivers` (valida solo el nativo); config que no parsea ⇒

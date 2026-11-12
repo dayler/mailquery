@@ -1,6 +1,6 @@
 """TC-06, PKG-01 and PKG-02: packaging metadata and version derivation.
 
-``develop`` carries the development major (``mailquery.__version__``, 3.0.0),
+``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a0),
 not yet released: the tests derive every expected version from the package
 instead of pinning a literal (M11-T01, milestone PKG-02; plan D15/D17).
 """
@@ -43,7 +43,7 @@ class PackagingTests(unittest.TestCase):
         """TC-06.01: version without bump, entry point group and console script."""
         project = _load()["project"]
         self.assertEqual(project["version"], mailquery.__version__)
-        self.assertEqual(mailquery.__version__.split(".")[0], "3", "develop carries the 3.0.0 major")
+        self.assertEqual(mailquery.__version__.split(".")[0], "3", "develop carries the 3.x major")
         self.assertEqual(
             project.get("entry-points", {}).get(ENTRY_POINT_GROUP), EXPECTED_TARGETS
         )

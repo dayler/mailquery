@@ -24,9 +24,9 @@ an agent harness to invoke it **on demand** and consume its output.
   built-in drivers and for plugins. The legacy unprefixed uid is accepted on
   input for the platform's native driver.
 
-The attachment and multi-driver features are part of the **not-yet-released
-3.0.0**. `develop` already reports `3.0.0` from `--version`, but publishes
-nothing: no tag, no release and no `main` merge.
+The attachment and multi-driver features are part of the future 3.0.0, not
+yet released. `develop` reports the pre-release `3.0.0a0` (3.0.0-alpha) from
+`--version`, but publishes nothing: no tag, no release and no `main` merge.
 
 References: [`docs/PRD-v2.1.md`](docs/PRD-v2.1.md) (delta contract),
 [`docs/recipes/`](docs/recipes/) (recipes for the harness),
@@ -250,7 +250,7 @@ the subcommand) and `--log-level {error,warning,info,debug}`. There is no
 
 ```text
 $ mailquery -v          # no side effects: does not create ~/.mailquery nor open the client
-mailquery 3.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0)
+mailquery 3.0.0a0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a0)
 ```
 
 The line keeps `backend <native driver>` and adds `; drivers: <driver>
@@ -277,7 +277,7 @@ mailquery doctor - environment and read-only preflight
 Checks:
   [ok]   python             3.14.7
   [ok]   home               …\.mailquery (writable)
-  [ok]   driver             outlook (api=1; pkg 3.0.0; network=false; readonly=structural;
+  [ok]   driver             outlook (api=1; pkg 3.0.0a0; network=false; readonly=structural;
                             body_local=true; attachments=local; native_order=text)
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)

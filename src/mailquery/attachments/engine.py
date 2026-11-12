@@ -9,8 +9,11 @@ M08–M10 consume (PRD-v2.1 RF-43/RF-45–RF-49/RF-51, §10.3, §10.4, §11.2,
 2. the **limits with known sizes** (``max_count`` only for ``--all``, including
    cache hits; ``max_file_size_mb``; ``max_total_size_mb``; 1 MiB = 1 048 576
    bytes; strictly greater exceeds);
-3. the **cache lookup** (regular file, expected size match) used to report
-   ``cached: true`` and to count real hit sizes;
+3. the **cache lookup** (regular file whose name, size and SHA-256 match the
+   per-message manifest, CR-01; the driver's expected size only feeds the
+   limits) used to report ``cached: true`` and to count real hit sizes; an
+   unverified entry at the path is never served: it is replaced on success and
+   removed when the recovery fails;
 4. the **first-block content screen of the attachments that will be extracted**
    (M06 ``screen_content``), mapped with the §11.7 core templates;
 5. the **staging extraction** (opaque files under ``tmp/staging``, hash and
@@ -56,6 +59,8 @@ from typing import Final, Protocol, TypedDict
 from mailquery.attachments.cache import (
     AttachmentCache,
     CacheHit,
+    Manifest,
+    ManifestEntry,
     StagedAttachment,
     StagingArea,
 )
@@ -339,26 +344,105 @@ class AttachmentsEngine:
         max_count = int(self._config.max_count)
         if indices is None and len(rows) > max_count:
             raise _max_count_error(canonical, len(rows), max_count)
-        max_file_bytes = int(self._config.max_file_size_mb) * MIB
-        max_total_bytes = int(self._config.max_total_size_mb) * MIB
 
         cache = AttachmentCache(self._home, canonical)
+
+        # CR-01: hits are verified against the per-message manifest (name, size
+        # and SHA-256); the driver's expected size only feeds the limits below.
+        manifest = cache.read_manifest()
+        hits: dict[int, CacheHit] = {}
+        unverified: set[int] = set()
+        # ``--force`` does not hash up front: an occupied path is verified only
+        # if the recovery fails, to decide whether the previous file is kept.
+        forced: set[int] = set()
+        for index in requested:
+            name = by_index[index]["name"]
+            if not cache.occupied(name, index):
+                continue
+            if force:
+                forced.add(index)
+                continue
+            hit = cache.lookup(name, index, manifest)
+            if hit is not None:
+                hits[index] = hit
+            else:
+                unverified.add(index)
+        published: set[int] = set()
+        try:
+            return self._recover_requested(
+                canonical,
+                legacy_uid,
+                rows,
+                by_index,
+                requested,
+                cache,
+                manifest,
+                hits,
+                published,
+                deadline,
+            )
+        except BaseException:
+            for index in forced - published:
+                if cache.lookup(str(by_index[index]["name"]), index, manifest) is None:
+                    unverified.add(index)
+            self._discard_unverified(
+                cache, by_index, unverified - published, manifest
+            )
+            raise
+
+    def _discard_unverified(
+        self,
+        cache: AttachmentCache,
+        by_index: Mapping[int, Mapping[str, object]],
+        indices: set[int],
+        manifest: Manifest,
+    ) -> None:
+        """Remove unverified cache entries after a failed recovery (CR-01).
+
+        Best-effort: a removal or manifest failure never masks the original
+        error. Registered (verified) files are never touched here.
+        """
+        if not indices:
+            return
+        removed = [
+            index
+            for index in sorted(indices)
+            if cache.discard_unverified(str(by_index[index]["name"]), index)
+        ]
+        stale = [index for index in removed if index in manifest]
+        if not stale:
+            return
+        remaining = {key: value for key, value in manifest.items() if key not in stale}
+        staging = cache.staging()
+        try:
+            cache.write_manifest(staging, remaining)
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+        finally:
+            staging.close()
+
+    def _recover_requested(
+        self,
+        canonical: str,
+        legacy_uid: object,
+        rows: Sequence[Mapping[str, object]],
+        by_index: Mapping[int, Mapping[str, object]],
+        requested: Sequence[int],
+        cache: AttachmentCache,
+        manifest: Manifest,
+        hits: dict[int, CacheHit],
+        published: set[int],
+        deadline: DeadlineFactory | None,
+    ) -> list[AttachmentResult]:
+        """Limits, screening, extraction and publication after the cache lookup."""
+        max_file_bytes = int(self._config.max_file_size_mb) * MIB
+        max_total_bytes = int(self._config.max_total_size_mb) * MIB
         sanitized = {
             index: sanitize_name(by_index[index]["name"], index) for index in requested
         }
         expected: dict[int, int | None] = {
             index: by_index[index]["size_bytes"] for index in requested
         }
-
-        hits: dict[int, CacheHit] = {}
-        if not force:
-            for index in requested:
-                row = by_index[index]
-                hit = cache.lookup(
-                    row["name"], index, expected_size=row["size_bytes"]
-                )
-                if hit is not None:
-                    hits[index] = hit
 
         for index in requested:
             known = hits[index].size_bytes if index in hits else expected[index]
@@ -496,6 +580,12 @@ class AttachmentsEngine:
                 target = cache.publish(
                     staged[index], by_index[index]["name"], index
                 )
+                published.add(index)
+                manifest[index] = ManifestEntry(
+                    sanitized_name=target.name,
+                    size_bytes=staged[index].size_bytes,
+                    sha256=staged[index].sha256,
+                )
                 records[index] = _extracted_record(
                     by_index[index], sanitized[index], staged[index], target
                 )
@@ -505,6 +595,14 @@ class AttachmentsEngine:
                 )
             return [records[index] for index in requested]
         finally:
+            if published:
+                # Register what was published, also when a later publication
+                # failed. Best-effort: an unregistered file is unverified on the
+                # next run and is re-extracted, never served (CR-01).
+                try:
+                    cache.write_manifest(staging, manifest)
+                except Exception:
+                    pass
             staging.close()
 
     # -- driver access ------------------------------------------------------ #

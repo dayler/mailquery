@@ -56,6 +56,12 @@ MAPI_E_LOGON_FAILED = 0x80040111
 MAPI_E_NETWORK_ERROR = 0x80040115
 MAPI_E_FAILONEPROVIDER = 0x8004011D
 
+#: Bytes the real ``Attachment.Size`` (``PR_ATTACH_SIZE``) adds to the decoded
+#: content: the MAPI property overhead measured on a real host (18848 reported
+#: for a 15099-byte file). The fake reproduces it so a test can never assume
+#: ``Size`` equals the recovered bytes (CR-01).
+MAPI_SIZE_OVERHEAD = 3749
+
 _HRESULT_TEXT = {
     DISP_E_EXCEPTION: "Exception occurred.",
     DISP_E_BADINDEX: "Invalid index.",
@@ -842,7 +848,8 @@ class AttachmentSpec:
     display_name: str | None = None
     #: Decoded bytes written by ``SaveAsFile`` (M10); an empty attachment is valid.
     content: bytes = b""
-    #: Local size reported by the ``Size`` property; ``None`` derives it from ``content``.
+    #: Local size reported by the ``Size`` property; ``None`` derives it from
+    #: ``content`` plus :data:`MAPI_SIZE_OVERHEAD`, like real Outlook (CR-01).
     size: int | None = None
     #: OlAttachmentType of the attachment (a by-value copy unless a test says otherwise).
     attachment_type: int = OL_BY_VALUE
@@ -1541,7 +1548,7 @@ class FakeAttachment(_ComObject):
     def _get_Size(self) -> int:
         if self._spec.size is not None:
             return int(self._spec.size)
-        return len(self._spec.content)
+        return len(self._spec.content) + MAPI_SIZE_OVERHEAD
 
     def _get_Type(self) -> int:
         return int(self._spec.attachment_type)
