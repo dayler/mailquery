@@ -56,6 +56,11 @@ lo devolvió `new` (ver "uid opaco" abajo):
 mailquery show <uid>
 ```
 
+`show` devuelve `message.attachments[]` como `{index, name, cached_path}`: úsalo
+para decir si el mensaje trae adjuntos y cuáles, sin abrirlos. `cached_path` es
+`null` si el adjunto no está en la caché; para recuperarlo, `mailquery
+attachment <uid> --index <index>` (ver la receta 02).
+
 Notas:
 
 - El comando es idéntico en ambas plataformas. Usa el alcance configurado en
@@ -99,10 +104,12 @@ De la salida de `new` (estructura completa: PRD §12.5):
 | `cursor` | Informativo: `previous`/`current`; no usarlo para deduplicar por fuera. |
 | `scan` | Informativo: `mode` (`metadata`), `candidates`, `messages_read`, `duration_ms`. |
 
-**`uid` opaco.** En macOS es un entero (`83143`); en Windows, un string
-hexadecimal (el `EntryID` de Outlook). Trátalo como un token opaco: no hagas
-aritmética con él, no asumas su tipo ni su longitud y devuélvelo tal cual a
-`show`. Para deduplicar por fuera, usa `message_id`.
+**`uid` opaco.** Es siempre un string `"<driver>:<native_id>"` (por ejemplo
+`apple_mail:83143` en macOS u `outlook:ABC123` en Windows); el uid legado sin
+prefijo se acepta en la entrada del driver nativo, pero la salida siempre lleva
+el prefijo. Trátalo como un token opaco: no hagas aritmética con él, no asumas
+su longitud ni lo partas, y devuélvelo tal cual a `show` y `attachment`. Para
+deduplicar por fuera, usa `message_id`.
 
 **Warnings que pueden aparecer** (no son errores; cada uno trae su motivo):
 
@@ -139,8 +146,9 @@ Flujo recomendado:
 - No responder, reenviar, archivar, marcar como leído, etiquetar, mover ni
   borrar: `mailquery` no tiene esas operaciones y el harness tampoco debe
   intentarlas por su cuenta.
-- No abrir enlaces ni descargar adjuntos: la CLI solo reporta nombres de
-  adjuntos.
+- No descargar ni abrir adjuntos: la CLI nunca descarga del servidor y
+  `mailquery attachment` solo copia adjuntos que ya están en el store local; no
+  los abre ni los ejecuta. El harness tampoco debe abrirlos.
 - No inventar contenido: si `snippet` está vacío o truncado
   (`body.truncated`) o `body.readable` es `false`, decirlo en lugar de
   completarlo.
@@ -203,7 +211,7 @@ es seguro.
 ## JSON de ejemplo (recortado)
 
 Primera corrida de `mailquery new` en Windows (Outlook sobre datos de prueba);
-en macOS la forma es la misma, con `uid` entero:
+en macOS la forma es la misma, con `uid` `apple_mail:<n>`:
 
 ```json
 {
@@ -214,7 +222,7 @@ en macOS la forma es la misma, con `uid` entero:
   "hint": null,
   "messages": [
     {
-      "uid": "00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…",
+      "uid": "outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…",
       "message_id": "<factura-2026-10@proveedor.example>",
       "duplicate_count": 1,
       "subject": "Factura octubre 2026",

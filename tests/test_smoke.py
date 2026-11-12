@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -20,6 +21,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+
+import mailquery
 
 ROOT = Path(__file__).resolve().parent.parent
 REAL_HOME = Path.home()
@@ -37,6 +40,20 @@ BUDGET = {
     "search_text": (3.0, 10.0),
 }
 BUDGET_COL = 1 if sys.platform == "win32" else 0
+
+
+def version_line_regex(backend: str) -> str:
+    """Regex of the current ``mailquery -v`` line (M11: derived from ``__version__``).
+
+    The line keeps the base prefix, the native ``backend <driver>`` and the additive
+    ``; drivers: <driver> <version>, ...`` part (PRD-v2.1 §11.9); the expected version
+    is always ``mailquery.__version__`` so the tests never pin a literal.
+    """
+    version = re.escape(mailquery.__version__)
+    return (
+        rf"^mailquery {version} \(backend {backend}; Python \d+\.\d+\.\d+; "
+        rf".+; drivers: .*\b{backend} {version}\)\n?$"
+    )
 
 
 def _outlook_running() -> bool:
@@ -234,11 +251,11 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(Path(self.exe).exists(), self.exe)
 
     def test_smoke_install_02_version_shows_platform_backend(self):
-        """SMOKE-INSTALL.02: mailquery -v shows the platform backend (PRD 12.9)."""
+        """SMOKE-INSTALL.02: mailquery -v shows the platform backend and the current version."""
         rc, out, err, _ = self._run(["-v"])
         self.assertEqual(rc, 0, err)
         backend = "outlook" if sys.platform == "win32" else "apple_mail"
-        self.assertRegex(out, rf"^mailquery 2\.0\.1 \(backend {backend}; Python \d+\.\d+\.\d+; ")
+        self.assertRegex(out, version_line_regex(backend))
         self.assertEqual(len(out.strip().splitlines()), 1)
 
     def test_smoke_install_03_doctor_all_checks_ok(self):

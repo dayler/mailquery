@@ -9,6 +9,10 @@
 #
 # Requirements: macOS or Linux (Linux is for development/CI only), Python >= 3.11 and pipx
 # (this script installs pipx when missing, via Homebrew or `python3 -m pip --user`).
+#
+# Backend plugins are separate packages installed explicitly into the same pipx
+# environment: `pipx inject mailquery <plugin-package>`. Installing the plugin is the
+# consent; the core never sandboxes it and `mailquery doctor` shows its capabilities.
 # ============================================================================
 set -eu
 umask 077
@@ -38,9 +42,10 @@ usage() {
 Usage: scripts/install.sh [options]
 
 Install or reinstall the mailquery command with pipx and, when it does not
-exist yet, create ~/.mailquery/config.toml from docs/config.example.toml.
-The application never creates or modifies its configuration: only this
-installer seeds it.
+exist yet, create ~/.mailquery/config.toml from docs/config.example.toml
+(including the documented [attachments] block). The application never
+creates or modifies its configuration: only this installer seeds it.
+Backend plugins: `pipx inject mailquery <plugin-package>` after installing.
 
 Options:
   -h, --help        Show this help and exit.
@@ -308,3 +313,5 @@ fi
 log "  - Edit ~/.mailquery/config.toml and declare at least one account."
 log "  - Verify: mailquery doctor && mailquery mailboxes"
 log "  - Query:  mailquery search --since 1w"
+log "  - Plugins: pipx inject mailquery <plugin-package> (declared by their driver)"
+log "  - Attachments: mailquery attachment <uid> --index 1 (see the [attachments] block)"

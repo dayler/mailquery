@@ -1,14 +1,18 @@
 # ============================================================================
-# mailquery — example configuration (2.0.1, macOS and Windows)
+# mailquery — example configuration (version 2.0.1; features for the future,
+# not-yet-released 3.0.0 of PRD-v2.1, macOS and Windows)
 #
 # The installers (`scripts/install.sh` or `scripts/install.ps1`) copy this file
 # to `~/.mailquery/config.toml` when that file does not exist yet. The
 # application never creates or modifies the configuration: only the installer
 # seeds it, and only when it is missing.
 #
-# An account is read ONLY if you declare it with a [scope."<account>"] block.
-# Identify it with the label shown by `mailquery mailboxes` (its unique email,
-# or the account UUID / a unique prefix of at least 8 characters, also work).
+# An account is read ONLY if you declare it with a
+# [scope."<driver>:<account>"] block; without the driver prefix the native
+# driver of the OS is used (`apple_mail` on macOS, `outlook` on Windows).
+# Identify the account with the label shown by `mailquery mailboxes` (its
+# unique email, or the account UUID / a unique prefix of at least 8 characters,
+# also work).
 # Inside every declared account, INBOX is always included; `mailbox_list` only
 # adds extra folders. Unknown keys => E_CONFIG_INVALID (exit 2).
 #
@@ -34,8 +38,11 @@
 # default_limit = 100            # 1..500
 # lookback = "10min"             # 1min..1d
 
-# --- Local attachment recovery (PRD-v2.1, future 3.0.0) ---------------------
+# --- Local attachment recovery (PRD-v2.1; future, not-yet-released 3.0.0) ---
 # Limits of `mailquery attachment`; `show` is not affected by `enabled`.
+# Recovered files go to ~/.mailquery/attachments/<driver>/<native_id>/ with
+# directories 0700 and files 0600 on POSIX; the whole message is blocked when
+# any attachment is dangerous.
 # [attachments]
 # enabled = true                 # true | false
 # max_file_size_mb = 100         # 1..500

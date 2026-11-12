@@ -4,11 +4,29 @@ Estado: **abierto**. Documento de seguimiento para futuras versiones. No cambia 
 PRD: el presupuesto p95 de macOS (§19 de [`PRD.md`](PRD.md)) sigue vigente y **hoy no se
 cumple** para `mailboxes` ni para `show` en equipos con un store grande.
 
-Medición del 2026-11-04, `develop` @ `11b81fa`, Mac del dueño, macOS 27.0.1 arm64,
-Python 3.15.2 (venv de `pipx`), `mailquery 2.0.0 (backend apple_mail)`. Store: 3 cuentas,
-44 carpetas, 148.054 mensajes (Gmail 30/137.873; iCloud 10/10.178; `On My Device` 4/3).
+Medición **histórica** del 2026-11-04, `develop` @ `11b81fa`, Mac del dueño, macOS
+27.0.1 arm64, Python 3.15.2 (venv de `pipx`), versión medida `mailquery 2.0.0`
+(`backend apple_mail`). Store: 3 cuentas, 44 carpetas, 148.054 mensajes (Gmail
+30/137.873; iCloud 10/10.178; `On My Device` 4/3).
+
+## Presupuestos de adjuntos (PRD-v2.1 §12.2)
+
+Presupuesto p95 de `mailquery attachment` (delta no publicado; la versión vigente
+del paquete es 2.0.1):
+
+| Operación | Apple Mail | Outlook | Plugin local | Plugin remoto |
+|-----------|------------|---------|--------------|---------------|
+| `attachment` acierto de caché (archivo local) | < 50 ms | < 50 ms | — | — |
+| `attachment` 1 adjunto ≤ 5 MB | < 200 ms | < 600 ms | sin objetivo fijo | sin presupuesto (red) |
+| `attachment --all` de N adjuntos | presupuesto × N (lineal) | presupuesto × N (lineal) | sin objetivo fijo | — |
+
+Un plugin local solo está acotado por el timeout de metadatos/extracción
+(RNF-16); un plugin remoto no tiene objetivo de latencia. El timeout de 30 s
+(metadatos) / 120 s (extracción) acota el peor caso y se registra como riesgo
+aceptado en el PRD.
 
 ## Cómo se mide
+
 
 `SMOKE-NEW.07` (`tests/test_smoke.py`) ejecuta cada comando 20 veces (10 en `mailboxes`)
 y compara el p95 por rango más cercano del `duration_ms` que la CLI registra en
@@ -47,6 +65,34 @@ que un solo pico hace fallar `mailboxes`; con n = 20 (`show`) es la segunda más
   harness, que puede añadir latencia de I/O; falta la medición sin sandbox en la
   Terminal del dueño.
 
+## Medición M11 (cierre de fase)
+
+Se re-miden en el host macOS del dueño los presupuestos de §12.2 y los de
+`SMOKE-NEW.07` (`mailboxes` y `show`). Los resultados se registran aquí y en
+`docs/plan/evidence/M11.md` (la escribe el orquestador); si el host no puede
+medir la extracción real de Outlook, queda como deuda/host pendiente y no bloquea
+el cierre (PRD-v2.1 §15).
+
+Medición del 2026-11-11, worktree de M11 (`feature/prd-v2.1-w3` + docs M11),
+Mac del dueño, macOS 27.0.1 arm64, Python 3.12.13, versión `__version__` = 2.0.1,
+store real con 1 cuenta incluida. `SMOKE-NEW.07`, 20 corridas por comando (10 en
+`mailboxes`), p95 por rango más cercano del `duration_ms`:
+
+| Comando | Presupuesto p95 | Medición M11 | Estado |
+|---------|-----------------|--------------|--------|
+| `mailboxes` | < 150 ms | 218 ms | **no cumple** (deuda conocida) |
+| `show` | < 150 ms | 164 ms | **no cumple** (deuda conocida) |
+| `search` | < 500 ms | 312 ms | cumple |
+| `new` | < 500 ms | 266 ms | cumple |
+| `doctor` | < 2 s (pared) | 443 ms (pared) | cumple |
+| `attachment` caché / extracción | §12.2 | sin host real de Outlook en esta fase; cubierto por el doble y por `SMOKE-ATT-AM`/`SMOKE-ATT-OL` (se saltan donde no aplica) | deuda de host |
+
+Los dos fallos de `SMOKE-NEW.07` (`mailboxes`, `show`) son la **deuda conocida**
+del host macOS del dueño (plan maestro §7.6); no son fallos nuevos del delta y
+M11 los registra sin convertirlos en criterio de aceptación. La extracción real
+de Outlook (materialización COM) sigue pendiente del host Windows del dueño
+(riesgo aceptado, PRD-v2.1 §15).
+
 ## Impacto
 
 `SMOKE-NEW.07` falla en macOS con Mail real y un store de este tamaño. La CI no lo
@@ -69,7 +115,8 @@ contadores intactos.
 ## Referencias
 
 - [`PRD.md` §19](PRD.md) — presupuestos p95.
-- [`tests/test_smoke.py`](../tests/test_smoke.py) — SMOKE-NEW.07.
+- [`tests/test_smoke.py`](../tests/test_smoke.py) — SMOKE-NEW.07 y SMOKE-ATT.
+- [`PRD-v2.1.md` §12.2](PRD-v2.1.md) — presupuestos de `attachment`.
 - [`src/mailquery/search.py`](../src/mailquery/search.py) — `run_mailboxes`.
 - [`src/mailquery/cli.py`](../src/mailquery/cli.py) — `duration_ms` de `event=end`.
 - [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3 —
