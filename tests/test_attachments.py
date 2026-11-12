@@ -1081,8 +1081,9 @@ class AttachmentStagingTests(unittest.TestCase):
                 [FakeAttachment("factura.pdf", data=payload)], on_chunk=hook
             )
             records = _engine(home, driver).recover("fake:1", [1])
-            self.assertEqual(observed["session_mode"], 0o700)
-            self.assertEqual(observed["file_mode"], 0o600)
+            if os.name == "posix":
+                self.assertEqual(observed["session_mode"], 0o700)
+                self.assertEqual(observed["file_mode"], 0o600)
             self.assertFalse(observed["published"])
             self.assertFalse(records[0]["cached"])
             self.assertTrue(records[0]["saved"])

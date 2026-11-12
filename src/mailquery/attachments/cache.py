@@ -130,6 +130,7 @@ class StagedAttachment:
     def publish(self, target: Path) -> None:
         """Atomically move the finished file to ``target`` (RF-45, RNF-14)."""
         self.finish()
+        _reject_non_regular_target(target)
         try:
             _atomic_replace(self._path, target)
         except OSError as exc:
@@ -376,6 +377,28 @@ def _create_staging_file(directory: Path) -> tuple[int, str]:
 def _write_chunk(handle: object, chunk: bytes) -> None:
     """Write one chunk to the staging handle (test seam for ``ENOSPC``)."""
     handle.write(chunk)  # type: ignore[attr-defined]
+
+
+def _reject_non_regular_target(target: Path) -> None:
+    """A directory (or other non-regular entry) at the cache path is an I/O failure.
+
+    ``os.replace`` onto a directory raises ``IsADirectoryError`` on POSIX but
+    ``PermissionError`` on Windows; DP-01 keeps ``E_PERMISSION`` for permission
+    problems, so classify a directory explicitly as ``E_IO``.
+    """
+    try:
+        info = os.lstat(target)
+    except FileNotFoundError:
+        return
+    except OSError:  # pragma: no cover - let os.replace report the failure
+        return
+    if stat.S_ISDIR(info.st_mode):
+        raise MailqueryError(
+            "E_IO",
+            "cannot publish the attachment to the cache: the cache path is a directory",
+            "remove the directory from ~/.mailquery/attachments and retry",
+            "cannot publish: cache path is a directory",
+        )
 
 
 def _atomic_replace(source: Path, target: Path) -> None:
