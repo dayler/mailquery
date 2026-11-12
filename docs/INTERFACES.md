@@ -535,6 +535,38 @@ en mayúsculas sin abrir COM. Implementa §9.3 según el anexo B:
 - `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
 - `parse_native_id(native_id) -> str` (estático, C1): valida la parte nativa de
   un uid prefijado (hex en mayúsculas) o `E_USAGE`; puro y offline.
+- `attachments(uid) -> list[AttachmentMetadataRow]` (M10, C1/RF-43/RF-47): lista
+  ordenada de los adjuntos **visibles** (los `PR_ATTACHMENT_HIDDEN` no se
+  listan), `index` 1..N compartido con `show` y `attachment`, `name` original
+  (`FileName`, si no `DisplayName`), `size_bytes` de la propiedad local `Size`
+  (o `None`) y `native_order_key` = índice en hex mayúsculas de 4 dígitos. La
+  disponibilidad se decide **solo con propiedades locales del item**, sin
+  descargar nada ni usar red: `Attachment.Type` = `olByValue` (1) es una copia
+  local; `olByReference` (4) no guarda bytes en el store y exigiría traerlos de
+  su origen ⇒ `not_downloaded`; `olEmbeddeditem` (5)/`olOLE` (6) no son un
+  archivo recuperable ⇒ `unsupported`. Un item no completamente descargado
+  (`DownloadState != OL_FULL_ITEM`) que declara adjuntos (`PR_HASATTACH`) no
+  puede enumerar nombres sin descargar ⇒ error de protocolo
+  `E_ATTACHMENT_UNREADABLE` (`unreadable`) y `show` devuelve `[]` +
+  `W_ATTACHMENTS_UNAVAILABLE` (PRD 12.10); un item ilegible/que no se puede
+  abrir ⇒ el mismo error. **Convención C8/C9:** S/MIME lanza
+  `E_ATTACHMENT_UNREADABLE` (`smime`) desde `attachments()`; `show` lo captura
+  (`attachments: []`) y `attachment` lo propaga antes de “0 adjuntos”. Sin
+  adjuntos ⇒ `[]`.
+- `attachment_stream(uid, index) -> Iterator[bytes]` (M10, C1/RF-45/RF-47):
+  materializa el adjunto local con `Attachment.SaveAsFile` —la **excepción COM**
+  de PRD-v2.1 §0.2/§15— en un subdirectorio propio `0700`
+  (`<home>/tmp/staging/outlook-<aleatorio>/`) con un archivo opaco `0600`,
+  valida que el resultado es un archivo regular **dentro de esa sesión** (un
+  symlink, un directorio o una ruta fuera ⇒
+  `E_ATTACHMENT_UNAVAILABLE`/`unsupported`, D12), entrega los bytes en bloques y
+  borra el archivo y la sesión **siempre** (`finally`, `close()` del backend y
+  barrido de sesiones huérfanas propias en la llamada siguiente). Un
+  `E_ACCESSDENIED` es `E_PERMISSION`, un rechazo transitorio persistente
+  `E_CLIENT_BUSY` y un cuelgue el watchdog de 30 s por llamada COM (RF-33,
+  `E_CLIENT_TIMEOUT` por el mecanismo D-03); el tope de 120 s de la extracción
+  lo aplica el motor (M08) mientras consume el stream. No resuelve referencias,
+  no descarga y no abre red; `size_bytes` desconocido ⇒ `None`.
 - `check_state_uid` se retira en M03: los uids de `state.json` los valida el
   núcleo (`state.py` + `uid.py`), no el backend (PRD-v2.1 §10.2.5-6).
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
@@ -575,7 +607,13 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   `win32com.__gen_path__` antes de importar `win32com.client`.
 - `READONLY_MEMBERS` (`{tipo: {miembro: tipo devuelto o None}}`) y
   `ReadOnlyCom(target, kind, watchdog)`: proxy de lista blanca; cualquier otro
-  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM. Sobre
+  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM.
+  **Excepción COM de M10** (PRD-v2.1 §0.2/§15, riesgo aceptado): sobre
+  `Attachment` se autorizan `Size` y `Type` (metadatos locales) y
+  `SaveAsFile` —la **única** operación de escritura del proxy—, usada solo para
+  materializar en staging un adjunto **ya descargado**; `GetTemporaryFilePath`
+  no se autoriza (el path lo controla el núcleo) y el `object_model_guard` no
+  se amplía en 3.0.0. Sobre
   objetos de `pywin32` llama directamente a `IDispatch.Invoke` con el DISPID
   cacheado por tipo y miembro (por objeto en los `Item`), sin el coste de la
   información de tipos del dispatch dinámico; el fake sigue pasando por `getattr`.
