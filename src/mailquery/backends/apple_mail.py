@@ -298,6 +298,62 @@ class AppleMailBackend(MailBackend):
             "warnings": warnings,
         }
 
+    def attachments(self, uid: Any) -> list[dict[str, Any]]:
+        """Ordered attachment metadata of one message (C1, M09; RF-43/RF-46/RF-47).
+
+        A readable ``.emlx`` lists one row per MIME attachment part (index 1..N
+        in part order, original name, decoded size and availability). S/MIME
+        messages (encrypted or signed) raise ``E_ATTACHMENT_UNREADABLE`` — the
+        message-level signal of the C8/C9 convention: ``show`` returns ``[]`` and
+        ``attachment`` reports row 8 before "no attachments". A missing or
+        unreadable body falls back to the ``Envelope Index`` names as 2.0.1 did,
+        with ``unavailable_reason="not_local"``. ``.partial.emlx`` parts are
+        externalized: their file is resolved best-effort (``unsupported`` when it
+        cannot be verified, PRD-v2.1 §15). Never writes: only reads the store.
+        """
+        native_uid = _native_uid(uid)
+        found = self.find_message(native_uid)
+        if found is None:
+            return []
+        row, _mailbox = found
+        path = _emlx_path(self.store, self._physical_mailbox(row), native_uid)
+        if path is None:
+            return _stored_attachment_rows(self.connection, self.tables, native_uid)
+        parsed = emlx.parse_attachments(path, native_uid=native_uid)
+        if parsed.smime is not None:
+            raise _smime_unreadable(native_uid)
+        if not parsed.readable:
+            return _stored_attachment_rows(self.connection, self.tables, native_uid)
+        return [
+            {
+                "index": item.index,
+                "name": item.name,
+                "size_bytes": item.size_bytes,
+                "native_order_key": item.native_order_key,
+                "unavailable_reason": item.unavailable_reason,
+            }
+            for item in parsed.items
+        ]
+
+    def attachment_stream(self, uid: Any, index: int) -> Iterable[bytes]:
+        """Decoded bytes of attachment ``index`` of one message (C1, M09-T03).
+
+        Reads the local ``.emlx`` (or the verifiable externalized file of a
+        ``.partial.emlx``) and yields decoded chunks; never writes and never
+        triggers a download. A read failure raises
+        :class:`mailquery.emlx.AttachmentReadError`, whose ``reason`` the core
+        maps to ``E_ATTACHMENT_UNAVAILABLE``/``E_ATTACHMENT_UNREADABLE``.
+        """
+        native_uid = _native_uid(uid)
+        found = self.find_message(native_uid)
+        if found is None:
+            raise emlx.AttachmentReadError("not_local", "the message does not exist")
+        row, _mailbox = found
+        path = _emlx_path(self.store, self._physical_mailbox(row), native_uid)
+        if path is None:
+            raise emlx.AttachmentReadError("not_local", "the .emlx file is missing")
+        yield from emlx.attachment_stream(path, int(index), native_uid=native_uid)
+
     @staticmethod
     def parse_uid(raw: Any) -> int:
         """Validate the ``show`` uid of Apple Mail: an integer (PRD 12.4).
@@ -694,6 +750,54 @@ def _fetch_attachment_names(
     except sqlite3.Error as exc:  # pragma: no cover - schema validated
         raise _query_error(exc) from exc
     return [str(row[0]) for row in rows if row[0]]
+
+
+def _native_uid(uid: Any) -> int:
+    """Native uid handed by the core (an ``int`` for Apple Mail)."""
+    return uid if isinstance(uid, int) and not isinstance(uid, bool) else int(uid)
+
+
+def _emlx_path(
+    store: "EnvelopeStore", mailbox: "Mailbox | None", native_uid: int
+) -> Path | None:
+    """``.emlx`` path of one message; resolution failures are a miss (M09)."""
+    if mailbox is None:  # pragma: no cover - the store maps every message row
+        return None
+    try:
+        return emlx.resolve_path(store, mailbox, native_uid)
+    except Exception:  # noqa: BLE001 - an unreadable store path is not local
+        return None
+
+
+def _stored_attachment_rows(
+    connection: sqlite3.Connection, tables: frozenset[str], native_uid: int
+) -> list[dict[str, Any]]:
+    """``Envelope Index`` attachment names when the body cannot be read (2.0.1).
+
+    The core reports them as ``not_local``: the names are known but the bytes
+    cannot be recovered locally; ``show`` keeps ``W_ATTACHMENTS_UNAVAILABLE``.
+    """
+    names = _fetch_attachment_names(connection, tables, native_uid)
+    return [
+        {
+            "index": index,
+            "name": name,
+            "size_bytes": None,
+            "native_order_key": str(index),
+            "unavailable_reason": "not_local",
+        }
+        for index, name in enumerate(names, start=1)
+    ]
+
+
+def _smime_unreadable(native_uid: int) -> MailqueryError:
+    """``E_ATTACHMENT_UNREADABLE`` message-level signal of S/MIME messages (C8/C9)."""
+    return MailqueryError(
+        "E_ATTACHMENT_UNREADABLE",
+        f"message uid {native_uid} is S/MIME protected and cannot be extracted",
+        "S/MIME attachments cannot be extracted",
+        "message is S/MIME protected",
+    )
 
 
 def _fetch_label_mailboxes(

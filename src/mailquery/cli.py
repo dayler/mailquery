@@ -3,7 +3,7 @@
 Only this module writes to ``stdout``/``stderr``. It parses ``argv`` with
 ``argparse`` (``-h``/``--help`` is the documented non-JSON exception), loads
 the configuration, sets up logging, takes the run lock, dispatches one of the
-five commands and renders either success or a JSON error object (PRD 12).
+six commands and renders either success or a JSON error object (PRD 12).
 """
 
 from __future__ import annotations
@@ -21,7 +21,10 @@ from typing import Any, Mapping, Sequence
 
 from mailquery import __version__
 from mailquery import uid as uid_module
+from mailquery.attachments.engine import AttachmentsEngine
+from mailquery.attachments.paths import message_dir
 from mailquery.backends import backend_class, get_backend
+from mailquery.backends.base import ExcludedStoreError
 from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.config import (
     APP_HOME_SUBDIRS,
@@ -42,9 +45,18 @@ from mailquery.config import (
 from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
 from mailquery.output import configure_streams, now_iso, write_json
-from mailquery.plugins import PluginContext, call_driver
+from mailquery.plugins import (
+    EXTRACTION_TIMEOUT_SECONDS,
+    PluginContext,
+    call_driver,
+    wrap_driver,
+)
 from mailquery.search import (
     Filters,
+    _config_for_driver,
+    _excluded_store_error,
+    _resolved_scope,
+    _scope_account_uuid,
     _store_excluded_warning,
     parse_relative_time,
     run_mailboxes,
@@ -54,7 +66,7 @@ from mailquery.search import (
 )
 from mailquery.state import RunLock, StateStore
 
-COMMANDS = ("doctor", "mailboxes", "search", "new", "show")
+COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
 # Backend check that the resolution of the ``[scope]`` blocks depends on, by
 # backend name (PRD 12.8; annex A.7 and B.8).
 _RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
@@ -72,14 +84,34 @@ Examples:
   mailquery search --text "*invoice*" --since 1mo
   mailquery new --peek
   mailquery show 83143
+  mailquery attachment apple_mail:83143 --all
 
 Configuration: ~/.mailquery/config.toml (optional; see README.md)
 Output: one JSON object on stdout for every command, in UTF-8 (this help,
         --version and the default doctor report are the only non-JSON output);
         logs go to ~/.mailquery/logs/mailquery.log
 Exit codes: 0 ok | 2 usage or config error | 3 environment error
-            | 4 rejected query | 5 busy or transient error | 6 mail client not running
+            | 4 rejected query or blocked attachments | 5 busy or transient error
+            | 6 mail client not running
 """
+
+_ATTACHMENT_EPILOG = """\
+Examples:
+  mailquery show apple_mail:83143
+  mailquery attachment apple_mail:83143 --index 1
+  mailquery attachment apple_mail:83143 --all
+
+Notes:
+  - If any attachment of the message matches a dangerous filename pattern, a blocked
+    extension or executable content, the whole message is blocked: the command fails
+    with E_ATTACHMENT_BLOCKED (exit 4) and no file is written (both --index and --all).
+  - Attachments that cannot be recovered fail with E_ATTACHMENT_UNAVAILABLE (exit 3);
+    corrupt or S/MIME attachments fail with E_ATTACHMENT_UNREADABLE (exit 3).
+  - Files are saved with mode 0600 under
+    ~/.mailquery/attachments/<driver>/<native_id>/<index:02d>_<sanitized_name>.
+"""
+
+_ATTACHMENT_USAGE = "mailquery attachment [-h] (--index N | --all) [--force] <uid>"
 
 _DOCTOR_EPILOG = """\
 Examples:
@@ -166,6 +198,28 @@ class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
         # action: the "Commands:" section lists the real commands only.
         if isinstance(action, argparse._SubParsersAction):
             return "".join(self._format_action(sub) for sub in action._get_subactions())
+        return super()._format_action(action)
+
+
+class _AttachmentHelpFormatter(_HelpFormatter):
+    """Attachment help: 17-column help texts and the literal wraps of PRD-v2.1 §11.4."""
+
+    def __init__(self, prog: str) -> None:
+        argparse.RawDescriptionHelpFormatter.__init__(
+            self, prog, width=_help_width(), max_help_position=17
+        )
+
+    def _split_lines(self, text: str, width: int) -> list[str]:
+        # §11.4 fixes the line breaks of the attachment help: preserve the
+        # explicit newlines and do not re-wrap (every line stays under 100 cols).
+        return text.splitlines()
+
+    def _format_action(self, action: argparse.Action) -> str:
+        if isinstance(action, argparse._SubParsersAction):
+            return super()._format_action(action)
+        # Keep the help column at 17 even with short invocations (``<uid>``,
+        # ``--all``): the PRD §11.4 block uses that alignment.
+        self._action_max_length = max(self._action_max_length, 15)
         return super()._format_action(action)
 
 
@@ -405,6 +459,44 @@ def build_parser() -> argparse.ArgumentParser:
     # The format is validated by AppleMailBackend.parse_uid in main(), not by argparse (PRD 12.4).
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
+    attachment_parser = subparsers.add_parser(
+        "attachment",
+        help="recover local attachments of one message",
+        description="Recover local attachments of one message into "
+        "~/.mailquery/attachments/.",
+        epilog=_ATTACHMENT_EPILOG,
+        formatter_class=_AttachmentHelpFormatter,
+        allow_abbrev=False,
+    )
+    attachment_parser.set_defaults(command="attachment")
+    attachment_parser.usage = _ATTACHMENT_USAGE
+    _style_parser(attachment_parser, root=False)
+    attachment_parser._positionals.title = "Positional arguments"  # noqa: SLF001
+    # ``--index``/``--all`` are mutually exclusive and the value is validated in
+    # main() (row 1 of §11.3) to keep the literal error texts.
+    attachment_parser.add_argument(
+        "--index",
+        metavar="N",
+        help="1-based attachment index to recover (as shown by `mailquery show <uid>`)",
+    )
+    attachment_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="recover all attachments of the message; if any is blocked the whole "
+        "message fails",
+    )
+    attachment_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-extract from the driver and overwrite existing cached files",
+    )
+    attachment_parser.add_argument(
+        "uid",
+        metavar="<uid>",
+        help="message uid (as returned by search, new or show, e.g. apple_mail:83143;\n"
+        "the legacy unprefixed uid is accepted for the native driver)",
+    )
+
     return parser
 
 
@@ -461,12 +553,19 @@ def _main(
 
     command = str(args.command)
     registry = BackendRegistry()
-    if command == "show":
+    if command == "attachment":
+        # Row 1 of §11.3: exactly one of --index/--all and a positive --index,
+        # before the home exists, the config is read or the store is opened.
+        try:
+            args.attachment_indices = _attachment_selection(args)
+        except MailqueryError as exc:
+            return _report_error(exc, command)
+    if command in ("show", "attachment"):
         # Before the home is created, the config is read or the store is opened:
         # generic uid syntax plus the installed driver (PRD-v2.1 §11.3 row 2) and,
         # for the native driver, its ``parse_native_id`` (pure, offline).
         try:
-            args.uid, args.uid_driver, args.uid_native_id = _parse_show_uid(
+            args.uid, args.uid_driver, args.uid_native_id = _parse_command_uid(
                 args.uid, mail_root, accounts_db, backend, registry
             )
         except MailqueryError as exc:
@@ -523,14 +622,14 @@ def _native_id_parser(
     ).parse_native_id
 
 
-def _parse_show_uid(
+def _parse_command_uid(
     raw: Any,
     mail_root: Path | None,
     accounts_db: Path | None,
     backend: Any,
     registry: BackendRegistry,
 ) -> tuple[Any, str, str]:
-    """Validate the ``show`` uid before creating the home (PRD-v2.1 §11.3 row 2, AC-05).
+    """Validate the command uid before creating the home (PRD-v2.1 §11.3 row 2, AC-05).
 
     Returns ``(native_uid_or_None, driver, native_id)``: the native uid of the
     platform driver (ready for the backend) or ``None`` when the prefix belongs
@@ -555,10 +654,10 @@ def _parse_show_uid(
     return native, parsed.driver, parsed.native_id
 
 
-def _require_show_driver_in_scope(
+def _require_command_driver_in_scope(
     args: argparse.Namespace, config: Config, native_name: str
 ) -> None:
-    """``show``: the uid's driver must be declared in ``[scope]`` (RF-36).
+    """``show``/``attachment``: the uid's driver must be declared in ``[scope]`` (RF-36).
 
     Runs after ``config.toml`` is read and before any driver is opened: an
     installed driver with no ``[scope]`` block is ``E_ACCOUNT_NOT_IN_SCOPE``
@@ -636,6 +735,7 @@ def _open_drivers(
     backend: Any,
     native_name: str,
     registry: BackendRegistry,
+    describe: bool = True,
 ) -> dict[str, Any]:
     """Open the drivers the command consults (M04-T01/T05).
 
@@ -658,14 +758,15 @@ def _open_drivers(
         opened.update(registry.open_drivers(plugins, context=context))
     for instance in opened.values():
         _bind_command(instance, command)
-        _log_backend_connection(instance)
+        if describe:
+            _log_backend_connection(instance)
     return opened
 
 
-def _validate_show_native_id(
+def _validate_command_native_id(
     args: argparse.Namespace, opened: Mapping[str, Any], native_name: str
 ) -> None:
-    """Validate the native part of a plugin ``show`` uid with the driver parser.
+    """Validate the native part of a plugin ``show``/``attachment`` uid with the parser.
 
     The plugin receives only ``<native_id>`` (RF-40) and validates it with
     ``parse_native_id``; the CLI runs that check after loading the declared
@@ -737,9 +838,12 @@ def _run_command(
     opened: dict[str, Any] = {}
     try:
         if command == "show":
-            _require_show_driver_in_scope(args, config, native_name)
+            _require_command_driver_in_scope(args, config, native_name)
+        if command == "attachment":
+            _require_attachments_enabled(config)
+            _require_command_driver_in_scope(args, config, native_name)
         with RunLock(home_path):
-            if command == "show":
+            if command in ("show", "attachment"):
                 names = (str(getattr(args, "uid_driver", "") or native_name),)
             else:
                 names = _declared_driver_names(config, native_name)
@@ -752,9 +856,21 @@ def _run_command(
                 backend=backend,
                 native_name=native_name,
                 registry=registry,
+                describe=command != "attachment",
             )
+            if command == "attachment":
+                # Row 5 of §11.3: the loaded driver must be able to materialize
+                # attachments before any store is opened.
+                _require_attachment_capabilities(
+                    opened.get(str(getattr(args, "uid_driver", "") or native_name)),
+                    str(getattr(args, "uid_driver", "") or native_name),
+                )
+                _log_backend_connection(
+                    opened.get(str(getattr(args, "uid_driver", "") or native_name))
+                )
+                _validate_command_native_id(args, opened, native_name)
             if command == "show":
-                _validate_show_native_id(args, opened, native_name)
+                _validate_command_native_id(args, opened, native_name)
             logger.info(
                 "event=start command=%s backend=%s drivers=%s",
                 command,
@@ -801,6 +917,17 @@ def _run_command(
 
     write_json(_success_payload(command, payload))
     duration_ms = int((time.perf_counter() - started) * 1000)
+    if command == "attachment":
+        attachments = payload.get("attachments") or ()
+        logger.info(
+            "event=end command=attachment exit_code=0 count=%d cached=%d bytes=%d "
+            "duration_ms=%d",
+            len(attachments),
+            sum(1 for entry in attachments if entry.get("cached")),
+            sum(int(entry.get("size_bytes") or 0) for entry in attachments),
+            duration_ms,
+        )
+        return 0
     warnings = payload.get("warnings") or ()
     raw_scan = payload.get("scan")
     scan: dict[str, Any] = raw_scan if isinstance(raw_scan, dict) else {}
@@ -849,7 +976,11 @@ def _execute(
         if registry is not None
         else BackendRegistry().is_installed
     )
-    if command == "mailboxes":
+    if command == "attachment":
+        payload = _run_attachment(
+            args, config, home_path, backend, mapping, native
+        )
+    elif command == "mailboxes":
         payload = run_mailboxes(backend, config, **extra)
     elif command == "search":
         payload = run_search(backend, config, filters, **extra)  # type: ignore[arg-type]
@@ -883,6 +1014,188 @@ def _execute(
             'run "mailquery --help" to see the available commands',
         )
     return payload
+
+
+def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
+    """Row 1 of §11.3: exactly one of ``--index``/``--all`` and a positive integer index."""
+    has_index = getattr(args, "index", None) is not None
+    if has_index == bool(getattr(args, "all", False)):
+        raise MailqueryError(
+            "E_USAGE",
+            "attachment requires exactly one of --index or --all",
+            "pass --index N to recover one attachment or --all to recover all of them",
+            "attachment arguments are invalid",
+        )
+    if not has_index:
+        return None
+    raw = str(args.index)
+    if not raw.isascii() or not raw.isdigit() or int(raw) < 1:
+        raise MailqueryError(
+            "E_USAGE",
+            f"invalid --index {raw}: expected a positive integer (1 or greater)",
+            "run `mailquery show <uid>` to list the attachment indexes",
+            "invalid attachment index",
+        )
+    return [int(raw)]
+
+
+def _require_attachments_enabled(config: Config) -> None:
+    """Row 4 of §11.3: ``[attachments].enabled`` only gates the ``attachment`` command."""
+    if config.attachments.enabled:
+        return
+    raise MailqueryError(
+        "E_ATTACHMENTS_DISABLED",
+        "attachment recovery is disabled: [attachments].enabled = false",
+        "set [attachments].enabled = true in ~/.mailquery/config.toml to allow "
+        "attachment recovery",
+        "attachment recovery is disabled",
+    )
+
+
+def _require_attachment_capabilities(instance: Any, driver: str) -> None:
+    """Row 5 of §11.3: only a driver that can materialize attachments may continue."""
+    capabilities = getattr(instance, "capabilities", None) or {}
+    mode = str(capabilities.get("attachments", "local"))
+    if mode not in ("none", "remote"):
+        return
+    raise MailqueryError(
+        "E_ATTACHMENT_UNAVAILABLE",
+        f"attachment recovery is unsupported by driver {driver!r}",
+        'install or declare a driver with attachments = "local" in the [scope] '
+        "blocks of ~/.mailquery/config.toml",
+        "attachment recovery is unsupported by the driver",
+    )
+
+
+def _attachment_not_found(uid: str) -> MailqueryError:
+    """``E_USAGE`` for an attachment uid that does not resolve to a visible message."""
+    return MailqueryError(
+        "E_USAGE",
+        f"message uid {uid} was not found",
+        "run `mailquery search` to find the uid; deleted messages and orphan "
+        ".emlx files are not shown",
+        "message uid was not found",
+    )
+
+
+def _attachment_out_of_range(uid: str, index: int, count: int) -> MailqueryError:
+    """``E_USAGE`` of the §11.5 example G (row 10 of §11.3)."""
+    return MailqueryError(
+        "E_USAGE",
+        f"attachment index {index} is out of range: message {uid} has "
+        f"{count} attachment(s) (valid: 1..{count})",
+        f"run `mailquery show {uid}` to list the attachment indexes",
+        "attachment index out of range",
+    )
+
+
+def _attachment_instance(
+    args: argparse.Namespace, backend: Any, drivers: Mapping[str, Any]
+) -> Any:
+    """The already opened driver of the uid prefix (native backend or declared plugin)."""
+    driver = str(getattr(args, "uid_driver", "") or "")
+    if backend is not None and str(getattr(backend, "driver", "") or "") == driver:
+        return backend
+    instance = drivers.get(driver)
+    if instance is None:  # pragma: no cover - the CLI always opens the target driver
+        raise uid_module.driver_unknown(driver)
+    return instance
+
+
+def _run_attachment(
+    args: argparse.Namespace,
+    config: Config,
+    home_path: Path,
+    backend: Any,
+    drivers: Mapping[str, Any],
+    native: str | None,
+) -> dict:
+    """Rows 6–15 of §11.3 for the ``attachment`` command (M08/C8).
+
+    The CLI resolves the account/scope, checks the message and its attachment
+    indexes (rows 6–10) and hands the extraction to the M07 engine (rows 11–15)
+    with the 120 s deadline of RNF-16. The success payload is the §11.2 contract;
+    the engine returns one record per requested attachment.
+    """
+    driver = str(getattr(args, "uid_driver", "") or "")
+    native_uid = getattr(args, "uid", None)
+    show_uid = uid_module.format_uid(
+        driver, str(getattr(args, "uid_native_id", ""))
+    )
+    instance = _attachment_instance(args, backend, drivers)
+    wrapped = wrap_driver(instance, driver=driver)
+    target_config = _config_for_driver(config, driver, str(native or driver))
+    excluded: list[dict] = []
+    resolved = _resolved_scope(target_config, wrapped, excluded, native=driver)
+    declared = {_scope_account_uuid(scope) for scope in resolved}
+    try:
+        found = wrapped.find_message(native_uid)
+    except ExcludedStoreError as exc:
+        raise _excluded_store_error(show_uid, exc.entry) from None
+    if found is None:
+        raise _attachment_not_found(show_uid)
+    _row, mailbox = found
+    account_uuid = mailbox["account_uuid"] if mailbox is not None else ""
+    if not account_uuid:
+        raise _attachment_not_found(show_uid)
+    if account_uuid not in declared:
+        raise MailqueryError(
+            "E_ACCOUNT_NOT_IN_SCOPE",
+            f"message uid {show_uid} belongs to account {account_uuid!r}, "
+            "which is not declared in config.toml",
+            "only accounts declared with a [scope.<account>] block are read; "
+            "declare the account in ~/.mailquery/config.toml",
+            "the message belongs to an account that is not declared",
+        )
+    # Row 8: the driver may raise the protocol error when the message is
+    # S/MIME or unreadable (convention C8/C9); the core maps it through M05.
+    entries = list(wrapped.attachments(native_uid) or [])
+    if not entries:
+        raise MailqueryError(
+            "E_USAGE",
+            f"message {show_uid} has no attachments",
+            "the message does not have any attachment to recover",
+            "the message has no attachments",
+        )
+    indices = getattr(args, "attachment_indices", None)
+    if indices is not None:
+        available = {
+            int(entry.get("index"))
+            for entry in entries
+            if isinstance(entry, Mapping) and entry.get("index") is not None
+        }
+        for value in indices:
+            if value not in available:
+                raise _attachment_out_of_range(show_uid, value, len(entries))
+    engine = AttachmentsEngine(home_path, config.attachments, wrapped)
+    deadline = lambda: time.monotonic() + EXTRACTION_TIMEOUT_SECONDS  # noqa: E731
+    records = engine.recover(
+        show_uid,
+        indices,
+        force=bool(getattr(args, "force", False)),
+        deadline=deadline,
+        entries=entries,
+    )
+    payload_entries = [
+        {
+            "index": int(record["index"]),
+            "original_name": str(record["original_name"]),
+            "sanitized_name": str(record["sanitized_name"]),
+            "saved": bool(record["saved"]),
+            "cached": bool(record["cached"]),
+            "path": str(record["path"]),
+            "size_bytes": int(record["size_bytes"]),
+            "sha256": str(record["sha256"]),
+        }
+        for record in records
+    ]
+    return {
+        "uid": show_uid,
+        "output_dir": str(message_dir(home_path, show_uid)),
+        "count": len(payload_entries),
+        "attachments": payload_entries,
+        "warnings": [],
+    }
 
 
 def _log_backend_connection(backend: Any) -> None:

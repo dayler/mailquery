@@ -15,6 +15,7 @@ Stable normalized payloads are compared against goldens in
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import logging
@@ -46,8 +47,19 @@ from tests.fixtures.make_fixtures import (
     DEFAULT_CONFIG,
     GMAIL_LABEL,
     ICLOUD_LABEL,
+    LIMIT_1MB_CONFIG,
     LOCAL_LABEL,
     MAILBOX_ICLOUD_INBOX,
+    PAYLOAD_PDF_OCTUBRE,
+    UID_ATTACH_BIG,
+    UID_ATTACH_CORRUPT,
+    UID_ATTACH_EMPTY,
+    UID_ATTACH_EXECUTABLE,
+    UID_ATTACH_HOSTILE_RESERVED,
+    UID_ATTACH_MISSING_EMLX,
+    UID_ATTACH_MULTI,
+    UID_ATTACH_PARTIAL,
+    UID_ATTACH_SMIME,
     build_store,
     write_config,
     write_state,
@@ -122,6 +134,9 @@ def _all_installed(driver: str) -> bool:
     return bool(driver)
 
 
+MESSAGE_DIR_RE = re.compile(r"(/attachments/[a-z0-9_]+/)([^/]+)")
+
+
 def _normalize(value: object, root: Path) -> object:
     """Replace run-dependent values so payloads can be compared to goldens."""
     if isinstance(value, dict):
@@ -141,7 +156,11 @@ def _normalize(value: object, root: Path) -> object:
         text = EMAIL_DATE_RE.sub("<EMAIL_DATE>", text)
         text = text.replace(str(root), "<ROOT>")
         # Goldens use "/" on every OS: normalize separators after the root swap.
-        return text.replace("\\", "/")
+        text = text.replace("\\", "/")
+        # Windows uses the stable 32-hex directory when the real cache path
+        # exceeds its conservative budget (D9); the message directory is not
+        # platform-independent, so goldens keep it as a placeholder.
+        return MESSAGE_DIR_RE.sub(r"\1<MESSAGE_DIR>", text)
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) >= 1_000_000_000:
         return "<EPOCH>"
     return value
@@ -750,7 +769,10 @@ class ShowTest(IntegrationBase):
         self.assertIn("billing@fixture.example", message["headers"]["From"])
         self.assertEqual(message["body_text"], "Please find the invoice attached.")
         self.assertIs(message["body_truncated"], False)
-        self.assertEqual(message["attachments"], [{"name": "invoice-2026-10.pdf"}])
+        self.assertEqual(
+            message["attachments"],
+            [{"index": 1, "name": "invoice-2026-10.pdf", "cached_path": None}],
+        )
         self.assertIs(message["partial"], False)
         self.assertIs(message["readable"], True)
         self.assertIs(message["source"]["partial"], False)
@@ -816,6 +838,355 @@ class ExtendedGoldenTest(IntegrationBase):
             "show", "83160", expected_exit=2, expected_code="E_ACCOUNT_NOT_IN_SCOPE"
         )
         self.assert_golden("show_not_in_scope_error.json", payload)
+
+
+# --------------------------------------------------------------------------- #
+# M09 — Apple Mail attachments: UT-AM-03/04 and the TC-08 goldens
+# --------------------------------------------------------------------------- #
+
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+class _AttachmentFixtureCase(IntegrationBase):
+    """Integration base over ``build_store(attachments=True)`` (M09 fixtures)."""
+
+    def setUp(self) -> None:
+        self.fx = build_store(attachments=True)
+        self.addCleanup(self.fx.cleanup)
+        self.addCleanup(_close_log_handlers)
+        write_config(self.fx.home, DEFAULT_CONFIG)
+
+    def cache_files(self) -> list[Path]:
+        base = self.fx.home / "attachments"
+        return sorted(path for path in base.rglob("*") if path.is_file())
+
+    def backend(self) -> AppleMailBackend:
+        instance = AppleMailBackend(
+            mail_root=self.fx.mail_root,
+            accounts_db=self.fx.accounts_db,
+            tmp_root=self.fx.home / "tmp",
+        )
+        self.addCleanup(instance.close)
+        return instance
+
+    def assert_reason(self, uid: int, index: int, reason: str) -> None:
+        rows = self.backend().attachments(uid)
+        self.assertEqual(rows[index - 1]["unavailable_reason"], reason, rows)
+
+
+class AppleMailAttachmentTest(_AttachmentFixtureCase):
+    """UT-AM-03/04: extraction, availability, read-only and integration (M09)."""
+
+    # -- UT-AM-03 ---------------------------------------------------------- #
+
+    def test_ut_am_03_01_first_extraction_then_cache_hit_then_force(self) -> None:
+        """UT-AM-03.01: cached false → true → --force false, same size and sha256."""
+        uid = prefixed_uid(UID_ATTACH_MULTI)
+        first = self.run_ok("attachment", uid, "--index", "2")
+        self.assertIs(first["attachments"][0]["cached"], False)
+        second = self.run_ok("attachment", uid, "--index", "2")
+        self.assertIs(second["attachments"][0]["cached"], True)
+        self.assertEqual(second["attachments"][0]["sha256"], first["attachments"][0]["sha256"])
+        forced = self.run_ok("attachment", uid, "--index", "2", "--force")
+        self.assertIs(forced["attachments"][0]["cached"], False)
+        self.assertEqual(forced["attachments"][0]["sha256"], first["attachments"][0]["sha256"])
+
+    def test_ut_am_03_02_missing_emlx_is_not_local(self) -> None:
+        """UT-AM-03.02: a missing .emlx with a DB attachment row ⇒ unavailable (not_local)."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_MISSING_EMLX),
+            "--index",
+            "1",
+            expected_exit=3,
+            expected_code="E_ATTACHMENT_UNAVAILABLE",
+        )
+        self.assertIn("is not available in the local store", payload["error"]["message"])
+        self.assert_reason(UID_ATTACH_MISSING_EMLX, 1, "not_local")
+        self.assertEqual(self.cache_files(), [])
+
+    def test_ut_am_03_03_unverifiable_externalized_attachment_is_unsupported(self) -> None:
+        """UT-AM-03.03: a .partial.emlx externalized part without file ⇒ unsupported."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_PARTIAL),
+            "--index",
+            "2",
+            expected_exit=3,
+            expected_code="E_ATTACHMENT_UNAVAILABLE",
+        )
+        self.assertIn("cannot be recovered by driver 'apple_mail'", payload["error"]["message"])
+        self.assert_reason(UID_ATTACH_PARTIAL, 2, "unsupported")
+        self.assertEqual(self.cache_files(), [])
+
+    def test_ut_am_03_04_partial_message_mixed_availability(self) -> None:
+        """UT-AM-03.04: --all fails on the unsupported part without partial files; --index 1 works."""
+        uid = prefixed_uid(UID_ATTACH_PARTIAL)
+        self.run_error(
+            "attachment",
+            uid,
+            "--all",
+            expected_exit=3,
+            expected_code="E_ATTACHMENT_UNAVAILABLE",
+        )
+        self.assertEqual(self.cache_files(), [])
+        payload = self.run_ok("attachment", uid, "--index", "1")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["attachments"][0]["index"], 1)
+        self.assertEqual(
+            Path(payload["attachments"][0]["path"]).read_bytes(), b"%PDF-1.4\nexternalized fixture attachment\n"
+        )
+
+    def test_ut_am_03_05_smime_is_unreadable_never_no_attachments(self) -> None:
+        """UT-AM-03.05: S/MIME ⇒ E_ATTACHMENT_UNREADABLE and show returns [] (D6)."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_SMIME),
+            "--index",
+            "1",
+            expected_exit=3,
+            expected_code="E_ATTACHMENT_UNREADABLE",
+        )
+        self.assertIn("S/MIME protected", payload["error"]["message"])
+        shown = self.run_ok("show", prefixed_uid(UID_ATTACH_SMIME))
+        self.assertEqual(shown["message"]["attachments"], [])
+        self.assert_warning(shown, "W_BODY_UNREADABLE")
+
+    def test_ut_am_03_06_corrupt_mime_payload_is_corrupt(self) -> None:
+        """UT-AM-03.06: an undecodable base64 attachment ⇒ E_ATTACHMENT_UNREADABLE (corrupt)."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_CORRUPT),
+            "--index",
+            "1",
+            expected_exit=3,
+            expected_code="E_ATTACHMENT_UNREADABLE",
+        )
+        self.assertIn("is corrupt or unreadable", payload["error"]["message"])
+        self.assert_reason(UID_ATTACH_CORRUPT, 1, "corrupt")
+
+    def test_ut_am_03_07_empty_attachment_is_saved_with_zero_size(self) -> None:
+        """UT-AM-03.07: a 0-byte attachment is valid (size 0, sha256 of the empty file)."""
+        payload = self.run_ok("attachment", prefixed_uid(UID_ATTACH_EMPTY), "--index", "1")
+        entry = payload["attachments"][0]
+        self.assertEqual(entry["size_bytes"], 0)
+        self.assertEqual(entry["sha256"], EMPTY_SHA256)
+        self.assertEqual(Path(entry["path"]).read_bytes(), b"")
+
+    def test_ut_am_03_08_deleted_cache_file_is_re_extracted_once(self) -> None:
+        """UT-AM-03.08: a cache file deleted before attachment is re-extracted once (AC-20)."""
+        uid = prefixed_uid(UID_ATTACH_MULTI)
+        first = self.run_ok("attachment", uid, "--index", "1")
+        cached = Path(first["attachments"][0]["path"])
+        cached.unlink()
+        again = self.run_ok("attachment", uid, "--index", "1")
+        self.assertIs(again["attachments"][0]["cached"], False)
+        self.assertEqual(again["attachments"][0]["sha256"], first["attachments"][0]["sha256"])
+        self.assertTrue(cached.is_file())
+
+    def test_ut_am_03_09_all_failure_leaves_no_partial_files(self) -> None:
+        """UT-AM-03.09: a failing --all leaves no partial cache file and cleans staging."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_EXECUTABLE),
+            "--all",
+            expected_exit=4,
+            expected_code="E_ATTACHMENT_BLOCKED",
+        )
+        self.assertIn("executable content", payload["error"]["message"])
+        self.assertEqual(self.cache_files(), [])
+        staging = self.fx.home / "tmp" / "staging"
+        self.assertEqual([path for path in staging.rglob("*") if path.is_file()], [])
+
+    # -- UT-AM-04 ---------------------------------------------------------- #
+
+    def test_ut_am_04_01_store_hashes_and_mtimes_do_not_change(self) -> None:
+        """UT-AM-04.01: success, cache, blocked and limit flows leave the store untouched."""
+        before = _store_snapshot(self.fx.mail_root)
+        self.run_ok("attachment", prefixed_uid(UID_ATTACH_MULTI), "--index", "1")
+        self.run_ok("attachment", prefixed_uid(UID_ATTACH_MULTI), "--index", "1")
+        self.run_error(
+            "attachment", prefixed_uid(UID_ATTACH_HOSTILE_RESERVED), "--all",
+            expected_exit=4, expected_code="E_ATTACHMENT_BLOCKED",
+        )
+        self.run_ok("attachment", prefixed_uid(UID_ATTACH_EMPTY), "--index", "1")
+        self.run_error(
+            "attachment", prefixed_uid(UID_ATTACH_SMIME), "--index", "1",
+            expected_exit=3, expected_code="E_ATTACHMENT_UNREADABLE",
+        )
+        self.configure(LIMIT_1MB_CONFIG)
+        self.run_error(
+            "attachment", prefixed_uid(UID_ATTACH_BIG), "--index", "1",
+            expected_exit=4, expected_code="E_ATTACHMENT_TOO_LARGE",
+        )
+        self.assertEqual(_store_snapshot(self.fx.mail_root), before)
+
+    def test_ut_am_04_02_every_write_stays_under_the_app_home(self) -> None:
+        """UT-AM-04.02: only ~/.mailquery is written; the staging area is left clean."""
+        before = set(_snapshot_paths(self.fx.root))
+        self.run_ok("attachment", prefixed_uid(UID_ATTACH_MULTI), "--all")
+        self.run_error(
+            "attachment", prefixed_uid(UID_ATTACH_EXECUTABLE), "--all",
+            expected_exit=4, expected_code="E_ATTACHMENT_BLOCKED",
+        )
+        new_paths = set(_snapshot_paths(self.fx.root)) - before
+        home_prefix = self.fx.home.relative_to(self.fx.root).as_posix()
+        for relative in new_paths:
+            self.assertTrue(
+                relative == home_prefix or relative.startswith(home_prefix + "/"),
+                f"write outside the app home: {relative}",
+            )
+        self.assertTrue(
+            any(path.startswith(f"{home_prefix}/attachments/") for path in new_paths),
+            new_paths,
+        )
+        staging = self.fx.home / "tmp" / "staging"
+        self.assertEqual([path for path in staging.rglob("*") if path.is_file()], [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX permissions only")
+    def test_ut_am_04_03_cache_permissions_are_private_and_not_executable(self) -> None:
+        """UT-AM-04.03: directories 0700 and files 0600 without the executable bit."""
+        payload = self.run_ok("attachment", prefixed_uid(UID_ATTACH_MULTI), "--all")
+        for entry in payload["attachments"]:
+            path = Path(entry["path"])
+            file_mode = path.stat().st_mode & 0o777
+            self.assertEqual(file_mode, 0o600, path)
+            directory = path.parent
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700, directory)
+            self.assertEqual(directory.parent.stat().st_mode & 0o777, 0o700, directory.parent)
+
+    def test_ut_am_04_04_capabilities_are_declared_and_shown_by_doctor(self) -> None:
+        """UT-AM-04.04: driver capabilities (attachments: local) shown by the doctor `driver` check."""
+        backend = self.backend()
+        self.assertEqual(backend.driver, "apple_mail")
+        self.assertEqual(backend.plugin_api, 1)
+        self.assertEqual(
+            dict(backend.capabilities),
+            {
+                "network": False,
+                "readonly": "structural",
+                "body_local": True,
+                "attachments": "local",
+                "native_order": "numeric",
+            },
+        )
+        payload = self.run_ok("doctor", "--json")
+        driver = next(check for check in payload["checks"] if check["name"] == "driver")
+        self.assertIs(driver["ok"], True, driver)
+        self.assertIn("attachments=local", driver["detail"])
+        self.assertIn("native_order=numeric", driver["detail"])
+
+
+class AttachmentGoldenTest(_AttachmentFixtureCase):
+    """TC-08 (M09): the six attachment goldens over the real Apple Mail fixtures.
+
+    Golden seeds: TC-08.01 runs on a fresh store (``cached: false``); TC-08.02
+    runs the same extraction once to seed the cache and compares the second run
+    (``cached: true``); TC-08.06 seeds ``attachment 2714 --index 1`` before the
+    ``show``. Every fixture payload is a fixed byte string, so sizes and sha256
+    values are stable.
+    """
+
+    def test_tc_08_01_attachment_saved(self) -> None:
+        """TC-08.01: attachment --index 2 of the three-attachment message (golden)."""
+        payload = self.run_ok(
+            "attachment", prefixed_uid(UID_ATTACH_MULTI), "--index", "2"
+        )
+        entry = payload["attachments"][0]
+        self.assertEqual(entry["original_name"], "Factura Octubre 2026.pdf")
+        self.assertEqual(entry["sanitized_name"], "02_Factura_Octubre_2026.pdf")
+        self.assertIs(entry["cached"], False)
+        self.assertEqual(entry["size_bytes"], len(PAYLOAD_PDF_OCTUBRE))
+        self.assertEqual(entry["sha256"], hashlib.sha256(PAYLOAD_PDF_OCTUBRE).hexdigest())
+        self.assert_golden("attachment_saved.json", payload)
+
+    def test_tc_08_02_attachment_cached(self) -> None:
+        """TC-08.02: first run seeds the cache; the second run is the cached golden."""
+        uid = prefixed_uid(UID_ATTACH_MULTI)
+        seeded = self.run_ok("attachment", uid, "--index", "2")
+        self.assertIs(seeded["attachments"][0]["cached"], False)
+        payload = self.run_ok("attachment", uid, "--index", "2")
+        self.assertIs(payload["attachments"][0]["cached"], True)
+        self.assertEqual(
+            payload["attachments"][0]["sha256"], seeded["attachments"][0]["sha256"]
+        )
+        self.assert_golden("attachment_cached.json", payload)
+
+    def test_tc_08_03_attachment_blocked_name(self) -> None:
+        """TC-08.03: --all on a message with a reserved filename (golden error, exit 4)."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_HOSTILE_RESERVED),
+            "--all",
+            expected_exit=4,
+            expected_code="E_ATTACHMENT_BLOCKED",
+        )
+        self.assertIn("CON.fdp.exe", payload["error"]["message"])
+        self.assertEqual(self.cache_files(), [])
+        self.assert_golden("attachment_blocked_name.json", payload)
+
+    def test_tc_08_04_attachment_blocked_content(self) -> None:
+        """TC-08.04: --index 2 of the MZ message (golden error, exit 4)."""
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_EXECUTABLE),
+            "--index",
+            "2",
+            expected_exit=4,
+            expected_code="E_ATTACHMENT_BLOCKED",
+        )
+        self.assertIn("has executable content", payload["error"]["message"])
+        self.assertEqual(self.cache_files(), [])
+        self.assert_golden("attachment_blocked_content.json", payload)
+
+    def test_tc_08_05_attachment_too_large(self) -> None:
+        """TC-08.05: max_file_size_mb=1 with a known 1.5 MiB attachment (golden, exit 4)."""
+        self.configure(LIMIT_1MB_CONFIG)
+        payload = self.run_error(
+            "attachment",
+            prefixed_uid(UID_ATTACH_BIG),
+            "--index",
+            "1",
+            expected_exit=4,
+            expected_code="E_ATTACHMENT_TOO_LARGE",
+        )
+        self.assertIn("max_file_size_mb=1", payload["error"]["message"])
+        self.assertEqual(self.cache_files(), [])
+        self.assert_golden("attachment_too_large.json", payload)
+
+    def test_tc_08_06_show_with_previous_cache(self) -> None:
+        """TC-08.06: attachment 2714 seeds the cache, then show returns its cached_path (golden)."""
+        seed = self.run_ok("attachment", "apple_mail:2714", "--index", "1")
+        published = Path(seed["attachments"][0]["path"])
+        payload = self.run_ok("show", "apple_mail:2714")
+        cached_path = payload["message"]["attachments"][0]["cached_path"]
+        self.assertEqual(cached_path, str(published))
+        self.assertTrue(Path(cached_path).is_file())
+        self.assert_golden("show_2714_with_cache.json", payload)
+
+
+def _store_snapshot(mail_root: Path) -> dict[str, tuple[int, int, str]]:
+    """``{relative path: (size, mtime_ns, sha256)}`` of every file of the Mail store."""
+    snapshot: dict[str, tuple[int, int, str]] = {}
+    for path in sorted(mail_root.rglob("*")):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        snapshot[path.relative_to(mail_root).as_posix()] = (
+            stat.st_size,
+            stat.st_mtime_ns,
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+    return snapshot
+
+
+def _snapshot_paths(root: Path) -> list[str]:
+    """Relative POSIX paths of every file and directory under ``root``."""
+    return [
+        path.relative_to(root).as_posix()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() or path.is_dir()
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -1012,7 +1383,10 @@ class OutlookGoldenTest(unittest.TestCase):
         """TC-02.03: show of the normal message with an attachment (golden)."""
         payload = self.show("normal")
         message = payload["message"]
-        self.assertEqual(message["attachments"], [{"name": "factura-2026-10.pdf"}])
+        self.assertEqual(
+            message["attachments"],
+            [{"index": 1, "name": "factura-2026-10.pdf", "cached_path": None}],
+        )
         self.assertEqual(message["date_received"], "2026-11-02T09:54:09-04:00")
         self.assertIs(message["readable"], True)
         _assert_golden(self, "outlook/show.json", payload, self.root)

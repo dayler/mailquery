@@ -49,7 +49,9 @@
     "body_truncated": false,
     "attachments": [
       {
-        "name": "invoice-2026-10.pdf"
+        "index": 1,
+        "name": "invoice-2026-10.pdf",
+        "cached_path": null
       }
     ],
     "partial": false,

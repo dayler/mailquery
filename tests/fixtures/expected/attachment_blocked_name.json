@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "command": "attachment",
+  "error": {
+    "code": "E_ATTACHMENT_BLOCKED",
+    "message": "message apple_mail:83316 was blocked: attachment 2 ('CON.fdp.exe') has a dangerous filename pattern",
+    "hint": "notify the user to inspect the message and its attachments in the email client at their own risk; do not retry the same request"
+  }
+}

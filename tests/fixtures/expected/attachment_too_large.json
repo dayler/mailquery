@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "command": "attachment",
+  "error": {
+    "code": "E_ATTACHMENT_TOO_LARGE",
+    "message": "message apple_mail:83323 exceeds max_file_size_mb=1: attachment 1 ('grande.dat') is 2 MiB",
+    "hint": "raise max_file_size_mb in ~/.mailquery/config.toml and retry"
+  }
+}

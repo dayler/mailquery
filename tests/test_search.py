@@ -1445,7 +1445,8 @@ class ShowTest(SearchFixtureTest):
         self.assertTrue(message["source"]["emlx_path"].endswith("79658.partial.emlx"))
         self.assertIn("Adjuntamos la factura", message["body_text"])
         self.assertEqual(
-            message["attachments"], [{"name": "factura-79658.pdf"}]
+            message["attachments"],
+            [{"index": 1, "name": "factura-79658.pdf", "cached_path": None}],
         )
         self.assertTrue(message["has_attachments"])
 
@@ -1877,22 +1878,22 @@ class ShowAttachmentsUnreadableTest(ExtendedSearchFixtureTest):
         return search.run_show(self.backend, self.config, uid)
 
     def test_ut_sr_12_01_missing_emlx_takes_names_from_the_index_and_warns(self) -> None:
-        """UT-SR-12.01: absent .emlx with index attachments: index names + W_ATTACHMENTS_UNAVAILABLE."""
+        """UT-SR-12.01: absent .emlx with index attachments: ``{index, name, cached_path}`` + warning."""
         result = self.show(UID_MISSING_EMLX_ATTACH)
-        self.assertEqual(result["message"]["attachments"], [{"name": "ghost.pdf"}])
+        self.assertEqual(
+            result["message"]["attachments"],
+            [{"index": 1, "name": "ghost.pdf", "cached_path": None}],
+        )
         self.assertEqual(
             warning_codes(result["warnings"]),
             ["W_EMLX_MISSING", "W_ATTACHMENTS_UNAVAILABLE"],
         )
-        # Encrypted S/MIME has an index row: same rule, names from the index.
+        # Encrypted S/MIME is the exception (D6): [] and only the body warning.
         encrypted = self.show(UID_SMIME_ENCRYPTED)
-        self.assertEqual(encrypted["message"]["attachments"], [{"name": "smime.p7m"}])
+        self.assertEqual(encrypted["message"]["attachments"], [])
         self.assertEqual(
             encrypted["warnings"],
-            [
-                BODY_UNREADABLE_SMIME.format(kind="encrypted"),
-                search_attachments_warning(),
-            ],
+            [BODY_UNREADABLE_SMIME.format(kind="encrypted")],
         )
 
     def test_ut_sr_12_02_signed_smime_without_index_row_has_no_attachments(self) -> None:

@@ -77,7 +77,38 @@ La frontera relevante es **`mailquery` → harness**: todo lo que sale de `mailq
 - **Sanitización parcial:** [`sanitize_text`](../../src/mailquery/output.py#L26) elimina ANSI y controles C0/DEL, normaliza fin de línea y conserva `\n`/`\t`; se aplica a `body_text` y a los snippets.
 - **Cabeceras limitadas:** `show` expone solo `From`, `To`, `Cc`, `Subject`, `Date` y `Message-ID` ([`_show_headers`](../../src/mailquery/search.py#L1250)); no expone `Reply-To`, `List-Unsubscribe` ni cabeceras completas.
 - **Adjuntos:** bloqueo por nombre, extensión y *magic bytes*; staging, permisos `0600` y caché efímera ([PRD-v2.1](../PRD-v2.1.md)).
+- **Excepción COM de Outlook (3.0.0):** el proxy de solo lectura autoriza
+  `Attachment.SaveAsFile` únicamente para materializar en staging un adjunto
+  **ya descargado**; no se resuelven referencias, no se descarga contenido y el
+  archivo temporal se valida (regular, dentro de su sesión, no symlink) y se
+  borra siempre (§4.2).
 - **Contenido como no confiable en el contrato:** [PRD.md §21.1](../PRD.md#L1123) y las recetas ya piden guardrails, aunque no definen política de URLs ni de archivos.
+
+### 4.2 Excepción de materialización COM (Outlook)
+
+`mailquery` necesita los **bytes** de un adjunto local para servirlos desde la
+caché, y el Outlook Object Model no expone un stream: la única vía es
+`Attachment.SaveAsFile` sobre un item del store local (PRD-v2.1 §0.2, §15). La
+excepción queda acotada así:
+
+- **Solo lectura del store:** la operación copia un adjunto que ya está en el
+  store local (item `OL_FULL_ITEM` y `olByValue`); no se llama a ningún miembro
+  de descarga ni de red y no se abre Outlook.
+- **Destino controlado por el núcleo:** el path lo crea el backend en una sesión
+  propia `0700` bajo `~/.mailquery/tmp/staging/`, con un nombre opaco y `0600`
+  en POSIX; `GetTemporaryFilePath` no está en la lista blanca.
+- **Validación D12:** antes de leer los bytes se comprueba que el resultado es un
+  archivo regular dentro de la sesión; un symlink, un directorio o una ruta
+  fuera del staging ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`).
+- **Limpieza garantizada:** el archivo y la sesión se borran en `finally`, al
+  cerrar el backend y, si un cuelgue terminó el proceso, en la siguiente
+  invocación (barrido de sesiones huérfanas propias).
+- **OMG:** `object_model_guard` **no** se amplía en 3.0.0; un aviso del Object
+  Model Guard sigue tratándose como cualquier denegación de COM (timeout o
+  `E_PERMISSION`) y el riesgo se acepta.
+- **Límite:** el host macOS no puede verificar la materialización real; el
+  contrato se cubre con el doble y con la SMOKE de Windows del dueño (riesgo
+  aceptado, PRD-v2.1 §15).
 
 ### 4.1 Huecos conocidos que aborda el mini-PRD
 
@@ -112,6 +143,7 @@ G-01 a G-04 son los que cubre el [mini-PRD de endurecimiento](../PRD-content-har
 | T-10 | Spoofing de remitente o dominio | Nombre visible de banco con dominio parecido | Confianza indebida, phishing | Harness: no confiar en `from.name`; verificar dominio; DMARC/SPF/DKIM del proveedor | Medio |
 | T-11 | Plugin externo malicioso o comprometido | Paquete que lee red o devuelve datos falsos | Compromiso del proceso y de la salida | Consentimiento al instalar; capacidades en `doctor`; revisar paquete; sandbox del OS | Aceptado |
 | T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/` | El agente lee datos alterados | Permisos `0700/0600`; tamaño esperado si el driver lo informa; usuario monousuario | Aceptado |
+| T-13 | Abuso de la excepción COM de materialización (Outlook) | `SaveAsFile` escribiendo fuera del staging o materializando un adjunto no local | Escritura arbitraria o descarga forzada | Solo `Attachment.SaveAsFile` en la lista blanca; path propio en staging `0700`/`0600`; solo adjuntos `OL_FULL_ITEM`/`olByValue`; validación regular/dentro de sesión (D12); borrado siempre | Aceptado (§4.2) |
 
 ---
 
@@ -160,7 +192,7 @@ G-01 a G-04 son los que cubre el [mini-PRD de endurecimiento](../PRD-content-har
 
 ## 9. Adjuntos, imágenes y firmas
 
-- **Adjuntos:** la extracción es inerte; el bloqueo es una red de seguridad, no un antivirus. El harness no debe abrirlos automáticamente ni ejecutarlos.
+- **Adjuntos:** la extracción es inerte; el bloqueo es una red de seguridad, no un antivirus. El harness no debe abrirlos automáticamente ni ejecutarlos. En Outlook la extracción usa la excepción COM de §4.2 (copia de un adjunto ya local a un staging privado y efímero, nunca una descarga).
 - **Imágenes:** `mailquery` no carga imágenes remotas ni inline; si se extrae una imagen como adjunto, sigue siendo contenido no confiable (puede contener QR, texto o exploits del parser de imagen). No analizarla con visión/OCR sin petición explícita.
 - **Firmas:** son texto y enlaces como el resto del cuerpo; mismas reglas. Las firmas con imágenes remotas no se cargan.
 

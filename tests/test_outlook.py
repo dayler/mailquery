@@ -2198,7 +2198,7 @@ class _OutlookCommandCase(_OutlookCliCase):
         return self.use(fk.FakeOutlook.item_matrix(_ITEMS_NOW))
 
     def run_json(self, *argv: str) -> dict:
-        backend = _backend(self.fake)
+        backend = _backend(self.fake, tmp_root=self.home / "tmp")
         self.addCleanup(backend.close)
         code, stdout, stderr = self.run_main(list(argv), backend)
         self.assertEqual(code, 0, stdout + stderr)
@@ -2207,7 +2207,7 @@ class _OutlookCommandCase(_OutlookCliCase):
         return payload
 
     def run_error(self, exit_code: int, code: str, *argv: str, backend=None) -> dict:
-        backend = backend if backend is not None else _backend(self.fake)
+        backend = backend if backend is not None else _backend(self.fake, tmp_root=self.home / "tmp")
         self.addCleanup(backend.close)
         return self.assert_error(self.run_main(list(argv), backend), exit_code, code)
 
@@ -2295,7 +2295,10 @@ class OutlookBodyTests(_OutlookCommandCase):
         self.assertEqual(shown["uid"], _uid(spec.entry_id))
         self.assertEqual(shown["body_text"], "Estimado cliente, adjuntamos la factura de octubre.")
         self.assertFalse(shown["body_truncated"])
-        self.assertEqual(shown["attachments"], [{"name": "factura-2026-10.pdf"}])
+        self.assertEqual(
+            shown["attachments"],
+            [{"index": 1, "name": "factura-2026-10.pdf", "cached_path": None}],
+        )
         self.assertTrue(shown["has_attachments"])
         self.assertIs(shown["partial"], False)
         self.assertIs(shown["readable"], True)
@@ -2624,7 +2627,7 @@ class _CommandScenarioCase(_OutlookCommandCase):
     """Command runs that tolerate errors: ``(exit code, payload)``."""
 
     def run_any(self, *argv: str) -> tuple[int, dict]:
-        backend = _backend(self.fake)
+        backend = _backend(self.fake, tmp_root=self.home / "tmp")
         self.addCleanup(backend.close)
         code, stdout, stderr = self.run_main(list(argv), backend)
         self.assertTrue(stdout.strip(), stderr)
@@ -3345,8 +3348,19 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
         (),
     )
     _DOCTORS = (("--json",), ())
-    #: Exit codes a read-only run may end with, and the error codes of each.
-    _ERRORS = {2: ("E_USAGE", "E_ACCOUNT_NOT_IN_SCOPE"), 4: ("E_UNBOUNDED_SCAN",)}
+    #: Exit codes a read-only run may end with, and the error codes of each
+    #: (M10 adds the attachment protocol codes; a read-only run never mutates).
+    _ERRORS = {
+        2: ("E_USAGE", "E_ACCOUNT_NOT_IN_SCOPE"),
+        3: (
+            "E_ATTACHMENT_UNAVAILABLE",
+            "E_ATTACHMENT_UNREADABLE",
+            "E_PERMISSION",
+            "E_CLIENT_BUSY",
+            "E_CLIENT_TIMEOUT",
+        ),
+        4: ("E_UNBOUNDED_SCAN", "E_ATTACHMENT_BLOCKED", "E_ATTACHMENT_TOO_LARGE"),
+    }
 
     def run_report(self, *argv: str) -> tuple[int, dict]:
         """`doctor` without `--json`: the text report, kept under ``report``."""
@@ -3367,6 +3381,18 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             runs += [("new", *flags) for flags in self._NEWS]
             runs += [("show", spec.entry_id) for spec in fake.items.values()]
             runs += [("show", "00AB"), ("show", "ab12")]
+            attachment_items = [
+                spec for spec in fake.items.values() if spec.attachments
+            ] or list(fake.items.values())
+            if attachment_items:
+                attachment_uid = attachment_items[0].entry_id
+                runs += [
+                    ("attachment", attachment_uid, "--index", "1"),
+                    ("attachment", attachment_uid, "--all"),
+                    ("attachment", attachment_uid, "--index", "1", "--force"),
+                ]
+            runs += [("attachment", "00AB", "--index", "1")]
+            runs += [("attachment", "ab12", "--index", "1")]
             runs += [("doctor", *flags) for flags in self._DOCTORS]
             outcomes = [
                 (argv, *(self.run_report(*argv) if argv == ("doctor",) else self.run_any(*argv)))
@@ -3422,11 +3448,25 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             self.assertEqual(fake.mutations.total, 0, fake.mutations.events)
             self.assertEqual(fake.call_log.count(action="forbidden"), 0)
 
+    def test_ol_30_05_attachment_writes_stay_under_home_and_clean_staging(self) -> None:
+        """OL-30.05: attachment runs write only under ``<home>`` and leave staging clean (M10)."""
+        # Run the sweep first so the assertions see every attachment invocation.
+        self.results()
+        staging = self.home / "tmp" / "staging"
+        leftovers = list(staging.iterdir()) if staging.is_dir() else []
+        self.assertEqual(leftovers, [], f"staging leftovers: {leftovers}")
+        # Every path under the test root belongs to the app home (no file leaks).
+        for path in self.root.rglob("*"):
+            self.assertTrue(path == self.home or self.home in path.parents, path)
+
     def test_ol_30_04_never_the_codes_annex_b7_excludes(self) -> None:
         """OL-30.04: no error or warning that annex B.7 excludes from this backend; no E_INTERNAL."""
         for _fake, outcomes in self.results():
             commands = {argv[0] for argv, _code, _payload in outcomes}
-            self.assertEqual(commands, {"mailboxes", "search", "new", "show", "doctor"})
+            self.assertEqual(
+                commands,
+                {"mailboxes", "search", "new", "show", "attachment", "doctor"},
+            )
             for argv, code, payload in outcomes:
                 with self.subTest(argv=argv):
                     if argv[0] in ("doctor", "mailboxes", "new"):
@@ -4081,6 +4121,655 @@ class OutlookObjectModelGuardTests(unittest.TestCase):
                 center = fk.FakeSecurityCenter.unavailable()
                 self.guard(self.policy(PromptOOMAddressInformationAccess=value), center)
                 self.assertEqual(center.queries, 0)
+
+
+# --------------------------------------------------------------------------- #
+# M10 — Outlook attachments (UT-OL-ATT-01..04, TC-09)
+# --------------------------------------------------------------------------- #
+
+#: Declared account of the attachment fixtures (the fake's cached Exchange account).
+_ATTACHMENT_SCOPE = '[scope."ana.perez@example.com"]\n'
+#: Decoded bytes of the ``local`` attachment of ``FakeOutlook.attachments_matrix``.
+_LOCAL_CONTENT = b"%PDF-1.4\nFactura de octubre 2026\n"
+_EXPECTED_DIR = Path(__file__).resolve().parent / "fixtures" / "expected"
+_ISO_RE = __import__("re").compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}")
+
+
+def _attachment_uid(fake: fk.FakeOutlook, key: str) -> str:
+    """Native EntryID of one attachment fixture item."""
+    return fake.item(key).entry_id
+
+
+_MESSAGE_DIR_RE = __import__("re").compile(r"(/attachments/[a-z0-9_]+/)([^/]+)")
+
+
+def _normalize_golden(value: object, root: Path) -> object:
+    """Run-independent view of an Outlook payload (same rules as the TC-02 goldens)."""
+    if isinstance(value, dict):
+        return {
+            key: _normalize_golden(item, root)
+            for key, item in value.items()
+            if key not in ("generated_at", "duration_ms")
+        }
+    if isinstance(value, list):
+        return [_normalize_golden(item, root) for item in value]
+    if isinstance(value, str):
+        text = _ISO_RE.sub("<ISO>", value)
+        text = text.replace(str(root), "<ROOT>").replace("\\", "/")
+        # The message directory is a native id on macOS and the stable 32-hex
+        # fallback when the Windows path budget is exceeded (D9): placeholder it.
+        return _MESSAGE_DIR_RE.sub(r"\1<MESSAGE_DIR>", text)
+    return value
+
+
+def _assert_outlook_golden(
+    case: unittest.TestCase, name: str, payload: dict, root: Path
+) -> None:
+    """Compare a normalized payload with ``expected/outlook/<name>``."""
+    normalized = _normalize_golden(payload, root)
+    path = _EXPECTED_DIR / "outlook" / name
+    if os.environ.get("MAILQUERY_UPDATE_GOLDENS") == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return
+    case.assertTrue(path.is_file(), f"missing golden {path}")
+    expected = json.loads(path.read_text(encoding="utf-8"))
+    case.assertEqual(normalized, expected, f"golden mismatch: {path.name}")
+
+
+class _AttachmentCase(_OutlookCommandCase):
+    """Commands and backend operations over the M10 attachment fixture profile."""
+
+    def attachments_fake(self) -> fk.FakeOutlook:
+        return self.use(fk.FakeOutlook.attachments_matrix(), _ATTACHMENT_SCOPE)
+
+    def backend(self) -> Any:
+        backend = _backend(self.fake, tmp_root=self.home / "tmp")
+        self.addCleanup(backend.close)
+        return backend
+
+    def metadata(self, key: str) -> list[dict[str, Any]]:
+        return list(self.backend().attachments(_attachment_uid(self.fake, key)))
+
+    def staging_root(self) -> Path:
+        return self.home / "tmp" / "staging"
+
+    def assert_staging_clean(self) -> None:
+        root = self.staging_root()
+        leftovers = list(root.iterdir()) if root.is_dir() else []
+        self.assertEqual(leftovers, [], f"staging leftovers: {leftovers}")
+
+    def assert_cache_empty(self) -> None:
+        cache = self.home / "attachments"
+        files = [path for path in cache.rglob("*") if path.is_file()] if cache.is_dir() else []
+        self.assertEqual(files, [])
+
+
+class OutlookAttachmentMetadataTests(_AttachmentCase):
+    """UT-OL-ATT-01: metadata, index and availability (AC-07/AC-15)."""
+
+    def test_ut_ol_att_01_01_show_and_attachment_share_index_and_name(self) -> None:
+        """UT-OL-ATT-01.01: show and attachment share index 1..N and the original name."""
+        self.attachments_fake()
+        uid = _attachment_uid(self.fake, "two_same")
+        shown = self.run_json("show", uid)["message"]["attachments"]
+        self.assertEqual(
+            [(entry["index"], entry["name"]) for entry in shown],
+            [(1, "recibo.pdf"), (2, "recibo.pdf"), (3, "otros.pdf")],
+        )
+        self.assertEqual(set(shown[0]), {"index", "name", "cached_path"})
+        recovered = []
+        for index in (1, 2, 3):
+            record = self.run_json("attachment", uid, "--index", str(index))["attachments"][0]
+            recovered.append((record["index"], record["original_name"]))
+        self.assertEqual(recovered, [(1, "recibo.pdf"), (2, "recibo.pdf"), (3, "otros.pdf")])
+        self.assertEqual(
+            [entry["sanitized_name"] for entry in
+             self.run_json("attachment", uid, "--all")["attachments"]],
+            ["01_recibo.pdf", "02_recibo.pdf", "03_otros.pdf"],
+        )
+        # Hidden attachments are never listed nor indexed.
+        hidden = self.run_json("show", _attachment_uid(self.fake, "hidden"))["message"]["attachments"]
+        self.assertEqual([(entry["index"], entry["name"]) for entry in hidden], [(1, "visible.pdf")])
+        self.assertEqual(
+            [entry["original_name"] for entry in
+             self.run_json("attachment", _attachment_uid(self.fake, "hidden"), "--all")["attachments"]],
+            ["visible.pdf"],
+        )
+
+    def test_ut_ol_att_01_02_local_attachment_has_a_stable_size_and_is_extracted(self) -> None:
+        """UT-OL-ATT-01.02: a local attachment exposes its local size and is recovered."""
+        self.attachments_fake()
+        rows = self.metadata("local")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["index"], 1)
+        self.assertEqual(rows[0]["name"], "factura-2026-10.pdf")
+        self.assertEqual(rows[0]["size_bytes"], len(_LOCAL_CONTENT))
+        self.assertIsNone(rows[0]["unavailable_reason"])
+        record = self.run_json(
+            "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+        )["attachments"][0]
+        self.assertFalse(record["cached"])
+        self.assertEqual(record["size_bytes"], len(_LOCAL_CONTENT))
+        self.assertEqual(
+            record["sha256"],
+            "752502404021825e55659c1f00deca846ba1405df9c1eb5b0a0c7ccfd51613f9",
+        )
+        published = Path(record["path"])
+        self.assertTrue(published.is_file())
+        self.assertEqual(published.read_bytes(), _LOCAL_CONTENT)
+
+    def test_ut_ol_att_01_03_not_downloaded_is_unavailable_without_downloading(self) -> None:
+        """UT-OL-ATT-01.03: a by-reference attachment ⇒ unavailable (not_downloaded), no download."""
+        self.attachments_fake()
+        uid = _attachment_uid(self.fake, "by_reference")
+        rows = self.metadata("by_reference")
+        self.assertEqual(rows[0]["unavailable_reason"], "not_downloaded")
+        self.assertIsNone(rows[0]["size_bytes"])
+        self.fake.call_log.clear()
+        error = self.run_error(3, "E_ATTACHMENT_UNAVAILABLE", "attachment", uid, "--index", "1")
+        self.assertIn("is not available in the local store", error["message"])
+        self.assertIn("downloads the attachment", error["hint"])
+        self.assertEqual(self.fake.call_log.count(kind="Attachment", member="SaveAsFile"), 0)
+        self.assertEqual(self.fake.call_log.count(member="MarkForDownload"), 0)
+        self.assertFalse(
+            {member for _kind, member in self.fake.call_log.members()} & {"MarkForDownload"}
+        )
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_01_04_smime_is_unreadable_and_show_returns_empty(self) -> None:
+        """UT-OL-ATT-01.04: S/MIME ⇒ show ``[]``, attachment ⇒ E_ATTACHMENT_UNREADABLE(smime)."""
+        self.attachments_fake()
+        uid = _attachment_uid(self.fake, "smime")
+        self.fake.call_log.clear()
+        payload = self.run_json("show", uid)
+        self.assertEqual(payload["message"]["attachments"], [])
+        self.assertIn(_SMIME_ENCRYPTED, payload["warnings"])
+        self.assertNotIn("W_ATTACHMENTS_UNAVAILABLE", " ".join(payload["warnings"]))
+        self.assertEqual(self.fake.call_log.count(member="Attachments"), 0)
+        error = self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", uid, "--index", "1")
+        self.assertIn("S/MIME protected", error["message"])
+        self.assertIn("S/MIME", error["hint"])
+        self.assert_cache_empty()
+
+    def test_ut_ol_att_01_05_corrupt_unreadable_and_unsupported_reasons(self) -> None:
+        """UT-OL-ATT-01.05: corrupt/unreadable ⇒ unreadable; embedded/OLE ⇒ unsupported."""
+        self.attachments_fake()
+        for key, code in (
+            ("corrupt", "E_ATTACHMENT_UNREADABLE"),
+            ("unopenable", "E_ATTACHMENT_UNREADABLE"),
+            ("embedded", "E_ATTACHMENT_UNAVAILABLE"),
+            ("ole", "E_ATTACHMENT_UNAVAILABLE"),
+        ):
+            with self.subTest(item=key):
+                error = self.run_error(3, code, "attachment", _attachment_uid(self.fake, key), "--index", "1")
+                if key == "corrupt":
+                    self.assertIn("corrupt or unreadable", error["message"])
+                if key == "unopenable":
+                    self.assertIn("cannot be read", error["message"])
+                if key in ("embedded", "ole"):
+                    self.assertIn("cannot be recovered", error["message"])
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_01_06_metadata_reads_only_local_properties(self) -> None:
+        """UT-OL-ATT-01.06: listing metadata records no download or network member."""
+        self.attachments_fake()
+        self.fake.call_log.clear()
+        for key in ("local", "two_same", "hidden", "header_only", "smime", "by_reference"):
+            with self.subTest(item=key):
+                try:
+                    self.metadata(key)
+                except Exception:  # noqa: BLE001 - the message-level signal is expected
+                    pass
+        members = {member for _kind, member in self.fake.call_log.members()}
+        self.assertNotIn("SaveAsFile", members)
+        self.assertNotIn("MarkForDownload", members)
+        self.assertFalse(members & {"Download", "GetTemporaryFilePath"})
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_01_07_header_only_show_is_empty_with_the_warning(self) -> None:
+        """UT-OL-ATT-01.07: header-only with attachments ⇒ ``[]`` + W_ATTACHMENTS_UNAVAILABLE."""
+        self.attachments_fake()
+        uid = _attachment_uid(self.fake, "header_only")
+        payload = self.run_json("show", uid)
+        self.assertEqual(payload["message"]["attachments"], [])
+        warnings = " ".join(payload["warnings"])
+        self.assertIn("W_ATTACHMENTS_UNAVAILABLE", warnings)
+        self.assertIn("W_BODY_NOT_LOCAL", warnings)
+        self.assertNotIn("E_USAGE", warnings)
+        self.assertFalse([entry for entry in payload["message"]["attachments"]])
+
+
+class OutlookAttachmentMaterializationTests(_AttachmentCase):
+    """UT-OL-ATT-02: COM materialization, staging and cleanup (AC-10/AC-12, §15)."""
+
+    def test_ut_ol_att_02_01_local_attachment_is_materialized_in_staging(self) -> None:
+        """UT-OL-ATT-02.01: SaveAsFile writes a 0600 regular file under a 0700 staging session."""
+        self.attachments_fake()
+        backend = self.backend()
+        uid = _attachment_uid(self.fake, "local")
+        stream = backend.attachment_stream(uid, 1)
+        first = next(stream)
+        self.assertTrue(first)
+        root = self.staging_root()
+        sessions = [path for path in root.iterdir() if path.is_dir()]
+        self.assertEqual(len(sessions), 1)
+        session = sessions[0]
+        self.assertTrue(session.name.startswith("outlook-"))
+        if os.name == "posix":
+            self.assertEqual(session.stat().st_mode & 0o777, 0o700)
+        files = list(session.iterdir())
+        self.assertEqual(len(files), 1)
+        self.assertFalse(files[0].is_symlink())
+        self.assertTrue(files[0].is_file())
+        if os.name == "posix":
+            self.assertEqual(files[0].stat().st_mode & 0o777, 0o600)
+        data = first + b"".join(stream)
+        stream.close()
+        self.assertEqual(data, _LOCAL_CONTENT)
+        self.assert_staging_clean()
+        # The command materializes again, validates and publishes under the cache.
+        record = self.run_json("attachment", uid, "--index", "1")["attachments"][0]
+        published = Path(record["path"])
+        self.assertEqual(published.read_bytes(), _LOCAL_CONTENT)
+        self.assertEqual(published.parent.parent.name, "outlook")
+        self.assertEqual(self.fake.mutations.total, 0)
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_02_02_invalid_materialized_path_is_rejected(self) -> None:
+        """UT-OL-ATT-02.02: a symlink or a path outside staging ⇒ unavailable (unsupported)."""
+        self.attachments_fake()
+        from mailquery.backends import outlook as outlook_mod
+
+        uid = _attachment_uid(self.fake, "invalid_staging")
+        error = self.run_error(3, "E_ATTACHMENT_UNAVAILABLE", "attachment", uid, "--index", "1")
+        self.assertIn("cannot be recovered", error["message"])
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+        outside = self.home / "outside.bin"
+        backend = self.backend()
+        with mock.patch.object(
+            outlook_mod, "_create_staging_file", staticmethod(lambda session: outside)
+        ):
+            with self.assertRaises(Exception) as caught:
+                list(backend.attachment_stream(_attachment_uid(self.fake, "local"), 1))
+        self.assertEqual(getattr(caught.exception, "code", None), "E_ATTACHMENT_UNAVAILABLE")
+        self.assertFalse(outside.exists())
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_02_03_executable_content_blocks_the_message(self) -> None:
+        """UT-OL-ATT-02.03: MZ in the materialized file ⇒ message blocked, temp removed."""
+        self.attachments_fake()
+        error = self.run_error(
+            4, "E_ATTACHMENT_BLOCKED", "attachment", _attachment_uid(self.fake, "executable"), "--index", "1"
+        )
+        self.assertIn("executable content", error["message"])
+        self.assertNotIn("\x00", error["message"])
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_02_04_temp_is_removed_on_failure_and_cancellation(self) -> None:
+        """UT-OL-ATT-02.04: the staging file is removed when extraction fails or is closed early."""
+        self.attachments_fake()
+        self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", _attachment_uid(self.fake, "corrupt"), "--index", "1")
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+        backend = self.backend()
+        stream = backend.attachment_stream(_attachment_uid(self.fake, "local"), 1)
+        next(stream)
+        self.assertTrue(any(self.staging_root().iterdir()))
+        stream.close()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_02_05_whitelist_gains_only_save_as_file(self) -> None:
+        """UT-OL-ATT-02.05: the COM whitelist only adds SaveAsFile (plus local Size/Type)."""
+        from mailquery.backends import outlook_com
+
+        self.assertIn("SaveAsFile", outlook_com.READONLY_MEMBERS["Attachment"])
+        self.assertIn("SaveAsFile", outlook_com.READONLY_METHODS)
+        self.assertEqual(
+            set(outlook_com.READONLY_MEMBERS["Attachment"]),
+            {"FileName", "DisplayName", "PropertyAccessor", "Size", "Type", "SaveAsFile"},
+        )
+        self.assertNotIn("GetTemporaryFilePath", outlook_com.READONLY_MEMBERS["Attachment"])
+        fake = self.attachments_fake()
+        app = _app(fake)
+        spec = fake.item("local")
+        item = app.Session.GetItemFromID(spec.entry_id, spec.folder.store.store_id)
+        attachment = item.Attachments.Item(1)
+        _assert_internal(self, lambda: attachment.Delete)
+        _assert_internal(self, lambda: attachment.GetTemporaryFilePath)
+        _assert_internal(self, lambda: attachment.SaveAs)
+        self.assertEqual(fake.call_log.count(action="forbidden"), 0)
+
+    def test_ut_ol_att_02_06_object_model_guard_is_not_extended(self) -> None:
+        """UT-OL-ATT-02.06: the OMG check is unchanged and does not gate materialization."""
+        self.attachments_fake()
+        checks = {check["name"]: check for check in self.run_json("doctor", "--json")["checks"]}
+        self.assertTrue(checks["object_model_guard"]["ok"])
+        self.assertNotIn("materialization", checks["object_model_guard"]["detail"])
+        record = self.run_json(
+            "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+        )["attachments"][0]
+        self.assertFalse(record["cached"])
+        self.assertTrue(Path(record["path"]).is_file())
+
+
+class OutlookAttachmentErrorTests(_AttachmentCase):
+    """UT-OL-ATT-03: materialization errors, timeouts and reasons (AC-15/AC-17)."""
+
+    def test_ut_ol_att_03_01_access_denied_is_permission_error(self) -> None:
+        """UT-OL-ATT-03.01: E_ACCESSDENIED in SaveAsFile ⇒ E_PERMISSION (exit 3)."""
+        self.attachments_fake()
+        error = self.run_error(
+            3, "E_PERMISSION", "attachment", _attachment_uid(self.fake, "denied"), "--index", "1"
+        )
+        self.assertIn("Outlook", error["message"])
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_03_02_persistent_transient_rejection_is_client_busy(self) -> None:
+        """UT-OL-ATT-03.02: a persistent transient rejection ⇒ E_CLIENT_BUSY (exit 5)."""
+        self.attachments_fake()
+        self.fake.reject_next(times=2, kind="Attachment", member="SaveAsFile")
+        error = self.run_error(
+            5, "E_CLIENT_BUSY", "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+        )
+        self.assertTrue(error["hint"].strip())
+        self.assertEqual(self.fake.call_log.count(kind="Attachment", member="SaveAsFile"), 2)
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_03_03_hung_com_call_is_client_timeout(self) -> None:
+        """UT-OL-ATT-03.03: a SaveAsFile call over the 30 s watchdog ⇒ E_CLIENT_TIMEOUT (exit 3)."""
+        uid = _attachment_uid(fk.FakeOutlook.attachments_matrix(), "local")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        home = root / ".mailquery"
+        home.mkdir()
+        (home / "config.toml").write_text(_ATTACHMENT_SCOPE, encoding="utf-8")
+        env = dict(os.environ)
+        env["HOME"] = env["USERPROFILE"] = str(root)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.pop("PYTHONPATH", None)
+        started = time.monotonic()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(_REPO_ROOT / "tests" / "fakes" / "run_cli.py"),
+                "--scenario",
+                "attachments_matrix",
+                "--home",
+                str(home),
+                "--timeout",
+                "0.2",
+                "--hang",
+                "Attachment.SaveAsFile",
+                "--hang-timeout",
+                "60",
+                "--",
+                "attachment",
+                uid,
+                "--index",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(root),
+            timeout=120,
+        )
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertLess(elapsed, 45.0)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"], "attachment")
+        self.assertEqual(payload["error"]["code"], "E_CLIENT_TIMEOUT")
+        self.assertIn("doctor", payload["error"]["hint"])
+        self.assertFalse((home / "attachments").exists())
+        # A later invocation sweeps the orphan session of the killed process.
+        from mailquery import cli
+
+        backend = _backend(fk.FakeOutlook.attachments_matrix(), tmp_root=home / "tmp")
+        self.addCleanup(backend.close)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["attachment", uid, "--index", "1"], home=home, backend=backend)
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        self.assertEqual(list((home / "tmp" / "staging").iterdir()), [])
+
+    def test_ut_ol_att_03_04_total_extraction_deadline_is_client_timeout(self) -> None:
+        """UT-OL-ATT-03.04: the 120 s core deadline expires though each COM call is fast."""
+        from mailquery.attachments.engine import AttachmentsEngine
+        from mailquery.config import load_config
+        from mailquery.plugins import wrap_driver
+
+        self.attachments_fake()
+        backend = self.backend()
+        config = load_config(self.home)
+        wrapped = wrap_driver(backend, driver="outlook")
+
+        class _Clock:
+            """Monotonic clock that jumps after the watchdog-free COM calls."""
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self) -> float:
+                self.calls += 1
+                return 0.0 if self.calls <= 2 else 20.0
+
+        engine = AttachmentsEngine(
+            self.home, config.attachments, wrapped, clock=_Clock()
+        )
+        with self.assertRaises(Exception) as caught:
+            engine.recover(
+                prefixed_uid(_attachment_uid(self.fake, "local"), "outlook"),
+                [1],
+                deadline=lambda: 10.0,
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "E_CLIENT_TIMEOUT")
+        self.assertEqual(getattr(caught.exception, "exit_code", None), 3)
+        # An aborted extraction leaves the generator suspended: closing the
+        # backend removes its staging session (and the next run sweeps orphans).
+        backend.close()
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_03_05_all_with_a_failure_returns_no_partial_results(self) -> None:
+        """UT-OL-ATT-03.05: a failure in ``--all`` writes nothing (no partial results)."""
+        self.attachments_fake()
+        error = self.run_error(
+            3,
+            "E_ATTACHMENT_UNREADABLE",
+            "attachment",
+            _attachment_uid(self.fake, "partial_failure"),
+            "--all",
+        )
+        self.assertIn("corrupt or unreadable", error["message"])
+        self.assert_cache_empty()
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_03_06_empty_attachment_is_published_with_zero_size(self) -> None:
+        """UT-OL-ATT-03.06: a 0-byte attachment is materialized and published with size 0."""
+        self.attachments_fake()
+        record = self.run_json(
+            "attachment", _attachment_uid(self.fake, "empty"), "--index", "1"
+        )["attachments"][0]
+        self.assertEqual(record["size_bytes"], 0)
+        self.assertEqual(
+            record["sha256"],
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        self.assertTrue(Path(record["path"]).is_file())
+        self.assertEqual(Path(record["path"]).read_bytes(), b"")
+
+
+class OutlookAttachmentReadOnlyTests(_AttachmentCase):
+    """UT-OL-ATT-04: read-only boundary and log (AC-19, RNF-13)."""
+
+    def _exercise(self) -> None:
+        self.run_json("attachment", _attachment_uid(self.fake, "local"), "--index", "1")
+        self.run_json("attachment", _attachment_uid(self.fake, "local"), "--index", "1")
+        self.run_error(4, "E_ATTACHMENT_BLOCKED", "attachment", _attachment_uid(self.fake, "executable"), "--index", "1")
+        self.run_error(3, "E_ATTACHMENT_UNAVAILABLE", "attachment", _attachment_uid(self.fake, "by_reference"), "--index", "1")
+        self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", _attachment_uid(self.fake, "corrupt"), "--index", "1")
+
+    def test_ut_ol_att_04_01_extractions_never_mutate_the_mailbox(self) -> None:
+        """UT-OL-ATT-04.01: 0 mutations/assignments; only whitelisted members are invoked."""
+        from mailquery.backends import outlook_com
+
+        self.attachments_fake()
+        self._exercise()
+        self.assertEqual(self.fake.mutations.assignments, 0)
+        self.assertEqual(self.fake.mutations.total, 0, self.fake.mutations.events)
+        self.assertEqual(self.fake.call_log.count(action="forbidden"), 0)
+        invoked = {
+            (entry.kind, entry.member)
+            for entry in self.fake.call_log
+            if entry.kind != "Connector"
+        }
+        for kind, member in invoked:
+            self.assertIn(member, outlook_com.READONLY_MEMBERS[kind], (kind, member))
+        self.assertIn(("Attachment", "SaveAsFile"), self.fake.call_log.members())
+
+    def test_ut_ol_att_04_02_writes_stay_under_the_app_home(self) -> None:
+        """UT-OL-ATT-04.02: all files this class writes are inside ``<home>``."""
+        self.attachments_fake()
+        before = set(self.root.rglob("*"))
+        self._exercise()
+        after = set(self.root.rglob("*"))
+        for path in after - before:
+            self.assertTrue(
+                path == self.home or self.home in path.parents,
+                f"write outside the app home: {path}",
+            )
+        self.assertTrue(any((self.home / "attachments").rglob("*.pdf")))
+        self.assert_staging_clean()
+
+    def test_ut_ol_att_04_03_log_has_no_pii(self) -> None:
+        """UT-OL-ATT-04.03: the log records no uids, EntryIDs, names, paths or accounts."""
+        self.attachments_fake()
+        uid = _attachment_uid(self.fake, "local")
+        self.run_json("attachment", uid, "--index", "1")
+        log = (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+        self.assertNotIn(uid, log)
+        self.assertNotIn("factura-2026-10", log)
+        self.assertNotIn("ana.perez@example.com", log)
+        self.assertNotIn(str(self.home), log)
+        self.assertNotIn("attachments/outlook", log)
+
+    def test_ut_ol_att_04_04_event_end_keeps_the_attachment_counts(self) -> None:
+        """UT-OL-ATT-04.04: ``event=end`` of attachment keeps count/cached/bytes/duration_ms."""
+        self.attachments_fake()
+        self.run_json("attachment", _attachment_uid(self.fake, "local"), "--index", "1")
+        log = (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+        line = next(
+            row for row in log.splitlines()
+            if "event=end command=attachment" in row
+        )
+        row = line
+        self.assertIn("exit_code=0", line)
+        self.assertIn("count=1", line)
+        self.assertIn("cached=0", line)
+        self.assertIn(f"bytes={len(_LOCAL_CONTENT)}", line)
+        self.assertRegex(row, "duration_ms=\\d+")
+
+
+class OutlookAttachmentGoldenTests(unittest.TestCase):
+    """TC-09: new Outlook attachment goldens (over the fake; existing show goldens untouched)."""
+
+    def setUp(self) -> None:
+        from mailquery import cli
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(cli._close_logging_handlers)
+        self.root = Path(tmp.name)
+        self.home = self.root / ".mailquery"
+        self.home.mkdir()
+        (self.home / "config.toml").write_text(_ATTACHMENT_SCOPE, encoding="utf-8")
+        self.fake = fk.FakeOutlook.attachments_matrix()
+
+    def run_payload(self, *argv: str) -> tuple[int, dict]:
+        from mailquery import cli
+
+        backend = _backend(self.fake, tmp_root=self.home / "tmp")
+        self.addCleanup(backend.close)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(list(argv), home=self.home, backend=backend)
+        self.assertTrue(out.getvalue(), err.getvalue())
+        return code, json.loads(out.getvalue())
+
+    def golden(self, name: str, payload: dict) -> None:
+        _assert_outlook_golden(self, name, payload, self.root)
+
+    def test_tc_09_01_attachment_saved(self) -> None:
+        """TC-09.01: first extraction of a local attachment (golden, cached:false)."""
+        code, payload = self.run_payload(
+            "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+        )
+        self.assertEqual(code, 0)
+        self.assertFalse(payload["attachments"][0]["cached"])
+        self.golden("attachment_saved.json", payload)
+
+    def test_tc_09_02_attachment_cached_after_the_seeding_run(self) -> None:
+        """TC-09.02: the second run reports the seeded cache (golden, cached:true)."""
+        uid = _attachment_uid(self.fake, "local")
+        first_code, first = self.run_payload("attachment", uid, "--index", "1")
+        self.assertEqual(first_code, 0)
+        self.assertFalse(first["attachments"][0]["cached"])  # documented seed
+        code, payload = self.run_payload("attachment", uid, "--index", "1")
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["attachments"][0]["cached"])
+        self.assertEqual(
+            payload["attachments"][0]["sha256"], first["attachments"][0]["sha256"]
+        )
+        self.golden("attachment_cached.json", payload)
+
+    def test_tc_09_03_attachment_unavailable_not_downloaded(self) -> None:
+        """TC-09.03: a by-reference attachment is unavailable (golden, exit 3)."""
+        code, payload = self.run_payload(
+            "attachment", _attachment_uid(self.fake, "by_reference"), "--index", "1"
+        )
+        self.assertEqual(code, 3)
+        self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_UNAVAILABLE")
+        self.golden("attachment_unavailable.json", payload)
+
+    def test_tc_09_04_attachment_blocked_executable_content(self) -> None:
+        """TC-09.04: executable content blocks the message (golden, exit 4)."""
+        code, payload = self.run_payload(
+            "attachment", _attachment_uid(self.fake, "executable"), "--index", "1"
+        )
+        self.assertEqual(code, 4)
+        self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_BLOCKED")
+        self.golden("attachment_blocked.json", payload)
+
+    def test_tc_09_05_existing_show_goldens_keep_the_c8_shape(self) -> None:
+        """TC-09.05: ``show.attachments`` keeps ``{index, name, cached_path}``; no golden rewrite."""
+        for key in ("local", "hidden", "smime"):
+            with self.subTest(item=key):
+                code, payload = self.run_payload("show", _attachment_uid(self.fake, key))
+                self.assertEqual(code, 0)
+                attachments = payload["message"]["attachments"]
+                for entry in attachments:
+                    self.assertEqual(set(entry), {"index", "name", "cached_path"})
+                if key == "smime":
+                    self.assertEqual(attachments, [])
+                    self.assertNotIn(
+                        "W_ATTACHMENTS_UNAVAILABLE", " ".join(payload["warnings"])
+                    )
 
 
 if __name__ == "__main__":  # pragma: no cover

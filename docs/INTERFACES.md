@@ -535,6 +535,38 @@ en mayúsculas sin abrir COM. Implementa §9.3 según el anexo B:
 - `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
 - `parse_native_id(native_id) -> str` (estático, C1): valida la parte nativa de
   un uid prefijado (hex en mayúsculas) o `E_USAGE`; puro y offline.
+- `attachments(uid) -> list[AttachmentMetadataRow]` (M10, C1/RF-43/RF-47): lista
+  ordenada de los adjuntos **visibles** (los `PR_ATTACHMENT_HIDDEN` no se
+  listan), `index` 1..N compartido con `show` y `attachment`, `name` original
+  (`FileName`, si no `DisplayName`), `size_bytes` de la propiedad local `Size`
+  (o `None`) y `native_order_key` = índice en hex mayúsculas de 4 dígitos. La
+  disponibilidad se decide **solo con propiedades locales del item**, sin
+  descargar nada ni usar red: `Attachment.Type` = `olByValue` (1) es una copia
+  local; `olByReference` (4) no guarda bytes en el store y exigiría traerlos de
+  su origen ⇒ `not_downloaded`; `olEmbeddeditem` (5)/`olOLE` (6) no son un
+  archivo recuperable ⇒ `unsupported`. Un item no completamente descargado
+  (`DownloadState != OL_FULL_ITEM`) que declara adjuntos (`PR_HASATTACH`) no
+  puede enumerar nombres sin descargar ⇒ error de protocolo
+  `E_ATTACHMENT_UNREADABLE` (`unreadable`) y `show` devuelve `[]` +
+  `W_ATTACHMENTS_UNAVAILABLE` (PRD 12.10); un item ilegible/que no se puede
+  abrir ⇒ el mismo error. **Convención C8/C9:** S/MIME lanza
+  `E_ATTACHMENT_UNREADABLE` (`smime`) desde `attachments()`; `show` lo captura
+  (`attachments: []`) y `attachment` lo propaga antes de “0 adjuntos”. Sin
+  adjuntos ⇒ `[]`.
+- `attachment_stream(uid, index) -> Iterator[bytes]` (M10, C1/RF-45/RF-47):
+  materializa el adjunto local con `Attachment.SaveAsFile` —la **excepción COM**
+  de PRD-v2.1 §0.2/§15— en un subdirectorio propio `0700`
+  (`<home>/tmp/staging/outlook-<aleatorio>/`) con un archivo opaco `0600`,
+  valida que el resultado es un archivo regular **dentro de esa sesión** (un
+  symlink, un directorio o una ruta fuera ⇒
+  `E_ATTACHMENT_UNAVAILABLE`/`unsupported`, D12), entrega los bytes en bloques y
+  borra el archivo y la sesión **siempre** (`finally`, `close()` del backend y
+  barrido de sesiones huérfanas propias en la llamada siguiente). Un
+  `E_ACCESSDENIED` es `E_PERMISSION`, un rechazo transitorio persistente
+  `E_CLIENT_BUSY` y un cuelgue el watchdog de 30 s por llamada COM (RF-33,
+  `E_CLIENT_TIMEOUT` por el mecanismo D-03); el tope de 120 s de la extracción
+  lo aplica el motor (M08) mientras consume el stream. No resuelve referencias,
+  no descarga y no abre red; `size_bytes` desconocido ⇒ `None`.
 - `check_state_uid` se retira en M03: los uids de `state.json` los valida el
   núcleo (`state.py` + `uid.py`), no el backend (PRD-v2.1 §10.2.5-6).
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
@@ -575,7 +607,13 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   `win32com.__gen_path__` antes de importar `win32com.client`.
 - `READONLY_MEMBERS` (`{tipo: {miembro: tipo devuelto o None}}`) y
   `ReadOnlyCom(target, kind, watchdog)`: proxy de lista blanca; cualquier otro
-  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM. Sobre
+  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM.
+  **Excepción COM de M10** (PRD-v2.1 §0.2/§15, riesgo aceptado): sobre
+  `Attachment` se autorizan `Size` y `Type` (metadatos locales) y
+  `SaveAsFile` —la **única** operación de escritura del proxy—, usada solo para
+  materializar en staging un adjunto **ya descargado**; `GetTemporaryFilePath`
+  no se autoriza (el path lo controla el núcleo) y el `object_model_guard` no
+  se amplía en 3.0.0. Sobre
   objetos de `pywin32` llama directamente a `IDispatch.Invoke` con el DISPID
   cacheado por tipo y miembro (por objeto en los `Item`), sin el coste de la
   información de tipos del dispatch dinámico; el fake sigue pasando por `getattr`.
@@ -624,6 +662,36 @@ Los dos métodos estáticos de parseo:
 - `check_state_uid` se retira en M03; la validación del estado vive en
   `state.py`.
 
+**Adjuntos (M09, C9; RF-43/RF-46/RF-47, AC-09/AC-10/AC-11/AC-12/AC-15/AC-20).**
+El adaptador implementa las dos operaciones del protocolo v1 además de
+`parse_native_id`; no escribe en el store ni en la caché (solo abre el `.emlx`
+en lectura) y nunca dispara descargas.
+
+- `attachments(uid) -> list[AttachmentMetadataRow]`: un row por **parte MIME**
+  con nombre, en orden de parte (1..N estable compartido con `show`); no se
+  deduplican nombres repetidos. `size_bytes` es el tamaño **decodificado**
+  (base64/QP) y `native_order_key = str(index)` (Apple Mail ordena
+  numéricamente, C1). `unavailable_reason`: `None` si es local, `corrupt` si el
+  payload no se puede decodificar (base64 estricto), `unsupported` si es una
+  parte externalizada de `.partial.emlx` cuyo archivo no se puede verificar,
+  `not_local` para los nombres del `Envelope Index` cuando el cuerpo falta o es
+  ilegible **no S/MIME** (fallback 2.0.1). Un mensaje S/MIME (cifrado o firmado)
+  lanza `MailqueryError E_ATTACHMENT_UNREADABLE` — la señal de mensaje de la
+  convención C8/C9: `show` la captura y devuelve `[]` (D6) y `attachment` la
+  propaga antes de "0 adjuntos" (fila 8 de §11.3); no se listan nombres del
+  índice para S/MIME. Un mensaje sin adjuntos devuelve `[]` sin motivo.
+- `attachment_stream(uid, index) -> Iterator[bytes]`: bytes **decodificados** en
+  chunks de 64 KiB; las partes externalizadas de `.partial.emlx` se leen del
+  archivo local cuando se puede localizar (best effort, PRD-v2.1 §15: layouts
+  `Data/<shards>/Attachments/<uid>/<part>/<name>` y variantes junto a
+  `Messages/`; nunca symlinks). Un fallo de lectura levanta
+  `emlx.AttachmentReadError` con `reason` (`corrupt`, `not_local`,
+  `unsupported`, `unreadable`) y el motor M07 lo mapea al código/exit de §11.7.
+  `--all`/`--index` los decide el núcleo; el adaptador solo entrega el índice
+  pedido. `load_body` sigue devolviendo `BodyRow.attachments` con **un nombre
+  por parte** (mismo orden que `attachments()`), para que `show` y `attachment`
+  compartan índices exactos.
+
 ### `accounts.py` (Apple Mail)
 `AccountLabel(uuid, label, email=None, provider=None, local=False)`.
 `AccountLabels(db_path=None, tmp_dir=None)` con `.available`, `.all()`,
@@ -664,6 +732,20 @@ fórmula falla; si no existe → `None`. `parse_emlx(path)` lee con
 `open(path, "rb")`, `int(line1.strip())`, payload MIME y trailer plist; texto
 plano preferente, HTML→texto con `output.html_to_text`, nombres de adjuntos;
 corrupto → `readable=False` + warning; `partial` por nombre `.partial.emlx`.
+
+**Adjuntos (M09).** Tipos `EmlxAttachment(index, name, size_bytes,
+native_order_key, unavailable_reason, external_path, part_path)` y
+`EmlxAttachments(path, partial, readable, smime, items, available)`; error
+`AttachmentReadError(reason, detail)` (mapea a §11.7 vía el motor).
+`parse_attachments(path, *, native_uid=None)`: lee el `.emlx` una vez, detecta
+S/MIME y devuelve las partes con nombre en orden de multipart (1-based, sin
+deduplicar); en `.partial.emlx` cada parte es externalizada y se resuelve con
+`external_attachment_path(...)` (best effort; `unsupported` si no aparece).
+`attachment_stream(path, index, *, native_uid=None)`: generador de chunks
+decodificados (`ATTACHMENT_CHUNK_SIZE = 64 KiB`); base64 se valida de forma
+estricta para distinguir `corrupt`. Todo es lectura pura (`open(..., "rb")`), no
+hay escritura ni descarga; `_attachment_names` ya no deduplica (un nombre por
+parte, M09) y `parse_emlx` conserva el comportamiento de 2.0.1 para el cuerpo.
 
 ### `state.py`
 `state.json` **schema 2** (PRD-v2.1 §10.2.4-6, C3). Tipos:
@@ -795,11 +877,26 @@ tras el merge, `truncated`/`hint` se calculan sobre el total fusionado,
 devuelve `excluded_stores: []`); el driver nativo sin bloques no aporta nada y,
 sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con `W_NO_ACCOUNTS`.
 `run_show` despacha por el driver del prefijo: resuelve solo los bloques de ese
-driver, llama a su `find_message`/`load_body` y —para un driver externo— a su
-operación `attachments()`; `attachments: "none"` devuelve `[]` sin llamarla y el
-payload de un plugin es `[{index, name, cached_path: null}]` (M08 calcula la
-caché; `show` no escribe). Los drivers internos conservan hasta M08 la forma
-2.0.1 `[{name}]`.
+driver, llama a su `find_message`/`load_body` y a su operación `attachments()`
+(API 1, C1) para componer `message.attachments[]` (M08, RF-43/AC-07):
+`[{index, name, cached_path}]` con el nombre **original**, el índice estable
+1..N del driver y `cached_path` calculado con `attachments.cache.cached_path`
+(M07) — `null` si el nombre dispara `classify_name` (regla de nombre) o si la
+entrada de caché no es un archivo regular. `show` **no crea, abre ni lee** la
+caché ni escribe en disco; tampoco inspecciona contenido: un adjunto que
+`attachment` bloquearía por *magic bytes* sigue mostrando `cached_path` si el
+archivo regular existe. Capacidad `attachments: "none"` ⇒ `[]` sin llamar al
+driver. Un driver remoto puede listar nombres (`show` solo calcula caché local,
+que será `null` si no hay archivo). **Convención C8/C9 (S/MIME/ilegible):** el
+driver puede propagar el motivo del mensaje lanzando el error de protocolo al
+listar los adjuntos (`PluginError(reason=smime|unreadable)` en un plugin,
+`MailqueryError E_ATTACHMENT_UNREADABLE` en un backend interno); `show` lo
+captura ⇒ `attachments: []`, conserva el `W_BODY_*` de 2.0.1 y **no** añade
+`W_ATTACHMENTS_UNAVAILABLE` (D6). Mientras un backend interno no implemente
+`attachments()` (antes de M09/M10), `run_show` usa el fallback 2.0.1: nombres
+MIME del cuerpo legible, nombres del `Envelope Index` con
+`W_ATTACHMENTS_UNAVAILABLE` para un cuerpo ilegible no S/MIME, y `[]` para
+S/MIME.
 
 **Envoltura de llamadas (M05, C5).** `_driver_pool` envuelve cada backend con
 `plugins.wrap_driver`, así que todas las operaciones de `MailBackend` pasan por
@@ -878,8 +975,43 @@ registro lo considera instalado; DP-02 solo filtra `--version`). `new` crea
 `event=start` registra `command=... backend=<driver nativo> drivers=<lista
 declarada separada por comas>` (el nativo primero; `-` si no hubiera ninguno):
 `backend` es siempre el driver de la plataforma aunque no se abra, y nunca
-incluye uids, `native_id`, cuentas, rutas, asuntos ni términos. `event=end`
-conserva sus campos actuales.
+incluye uids, `native_id`, cuentas, rutas, asuntos ni términos. El `event=end`
+de `attachment` (solo en éxito; D7) registra `exit_code=0 count=<N>
+cached=<M> bytes=<total> duration_ms=<ms>`; el resto de comandos conserva sus
+campos actuales y un fallo registra `event=error` sin `event=end`.
+
+**Comando `attachment` (M08, C8; PRD-v2.1 §11.2–11.5, AC-07/08/12/14/15/17/19).**
+`mailquery attachment <uid> (--index N | --all) [--force]`. `--index` acepta
+solo un entero positivo (se valida en `main` con el texto literal de §11.3, no
+con el `type=int` de argparse) y `--index`/`--all` son mutuamente excluyentes
+con el texto `attachment requires exactly one of --index or --all`. La ayuda
+(`attachment --help`) reproduce literalmente §11.4 (usage, positional,
+options, examples y notes; columnas alineadas a 17 y ≤ 100 columnas) y la
+ayuda raíz lista los seis comandos con la línea de exits de §11.1.
+`_run_command` implementa la precedencia de §11.3 filas 1–10 **antes** de
+llamar al motor M07: (1) argumentos; (2) sintaxis del uid y driver instalado,
+antes de crear el home; (3) config (incluye `[attachments]` y `[scope]`);
+(4) `[attachments].enabled=false` solo para `attachment` ⇒
+`E_ATTACHMENTS_DISABLED` (2); (5) el driver del prefijo debe estar declarado
+(`E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo), se abre y se comprueban sus
+capacidades: `attachments: "none"` **y** `"remote"` ⇒
+`E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store (el
+núcleo no puede materializar adjuntos remotos); (6) resolución de cuenta con
+`config.resolve_scope` (el driver se envuelve antes con `plugins.wrap_driver`);
+(7) `find_message` ⇒ `E_USAGE "message uid <uid> was not found"`; (8) la
+llamada `attachments()` puede lanzar la señal S/MIME/ilegible de la convención
+C8/C9 y el error de protocolo se propaga tal cual (`E_ATTACHMENT_UNREADABLE`,
+exit 3, antes del caso “0 adjuntos”); (9) lista vacía ⇒ `E_USAGE "message <uid>
+has no attachments"`; (10) índice fuera de rango ⇒ el texto del ejemplo G.
+Después, `AttachmentsEngine.recover(...)` ejecuta las filas 11–15 con las filas
+de metadatos ya obtenidas (`entries`), de modo que el driver no se consulta dos
+veces; la CLI no reimplementa bloqueo, límites ni caché. El éxito es el JSON
+de §11.2 con `uid` prefijado, `output_dir` absoluto (`message_dir`), `count`,
+ocho campos por adjunto y `warnings: []`. El presupuesto de extracción es
+`EXTRACTION_TIMEOUT_SECONDS` (120 s, RNF-16): se pasa al motor como factoría
+`lambda: time.monotonic() + 120`, una por adjunto, y al vencer ⇒
+`E_CLIENT_TIMEOUT` (3), sin reintento, staging limpio y sin archivos nuevos.
+`show` no aplica `[attachments].enabled`.
 `bind_command(command)` del backend si existe; todo `E_INTERNAL`
 (también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
 su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
@@ -1134,7 +1266,9 @@ class AttachmentsEngine:
   y sin archivos nuevos. El motor **no** fija políticas de tiempo por sí solo.
 - Resultado: un registro §11.2 por adjunto solicitado, en orden de índice y
   con `path` absoluto. Un fallo no devuelve registros parciales.
-- `output_dir` de M08 = `attachments.paths.message_dir(home, uid)`.
+- `output_dir` de M08 = `attachments.paths.message_dir(home, uid)`. M08 ya
+  validó las filas 7–10 (`find_message`, `attachments()`, “0 adjuntos”, rango
+  del índice) y pasa esas filas en `entries`; el motor solo ejecuta 11–15.
 
 #### Flujo interno (§11.3)
 
@@ -1297,9 +1431,11 @@ menciona E/S de caché está superada por DP-01, §11.3 fila 15 y AC-12. Los
 > ordenados por `(date_received, driver, native_order_key)` (DESC en
 > `search`, ASC en `new`), con `duplicate_count` calculado dentro de cada driver
 > (PRD-v2.1 §10.2.7-9). El log `event=start` añade `drivers=` (fuera del
-> contrato JSON). `show` de un driver externo declarado ya devuelve
-> `attachments: [{index, name, cached_path: null}]` (AC-07 parcial, M04); los
-> drivers internos conservan la forma 2.0.1 `[{name}]` hasta M08.
+> contrato JSON). **M08** cierra la forma de `show.attachments` para todos los
+> drivers: `{index, name, cached_path}` (AC-07) y el driver con
+> `attachments: "none"` devuelve `[]`; es la única edición de forma/valor de
+> esos goldens (M09/M10 no los reescriben). M08 añade el comando `attachment`
+> con el payload de §11.2 y el `event=end` con conteos (§12.1).
 
 Resumen de coordinación; el contrato completo es el PRD §12.5. Los ejemplos
 están compactados en una línea por brevedad: la salida real es JSON
@@ -1350,10 +1486,32 @@ Igual que `search` más:
   "size_bytes": 202913,
   "headers": {"From": "", "To": "", "Cc": "", "Subject": "", "Date": "", "Message-ID": ""},
   "body_text": "", "body_truncated": false,
-  "attachments": [{"name": "..."}],
+  "attachments": [{"index": 1, "name": "<original_name>", "cached_path": "<abs path>|null"}],
   "partial": true, "readable": true,
   "source": {"emlx_path": "/...", "partial": true}}}
 ```
+
+`index` es la posición 1..N estable que comparte con `attachment`; `name` es el
+nombre original del driver y `cached_path` la ruta absoluta del archivo de caché
+(regular) o `null` (sin caché, nombre no seguro o entrada no regular). En S/MIME
+`attachments` es `[]` y solo queda el `W_BODY_UNREADABLE` de 2.0.1 (D6). Un
+driver con `attachments: "none"` devuelve `[]`; `show` nunca escribe.
+
+### `attachment`
+```json
+{"uid": "apple_mail:83143",
+ "output_dir": "/Users/<user>/.mailquery/attachments/apple_mail/83143",
+ "count": 1,
+ "attachments": [{"index": 2, "original_name": "Factura Octubre 2026.pdf",
+   "sanitized_name": "02_Factura_Octubre_2026.pdf", "saved": true, "cached": false,
+   "path": "/Users/<user>/.mailquery/attachments/apple_mail/83143/02_Factura_Octubre_2026.pdf",
+   "size_bytes": 128450, "sha256": "<64 hex>"}],
+ "warnings": []}
+```
+`ok`/`command`/`generated_at` los añade `cli` (§11.2). Un acierto de caché
+devuelve `cached: true` y `saved: true` con el `size_bytes`/`sha256` del archivo
+servido; `--force` re-extrae (`cached: false`). El error sigue el contrato
+`{ok:false, command, error:{code,message,hint}}` de §11.5 C/D/G/H/E/F.
 
 ### `mailboxes`
 ```json
@@ -1522,6 +1680,19 @@ cifrado y firmado, `.emlx` ausente con fila de adjuntos, mensaje borrado,
 representables/futuras, y el `Envelope Index` en modo WAL con `-wal` y `-shm`.
 `now` fija el reloj del fixture (las fechas son relativas a él).
 
+`build_store(..., attachments=True)` (M09) añade los fixtures de adjuntos, sin
+cambiar el store por defecto: tres adjuntos con un nombre repetido
+(`UID_ATTACH_MULTI`), un mensaje por patrón de nombre hostil
+(`HOSTILE_ATTACHMENT_NAMES`: traversal, separadores, `..`, `C:`, ADS, RLO,
+`CON.fdp.exe`, doble extensión), contenido ejecutable (`MZ`), adjunto vacío de
+0 B, `.partial.emlx` con un adjunto externalizado verificable y otro no
+verificable, archivo de 1,5 MiB (`max_file_size_mb=1` en `LIMIT_1MB_CONFIG`),
+nombres Unicode/largos, S/MIME con fila de adjuntos, `.emlx` ausente con fila
+del índice y payload base64 corrupto. `FixtureMessage.attachments` es una tupla
+de `FixtureAttachment(name, payload, externalized, external_file,
+external_payload, corrupt)`; los fixtures 2.0.1 (`attachment_names`) se siguen
+generando igual.
+
 ## 7. Reparto de propiedad de archivos (histórico, v1.x)
 
 Reparto del equipo de la v1.x, conservado como referencia; en 2.0.0 el
@@ -1632,6 +1803,17 @@ una zona local fija (`output.LOCAL_ZONE`, UTC−04:00); la config declara la
 cuenta Exchange y el buzón compartido excluido. El backend se construye con
 `tmp_root=<home>/tmp` (como hace `cli`) y con el `registry` y el
 `security_center` del fake, así que `doctor` es determinista.
+`tests/fixtures/expected/attachment_saved.json`, `attachment_cached.json`,
+`attachment_blocked_name.json`, `attachment_blocked_content.json`,
+`attachment_too_large.json` y `show_2714_with_cache.json` (M09, TC-08) son los
+flujos de adjuntos sobre `build_store(attachments=True)` con `DEFAULT_CONFIG`.
+Semilla: `attachment_saved` corre en un store nuevo (`cached:false`);
+`attachment_cached` ejecuta antes una corrida de siembra (documentada en el
+test) y compara la segunda (`cached:true`); `show_2714_with_cache` ejecuta
+`attachment apple_mail:2714 --index 1` antes del `show`. Los payloads del
+fixture son bytes fijos, así que `size_bytes` y `sha256` son estables; las
+rutas se normalizan a `<ROOT>`. Los goldens existentes de `show`/`search`/`new`
+no cambian en M09 (M08 es su dueño).
 
 `tests/test_integration.py` también ejecuta, en **ambos backends** (store
 sintético con `DEFAULT_CONFIG` y `FakeOutlook.item_matrix()` con
