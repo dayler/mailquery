@@ -8,6 +8,7 @@ Apple Mail store (V9/V10/V11) under ``~/Library/Mail`` or with no account that e
 an included mailbox.
 """
 
+import hashlib
 import json
 import math
 import os
@@ -99,6 +100,15 @@ def _snapshot(path: Path) -> dict | None:
     st = path.lstat()
     snap["."] = (None, st.st_mtime_ns)
     return snap
+
+
+def _sha256(path: Path) -> str:
+    """SHA-256 of a file (SMOKE-ATT)."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _p95(values: list[float]) -> float:
@@ -369,6 +379,155 @@ class SmokeTest(unittest.TestCase):
         for name, t in summary.items():
             with self.subTest(command=name):
                 self.assertLess(t, BUDGET[name][BUDGET_COL])
+        self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
+
+
+# --------------------------------------------------------------------------- #
+# SMOKE-ATT-OL — real Outlook attachment recovery (Windows host, M10)
+# --------------------------------------------------------------------------- #
+
+
+class SmokeAttOutlook(unittest.TestCase):
+    """SMOKE-ATT-OL: recover one real local attachment through the COM exception.
+
+    Runs only on a Windows host with classic Outlook running and ``pipx``
+    available (the same rules as SMOKE-NEW); everywhere else the class is
+    skipped. It recovers one attachment of a message that already holds local
+    content — it never asks Outlook to download anything — and checks the file,
+    the cache hit and the read-only store counters.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest(
+                "SMOKE-ATT-OL runs only on Windows with classic Outlook"
+            )
+        if not _outlook_running():
+            raise unittest.SkipTest("classic Outlook (OUTLOOK.EXE) is not running")
+        if shutil.which("pipx") is None:
+            raise unittest.SkipTest("pipx is not available")
+        cls.real_mq_before = _snapshot(REAL_HOME / ".mailquery")
+        cls.tmp = Path(tempfile.mkdtemp(prefix="mq-smoke-att-ol-"))
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, ignore_errors=True)
+        cls.home = cls.tmp / "home"
+        cls.home.mkdir()
+        cls.pipx_home = cls.tmp / "pipx-home"
+        cls.pipx_bin = cls.tmp / "pipx-bin"
+        cls.pipx_home.mkdir()
+        cls.pipx_bin.mkdir()
+        cls.env = dict(os.environ)
+        cls.env.update({
+            "HOME": str(cls.home),
+            "USERPROFILE": str(cls.home),
+            "PIPX_HOME": str(cls.pipx_home),
+            "PIPX_BIN_DIR": str(cls.pipx_bin),
+            "PYTHONUTF8": "1",
+        })
+        cls.env.pop("PYTHONPATH", None)
+        cls.env["PATH"] = str(cls.pipx_bin) + os.pathsep + cls.env.get("PATH", "")
+        cls.exe = str(cls.pipx_bin / EXE)
+        cls.install = subprocess.run(
+            ["pipx", "install", str(ROOT)],
+            cwd=str(cls.tmp),
+            env=cls.env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900,
+        )
+        if cls.install.returncode != 0:
+            return
+        cls.scope_account = cls._declare_first_usable_account()
+
+    @classmethod
+    def _run(cls, args):
+        return subprocess.run(
+            [cls.exe, *args],
+            env=cls.env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+            cwd=str(cls.tmp),
+        )
+
+    @classmethod
+    def _declare_first_usable_account(cls):
+        """Declare accounts in order until one exposes an included mailbox."""
+        rc = cls._run(["mailboxes"]).returncode
+        if rc != 0:
+            return None
+        listed = json.loads(cls._run(["mailboxes"]).stdout)
+        for account in listed["accounts"]:
+            config = cls.home / ".mailquery"
+            config.mkdir(exist_ok=True)
+            label = json.dumps(account["label"], ensure_ascii=False)
+            (config / "config.toml").write_text(
+                f"[scope.{label}]\n", encoding="utf-8"
+            )
+            result = cls._run(["mailboxes"])
+            if result.returncode != 0:
+                return None
+            if any(m["included"] for m in json.loads(result.stdout)["mailboxes"]):
+                return account["label"]
+        return None
+
+    def _json(self, args, command):
+        result = self._run(args)
+        self.assertEqual(result.returncode, 0, f"{args}: {result.stdout}\n{result.stderr}")
+        payload = json.loads(result.stdout)
+        self.assertIs(payload["ok"], True)
+        self.assertEqual(payload["command"], command)
+        self.assertIn("generated_at", payload)
+        return payload
+
+    def _attachment_uid(self) -> str:
+        self.assertIsNotNone(self.scope_account, "no declared account exposes a mailbox")
+        messages = self._json(["search", "--has-attachments", "--limit", "5"], "search")["messages"]
+        self.assertTrue(messages, "no message with attachments in the declared scope")
+        return messages[0]["uid"]
+
+    def test_smoke_att_ol_01_recovers_a_local_attachment(self) -> None:
+        """SMOKE-ATT-OL.01: attachment --index 1 => exit 0, JSON contract, file written."""
+        uid = self._attachment_uid()
+        payload = self._json(["attachment", uid, "--index", "1"], "attachment")
+        self.assertEqual(payload["count"], 1)
+        record = payload["attachments"][0]
+        self.assertIs(record["saved"], True)
+        path = Path(record["path"])
+        self.assertTrue(path.is_file(), path)
+        self.assertEqual(record["size_bytes"], path.stat().st_size)
+        self.assertGreater(record["size_bytes"], 0)
+        self.assertEqual(record["sha256"], _sha256(path))
+        self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
+
+    def test_smoke_att_ol_02_second_run_is_a_cache_hit(self) -> None:
+        """SMOKE-ATT-OL.02: a second run returns cached:true with the same sha256."""
+        uid = self._attachment_uid()
+        first = self._json(["attachment", uid, "--index", "1"], "attachment")["attachments"][0]
+        second = self._json(["attachment", uid, "--index", "1"], "attachment")["attachments"][0]
+        self.assertIs(second["cached"], True)
+        self.assertEqual(second["sha256"], first["sha256"])
+        self.assertEqual(second["path"], first["path"])
+
+    def test_smoke_att_ol_03_store_counters_are_unchanged(self) -> None:
+        """SMOKE-ATT-OL.03: recovering attachments leaves the included folders untouched."""
+        uid = self._attachment_uid()
+        before = {
+            m["url"]: (m["total"], m["unread"])
+            for m in self._json(["mailboxes"], "mailboxes")["mailboxes"]
+            if m["included"]
+        }
+        self._json(["attachment", uid, "--index", "1"], "attachment")
+        after = {
+            m["url"]: (m["total"], m["unread"])
+            for m in self._json(["mailboxes"], "mailboxes")["mailboxes"]
+            if m["included"]
+        }
+        self.assertEqual(after, before)
         self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
 
 

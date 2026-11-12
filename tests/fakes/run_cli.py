@@ -83,14 +83,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     outlook_com.get_drive_type = fake.drive_type
     if options.timeout is not None:
         outlook_com.CALL_TIMEOUT_SECONDS = options.timeout
+    home = Path(options.home) if options.home else None
     backend = get_backend(
         platform="win32",
         outlook_app=fake,
         registry=fake.registry,
         security_center=fake.security_center,
         pywin32=True,
+        tmp_root=(home / "tmp") if home is not None else None,
     )
-    home = Path(options.home) if options.home else None
     return cli.main(cli_argv, home=home, backend=backend)
 
 
