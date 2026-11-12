@@ -184,6 +184,28 @@ Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de
 1. El orquestador actualiza §0.7.2 y §0.7.3 al cerrar cada milestone, antes de marcarlo 🟢 en el plan maestro; ambos documentos deben coincidir.
 2. Un cambio del plan que altere el alcance de una fila obliga a actualizar esta tabla en el mismo cambio.
 3. La conciliación con `PRD.md` (aplicar §0.2, renumerar AC, retirar el delta) no forma parte de este plan; cuando se haga, esta sección se sustituye por el registro histórico correspondiente.
+4. Los cambios aprobados después del cierre de fase se registran en §0.7.5 hasta su conciliación.
+
+### 0.7.5 Cambios posteriores al cierre (pendientes de conciliación)
+
+Cambios aprobados por el dueño después del cierre de fase. Se implementan en `develop` **sin reescribir todavía** las reglas normativas de este delta que afectan; la conciliación (con `PRD.md` y, mientras exista, con este delta) debe aplicarlos sobre las reglas listadas. Hasta entonces, donde contradigan el texto normativo de este documento, prevalece esta tabla.
+
+| ID | Cambio | Reglas a conciliar | Evidencia | Implementación | Conciliación |
+|---|---|---|---|---|---|
+| CR-01 | Caché de adjuntos validada por un manifiesto por mensaje (SHA-256) en lugar del tamaño esperado del driver | RF-45, RF-51, §10.3.1 (el acierto no re-valida contenido), §10.4, AC-12, AC-20 | UT-ATT-08.03 (reescrito), UT-ATT-12.01–12.15, UT-OL-ATT-01.08, SMOKE-ATT-OL.02 en el host Windows del dueño; `INTERFACES.md` (semántica de caché) y `threat-model.md` T-12 | 🟢 | ⚪ |
+| CR-02 | Versión de desarrollo `3.0.0-alpha`, escrita en su forma PEP 440 normalizada `3.0.0a0` | §0.5, RC-25, CL-05 | PKG-01.03, PKG-02.01–02.03, TC-06.02, goldens `doctor.json` y `outlook/doctor.json`, DOC-01.04, DOC-02.02, DOC-03.03 | 🟢 | ⚪ |
+
+**CR-01 — contrato de caché (sustituye en lo que contradiga a RF-45, RF-51, §10.3.1 y §10.4):**
+
+- **Defecto que corrige:** RF-45 trataba como miss un archivo cuyo tamaño no coincidiera con el tamaño esperado del driver. En Outlook ese tamaño es `Attachment.Size` (`PR_ATTACH_SIZE`), que incluye el overhead de propiedades MAPI (18848 frente a 15099 bytes reales en el host del dueño), así que **ningún** adjunto de Outlook era acierto y cada ejecución re-extraía con `SaveAsFile`. Se elimina esa comparación: el tamaño esperado del driver solo alimenta los límites previos a la extracción (RF-49).
+- **Manifiesto:** cada mensaje tiene `<message_dir>/.manifest.json` (`0600`, escrito de forma atómica) con, por índice, `sanitized_name`, `size_bytes` y `sha256`. El `sha256` es el calculado en staging sobre bytes que ya pasaron la pantalla de nombre y de *magic bytes*.
+- **Acierto:** archivo regular en la ruta determinista cuyo nombre, tamaño (filtro previo, sin hash) y SHA-256 coinciden con su entrada; el SHA-256 completo se calcula en cada acierto. `cached: true` pasa a significar "existía, su SHA-256 coincide con el registrado y no se pidió `--force`".
+- **Entrada sin verificar** (sin manifiesto o sin entrada, otro nombre, tamaño o SHA-256 distinto, manifiesto ilegible, con otra versión o enlazado): nunca se sirve. Se re-extrae con la pantalla completa; si sale bien, `os.replace` la sustituye y se registra; si la recuperación falla, se elimina (un enlace se borra a sí mismo, nunca su destino; un directorio nunca se borra recursivamente), se quita su entrada y se devuelve el error original. Un `--force` fallido conserva una entrada verificada.
+- **Directorios enlazados:** si `attachments/`, `<driver>/` o `<native_id>/` es un symlink o una junction, no hay acierto, no se borra nada y la publicación falla con `E_IO` (exit 3) sin escribir.
+- **`show` no cambia:** `cached_path` solo comprueba que el archivo exista como archivo regular; no lee el archivo ni el manifiesto. La validación ocurre solo en `attachment`.
+- **Best-effort:** si escribir el manifiesto falla, el comando no falla; el archivo publicado queda sin verificar y se re-extrae en la siguiente ejecución. La caché sigue sin ser estado de la aplicación: sin barrido, purga ni validación al arrancar (RF-51, ADR-24).
+
+**CR-02 — versión:** `develop` anuncia la pre-release `3.0.0a0` (`3.0.0-alpha`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`. Se usa la forma PEP 440 normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag, sin release y sin merge a `main`. La versión de release de §0.5 sigue siendo `3.0.0`; RC-25 y CL-05 siguen ⚪.
 
 ---
 

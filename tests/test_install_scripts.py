@@ -35,6 +35,10 @@ GOOD_VERSION = (
     f"mailquery {mailquery.__version__} (backend outlook; Python 3.14.0; "
     f"Windows 10.0.26200 AMD64; drivers: outlook {mailquery.__version__})"
 )
+#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a0``).
+_VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
+#: ``3.0.0`` as the final release (the ``3.0.0a0`` pre-release is not published 3.0.0).
+_FINAL_3_0_0 = r"\b3\.0\.0(?!(?:a|b|rc)\d)"
 
 SH = shutil.which("sh")
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -374,11 +378,11 @@ class InstallerVersionTest(unittest.TestCase):
         version = mailquery.__version__
         self.assertTrue(GOOD_VERSION.startswith(f"mailquery {version} (backend outlook; Python "))
         self.assertIn(f"drivers: outlook {version})", GOOD_VERSION)
-        self.assertNotIn("3.0.0", GOOD_VERSION)
+        self.assertNotRegex(GOOD_VERSION, _FINAL_3_0_0)
         self.assertRegex(
             GOOD_VERSION,
-            r"^mailquery \d+\.\d+\.\d+ \(backend outlook; Python \d+\.\d+\.\d+; .+; "
-            r"drivers: outlook \d+\.\d+\.\d+\)$",
+            rf"^mailquery {_VERSION} \(backend outlook; Python \d+\.\d+\.\d+; .+; "
+            rf"drivers: outlook {_VERSION}\)$",
         )
 
 

@@ -1706,7 +1706,13 @@ def _attachment_unavailable_reason(attachment: Any) -> str | None:
 
 
 def _attachment_size(attachment: Any) -> int | None:
-    """Expected size of a local attachment from its ``Size`` property, or ``None``."""
+    """Expected size of a local attachment from its ``Size`` property, or ``None``.
+
+    ``Attachment.Size`` (``PR_ATTACH_SIZE``) includes the MAPI property overhead,
+    so it is an upper-bound estimate of the decoded bytes, never their exact
+    count. The core only uses it for the limits checked before extraction; cache
+    hits are verified against the per-message manifest (CR-01).
+    """
     try:
         size = int(attachment.Size)
     except (outlook_com.ComCallError, TypeError, ValueError):

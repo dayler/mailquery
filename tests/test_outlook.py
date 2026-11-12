@@ -42,6 +42,18 @@ def _connect(fake: fk.FakeOutlook):
     return fake.GetActiveObject("Outlook.Application")
 
 
+def _symlinks_available(directory: Path) -> bool:
+    """Whether this host can create symlinks (Windows needs a privilege)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=directory) as probe:
+        link = Path(probe) / "link"
+        try:
+            os.symlink(Path(probe) / "target", link)
+        except (OSError, NotImplementedError):
+            return False
+    return True
+
+
 def _stores(fake: fk.FakeOutlook) -> dict[str, object]:
     """COM Store objects of the fake keyed by their spec key (profile order)."""
     stores = _connect(fake).Session.Stores
@@ -4241,13 +4253,17 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
         )
 
     def test_ut_ol_att_01_02_local_attachment_has_a_stable_size_and_is_extracted(self) -> None:
-        """UT-OL-ATT-01.02: a local attachment exposes its local size and is recovered."""
+        """UT-OL-ATT-01.02: a local attachment exposes its local size and is recovered.
+
+        ``size_bytes`` is ``Attachment.Size``, which includes the MAPI overhead;
+        the recovered record carries the real decoded size (CR-01).
+        """
         self.attachments_fake()
         rows = self.metadata("local")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["index"], 1)
         self.assertEqual(rows[0]["name"], "factura-2026-10.pdf")
-        self.assertEqual(rows[0]["size_bytes"], len(_LOCAL_CONTENT))
+        self.assertEqual(rows[0]["size_bytes"], len(_LOCAL_CONTENT) + fk.MAPI_SIZE_OVERHEAD)
         self.assertIsNone(rows[0]["unavailable_reason"])
         record = self.run_json(
             "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
@@ -4261,6 +4277,25 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
         published = Path(record["path"])
         self.assertTrue(published.is_file())
         self.assertEqual(published.read_bytes(), _LOCAL_CONTENT)
+
+    def test_ut_ol_att_01_08_second_run_is_a_cache_hit_despite_size_overhead(self) -> None:
+        """UT-OL-ATT-01.08: ``Size`` with MAPI overhead never defeats the cache (CR-01).
+
+        Regression of the host defect: every run re-extracted with ``SaveAsFile``
+        because the cache compared ``Attachment.Size`` with the file size.
+        """
+        self.attachments_fake()
+        uid = _attachment_uid(self.fake, "local")
+        first = self.run_json("attachment", uid, "--index", "1")["attachments"][0]
+        self.assertFalse(first["cached"])
+        self.fake.call_log.clear()
+        second = self.run_json("attachment", uid, "--index", "1")["attachments"][0]
+        self.assertTrue(second["cached"])
+        self.assertEqual(second["sha256"], first["sha256"])
+        self.assertEqual(second["size_bytes"], len(_LOCAL_CONTENT))
+        self.assertEqual(self.fake.call_log.count(kind="Attachment", member="SaveAsFile"), 0)
+        shown = self.run_json("show", uid)["message"]["attachments"]
+        self.assertEqual(shown[0]["cached_path"], first["path"])
 
     def test_ut_ol_att_01_03_not_downloaded_is_unavailable_without_downloading(self) -> None:
         """UT-OL-ATT-01.03: a by-reference attachment ⇒ unavailable (not_downloaded), no download."""
@@ -4387,11 +4422,16 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
         self.attachments_fake()
         from mailquery.backends import outlook as outlook_mod
 
-        uid = _attachment_uid(self.fake, "invalid_staging")
-        error = self.run_error(3, "E_ATTACHMENT_UNAVAILABLE", "attachment", uid, "--index", "1")
-        self.assertIn("cannot be recovered", error["message"])
-        self.assert_cache_empty()
-        self.assert_staging_clean()
+        # The fake materializes a real symlink: hosts without the privilege
+        # (Windows without Developer Mode) only run the outside-path half.
+        if _symlinks_available(self.home):
+            uid = _attachment_uid(self.fake, "invalid_staging")
+            error = self.run_error(
+                3, "E_ATTACHMENT_UNAVAILABLE", "attachment", uid, "--index", "1"
+            )
+            self.assertIn("cannot be recovered", error["message"])
+            self.assert_cache_empty()
+            self.assert_staging_clean()
 
         outside = self.home / "outside.bin"
         backend = self.backend()

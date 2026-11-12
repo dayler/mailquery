@@ -4,7 +4,7 @@
 **Documento:** anexo técnico de seguridad (no forma parte del alcance de `PRD-v2.1`).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** implementado en la rama de integración del delta (PRD-v2.1), **no publicado**: el paquete anuncia la versión 3.0.0 en `develop`, todavía sin tag de release ni merge a `main`.
+**Estado:** implementado en la rama de integración del delta (PRD-v2.1), **no publicado**: el paquete anuncia la pre-release 3.0.0a0 (3.0.0-alpha) en `develop`, todavía sin tag de release ni merge a `main`.
 **Ámbito:** amenazas derivadas del **contenido** del correo (texto, HTML, URLs, imágenes, firmas, adjuntos) y del uso de la salida de `mailquery` por un harness de agentes. No cubre la seguridad del proveedor de correo, del cliente de escritorio ni del endpoint; esas capas se mencionan solo como mitigaciones externas.
 
 **Documentos relacionados:** [`PRD.md`](../PRD.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); [`PRD-v2.1.md`](../PRD-v2.1.md) (plugins y adjuntos); [`PRD-content-hardening.md`](../PRD-content-hardening.md) (mini-PRD A2–A5); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
@@ -142,7 +142,7 @@ G-01 a G-04 son los que cubre el [mini-PRD de endurecimiento](../PRD-content-har
 | T-09 | Inyección visual o QR en imágenes/firmas | Imagen con texto “ignora…” o QR a URL maliciosa | Inyección o redirección | No analizar imágenes no solicitadas; confirmar antes de decodificar QR/OCR | Medio |
 | T-10 | Spoofing de remitente o dominio | Nombre visible de banco con dominio parecido | Confianza indebida, phishing | Harness: no confiar en `from.name`; verificar dominio; DMARC/SPF/DKIM del proveedor | Medio |
 | T-11 | Plugin externo malicioso o comprometido | Paquete que lee red o devuelve datos falsos | Compromiso del proceso y de la salida | Consentimiento al instalar; capacidades en `doctor`; revisar paquete; sandbox del OS | Aceptado |
-| T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/` | El agente lee datos alterados | Permisos `0700/0600`; tamaño esperado si el driver lo informa; usuario monousuario | Aceptado |
+| T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/` | El agente lee datos alterados | Permisos `0700/0600`; manifiesto por mensaje con el SHA-256 de los bytes que pasaron la pantalla: `attachment` nunca sirve un archivo sin verificar y lo re-extrae o elimina; directorios de caché enlazados ⇒ `E_IO`; usuario monousuario. Residual: quien tenga la misma cuenta puede reescribir archivo y manifiesto a la vez (un HMAC no ayuda: la clave viviría en el mismo `~/.mailquery`); `show` no valida (`cached_path` solo comprueba el archivo regular); TOCTOU entre el hash y la lectura del agente | Aceptado |
 | T-13 | Abuso de la excepción COM de materialización (Outlook) | `SaveAsFile` escribiendo fuera del staging o materializando un adjunto no local | Escritura arbitraria o descarga forzada | Solo `Attachment.SaveAsFile` en la lista blanca; path propio en staging `0700`/`0600`; solo adjuntos `OL_FULL_ITEM`/`olByValue`; validación regular/dentro de sesión (D12); borrado siempre | Aceptado (§4.2) |
 
 ---
@@ -202,8 +202,13 @@ G-01 a G-04 son los que cubre el [mini-PRD de endurecimiento](../PRD-content-har
   `~/.mailquery/attachments/<driver>/<native_id>/` (directorios 0700, archivos 0600
   en POSIX, ACL del perfil en Windows) y el staging bajo `~/.mailquery/tmp/`. La
   publicación es atómica y no sigue symlinks; la caché es efímera y no se valida ni
-  purga al arrancar (limpieza externa). El contenido sigue siendo no confiable
-  aunque el archivo se haya copiado correctamente.
+  purga al arrancar (limpieza externa). Cada archivo publicado se registra en el
+  manifiesto del mensaje (`.manifest.json`: nombre, tamaño y SHA-256 de los bytes
+  que pasaron la pantalla); `attachment` solo sirve un archivo cuyo SHA-256
+  coincide, y uno sin verificar se re-extrae (o se elimina si la re-extracción
+  falla). Un directorio de caché enlazado (symlink/junction) se rechaza con
+  `E_IO`. El contenido sigue siendo no confiable aunque el archivo se haya
+  copiado correctamente.
 - **Frontera de plugins (ADR-22):** un plugin de backend externo ejecuta código en el
   proceso y puede usar red si declara `network: true`; instalarlo
   (`pipx inject mailquery <paquete>`) es el consentimiento. El núcleo no lo sandboxea

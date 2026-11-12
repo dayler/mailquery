@@ -15,6 +15,7 @@ import ast
 import contextlib
 import errno
 import hashlib
+import json
 import os
 import re
 import stat
@@ -794,11 +795,68 @@ def _cache_file(home: Path, uid: str, original_name: str, index: int) -> Path:
     return attachment_path(home, uid, sanitize_name(original_name, index))
 
 
-def _seed_cache(home: Path, uid: str, original_name: str, index: int, data: bytes) -> Path:
+def _seed_cache(
+    home: Path,
+    uid: str,
+    original_name: str,
+    index: int,
+    data: bytes,
+    *,
+    registered: bool = True,
+) -> Path:
+    """Seed a cache file; ``registered`` also records it in the manifest (CR-01)."""
     path = _cache_file(home, uid, original_name, index)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
+    if registered:
+        _register(home, uid, index, path.name, len(data), _sha256(data))
     return path
+
+
+def _link_directory(link: Path, target: Path) -> bool:
+    """Create a directory symlink, or a junction on Windows without the privilege."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError):
+        pass
+    if os.name != "nt":  # pragma: no cover - POSIX always allows symlinks here
+        return False
+    try:
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    except (ImportError, OSError):  # pragma: no cover - very restricted hosts
+        return False
+    return True
+
+
+def _manifest_path(home: Path, uid: str) -> Path:
+    return message_dir(home, uid) / attachment_cache.MANIFEST_NAME
+
+
+def _read_manifest(home: Path, uid: str) -> dict[str, dict[str, object]]:
+    path = _manifest_path(home, uid)
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))["entries"]
+
+
+def _register(
+    home: Path, uid: str, index: int, sanitized_name: str, size: int, digest: str
+) -> None:
+    path = _manifest_path(home, uid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entries = _read_manifest(home, uid)
+    entries[str(index)] = {
+        "sanitized_name": sanitized_name,
+        "size_bytes": size,
+        "sha256": digest,
+    }
+    path.write_text(
+        json.dumps({"version": attachment_cache.MANIFEST_VERSION, "entries": entries}),
+        encoding="utf-8",
+    )
 
 
 def _tree_files(root: Path) -> dict[str, bytes]:
@@ -834,7 +892,12 @@ def _sha256(data: bytes) -> str:
 
 
 def _cache_files(home: Path) -> list[Path]:
-    return [path for path in (home / "attachments").rglob("*") if path.is_file()]
+    """Cached attachment files (the per-message manifest is not an attachment)."""
+    return [
+        path
+        for path in (home / "attachments").rglob("*")
+        if path.is_file() and path.name != attachment_cache.MANIFEST_NAME
+    ]
 
 
 def _assert_no_staging(test: unittest.TestCase, home: Path) -> None:
@@ -1298,17 +1361,26 @@ class AttachmentCacheTests(unittest.TestCase):
             self.assertEqual(records[0]["sha256"], _sha256(b"new-bytes"))
             self.assertGreater(driver.opens(1), opens_before)
 
-    def test_ut_att_08_03_expected_size_mismatch_is_a_miss(self) -> None:
-        """UT-ATT-08.03 B: a driver expected size mismatch re-extracts the file."""
+    def test_ut_att_08_03_driver_expected_size_is_not_compared(self) -> None:
+        """UT-ATT-08.03 B: a registered file is a hit even if the driver size differs (CR-01).
+
+        Regression of the Outlook defect: ``Attachment.Size`` includes MAPI
+        overhead, so the driver's size never equals the decoded bytes.
+        """
         with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
             home = _new_home(tmp)
-            _seed_cache(home, "fake:1", "factura.pdf", 1, b"short")
             payload = b"x" * 1000
-            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=payload)])
-            records = _engine(home, driver).recover("fake:1", [1])
-            self.assertFalse(records[0]["cached"])
-            self.assertEqual(Path(records[0]["path"]).read_bytes(), payload)
-            self.assertEqual(driver.opens(1), 2)
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=payload, known_size=len(payload) + 3749)]
+            )
+            first = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(first[0]["cached"])
+            self.assertEqual(first[0]["size_bytes"], len(payload))
+            opens = driver.opens(1)
+            second = _engine(home, driver).recover("fake:1", [1])
+            self.assertTrue(second[0]["cached"])
+            self.assertEqual(second[0]["sha256"], _sha256(payload))
+            self.assertEqual(driver.opens(1), opens)
 
     def test_ut_att_08_04_blocked_message_never_serves_cache(self) -> None:
         """UT-ATT-08.04 P: a blocked message serves no cache even if files exist."""
@@ -1376,6 +1448,290 @@ class AttachmentCacheTests(unittest.TestCase):
             self.assertEqual(cached_path(home, uid, "factura.pdf", 1), expected)
             expected.unlink()
             self.assertIsNone(cached_path(home, uid, "factura.pdf", 1))
+
+
+class AttachmentManifestTests(unittest.TestCase):
+    """UT-ATT-12: per-message manifest and unverified entries (CR-01, RF-45, RF-51)."""
+
+    def test_ut_att_12_01_publication_registers_name_size_and_sha256(self) -> None:
+        """UT-ATT-12.01 P: each published file is registered; other entries are kept."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            other = _seed_cache(home, "fake:1", "dos.pdf", 2, b"two")
+            driver = FakeAttachmentDriver(
+                [
+                    FakeAttachment("uno.pdf", data=b"one"),
+                    FakeAttachment("dos.pdf", data=b"two"),
+                ]
+            )
+            _engine(home, driver).recover("fake:1", [1])
+            manifest_path = _manifest_path(home, "fake:1")
+            document = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["version"], attachment_cache.MANIFEST_VERSION)
+            self.assertEqual(
+                document["entries"]["1"],
+                {"sanitized_name": "01_uno.pdf", "size_bytes": 3, "sha256": _sha256(b"one")},
+            )
+            self.assertEqual(document["entries"]["2"]["sanitized_name"], other.name)
+            if os.name == "posix":
+                self.assertEqual(_mode(manifest_path), 0o600)
+            _assert_no_staging(self, home)
+
+    def test_ut_att_12_02_unregistered_file_is_replaced_and_registered(self) -> None:
+        """UT-ATT-12.02 N: a file without manifest entry is never served; it is replaced."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            seeded = _seed_cache(
+                home, "fake:1", "factura.pdf", 1, b"planted", registered=False
+            )
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"real")])
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(seeded.read_bytes(), b"real")
+            self.assertEqual(_read_manifest(home, "fake:1")["1"]["sha256"], _sha256(b"real"))
+            again = _engine(home, driver).recover("fake:1", [1])
+            self.assertTrue(again[0]["cached"])
+
+    def test_ut_att_12_03_sha256_mismatch_with_same_size_is_replaced(self) -> None:
+        """UT-ATT-12.03 N: a substituted file of the same size is detected by SHA-256."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"original")])
+            first = _engine(home, driver).recover("fake:1", [1])
+            target = Path(first[0]["path"])
+            target.write_bytes(b"tampered")  # same length, different content
+            opens = driver.opens(1)
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(target.read_bytes(), b"original")
+            self.assertEqual(records[0]["sha256"], _sha256(b"original"))
+            self.assertGreater(driver.opens(1), opens)
+
+    def test_ut_att_12_04_size_mismatch_is_unverified_without_hashing(self) -> None:
+        """UT-ATT-12.04 B: a registered size mismatch is a miss before any hash is computed."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"original")])
+            first = _engine(home, driver).recover("fake:1", [1])
+            Path(first[0]["path"]).write_bytes(b"truncated-and-longer")
+            cache = attachment_cache.AttachmentCache(home, "fake:1")
+            with mock.patch.object(
+                attachment_cache, "_hash_file", side_effect=AssertionError("hashed")
+            ):
+                self.assertIsNone(cache.lookup("factura.pdf", 1))
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(Path(records[0]["path"]).read_bytes(), b"original")
+
+    def test_ut_att_12_05_unverified_file_is_removed_when_recovery_fails(self) -> None:
+        """UT-ATT-12.05 N: a failed re-extraction removes the unverified file and its entry."""
+        cases = (
+            ("blocked", FakeAttachment("factura.pdf", data=samples.mz_bytes()), None,
+             "E_ATTACHMENT_BLOCKED"),
+            ("unavailable", FakeAttachment("factura.pdf", data=b"ok"),
+             {"open:1": DriverFailure("not_local")}, "E_ATTACHMENT_UNAVAILABLE"),
+        )
+        for label, attachment, failures, code in cases:
+            for force in (False, True):
+                with self.subTest(label, force=force), tempfile.TemporaryDirectory(
+                    prefix="mailquery-cr01-"
+                ) as tmp:
+                    home = _new_home(tmp)
+                    seeded = _seed_cache(
+                        home, "fake:1", "factura.pdf", 1, b"planted", registered=False
+                    )
+                    _register(home, "fake:1", 1, seeded.name, 7, "0" * 64)  # stale entry
+                    kept = _seed_cache(home, "fake:1", "otro.pdf", 2, b"kept")
+                    driver = FakeAttachmentDriver(
+                        [attachment, FakeAttachment("otro.pdf", data=b"kept")],
+                        failures=failures,
+                    )
+                    with self.assertRaises(MailqueryError) as caught:
+                        _engine(home, driver).recover("fake:1", [1], force=force)
+                    self.assertEqual(caught.exception.code, code)
+                    self.assertFalse(seeded.exists())
+                    self.assertEqual(kept.read_bytes(), b"kept")
+                    self.assertEqual(sorted(_read_manifest(home, "fake:1")), ["2"])
+                    _assert_no_staging(self, home)
+
+    def test_ut_att_12_06_registered_file_survives_failed_force(self) -> None:
+        """UT-ATT-12.06 N: ``--force`` that fails keeps a registered file and its entry."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, b"verified")
+            driver = FakeAttachmentDriver(
+                [FakeAttachment("factura.pdf", data=samples.mz_bytes())]
+            )
+            with self.assertRaises(MailqueryError):
+                _engine(home, driver).recover("fake:1", [1], force=True)
+            self.assertEqual(seeded.read_bytes(), b"verified")
+            self.assertEqual(_read_manifest(home, "fake:1")["1"]["sha256"], _sha256(b"verified"))
+
+    def test_ut_att_12_07_invalid_manifest_makes_every_file_unverified(self) -> None:
+        """UT-ATT-12.07 N: an unparsable, wrong-version or malformed manifest is not trusted."""
+        documents = (
+            "{not json",
+            json.dumps({"version": 99, "entries": {}}),
+            json.dumps({"version": 1, "entries": {"1": {"sanitized_name": "01_factura.pdf",
+                                                         "size_bytes": 4, "sha256": "XYZ"}}}),
+            json.dumps({"version": 1, "entries": {"1": {"sanitized_name": "01_factura.pdf",
+                                                         "size_bytes": True,
+                                                         "sha256": _sha256(b"data")}}}),
+        )
+        for document in documents:
+            with self.subTest(document=document[:24]), tempfile.TemporaryDirectory(
+                prefix="mailquery-cr01-"
+            ) as tmp:
+                home = _new_home(tmp)
+                _seed_cache(home, "fake:1", "factura.pdf", 1, b"data", registered=False)
+                _manifest_path(home, "fake:1").write_text(document, encoding="utf-8")
+                driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"data")])
+                records = _engine(home, driver).recover("fake:1", [1])
+                self.assertFalse(records[0]["cached"])
+                self.assertEqual(_read_manifest(home, "fake:1")["1"]["sha256"], _sha256(b"data"))
+
+    def test_ut_att_12_08_entry_with_another_name_is_unverified(self) -> None:
+        """UT-ATT-12.08 N: an entry registered under another sanitized name is not a hit."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, b"data", registered=False)
+            _register(home, "fake:1", 1, "01_other.pdf", 4, _sha256(b"data"))
+            cache = attachment_cache.AttachmentCache(home, "fake:1")
+            self.assertIsNone(cache.lookup("factura.pdf", 1))
+            self.assertTrue(seeded.exists())
+
+    def test_ut_att_12_09_linked_manifest_is_ignored(self) -> None:
+        """UT-ATT-12.09 N: a symlinked manifest is not read and is replaced, not followed."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            _seed_cache(home, "fake:1", "factura.pdf", 1, b"data", registered=False)
+            outside = Path(tmp) / "outside.json"
+            outside.write_text(
+                json.dumps({"version": 1, "entries": {"1": {
+                    "sanitized_name": "01_factura.pdf", "size_bytes": 4,
+                    "sha256": _sha256(b"data")}}}),
+                encoding="utf-8",
+            )
+            snapshot = outside.read_bytes()
+            try:
+                _manifest_path(home, "fake:1").symlink_to(outside)
+            except (OSError, NotImplementedError):  # pragma: no cover - Windows privileges
+                self.skipTest("symlinks are not available on this host")
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"data")])
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(outside.read_bytes(), snapshot)
+            self.assertFalse(_manifest_path(home, "fake:1").is_symlink())
+
+    def test_ut_att_12_10_linked_message_directory_is_refused(self) -> None:
+        """UT-ATT-12.10 N: a symlinked message or driver directory is ``E_IO``; nothing is written."""
+        for level in ("message", "driver"):
+            with self.subTest(level), tempfile.TemporaryDirectory(
+                prefix="mailquery-cr01-"
+            ) as tmp:
+                home = _new_home(tmp)
+                outside = Path(tmp) / "outside"
+                outside.mkdir()
+                directory = message_dir(home, "fake:1")
+                link = directory if level == "message" else directory.parent
+                link.parent.mkdir(parents=True, exist_ok=True)
+                if not _link_directory(link, outside):  # pragma: no cover
+                    self.skipTest("directory links are not available on this host")
+                driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"data")])
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+                self.assertEqual(caught.exception.code, "E_IO")
+                self.assertEqual(caught.exception.exit_code, 3)
+                self.assertEqual(list(outside.rglob("*")), [])
+                _assert_no_staging(self, home)
+
+    def test_ut_att_12_11_linked_directory_is_never_a_hit_nor_cleaned(self) -> None:
+        """UT-ATT-12.11 N: through a linked message directory nothing is served or removed."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            planted = outside / "01_factura.pdf"
+            planted.write_bytes(b"data")
+            directory = message_dir(home, "fake:1")
+            directory.parent.mkdir(parents=True)
+            if not _link_directory(directory, outside):  # pragma: no cover
+                self.skipTest("directory links are not available on this host")
+            (outside / attachment_cache.MANIFEST_NAME).write_text(
+                json.dumps({"version": 1, "entries": {"1": {
+                    "sanitized_name": "01_factura.pdf", "size_bytes": 4,
+                    "sha256": _sha256(b"data")}}}),
+                encoding="utf-8",
+            )
+            cache = attachment_cache.AttachmentCache(home, "fake:1")
+            self.assertFalse(cache.directories_are_real())
+            self.assertEqual(cache.read_manifest(), {})
+            self.assertIsNone(cache.lookup("factura.pdf", 1))
+            self.assertFalse(cache.discard_unverified("factura.pdf", 1))
+            self.assertTrue(planted.exists())
+
+    def test_ut_att_12_12_unverified_directory_is_never_removed(self) -> None:
+        """UT-ATT-12.12 N: a directory at the cache path is kept (no recursive removal)."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            directory = _cache_file(home, "fake:1", "factura.pdf", 1)
+            directory.mkdir(parents=True)
+            (directory / "inside.txt").write_bytes(b"inside")
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"new")])
+            with self.assertRaises(MailqueryError) as caught:
+                _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_IO")
+            self.assertEqual((directory / "inside.txt").read_bytes(), b"inside")
+
+    def test_ut_att_12_13_locked_unverified_file_is_io_and_never_served(self) -> None:
+        """UT-ATT-12.13 N: a replace refused by the OS (file open on Windows) is ``E_IO``."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, b"old", registered=False)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"new")])
+            sharing = OSError(errno.EIO, "The process cannot access the file")
+            with mock.patch.object(attachment_cache, "_atomic_replace", side_effect=sharing), \
+                    mock.patch.object(
+                        attachment_cache.AttachmentCache, "discard_unverified", return_value=False
+                    ):
+                with self.assertRaises(MailqueryError) as caught:
+                    _engine(home, driver).recover("fake:1", [1])
+            self.assertEqual(caught.exception.code, "E_IO")
+            self.assertEqual(seeded.read_bytes(), b"old")
+            self.assertNotIn("1", _read_manifest(home, "fake:1"))
+            _assert_no_staging(self, home)
+            records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertEqual(seeded.read_bytes(), b"new")
+
+    def test_ut_att_12_14_manifest_write_failure_is_best_effort(self) -> None:
+        """UT-ATT-12.14 B: a published file whose entry could not be written is re-extracted."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            driver = FakeAttachmentDriver([FakeAttachment("factura.pdf", data=b"data")])
+            with mock.patch.object(
+                attachment_cache.AttachmentCache,
+                "write_manifest",
+                side_effect=MailqueryError("E_IO", "disk full", "free space", "io"),
+            ):
+                records = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(records[0]["cached"])
+            self.assertTrue(Path(records[0]["path"]).is_file())
+            self.assertEqual(_read_manifest(home, "fake:1"), {})
+            again = _engine(home, driver).recover("fake:1", [1])
+            self.assertFalse(again[0]["cached"])
+            third = _engine(home, driver).recover("fake:1", [1])
+            self.assertTrue(third[0]["cached"])
+
+    def test_ut_att_12_15_show_cached_path_only_checks_the_file(self) -> None:
+        """UT-ATT-12.15 P: ``cached_path`` (show, option 1a) never reads file or manifest."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-cr01-") as tmp:
+            home = _new_home(tmp)
+            seeded = _seed_cache(home, "fake:1", "factura.pdf", 1, b"x", registered=False)
+            with mock.patch.object(
+                attachment_cache, "_open_no_follow", side_effect=AssertionError("read")
+            ), mock.patch("builtins.open", side_effect=AssertionError("read")):
+                self.assertEqual(cached_path(home, "fake:1", "factura.pdf", 1), seeded)
 
 
 class AttachmentPermissionTests(unittest.TestCase):

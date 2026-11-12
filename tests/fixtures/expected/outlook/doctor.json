@@ -15,7 +15,7 @@
     {
       "name": "driver",
       "ok": true,
-      "detail": "outlook (api=1; pkg 3.0.0; network=false; readonly=structural; body_local=true; attachments=local; native_order=text)"
+      "detail": "outlook (api=1; pkg 3.0.0a0; network=false; readonly=structural; body_local=true; attachments=local; native_order=text)"
     },
     {
       "name": "pywin32",
