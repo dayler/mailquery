@@ -144,18 +144,18 @@ Cada fila de la tabla de supresión §0.2 se sigue aquí.
 | RC-09 | `show` | M08 | AC-07; UT-ATC-01 (incluye `cached_path` symlink/directorio, contenido bloqueable y S/MIME `[]`); goldens `show_*` | 🟢 |
 | RC-10 | Contrato JSON | M03, M08 | AC-05, AC-07; TC-05; goldens | 🟢 |
 | RC-11 | Códigos de salida y errores | M01, M02, M05, M08 | AC-08, AC-14, AC-15, AC-16; UT-ERR-01..04; UT-CLI-09 actualizado | 🟢 |
-| RC-12 | Tabla de comandos y ayuda | M08, M11 | AC-21; UT-ATC-09; DOC-01..05 | 🟡 |
+| RC-12 | Tabla de comandos y ayuda | M08, M11 | AC-21; UT-ATC-09; DOC-01..05 | 🟢 |
 | RC-13 | `doctor` | M02 | AC-02, AC-18; UT-DRV-05; goldens `doctor.json` y `outlook/doctor.json` (los actualiza M02, única edición; la versión del paquete no cambia en esta fase) | 🟢 |
-| RC-14 | `--version` | M01, M11 | AC-18; UT-PL-03; README/`SKILL.md` | 🟡 |
+| RC-14 | `--version` | M01, M11 | AC-18; UT-PL-03; README/`SKILL.md` | 🟢 |
 | RC-15 | Catálogo de warnings | M02, M08 | Sin warnings nuevos; AC-15 (bloqueo = error exit 4); tests de warnings | 🟢 |
-| RC-16 | Instalación y dependencias | M01, M11 | AC-01; PKG-02, INS-SMOKE-01; entry points y `pipx inject` | 🟡 |
+| RC-16 | Instalación y dependencias | M01, M11 | AC-01; PKG-02, INS-SMOKE-01; entry points y `pipx inject` | 🟢 |
 | RC-17 | Logs | M04, M05, M08, M10 | AC-19; UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | 🟢 |
 | RC-18 | Errores y timeouts de Windows | M10 | AC-17; UT-OL-ATT-03; SMOKE-ATT (Windows) | 🟢 |
-| RC-19 | Operación con el harness | M11 | AC-21; `skills/mailquery/SKILL.md`, READMEs y recetas | ⚪ |
+| RC-19 | Operación con el harness | M11 | AC-21; `skills/mailquery/SKILL.md`, READMEs y recetas | 🟢 |
 | RC-20 | Configuración | M02 | AC-03, AC-14; UT-DRV-04; `config.example.toml` | 🟢 |
 | RC-21 | Layout del home | M02, M07 | AC-12; `~/.mailquery/attachments/` y `tmp/staging`; UT-ATT-07/09 | 🟢 |
-| RC-22 | Rendimiento | M08, M09, M10, M11 | AC-12, AC-20; SMOKE de presupuestos; `PERFORMANCE-BACKLOG.md` | 🟡 |
-| RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | 🟡 |
+| RC-22 | Rendimiento | M08, M09, M10, M11 | AC-12, AC-20; SMOKE de presupuestos; `PERFORMANCE-BACKLOG.md` | 🟢 |
+| RC-23 | Criterios de aceptación (§20 del PRD.md) | M01–M11 | Matriz AC del plan maestro; AC-01..AC-21 | 🟢 |
 | RC-24 | Cambios de comportamiento en macOS | M03, M08, M09 | AC-05, AC-07, AC-12; goldens Apple Mail y SMOKE; fila S/MIME de §0.4 (`show` ⇒ `[]`) | 🟢 |
 | RC-25 | Versión del paquete | Release futuro del `3.0.0` (fuera de esta fase) | PKG-02; bump a `3.0.0` en paquete y documentación al publicar | ⚪ |
 
@@ -166,16 +166,16 @@ Este checklist es la puerta del **release futuro** del `3.0.0`, no de la fase de
 | ID | Ítem | Evidencia | Estado |
 |---|---|---|---|
 | CL-01 | AC-01…AC-21 verdes con su caso/golden y trazados en el plan maestro | Matriz AC de `plan/PLAN-MASTER.md` §4 | 🟡 |
-| CL-02 | Suite completa verde en la matriz de CI (3 SO × Python 3.11–3.14) | PR del último lote de integración (I4) en esta fase; la corrida del release queda para el release futuro | ⚪ |
-| CL-03 | SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-AM/SMOKE-ATT-OL verdes en los hosts del dueño (macOS/Windows) o saltadas con motivo | Evidencia de M11-T08 | ⚪ |
+| CL-02 | Suite completa verde en la matriz de CI (3 SO × Python 3.11–3.14) | PR del último lote de integración (I4) en esta fase; la corrida del release queda para el release futuro | 🟢 |
+| CL-03 | SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-AM/SMOKE-ATT-OL verdes en los hosts del dueño (macOS/Windows) o saltadas con motivo | Evidencia de M11-T08 | 🟢 |
 | CL-04 | Gates de solo lectura (TC-03, OL-30) verdes, incluido `attachment` | Evidencia de M09/M10 | 🟢 |
 | CL-05 | Versión `3.0.0`, entry points de backends y instaladores correctos | PKG-02, INS-SMOKE-01; el bump de versión es parte del release futuro | ⚪ |
-| CL-06 | Documentación consumidora actualizada: READMEs, `INTERFACES.md`, `config.example.toml`, recetas, skills y ayudas | DOC-01..06 | ⚪ |
-| CL-07 | Sin referencias obsoletas (cinco comandos/five commands, uid entero, `attachments` solo `name`, `[scope]` sin driver, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`, `retention_days`) | DOC-01..05, TC-07 y revisión del planificador | ⚪ |
+| CL-06 | Documentación consumidora actualizada: READMEs, `INTERFACES.md`, `config.example.toml`, recetas, skills y ayudas | DOC-01..06 | 🟢 |
+| CL-07 | Sin referencias obsoletas (cinco comandos/five commands, uid entero, `attachments` solo `name`, `[scope]` sin driver, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`, `retention_days`) | DOC-01..05, TC-07 y revisión del planificador | 🟢 |
 | CL-08 | Todas las filas de §0.7.2 en 🟢 | Este registro | ⚪ |
 | CL-09 | `PRD.md` sin cambios y marcado para conciliación futura | `git diff` del release | ⚪ |
-| CL-10 | Dashboard del plan maestro en 🟢 y registro de ejecución completo | `plan/PLAN-MASTER.md` §3 y §11 | ⚪ |
-| CL-11 | Sin dependencias nuevas, sin red en el núcleo e I-1 verificado | PKG-02, gates de solo lectura | ⚪ |
+| CL-10 | Dashboard del plan maestro en 🟢 y registro de ejecución completo | `plan/PLAN-MASTER.md` §3 y §11 | 🟢 |
+| CL-11 | Sin dependencias nuevas, sin red en el núcleo e I-1 verificado | PKG-02, gates de solo lectura | 🟢 |
 | CL-12 | Evidencia de release archivada (suite, goldens, CI, hosts) | Release futuro; la fase archiva evidencia de cierre en `docs/plan/evidence/M11.md` | ⚪ |
 | CL-13 | S/MIME en `show`: `attachments: []` y `W_ATTACHMENTS_UNAVAILABLE` solo para cuerpo ilegible no S/MIME; fila de §0.4 verificada | UT-ATC-01.06, TC-09; M08/M09 | 🟢 |
 

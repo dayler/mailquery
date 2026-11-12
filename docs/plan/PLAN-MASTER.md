@@ -52,7 +52,7 @@ Reglas:
 | C | Núcleo de datos multi-driver | M04, M05 | 🟢 | merge/orden/cursor y protocolo de errores de plugin verdes |
 | D | Recuperación de adjuntos (núcleo) | M06, M07, M08 | 🟢 | bloqueo, caché y comando `attachment` verdes |
 | E | Adaptadores de backend | M09, M10 | 🟢 | Apple Mail y Outlook con adjuntos verdes |
-| F | Documentación y cierre de fase | M11 | 🟡 | documentación y conciliación listas; la publicación del `3.0.0` queda fuera |
+| F | Documentación y cierre de fase | M11 | 🟢 | documentación y conciliación listas; la publicación del `3.0.0` queda fuera |
 
 ### 3.1 Milestones
 
@@ -68,9 +68,9 @@ Reglas:
 | M08 | [Comando `attachment` y `show.attachments`](milestones/M08-attachment-command-and-show.md) | D | M05, M07 | AC-07, AC-08, AC-12 (CLI), AC-14 (CLI), AC-15 (CLI), AC-17 (extracción), AC-19 (fin), AC-21 (parcial) | UT-ATC-01..10; UT-CLI-06/07; goldens `show_*` (forma y valor) | INTERFACES contrato JSON; ayudas en código | 🟢 |
 | M09 | [Backend Apple Mail: adjuntos](milestones/M09-apple-mail-attachments.md) | E | M08 | AC-09, AC-10, AC-11, AC-12, AC-15, AC-20 (integración) | UT-AM-01..04, TC-08, SMOKE-ATT-AM | INTERFACES backend Apple Mail 🟢 |
 | M10 | [Backend Outlook: adjuntos](milestones/M10-outlook-attachments.md) | E | M08, M09 | AC-10, AC-12, AC-15, AC-17 (Outlook), AC-19, AC-20 (integración) | UT-OL-ATT-01..04, TC-09, OL-30, SMOKE-ATT-OL | INTERFACES Outlook y excepción COM 🟢 |
-| M11 | [Documentación, cierre de fase y conciliación](milestones/M11-docs-release-and-reconciliation.md) | F | M01–M10 | Cierre de AC-01…AC-21; AC-19 (docs), AC-21 | DOC-01..06, PKG-02, INS-SMOKE-01, TC-04/TC-05/TC-06/TC-07 | READMEs, recetas, skills, instaladores, PRD-v2.1 §0.7 | ⚪ |
+| M11 | [Documentación, cierre de fase y conciliación](milestones/M11-docs-release-and-reconciliation.md) | F | M01–M10 | Cierre de AC-01…AC-21; AC-19 (docs), AC-21 | DOC-01..06, PKG-02, INS-SMOKE-01, TC-04/TC-05/TC-06/TC-07 | READMEs, recetas, skills, instaladores, PRD-v2.1 §0.7 🟢 |
 
-**Resumen:** milestones 🟢 10/11 · 🟡 1 · 🔴 0 · ⚪ 0. ACs 🟢 16/21. Documentos consumidores 🟢 0/10. Suite: línea base 747 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 6 saltados); objetivo final: 0 fallos nuevos y SMOKE verde en los hosts del dueño.
+**Resumen:** milestones 🟢 11/11 · 🟡 0 · 🔴 0 · ⚪ 0. ACs 🟢 21/21. Documentos consumidores 🟢 10/10. Suite final: 1048 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 8 saltados); 0 fallos nuevos. Fase cerrada **sin publicación** (D15): versión 2.0.1, sin tag de release, sin merge a `main`.
 
 ### 3.2 Lotes de integración
 
@@ -111,9 +111,9 @@ Cada fila indica el milestone **dueño** de la evidencia principal; las filas co
 | AC-16 | Protocolo de errores de plugin: `reason`/`hint`/`detail`/`log_message`, `code` del núcleo | M05 | UT-ERR-01..03 | INTERFACES errores | 🟢 |
 | AC-17 | Timeout 30 s metadatos / 120 s extracción | M05, M08, M10 | UT-ERR-04, UT-ATC-07, UT-OL-ATT-03 | — | 🟢 |
 | AC-18 | `doctor` con `driver`; `--version` aditivo con drivers | M01, M02 | UT-PL-03, UT-DRV-05, PKG-02 | `doctor.json`, ayuda | 🟢 |
-| AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin PII | M04, M05, M08, M10, M11 | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | INTERFACES log | 🟡 |
+| AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin PII | M04, M05, M08, M10, M11 | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | INTERFACES log | 🟢 |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | M07, M09, M10 | UT-ATT-10, SMOKE-ATT-AM / SMOKE-ATT-OL | — | 🟢 |
-| AC-21 | Ayuda raíz con 6 comandos, ayuda de `attachment` y línea de exits | M08, M11 | UT-ATC-09, DOC-01..06, TC-07 extendido | READMEs/`--help` | 🟡 |
+| AC-21 | Ayuda raíz con 6 comandos, ayuda de `attachment` y línea de exits | M08, M11 | UT-ATC-09, DOC-01..06, TC-07 extendido | READMEs/`--help` | 🟢 |
 
 ---
 
@@ -394,6 +394,8 @@ Se completa al cerrar cada milestone (solo el orquestador).
 | 2026-11-11 | M08 | ⚪ → 🟢 | suite 974/2/6; UT-ATC-01..10 verdes solos; +50 casos; goldens `show_2714`, `show_smime_encrypted`, `outlook/show` con forma/valor `attachments`; ayuda literal §11.4 y 6 comandos; +2167/−237. Evidencia: [`evidence/M08.md`](evidence/M08.md) | 0 HITL; convención S/MIME C8/C9 fijada para M09/M10 |
 | 2026-11-11 | M09 | ⚪ → 🟢 | suite del milestone 1007/2/6; UT-AM-01..04, TC-08, TC-03.02 y SMOKE-ATT-AM (real, 4 OK) verdes; +33 casos; 6 goldens nuevos con semilla documentada; +1810/−25. Evidencia: [`evidence/M09.md`](evidence/M09.md) | 0 HITL; externalizados `.partial.emlx` best-effort documentado |
 | 2026-11-11 | M10 | ⚪ → 🟢 | suite del milestone 1003/2/8 (SMOKE-ATT-OL salta en macOS); UT-OL-ATT-01..04, TC-09 y OL-30 verdes; +29 casos; 4 goldens Outlook nuevos; +1553/−14. Evidencia: [`evidence/M10.md`](evidence/M10.md) | 0 HITL; materialización COM real solo verificable en host Windows (riesgo aceptado) |
+| 2026-11-11 | M11 | ⚪ → 🟢 | suite 1048/2/8 (solo `SMOKE-NEW.07`); DOC-01..06/TC-04/05/07 31/31, PKG-02/TC-06 8 OK, INS-SMOKE-01 4/4, `test_integration` 80/80; +35 casos; 16 archivos +1591/−527; escaneo de referencias obsoletas con 0 hits. Evidencia: [`evidence/M11.md`](evidence/M11.md) | 0 HITL; riesgo aceptado: SMOKE-ATT-OL/materialización COM sin host Windows |
+| 2026-11-11 | Cierre de fase | — | — | PRs I1–I4 mergeados en `develop` (matriz de CI completa verde en los 4, 15 jobs cada uno); AC-01…AC-21 🟢; sin bump de versión, sin tag de release, sin merge a `main` (D15 + instrucción del dueño). Evidencia de CI en [`evidence/M11.md`](evidence/M11.md) §7 | Fase cerrada; la publicación del `3.0.0` queda para el release futuro |
 
 ---
 
