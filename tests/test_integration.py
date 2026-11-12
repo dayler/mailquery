@@ -24,14 +24,16 @@ import re
 import sqlite3
 import sys
 import tempfile
+import tomllib
 import unittest
 from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from mailquery import cli
+from mailquery import __version__, cli
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import BackendRegistry
+from mailquery.config import load_config
 from mailquery.state import StateStore
 from tests.fakes.plugin import (
     ACCOUNT_LABEL as PLUGIN_ACCOUNT_LABEL,
@@ -1493,6 +1495,24 @@ def _key_paths(value: object, prefix: str = "") -> set[str]:
     return paths
 
 
+def _fake_with_attachment_message(fake):
+    """Add the Outlook counterpart of Apple Mail 2714: To, Cc and a local attachment."""
+    from tests.fakes import outlook as fake_outlook
+
+    inbox = fake.store("exchange").inbox
+    assert inbox is not None
+    inbox.add_message(
+        "complete",
+        subject="Factura completa",
+        sender=("Proveedor", "ventas@proveedor.example"),
+        to=[("Ana", "ana@example.com")],
+        cc=[("Copia", "copia@example.com")],
+        body="Adjuntamos la factura.\r\n",
+        attachments=[fake_outlook.AttachmentSpec("factura.pdf")],
+    )
+    return fake
+
+
 class _BothBackendsCase(unittest.TestCase):
     """``cli.main`` on Apple Mail (fixture store) and on Outlook (in-memory fake).
 
@@ -1568,19 +1588,49 @@ class _BothBackendsCase(unittest.TestCase):
         return payloads
 
 
-class RecipeCommandTest(_BothBackendsCase):
+class _AttachmentUidMixin:
+    """Resolve a message with a known attachment on both backends (TC-04/TC-05/TC-08)."""
+
+    def attachment_uid(self, backend: str) -> str:
+        if backend == "outlook":
+            return self.fake.item("complete").entry_id
+        code, payload, stderr = self.run_backend(backend, "show", "2714")
+        self.assertEqual(code, 0, f"{backend} show 2714: {payload} {stderr}")
+        attachments = payload["message"]["attachments"]
+        self.assertTrue(attachments, "the Apple Mail fixture message 2714 has no attachment")
+        return str(payload["message"]["uid"])
+
+
+class RecipeCommandTest(_AttachmentUidMixin, _BothBackendsCase):
     """TC-04 (PRD 21.2): every recipe command runs with exit 0 on both backends."""
 
-    def assert_recipe(self, name: str, uid_command: tuple[str, ...]) -> None:
+    def outlook_fake(self):
+        return _fake_with_attachment_message(super().outlook_fake())
+
+    def assert_recipe(
+        self, name: str, uid_command: tuple[str, ...], *, requires_attachment: bool = False
+    ) -> None:
         commands = _recipe_commands(name)
         self.assertTrue(commands, f"no mailquery command in {name}")
+        if requires_attachment:
+            self.assertTrue(
+                any(command and command[0] == "attachment" for command in commands),
+                f"{name} must show at least one `mailquery attachment` command",
+            )
         for backend in ("apple_mail", "outlook"):
             code, payload, stderr = self.run_backend(backend, *uid_command)
             self.assertEqual(code, 0, f"{backend} {uid_command}: {payload} {stderr}")
             self.assertTrue(payload["messages"], f"{backend} {uid_command}: no message for <uid>")
             uid = str(payload["messages"][0]["uid"])
+            attachment_uid = None
             for command in commands:
-                argv = [uid if arg == "<uid>" else arg for arg in command]
+                argv = list(command)
+                if argv and argv[0] == "attachment":
+                    if attachment_uid is None:
+                        attachment_uid = self.attachment_uid(backend)
+                    argv = [attachment_uid if arg == "<uid>" else arg for arg in argv]
+                else:
+                    argv = [uid if arg == "<uid>" else arg for arg in argv]
                 with self.subTest(backend=backend, command=" ".join(command)):
                     code, payload, stderr = self.run_backend(backend, *argv)
                     self.assertEqual(code, 0, f"{payload} {stderr}")
@@ -1591,11 +1641,24 @@ class RecipeCommandTest(_BothBackendsCase):
         self.assert_recipe("01-new-mail-digest.md", ("new", "--peek"))
 
     def test_tc_04_02_search_invoices_commands_exit_0_on_both_backends(self) -> None:
-        """TC-04.02: each command of 02-search-invoices.md exits 0 (<uid> from `search --since 1mo`)."""
-        self.assert_recipe("02-search-invoices.md", ("search", "--since", "1mo"))
+        """TC-04.02: each command of 02-search-invoices.md exits 0; `<uid>` has an attachment."""
+        self.assert_recipe(
+            "02-search-invoices.md", ("search", "--since", "1mo", "--has-attachments"),
+            requires_attachment=True,
+        )
+
+    def test_tc_04_03_recipes_do_not_promise_remote_extraction_or_execution(self) -> None:
+        """TC-04.03: recipes promise no remote extraction, no `--out` and no file execution."""
+        for recipe in sorted(RECIPES_DIR.glob("*.md")):
+            text = recipe.read_text(encoding="utf-8")
+            with self.subTest(recipe=recipe.name):
+                self.assertNotIn("--out", text)
+                for promise in ("extracción remota", "extraccion remota", "remote extraction"):
+                    self.assertNotIn(promise, text.lower())
+                self.assertRegex(text, r"(?i)(nunca|no) (?:abrir|ejecutar|descargar)|never (?:open|execute|download)")
 
 
-class JsonShapeParityTest(_BothBackendsCase):
+class JsonShapeParityTest(_AttachmentUidMixin, _BothBackendsCase):
     """TC-05 (RF-30): the same recursive set of JSON keys on both backends.
 
     The Outlook profile adds to ``item_matrix`` a message with To, Cc and a
@@ -1604,21 +1667,7 @@ class JsonShapeParityTest(_BothBackendsCase):
     """
 
     def outlook_fake(self):
-        from tests.fakes import outlook as fake_outlook
-
-        fake = fake_outlook.FakeOutlook.item_matrix()
-        inbox = fake.store("exchange").inbox
-        assert inbox is not None
-        inbox.add_message(
-            "complete",
-            subject="Factura completa",
-            sender=("Proveedor", "ventas@proveedor.example"),
-            to=[("Ana", "ana@example.com")],
-            cc=[("Copia", "copia@example.com")],
-            body="Adjuntamos la factura.\r\n",
-            attachments=[fake_outlook.AttachmentSpec("factura.pdf")],
-        )
-        return fake
+        return _fake_with_attachment_message(super().outlook_fake())
 
     def assert_same_keys(self, payloads: dict[str, dict]) -> None:
         apple, outlook = (_key_paths(payloads[name]) for name in ("apple_mail", "outlook"))
@@ -1629,22 +1678,23 @@ class JsonShapeParityTest(_BothBackendsCase):
             "keys only on Apple Mail / only on Outlook",
         )
 
-    def test_tc_05_01_search(self) -> None:
-        """TC-05.01: `search` has the same recursive keys on both backends."""
-        payloads = self.run_both_ok("search", "--limit", "200")
-        for payload in payloads.values():
-            self.assertTrue(any(message["cc"] for message in payload["messages"]))
-        self.assert_same_keys(payloads)
-
-    def test_tc_05_02_new(self) -> None:
-        """TC-05.02: `new` (first run) has the same recursive keys on both backends."""
-        payloads = self.run_both_ok("new")
-        for payload in payloads.values():
-            self.assertTrue(payload["messages"])
-        self.assert_same_keys(payloads)
-
-    def test_tc_05_03_show(self) -> None:
-        """TC-05.03: `show` (message with To, Cc and an attachment) has the same keys."""
+    def test_tc_05_01_list_commands_have_the_same_keys(self) -> None:
+        """TC-05.01: search/new/show/mailboxes share the recursive key set on both backends."""
+        for label, argv in (
+            ("search", ("search", "--limit", "200")),
+            ("new", ("new",)),
+            ("mailboxes", ("mailboxes",)),
+            ("doctor", ("doctor", "--json")),
+        ):
+            with self.subTest(command=label):
+                payloads = self.run_both_ok(*argv)
+                if label == "search":
+                    for payload in payloads.values():
+                        self.assertTrue(any(message["cc"] for message in payload["messages"]))
+                if label == "new":
+                    for payload in payloads.values():
+                        self.assertTrue(payload["messages"])
+                self.assert_same_keys(payloads)
         payloads = {}
         for backend, uid in (
             ("apple_mail", "2714"),
@@ -1656,212 +1706,494 @@ class JsonShapeParityTest(_BothBackendsCase):
             payloads[backend] = payload
         self.assert_same_keys(payloads)
 
-    def test_tc_05_04_mailboxes(self) -> None:
-        """TC-05.04: `mailboxes` has the same recursive keys on both backends."""
-        self.assert_same_keys(self.run_both_ok("mailboxes"))
-
-    def test_tc_05_05_error(self) -> None:
-        """TC-05.05: an error has the same recursive keys on both backends."""
-        payloads = {}
+    def test_tc_05_02_attachment_success_and_error_have_the_same_keys(self) -> None:
+        """TC-05.02: `attachment` success and error payloads share the key set on both backends."""
+        successes = {}
         for backend in ("apple_mail", "outlook"):
-            code, payload, _stderr = self.run_backend(backend, "search", "--since", "banana")
-            self.assertEqual((code, payload["error"]["code"]), (2, "E_BAD_TIME"))
-            payloads[backend] = payload
-        self.assert_same_keys(payloads)
+            uid = self.attachment_uid(backend)
+            code, payload, stderr = self.run_backend(backend, "attachment", uid, "--index", "1")
+            self.assertEqual(code, 0, f"{backend} attachment: {payload} {stderr}")
+            self.assertTrue(payload["attachments"], f"{backend}: no attachment extracted")
+            self.assertIs(payload["attachments"][0]["saved"], True)
+            successes[backend] = payload
+        self.assert_same_keys(successes)
+        errors = {}
+        for backend in ("apple_mail", "outlook"):
+            uid = self.attachment_uid(backend)
+            code, payload, _stderr = self.run_backend(
+                backend, "attachment", uid, "--index", "99"
+            )
+            self.assertEqual((code, payload["error"]["code"]), (2, "E_USAGE"))
+            errors[backend] = payload
+        self.assert_same_keys(errors)
 
-    def test_tc_05_06_doctor_json(self) -> None:
-        """TC-05.06: `doctor --json` has the same recursive keys on both backends."""
-        self.assert_same_keys(self.run_both_ok("doctor", "--json"))
+    def test_tc_05_03_error_object_keeps_the_closed_shape(self) -> None:
+        """TC-05.03: the error object is `{code, message, hint}` with no extra fields."""
+        for backend in ("apple_mail", "outlook"):
+            with self.subTest(backend=backend):
+                code, payload, _stderr = self.run_backend(backend, "search", "--since", "banana")
+                self.assertEqual((code, payload["error"]["code"]), (2, "E_BAD_TIME"))
+                self.assertEqual(set(payload), {"ok", "command", "error"})
+                self.assertEqual(set(payload["error"]), {"code", "message", "hint"})
+
+# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# TC-07 — user documentation (PRD 21.2, 23.3)
+# --------------------------------------------------------------------------- #
+
+DOCS_ROOT = Path(__file__).resolve().parents[1]
+README_EN = DOCS_ROOT / "README.md"
+README_ES = DOCS_ROOT / "README.es.md"
+SKILL_FILE = DOCS_ROOT / "skills" / "mailquery" / "SKILL.md"
+SKILLS_README = DOCS_ROOT / "skills" / "README.md"
+CONFIG_EXAMPLE = DOCS_ROOT / "docs" / "config.example.toml"
+INSTALL_SH = DOCS_ROOT / "scripts" / "install.sh"
+INSTALL_PS1 = DOCS_ROOT / "scripts" / "install.ps1"
+
+COMMANDS = tuple(cli.COMMANDS)
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _help_text(argv: list[str]) -> str:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+        code = cli.main(list(argv))
+    assert code == 0, f"{argv} exited {code}"
+    return stdout.getvalue()
+
+
+def _all_help_texts() -> dict[str, str]:
+    texts = {"mailquery": _help_text(["--help"])}
+    for command in COMMANDS:
+        texts[command] = _help_text([command, "--help"])
+    return texts
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.split())
+
+
+#: Stale patterns the 2.1 documentation retires (plan §9.3, CL-07).
+_STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
+    "five commands": re.compile(r"five commands", re.IGNORECASE),
+    "cinco comandos": re.compile(r"cinco comandos", re.IGNORECASE),
+    "integer uid": re.compile(
+        r"(?i)\buid\b[^\n.]{0,80}\b(?:integer|entero)\b|"
+        r"\b(?:integer|entero)\b[^\n.]{0,40}\buid\b"
+    ),
+    "attachments name-only": re.compile(r'"attachments"\s*:\s*\[\{\s*"name"'),
+    "published 3.0.0": re.compile(r"mailquery 3\.0\.0"),
+    "baseline": re.compile(r"\bbaseline\b", re.IGNORECASE),
+    "retention_days": re.compile(r"retention_days(?! was replaced by max_size_mb)"),
+    "--out": re.compile(r"--out\b"),
+}
+
+#: Text the README must document (DOC-01.03/05, AC-21).
+_README_CONTRACT_FEATURES = (
+    '[scope."<driver>',
+    "[attachments]",
+    "mailquery attachment",
+    "--index",
+    "--all",
+    "--force",
+    "cached_path",
+    "index",
+    "drivers:",
+    "E_ATTACHMENT_BLOCKED",
+    "E_ATTACHMENTS_DISABLED",
+    "E_ATTACHMENT_UNAVAILABLE",
+    "E_ATTACHMENT_UNREADABLE",
+    "E_PLUGIN_INCOMPATIBLE",
+    "E_PLUGIN_FAILED",
+    "E_DRIVER_UNKNOWN",
+    "E_IO",
+    "~/.mailquery/attachments/",
+    "pipx inject mailquery",
+)
+
+_EXPECTED_EXIT_LINE = (
+    "Exit codes: 0 ok | 2 usage or config error | 3 environment error "
+    "| 4 rejected query or blocked attachments | 5 busy or transient error "
+    "| 6 mail client not running"
+)
+
+
+class _DocumentationCase(unittest.TestCase):
+    def assert_no_stale_terms(self, label: str, text: str) -> None:
+        for name, pattern in _STALE_TEXT_PATTERNS.items():
+            match = pattern.search(text)
+            self.assertIsNone(match, f"{label} contains the stale marker {name!r}: {match.group(0)!r}" if match else "")
 
 
 # --------------------------------------------------------------------------- #
-# error JSON, exit codes and failure modes
+# DOC-01 — README.md (AC-21)
 # --------------------------------------------------------------------------- #
 
 
-class ErrorContractTest(IntegrationBase):
-    def test_bad_time_is_exit_2(self) -> None:
-        self.run_error("search", "--since", "banana", expected_exit=2, expected_code="E_BAD_TIME")
+class ReadmeDocumentationTest(_DocumentationCase):
+    def test_doc_01_01_six_commands_without_five_commands(self) -> None:
+        """DOC-01.01: README lists the six commands and no five-command wording."""
+        text = _read(README_EN)
+        for command in COMMANDS:
+            with self.subTest(command=command):
+                self.assertRegex(text, rf"`mailquery {command}\b|mailquery {command} ")
+        self.assertIsNone(re.search(r"five commands", text, re.IGNORECASE))
+        self.assertIsNone(re.search(r"cinco comandos", text, re.IGNORECASE))
 
-    def test_invalid_limit_is_exit_2(self) -> None:
-        self.run_error("search", "--limit", "0", expected_exit=2, expected_code="E_USAGE")
-        self.run_error("show", "not-a-uid", expected_exit=2, expected_code="E_USAGE")
+    def test_doc_01_02_uid_is_a_prefixed_string_with_legacy_input(self) -> None:
+        """DOC-01.02: README documents the prefixed string uid and the legacy input."""
+        text = _read(README_EN)
+        self.assertIn("<driver>:<native_id>", text)
+        self.assertRegex(text, r"(?i)legacy")
+        self.assertRegex(text, r"(?i)unprefixed")
+        self.assertRegex(text, r'"uid":\s*"apple_mail:')
+        for pattern in ("integer uid",):
+            match = _STALE_TEXT_PATTERNS[pattern].search(text)
+            self.assertIsNone(match, match.group(0) if match else "")
 
-    def test_unknown_command_is_exit_2(self) -> None:
-        code, payload, stderr = self.run_cli("frobnicate")
-        self.assertEqual(code, 2)
-        assert payload is not None
-        self.assertIs(payload["ok"], False)
-        self.assertEqual(payload["error"]["code"], "E_USAGE")
-        self.assertTrue(stderr.strip())
+    def test_doc_01_03_documents_scope_attachments_doctor_and_version(self) -> None:
+        """DOC-01.03: README covers [scope] with driver, [attachments], attachment and doctor/version."""
+        text = _read(README_EN)
+        for feature in _README_CONTRACT_FEATURES:
+            with self.subTest(feature=feature):
+                self.assertIn(feature, text)
+        doctor_section = text[text.index("### `mailquery doctor") : text.index("### `mailquery mailboxes")]
+        self.assertIn("`driver`", doctor_section)
+        self.assertRegex(text, r"drivers: ")
 
-    def test_invalid_config_is_exit_2(self) -> None:
-        self.configure(BROKEN_CONFIG)
-        self.run_error("search", expected_exit=2, expected_code="E_CONFIG_INVALID")
+    def test_doc_01_04_no_stale_marks(self) -> None:
+        """DOC-01.04: README has no retired marks (five commands, baseline, integer uid, 3.0.0)."""
+        self.assert_no_stale_terms("README.md", _read(README_EN))
 
-    def test_missing_store_is_exit_3(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="mailquery-nostore-") as tmp, _closing_log_handlers():
-            empty_root = Path(tmp) / "Mail"
-            empty_root.mkdir()
-            empty_home = Path(tmp) / "home"
-            empty_home.mkdir()
-            missing_accounts = Path(tmp) / "Accounts4.sqlite"
-            self.run_error(
-                "mailboxes",
-                home=empty_home,
-                mail_root=empty_root,
-                accounts_db=missing_accounts,
-                expected_exit=3,
-                expected_code="E_STORE_NOT_FOUND",
-            )
-            # doctor still diagnoses and exits 0 (PRD decision 8).
-            code, payload, _stderr = self.run_cli(
-                "doctor",
-                "--json",
-                home=empty_home,
-                mail_root=empty_root,
-                accounts_db=missing_accounts,
-            )
-            self.assertEqual(code, 0)
-            assert payload is not None
-            self.assertIs(payload["ok"], True)
-            checks = {check["name"]: check for check in payload["checks"]}
-            self.assertIs(checks["store"]["ok"], False)
-            self.assertIs(checks["schema"]["ok"], False)
+    def test_doc_01_05_examples_match_the_contract(self) -> None:
+        """DOC-01.05: README JSON/command examples match the implemented contract."""
+        text = _read(README_EN)
+        self.assertRegex(text, r'"uid":\s*"apple_mail:')
+        self.assertRegex(text, r'"attachments":\s*\[\s*\{\s*"index"')
+        self.assertIn('"cached_path"', text)
+        self.assertRegex(text, r'"sanitized_name"')
+        self.assertRegex(text, r"drivers: [^)\n]*(?:apple_mail|outlook) \d+\.\d+\.\d+")
+        self.assertIn("mailquery attachment apple_mail:", text)
 
-    def test_ut_st_04_02_corrupt_state_blocks_new_but_not_the_other_commands(self) -> None:
-        """UT-ST-04.02: with a corrupt state ``new`` fails; search, show and mailboxes work."""
-        (self.fx.home / "state.json").write_text("{this is not json", encoding="utf-8")
-        error = self.run_error("new", expected_exit=3, expected_code="E_STATE_CORRUPT")
-        self.assertIn("first run", error["error"]["hint"])
-        # search/show/mailboxes/doctor are unaffected by a damaged state file.
-        self.run_ok("search")
-        self.run_ok("show", "2714")
-        self.run_ok("mailboxes")
-        code, payload, _stderr = self.run_cli("doctor", "--json")
-        self.assertEqual(code, 0)
-        assert payload is not None
-        checks = {check["name"]: check for check in payload["checks"]}
-        self.assertIs(checks["state"]["ok"], False)
 
-    def test_lock_contention_is_exit_5(self) -> None:
-        from mailquery.state import RunLock
+# --------------------------------------------------------------------------- #
+# DOC-02 — README.es.md (AC-21)
+# --------------------------------------------------------------------------- #
 
-        lock = RunLock(self.fx.home)
-        lock.acquire()
-        try:
-            self.run_error("mailboxes", expected_exit=5, expected_code="E_LOCKED")
-        finally:
-            lock.release()
-        # Released: the next invocation succeeds.
-        self.run_ok("mailboxes")
 
-    def test_account_labels_unavailable_is_exit_2(self) -> None:
-        missing = self.fx.root / "missing-accounts.sqlite"
-        self.run_error(
-            "search",
-            accounts_db=missing,
-            expected_exit=2,
-            expected_code="E_ACCOUNT_LABELS_UNAVAILABLE",
+def _flags(text: str) -> set[str]:
+    return set(re.findall(r"--[a-z][a-z0-9-]*", text))
+
+
+def _home_paths(text: str) -> set[str]:
+    return set(re.findall(r"~/\.mailquery/[A-Za-z0-9_./<>%-]+", text))
+
+
+class ReadmeEsDocumentationTest(_DocumentationCase):
+    def test_doc_02_01_parity_with_readme(self) -> None:
+        """DOC-02.01: README.es.md has the same commands, flags, paths and exit codes."""
+        english, spanish = _read(README_EN), _read(README_ES)
+        for command in COMMANDS:
+            with self.subTest(command=command):
+                self.assertIn(command, spanish)
+        self.assertEqual(_flags(english), _flags(spanish))
+        self.assertEqual(_home_paths(english), _home_paths(spanish))
+        for code in ("E_ATTACHMENT_BLOCKED", "E_ATTACHMENTS_DISABLED", "E_IO"):
+            with self.subTest(code=code):
+                self.assertIn(code, spanish)
+
+    def test_doc_02_02_no_stale_marks(self) -> None:
+        """DOC-02.02: README.es.md has no retired marks."""
+        self.assert_no_stale_terms("README.es.md", _read(README_ES))
+
+    def test_doc_02_03_prefixed_uid_and_attachment_examples(self) -> None:
+        """DOC-02.03: Spanish examples use the prefixed uid and `attachment`."""
+        text = _read(README_ES)
+        self.assertRegex(text, r'"uid":\s*"apple_mail:')
+        self.assertIn("mailquery attachment apple_mail:", text)
+        self.assertIn("<driver>:<native_id>", text)
+
+
+# --------------------------------------------------------------------------- #
+# DOC-03 — cross-document coherence (AC-21)
+# --------------------------------------------------------------------------- #
+
+
+class DocumentationCoherenceTest(_DocumentationCase):
+    def test_doc_03_01_documents_and_help_agree(self) -> None:
+        """DOC-03.01: READMEs, recipes, SKILL, config example and helps agree."""
+        readme, spanish = _read(README_EN), _read(README_ES)
+        skill = _read(SKILL_FILE)
+        config = _read(CONFIG_EXAMPLE)
+        recipes = _read(RECIPES_DIR / "02-search-invoices.md")
+        helps = _all_help_texts()
+        for document, label in ((readme, "README.md"), (spanish, "README.es.md"), (skill, "SKILL.md")):
+            for command in COMMANDS:
+                with self.subTest(document=label, command=command):
+                    self.assertIn(command, document)
+        exit_line = _normalized(helps["mailquery"])
+        self.assertIn(_EXPECTED_EXIT_LINE, exit_line)
+        self.assertIn("blocked attachments", exit_line)
+        self.assertIn("blocked attachments", readme)
+        self.assertIn("adjuntos bloqueados", spanish)
+        for document, label in (
+            (readme, "README.md"),
+            (spanish, "README.es.md"),
+            (skill, "SKILL.md"),
+        ):
+            with self.subTest(document=label):
+                self.assertIn("<driver>:<native_id>", document)
+                self.assertIn("~/.mailquery/attachments/", document)
+        self.assertIn('[scope."<driver>:', config)
+        self.assertIn("~/.mailquery/attachments/", config)
+        for document, label in ((readme, "README.md"), (spanish, "README.es.md"), (skill, "SKILL.md")):
+            with self.subTest(document=label):
+                self.assertIn("<driver>:<native_id>", document)
+        self.assertIn("~/.mailquery/attachments/", recipes)
+        self.assertIn("~/.mailquery/attachments/", helps["attachment"])
+
+    def test_doc_03_02_no_document_promises_write_outside_home_or_core_network(self) -> None:
+        """DOC-03.02: no document promises writes outside ~/.mailquery or core network."""
+        readme, spanish = _read(README_EN), _read(README_ES)
+        skill = _read(SKILL_FILE)
+        config = _read(CONFIG_EXAMPLE)
+        for document, label in (
+            (readme, "README.md"),
+            (spanish, "README.es.md"),
+            (skill, "SKILL.md"),
+            (config, "config.example.toml"),
+            *((_read(path), path.name) for path in sorted(RECIPES_DIR.glob("*.md"))),
+        ):
+            with self.subTest(document=label):
+                self.assertNotIn("--out", document)
+                self.assertIn("~/.mailquery", document)
+        for text, label in ((readme, "README.md"), (spanish, "README.es.md")):
+            with self.subTest(document=label):
+                self.assertRegex(text, r"(?i)no network|sin red|never (?:opens?|uses?) (?:the )?network")
+                self.assertRegex(text, r"(?is)only\s+writes\s+(?:inside|under)\s+`?~/\.mailquery|solo\s+escribe\s+dentro\s+de\s+`?~/\.mailquery")
+        self.assertRegex(skill, r"(?i)read-only|solo lectura")
+
+    def test_doc_03_03_version_examples_use_the_current_version(self) -> None:
+        """DOC-03.03: version examples use `__version__` with `drivers:` and never 3.0.0 as current."""
+        for path in (README_EN, README_ES):
+            text = _read(path)
+            lines = re.findall(r"mailquery \d+\.\d+\.\d+ \([^\n]*\)", text)
+            with self.subTest(document=path.name):
+                self.assertTrue(lines, f"{path.name} shows no version example")
+                for line in lines:
+                    self.assertIn("drivers:", line)
+                    self.assertIn(__version__, line)
+                self.assertNotRegex(text, r"mailquery 3\.0\.0")
+                if "3.0.0" in text:
+                    self.assertRegex(
+                        text,
+                        r"(?is)(?:future|futuro)[^.]{0,80}3\.0\.0|"
+                        r"3\.0\.0[^.]{0,80}(?:not (?:yet )?released|no publicado)",
+                    )
+
+
+# --------------------------------------------------------------------------- #
+# DOC-04 — skills/mailquery/SKILL.md (AC-21)
+# --------------------------------------------------------------------------- #
+
+
+class SkillDocumentationTest(_DocumentationCase):
+    def test_doc_04_01_skill_documents_the_new_contract(self) -> None:
+        """DOC-04.01: SKILL has six commands, string uid, show.attachments and the new errors."""
+        text = _read(SKILL_FILE)
+        for command in COMMANDS:
+            with self.subTest(command=command):
+                self.assertIn(command, text)
+        for feature in (
+            "<driver>:<native_id>",
+            "cached_path",
+            "E_ATTACHMENT_BLOCKED",
+            "E_ATTACHMENT_UNAVAILABLE",
+            "E_ATTACHMENT_UNREADABLE",
+            "E_DRIVER_UNKNOWN",
+            "E_PLUGIN_FAILED",
+        ):
+            with self.subTest(feature=feature):
+                self.assertIn(feature, text)
+
+    def test_doc_04_02_skill_forbids_opening_or_executing_recovered_files(self) -> None:
+        """DOC-04.02: the harness must not open/execute recovered files and blocking is whole-message."""
+        text = _read(SKILL_FILE)
+        self.assertRegex(text, r"(?i)never (?:open|execute)|do not (?:open|execute)|nunca (?:abrir|ejecutar)")
+        self.assertRegex(text, r"(?i)whole message|message is blocked|mensaje completo")
+
+    def test_doc_04_03_skill_does_not_describe_an_integer_uid_or_omit_attachment(self) -> None:
+        """DOC-04.03: SKILL does not present an integer uid and does not omit `attachment`."""
+        text = _read(SKILL_FILE)
+        self.assertIn("attachment", text)
+        match = _STALE_TEXT_PATTERNS["integer uid"].search(text)
+        self.assertIsNone(match, match.group(0) if match else "")
+
+
+# --------------------------------------------------------------------------- #
+# DOC-05 — CLI help (AC-21)
+# --------------------------------------------------------------------------- #
+
+
+class HelpDocumentationTest(_DocumentationCase):
+    def test_doc_05_01_root_help_lists_six_commands_and_the_exit_line(self) -> None:
+        """DOC-05.01: the root help lists the six commands and the §11.1 exit line."""
+        text = _all_help_texts()["mailquery"]
+        self.assertIn("Commands:", text)
+        for command in COMMANDS:
+            with self.subTest(command=command):
+                self.assertRegex(text, rf"(?m)^  {command}\s")
+        self.assertIn(_EXPECTED_EXIT_LINE, _normalized(text))
+
+    def test_doc_05_02_attachment_help_matches_the_prd(self) -> None:
+        """DOC-05.02: `attachment --help` matches PRD-v2.1 §11.4."""
+        text = _all_help_texts()["attachment"]
+        normalized = _normalized(text)
+        self.assertIn(
+            "usage: mailquery attachment [-h] (--index N | --all) [--force] <uid>",
+            normalized,
         )
+        self.assertIn("Recover local attachments of one message into ~/.mailquery/attachments/", normalized)
+        for section in ("Positional arguments:", "Options:", "Examples:", "Notes:"):
+            with self.subTest(section=section):
+                self.assertIn(section, text)
+        for option in ("--index N", "--all", "--force"):
+            with self.subTest(option=option):
+                self.assertIn(option, text)
+        for note in (
+            "E_ATTACHMENT_BLOCKED (exit 4)",
+            "E_ATTACHMENT_UNAVAILABLE (exit 3)",
+            "E_ATTACHMENT_UNREADABLE (exit 3)",
+            "0600",
+        ):
+            with self.subTest(note=note):
+                self.assertIn(note, normalized)
 
-    def test_include_mailbox_on_undeclared_account_is_exit_2(self) -> None:
-        self.configure(ICLOUD_ONLY_CONFIG)
-        self.run_error(
-            "search",
-            "--include-mailbox",
-            "All Mail",
-            expected_exit=2,
-            expected_code="E_ACCOUNT_NOT_IN_SCOPE",
+    def test_doc_05_03_seven_help_invocations_parse(self) -> None:
+        """DOC-05.03: the root help and the six subcommand helps (7 invocations) parse."""
+        for argv in (["--help"], *([command, "--help"] for command in COMMANDS)):
+            with self.subTest(argv=argv):
+                text = _help_text(argv)
+                self.assertTrue(text.strip())
+        self.assertEqual(len(COMMANDS), 6)
+
+    def test_doc_05_04_help_has_no_stale_terms(self) -> None:
+        """DOC-05.04: no help mentions five commands or an integer uid (module docstring included)."""
+        for label, text in _all_help_texts().items():
+            self.assert_no_stale_terms(f"{label} --help", text)
+        self.assert_no_stale_terms("cli.py docstring", cli.__doc__ or "")
+
+
+# --------------------------------------------------------------------------- #
+# DOC-06 — docs/config.example.toml (AC-21)
+# --------------------------------------------------------------------------- #
+
+
+class ConfigExampleTest(_DocumentationCase):
+    def _load(self, text: str):
+        with tempfile.TemporaryDirectory(prefix="mailquery-config-example-") as tmp:
+            home = Path(tmp) / ".mailquery"
+            home.mkdir()
+            (home / "config.toml").write_text(text, encoding="utf-8")
+            return load_config(home)
+
+    def test_doc_06_01_parses_with_the_real_loader_and_documents_attachments(self) -> None:
+        """DOC-06.01: the example parses with the real loader and documents [attachments] defaults."""
+        template = _read(CONFIG_EXAMPLE)
+        self.assertIn("# [attachments]", template)
+        for default in ("enabled = true", "max_file_size_mb = 100", "max_total_size_mb = 200", "max_count = 50"):
+            with self.subTest(default=default):
+                self.assertIn(default, template)
+        parsed = self._load(template)
+        self.assertEqual(parsed.attachments.enabled, True)
+        self.assertEqual(parsed.attachments.max_file_size_mb, 100)
+        self.assertEqual(parsed.attachments.max_total_size_mb, 200)
+        self.assertEqual(parsed.attachments.max_count, 50)
+        explicit = (
+            "[attachments]\nenabled = true\nmax_file_size_mb = 100\n"
+            "max_total_size_mb = 200\nmax_count = 50\n"
         )
+        parsed = self._load(explicit)
+        self.assertEqual(parsed.attachments.max_total_size_mb, 200)
 
-    def test_mailbox_not_found_is_exit_2(self) -> None:
-        self.configure(f'[scope."{ICLOUD_LABEL}"]\nmailbox_list = ["Does not exist"]\n')
-        self.run_error("search", expected_exit=2, expected_code="E_MAILBOX_NOT_FOUND")
+    def test_doc_06_02_scope_examples_with_and_without_driver_prefix(self) -> None:
+        """DOC-06.02: the example shows one prefixed [scope] block and one unprefixed block."""
+        template = _read(CONFIG_EXAMPLE)
+        self.assertRegex(template, r'\[scope\."(?:<driver>|apple_mail|outlook|graph):')
+        self.assertRegex(template, r'\[scope\."(?!<driver>|apple_mail:|outlook:|graph:)[^"]+"\]')
+        self.assertEqual(tomllib.loads(template), {}, "the template must keep all sections commented")
+        documented = set(re.findall(r"(?m)^#\s*\[([a-z][a-z0-9_-]*)", template))
+        self.assertTrue(documented <= {"logging", "search", "new", "attachments", "scope"})
 
-    def test_permission_denied_on_store_is_exit_3(self) -> None:
-        from tests.mocks import tcc_denied
-
-        with tcc_denied():
-            self.run_error("mailboxes", expected_exit=3, expected_code="E_PERMISSION")
-            # doctor never fails: it reports the denied store and exits 0.
-            code, payload, _stderr = self.run_cli("doctor", "--json")
-        self.assertEqual(code, 0)
-        assert payload is not None
-        checks = {check["name"]: check for check in payload["checks"]}
-        # The store *directory* is visible; opening the index is what TCC denies.
-        self.assertIs(checks["schema"]["ok"], False)
-        self.assertIs(checks["readonly_strategy"]["ok"], False)
-
-    def test_unexpected_schema_is_exit_3(self) -> None:
-        from tests.mocks import drop_required_table
-
-        drop_required_table(self.fx.envelope_index, "message_global_data")
-        self.run_error("mailboxes", expected_exit=3, expected_code="E_SCHEMA_UNSUPPORTED")
-        code, payload, _stderr = self.run_cli("doctor", "--json")
-        self.assertEqual(code, 0)
-        assert payload is not None
-        checks = {check["name"]: check for check in payload["checks"]}
-        self.assertIs(checks["schema"]["ok"], False)
+    def test_doc_06_03_no_previous_version_keys(self) -> None:
+        """DOC-06.03: the example keeps no keys retired by previous versions."""
+        template = _read(CONFIG_EXAMPLE)
+        for stale in ("retention_days", "[backend.", "[driver.", "--out"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, template)
+        self.assertIsNone(re.search(r"(?m)^\s*backend\s*=", template))
 
 
 # --------------------------------------------------------------------------- #
 # TC-07 — user documentation (PRD 21.2, 23.3)
 # --------------------------------------------------------------------------- #
 
-DOCS_ROOT = Path(__file__).resolve().parents[1]
-#: Terms the 1.x documentation used and the 2.0.0 contract retired (TC-07.01-.04).
-_FORBIDDEN_DOC_TERMS = (
-    re.compile(r"baseline", re.IGNORECASE),
-    re.compile(r"retention_days(?! was replaced by max_size_mb)"),
-    re.compile(r"W_EMLX_UNREADABLE"),
-    re.compile(r"only runs on macOS", re.IGNORECASE),
-    re.compile(r"solo macOS", re.IGNORECASE),
-)
 
+class UserDocumentationTest(_DocumentationCase):
+    """TC-07: documentation and helps are coherent with the 2.1 contract."""
 
-class UserDocumentationTest(unittest.TestCase):
-    """TC-07: the user documentation has no 1.x leftovers and the recipes cover exits 3, 5, 6."""
-
-    def assert_clean(self, label: str, text: str) -> None:
-        for pattern in _FORBIDDEN_DOC_TERMS:
-            match = pattern.search(text)
-            self.assertIsNone(match, f"{label} contains {match.group(0)!r}" if match else "")
-
-    def test_tc_07_01_readme_has_no_retired_terms(self) -> None:
-        """TC-07.01: README.md without baseline, retention_days (but the hint), W_EMLX_UNREADABLE, macOS-only."""
-        self.assert_clean("README.md", (DOCS_ROOT / "README.md").read_text(encoding="utf-8"))
-
-    def test_tc_07_02_recipes_have_no_retired_terms(self) -> None:
-        """TC-07.02: the recipes without the retired terms."""
-        recipes = sorted(RECIPES_DIR.glob("*.md"))
-        self.assertEqual(len(recipes), 2)
-        for recipe in recipes:
-            self.assert_clean(recipe.name, recipe.read_text(encoding="utf-8"))
-
-    def test_tc_07_03_config_example_has_no_retired_terms(self) -> None:
-        """TC-07.03: docs/config.example.toml without the retired terms."""
-        path = DOCS_ROOT / "docs" / "config.example.toml"
-        self.assert_clean(path.name, path.read_text(encoding="utf-8"))
-
-    def test_tc_07_04_help_has_no_retired_terms(self) -> None:
-        """TC-07.04: the --help output of the root and of the 5 commands without the retired terms."""
-        for argv in (["--help"], *([command, "--help"] for command in ("doctor", "mailboxes", "search", "new", "show"))):
+    def test_tc_07_01_root_and_six_helps_parse(self) -> None:
+        """TC-07.01: the root help and the six subcommand helps (7 invocations) parse."""
+        self.assertEqual(len(COMMANDS), 6)
+        for argv in (["--help"], *([command, "--help"] for command in COMMANDS)):
             with self.subTest(argv=argv):
-                stdout = io.StringIO()
-                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
-                    code = cli.main(argv)
-                self.assertEqual(code, 0)
-                self.assertTrue(stdout.getvalue().strip())
-                self.assert_clean(" ".join(argv), stdout.getvalue())
+                self.assertTrue(_help_text(argv).strip())
 
-    def test_tc_07_05_each_recipe_mentions_exits_3_5_and_6(self) -> None:
-        """TC-07.05: every recipe handles the exit codes 3, 5 and 6."""
+    def test_tc_07_02_attachment_help_matches_the_prd(self) -> None:
+        """TC-07.02: `attachment --help` matches PRD-v2.1 §11.4."""
+        normalized = _normalized(_all_help_texts()["attachment"])
+        self.assertIn("usage: mailquery attachment [-h] (--index N | --all) [--force] <uid>", normalized)
+        self.assertIn("E_ATTACHMENT_BLOCKED (exit 4)", normalized)
+
+    def test_tc_07_03_documents_have_no_retired_terms_and_recipes_cover_exits(self) -> None:
+        """TC-07.03: docs/helps have no retired terms; recipes cover exits 3, 5 and 6."""
+        for path in (README_EN, README_ES, SKILL_FILE, SKILLS_README, CONFIG_EXAMPLE):
+            with self.subTest(document=path.name):
+                self.assert_no_stale_terms(path.name, _read(path))
+        for path in sorted(RECIPES_DIR.glob("*.md")):
+            with self.subTest(document=path.name):
+                self.assert_no_stale_terms(path.name, _read(path))
+        for label, text in _all_help_texts().items():
+            self.assert_no_stale_terms(f"{label} --help", text)
+        self.assert_no_stale_terms("cli.py docstring", cli.__doc__ or "")
+        self.assertEqual(len(sorted(RECIPES_DIR.glob("*.md"))), 2)
         for recipe in sorted(RECIPES_DIR.glob("*.md")):
-            text = recipe.read_text(encoding="utf-8")
+            text = _read(recipe)
             for code in ("3", "5", "6"):
                 with self.subTest(recipe=recipe.name, exit=code):
-                    self.assertIsNotNone(re.search(rf"exit {code}(?!\d)|`{code}`", text), f"no mention of exit {code}")
+                    self.assertIsNotNone(
+                        re.search(rf"exit {code}(?!\d)|`{code}`", text),
+                        f"no mention of exit {code}",
+                    )
+
+    def test_tc_07_04_no_document_or_help_promises_integer_uid_or_outside_writes(self) -> None:
+        """TC-07.04: no help/document shows an integer uid or promises writes outside ~/.mailquery."""
+        text = _read(README_EN) + _read(README_ES) + _read(SKILL_FILE)
+        text += "".join(_all_help_texts().values())
+        match = _STALE_TEXT_PATTERNS["integer uid"].search(text)
+        self.assertIsNone(match, match.group(0) if match else "")
+        for document, label in ((_read(README_EN), "README.md"), (_read(README_ES), "README.es.md")):
+            self.assertNotIn("--out", document)
+            self.assertIsNone(
+                re.search(
+                    r"(?is)(?:writes?|escribe)\b[^.]{0,40}?\b(?:outside|fuera de)\b"
+                    r"(?!\s*`?~/\.mailquery)",
+                    document,
+                )
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs

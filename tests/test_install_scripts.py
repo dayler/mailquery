@@ -17,12 +17,24 @@ import unittest
 import venv
 from pathlib import Path
 
+import mailquery
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 INSTALL_SH = SCRIPTS_DIR / "install.sh"
 INSTALL_PS1 = SCRIPTS_DIR / "install.ps1"
 INSTALL_BAT = SCRIPTS_DIR / "install.bat"
+SKILLS_DIR = REPO_ROOT / "skills"
+SKILLS_INSTALL_SH = SKILLS_DIR / "install.sh"
+SKILLS_INSTALL_PS1 = SKILLS_DIR / "install.ps1"
 TEMPLATE = REPO_ROOT / "docs" / "config.example.toml"
+
+#: Full ``mailquery -v`` line of the current package (M11-T01: derived from
+#: ``mailquery.__version__``, never from a literal; includes the new ``drivers:`` part).
+GOOD_VERSION = (
+    f"mailquery {mailquery.__version__} (backend outlook; Python 3.14.0; "
+    f"Windows 10.0.26200 AMD64; drivers: outlook {mailquery.__version__})"
+)
 
 SH = shutil.which("sh")
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -249,7 +261,7 @@ class InstallPs1Test(unittest.TestCase):
 class InstallPs1FinalCheckTest(unittest.TestCase):
     """UT-INS-01: final check of install.ps1 with fake pipx and mailquery shims."""
 
-    GOOD_VERSION = "mailquery 2.0.0 (backend outlook; Python 3.14.0; Windows 10.0.26200 AMD64)"
+    GOOD_VERSION = GOOD_VERSION
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -319,7 +331,8 @@ class InstallPs1FinalCheckTest(unittest.TestCase):
     def test_ut_ins_01_02_bad_version_output_is_reported(self) -> None:
         """UT-INS-01.02: mailquery -v fails or lacks 'backend outlook' => hint and exit != 0."""
         wrong, _home, _calls = self._run(
-            win32com_ok=True, version="mailquery 2.0.0 (backend apple_mail; Python 3.14.0)"
+            win32com_ok=True,
+            version=f"mailquery {mailquery.__version__} (backend apple_mail; Python 3.14.0)",
         )
         wrong_output = wrong.stdout + wrong.stderr
         self.assertNotEqual(wrong.returncode, 0, wrong_output)
@@ -348,6 +361,117 @@ class InstallPs1FinalCheckTest(unittest.TestCase):
         self.assertIn(os.environ.get("USERNAME", ""), acl.stdout)
         self.assertIn("mailquery --help", calls)
         self.assertIn("mailquery doctor", calls)
+
+
+# --------------------------------------------------------------------------- #
+# PKG-02 — packaging / version derivation (no bump)
+# --------------------------------------------------------------------------- #
+
+
+class InstallerVersionTest(unittest.TestCase):
+    def test_pkg_02_02_good_version_is_the_full_current_version_line(self) -> None:
+        """PKG-02.02: GOOD_VERSION is the full current ``-v`` line, derived (not just the version)."""
+        version = mailquery.__version__
+        self.assertTrue(GOOD_VERSION.startswith(f"mailquery {version} (backend outlook; Python "))
+        self.assertIn(f"drivers: outlook {version})", GOOD_VERSION)
+        self.assertNotIn("3.0.0", GOOD_VERSION)
+        self.assertRegex(
+            GOOD_VERSION,
+            r"^mailquery \d+\.\d+\.\d+ \(backend outlook; Python \d+\.\d+\.\d+; .+; "
+            r"drivers: outlook \d+\.\d+\.\d+\)$",
+        )
+
+
+# --------------------------------------------------------------------------- #
+# INS-SMOKE-01 — installers (AC-21, M11-T05)
+# --------------------------------------------------------------------------- #
+
+
+class InstallerSmokeTest(unittest.TestCase):
+    def test_ins_smoke_01_01_installers_validate_and_dry_run(self) -> None:
+        """INS-SMOKE-01.01: syntax/help/print-config/dry-run of the installers still pass."""
+        if SH is None:
+            self.skipTest("POSIX shell is not available")
+        for script in (INSTALL_SH, SKILLS_INSTALL_SH):
+            with self.subTest(script=script.name):
+                result = subprocess.run(
+                    [SH, "-n", str(script)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    env=_env(),
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+        help_result = _run_sh("--help")
+        self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        for option in ("--dry-run", "--print-config", "--no-config"):
+            with self.subTest(option=option):
+                self.assertIn(option, help_result.stdout)
+        printed = _run_sh("--print-config")
+        self.assertEqual(printed.returncode, 0, printed.stderr)
+        self.assertEqual(printed.stdout, TEMPLATE.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            dry = _run_sh("--dry-run", "--no-config", home=home)
+            self.assertEqual(dry.returncode, 0, dry.stderr)
+            self.assertIn("Deployment plan", dry.stdout + dry.stderr)
+            self.assertFalse((home / ".mailquery").exists())
+        if PWSH is not None:
+            for script in (INSTALL_PS1, SKILLS_INSTALL_PS1):
+                with self.subTest(script=script.name):
+                    result = subprocess.run(
+                        [
+                            PWSH,
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-Command",
+                            "$errors = $null; "
+                            "[void][System.Management.Automation.Language.Parser]::ParseFile("
+                            f"'{script}', [ref]$null, [ref]$errors); "
+                            "if ($errors.Count -gt 0) { exit 1 }",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        env=_env(),
+                        timeout=60,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_ins_smoke_01_02_template_documents_attachments_and_is_valid_toml(self) -> None:
+        """INS-SMOKE-01.02: the config template documents [attachments] and stays valid TOML."""
+        import tomllib
+
+        from mailquery.config import load_config
+
+        template = TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("# [attachments]", template)
+        for default in ("enabled = true", "max_file_size_mb = 100", "max_total_size_mb = 200", "max_count = 50"):
+            with self.subTest(default=default):
+                self.assertIn(default, template)
+        self.assertEqual(tomllib.loads(template), {}, "the template keeps every section commented")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / ".mailquery"
+            home.mkdir()
+            (home / "config.toml").write_text(template, encoding="utf-8")
+            config = load_config(home)
+        self.assertEqual(config.attachments.enabled, True)
+        self.assertEqual(config.attachments.max_file_size_mb, 100)
+        self.assertEqual(config.attachments.max_total_size_mb, 200)
+        self.assertEqual(config.attachments.max_count, 50)
+
+    def test_ins_smoke_01_03_installers_mention_plugins_and_keep_the_native_backend_check(self) -> None:
+        """INS-SMOKE-01.03: installers mention `pipx inject`; `mailquery -v` keeps the native backend."""
+        sh_text = INSTALL_SH.read_text(encoding="utf-8")
+        ps1_text = INSTALL_PS1.read_text(encoding="utf-8")
+        skills_sh = SKILLS_INSTALL_SH.read_text(encoding="utf-8")
+        self.assertIn("pipx inject mailquery", sh_text)
+        self.assertIn("pipx inject mailquery", ps1_text)
+        self.assertIn("backend outlook", ps1_text)
+        self.assertIn("mailquery -v", ps1_text)
+        self.assertIn("mailquery", skills_sh)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs
