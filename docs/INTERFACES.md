@@ -624,6 +624,36 @@ Los dos métodos estáticos de parseo:
 - `check_state_uid` se retira en M03; la validación del estado vive en
   `state.py`.
 
+**Adjuntos (M09, C9; RF-43/RF-46/RF-47, AC-09/AC-10/AC-11/AC-12/AC-15/AC-20).**
+El adaptador implementa las dos operaciones del protocolo v1 además de
+`parse_native_id`; no escribe en el store ni en la caché (solo abre el `.emlx`
+en lectura) y nunca dispara descargas.
+
+- `attachments(uid) -> list[AttachmentMetadataRow]`: un row por **parte MIME**
+  con nombre, en orden de parte (1..N estable compartido con `show`); no se
+  deduplican nombres repetidos. `size_bytes` es el tamaño **decodificado**
+  (base64/QP) y `native_order_key = str(index)` (Apple Mail ordena
+  numéricamente, C1). `unavailable_reason`: `None` si es local, `corrupt` si el
+  payload no se puede decodificar (base64 estricto), `unsupported` si es una
+  parte externalizada de `.partial.emlx` cuyo archivo no se puede verificar,
+  `not_local` para los nombres del `Envelope Index` cuando el cuerpo falta o es
+  ilegible **no S/MIME** (fallback 2.0.1). Un mensaje S/MIME (cifrado o firmado)
+  lanza `MailqueryError E_ATTACHMENT_UNREADABLE` — la señal de mensaje de la
+  convención C8/C9: `show` la captura y devuelve `[]` (D6) y `attachment` la
+  propaga antes de "0 adjuntos" (fila 8 de §11.3); no se listan nombres del
+  índice para S/MIME. Un mensaje sin adjuntos devuelve `[]` sin motivo.
+- `attachment_stream(uid, index) -> Iterator[bytes]`: bytes **decodificados** en
+  chunks de 64 KiB; las partes externalizadas de `.partial.emlx` se leen del
+  archivo local cuando se puede localizar (best effort, PRD-v2.1 §15: layouts
+  `Data/<shards>/Attachments/<uid>/<part>/<name>` y variantes junto a
+  `Messages/`; nunca symlinks). Un fallo de lectura levanta
+  `emlx.AttachmentReadError` con `reason` (`corrupt`, `not_local`,
+  `unsupported`, `unreadable`) y el motor M07 lo mapea al código/exit de §11.7.
+  `--all`/`--index` los decide el núcleo; el adaptador solo entrega el índice
+  pedido. `load_body` sigue devolviendo `BodyRow.attachments` con **un nombre
+  por parte** (mismo orden que `attachments()`), para que `show` y `attachment`
+  compartan índices exactos.
+
 ### `accounts.py` (Apple Mail)
 `AccountLabel(uuid, label, email=None, provider=None, local=False)`.
 `AccountLabels(db_path=None, tmp_dir=None)` con `.available`, `.all()`,
@@ -664,6 +694,20 @@ fórmula falla; si no existe → `None`. `parse_emlx(path)` lee con
 `open(path, "rb")`, `int(line1.strip())`, payload MIME y trailer plist; texto
 plano preferente, HTML→texto con `output.html_to_text`, nombres de adjuntos;
 corrupto → `readable=False` + warning; `partial` por nombre `.partial.emlx`.
+
+**Adjuntos (M09).** Tipos `EmlxAttachment(index, name, size_bytes,
+native_order_key, unavailable_reason, external_path, part_path)` y
+`EmlxAttachments(path, partial, readable, smime, items, available)`; error
+`AttachmentReadError(reason, detail)` (mapea a §11.7 vía el motor).
+`parse_attachments(path, *, native_uid=None)`: lee el `.emlx` una vez, detecta
+S/MIME y devuelve las partes con nombre en orden de multipart (1-based, sin
+deduplicar); en `.partial.emlx` cada parte es externalizada y se resuelve con
+`external_attachment_path(...)` (best effort; `unsupported` si no aparece).
+`attachment_stream(path, index, *, native_uid=None)`: generador de chunks
+decodificados (`ATTACHMENT_CHUNK_SIZE = 64 KiB`); base64 se valida de forma
+estricta para distinguir `corrupt`. Todo es lectura pura (`open(..., "rb")`), no
+hay escritura ni descarga; `_attachment_names` ya no deduplica (un nombre por
+parte, M09) y `parse_emlx` conserva el comportamiento de 2.0.1 para el cuerpo.
 
 ### `state.py`
 `state.json` **schema 2** (PRD-v2.1 §10.2.4-6, C3). Tipos:
@@ -1598,6 +1642,19 @@ cifrado y firmado, `.emlx` ausente con fila de adjuntos, mensaje borrado,
 representables/futuras, y el `Envelope Index` en modo WAL con `-wal` y `-shm`.
 `now` fija el reloj del fixture (las fechas son relativas a él).
 
+`build_store(..., attachments=True)` (M09) añade los fixtures de adjuntos, sin
+cambiar el store por defecto: tres adjuntos con un nombre repetido
+(`UID_ATTACH_MULTI`), un mensaje por patrón de nombre hostil
+(`HOSTILE_ATTACHMENT_NAMES`: traversal, separadores, `..`, `C:`, ADS, RLO,
+`CON.fdp.exe`, doble extensión), contenido ejecutable (`MZ`), adjunto vacío de
+0 B, `.partial.emlx` con un adjunto externalizado verificable y otro no
+verificable, archivo de 1,5 MiB (`max_file_size_mb=1` en `LIMIT_1MB_CONFIG`),
+nombres Unicode/largos, S/MIME con fila de adjuntos, `.emlx` ausente con fila
+del índice y payload base64 corrupto. `FixtureMessage.attachments` es una tupla
+de `FixtureAttachment(name, payload, externalized, external_file,
+external_payload, corrupt)`; los fixtures 2.0.1 (`attachment_names`) se siguen
+generando igual.
+
 ## 7. Reparto de propiedad de archivos (histórico, v1.x)
 
 Reparto del equipo de la v1.x, conservado como referencia; en 2.0.0 el
@@ -1708,6 +1765,17 @@ una zona local fija (`output.LOCAL_ZONE`, UTC−04:00); la config declara la
 cuenta Exchange y el buzón compartido excluido. El backend se construye con
 `tmp_root=<home>/tmp` (como hace `cli`) y con el `registry` y el
 `security_center` del fake, así que `doctor` es determinista.
+`tests/fixtures/expected/attachment_saved.json`, `attachment_cached.json`,
+`attachment_blocked_name.json`, `attachment_blocked_content.json`,
+`attachment_too_large.json` y `show_2714_with_cache.json` (M09, TC-08) son los
+flujos de adjuntos sobre `build_store(attachments=True)` con `DEFAULT_CONFIG`.
+Semilla: `attachment_saved` corre en un store nuevo (`cached:false`);
+`attachment_cached` ejecuta antes una corrida de siembra (documentada en el
+test) y compara la segunda (`cached:true`); `show_2714_with_cache` ejecuta
+`attachment apple_mail:2714 --index 1` antes del `show`. Los payloads del
+fixture son bytes fijos, así que `size_bytes` y `sha256` son estables; las
+rutas se normalizan a `<ROOT>`. Los goldens existentes de `show`/`search`/`new`
+no cambian en M09 (M08 es su dueño).
 
 `tests/test_integration.py` también ejecuta, en **ambos backends** (store
 sintético con `DEFAULT_CONFIG` y `FakeOutlook.item_matrix()` con
