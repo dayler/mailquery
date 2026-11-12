@@ -43,6 +43,7 @@ from mailquery.plugins import (
     RESERVED_DRIVER_NAMES,
     Capabilities,
     DriverMetadata,
+    PluginContext,
 )
 from mailquery.errors import MailqueryError
 
@@ -250,6 +251,47 @@ class BackendRegistry:
             return self._loaded[driver]
         entry = next(candidate for candidate in self.entries() if candidate.name == driver)
         return self._load_raw(entry)
+
+    def open(self, driver: str, *, context: PluginContext | None = None) -> Any:
+        """Load and instantiate one declared driver (API 1 entry-point convention).
+
+        The entry point is a class or a factory. An external driver is invoked
+        with one positional :class:`PluginContext` (``home``/``tmp_dir``); the
+        built-in drivers are instantiated without arguments. An entry point that
+        already returns a backend instance is used as is. A constructor failure
+        is ``E_PLUGIN_INCOMPATIBLE`` (exit 3): the driver was declared but could
+        not start, and the command must fail without partial results (M04).
+        """
+        metadata = self.info(driver)
+        loaded = self.load(driver)
+        if not isinstance(loaded, type) and hasattr(loaded, "query"):
+            return loaded
+        try:
+            if metadata.get("internal"):
+                return loaded() if isinstance(loaded, type) else loaded
+            if context is not None:
+                return loaded(context)
+            return loaded()
+        except MailqueryError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the driver could not start
+            raise _plugin_incompatible(
+                f"driver {driver!r} failed to start: {type(exc).__name__}",
+                "reinstall or upgrade the plugin and run `mailquery doctor`",
+            ) from exc
+
+    def open_drivers(
+        self,
+        drivers: Iterable[str],
+        *,
+        context: PluginContext | None = None,
+    ) -> dict[str, Any]:
+        """Load and instantiate the given declared drivers, in the requested order."""
+        opened: dict[str, Any] = {}
+        for driver in drivers:
+            name = str(driver)
+            opened[name] = self.open(name, context=context)
+        return opened
 
     # -- internals ---------------------------------------------------------- #
 

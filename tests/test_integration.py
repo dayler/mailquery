@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 import tempfile
 import unittest
 from datetime import timedelta
@@ -29,7 +30,15 @@ from unittest import mock
 
 from mailquery import cli
 from mailquery.backends.apple_mail import AppleMailBackend
+from mailquery.backends.registry import BackendRegistry
 from mailquery.state import StateStore
+from tests.fakes.plugin import (
+    ACCOUNT_LABEL as PLUGIN_ACCOUNT_LABEL,
+    DRIVER as PLUGIN_DRIVER,
+    FakeEntryPoint,
+    internal_entry_points,
+    plugin_factory,
+)
 from tests.fixtures.make_fixtures import (
     ACCOUNT_GMAIL,
     ACCOUNT_ICLOUD,
@@ -807,6 +816,105 @@ class ExtendedGoldenTest(IntegrationBase):
             "show", "83160", expected_exit=2, expected_code="E_ACCOUNT_NOT_IN_SCOPE"
         )
         self.assert_golden("show_not_in_scope_error.json", payload)
+
+
+# --------------------------------------------------------------------------- #
+# TC-08 (M04) — multi-driver goldens: apple_mail + the API 1 plugin double
+# --------------------------------------------------------------------------- #
+
+#: Default fixture config plus the plugin account: apple_mail + graph.
+MULTI_DRIVER_CONFIG = (
+    f'{DEFAULT_CONFIG}\n[scope."{PLUGIN_DRIVER}:{PLUGIN_ACCOUNT_LABEL}"]\n'
+)
+
+
+def _plugin_row(now, native_id: str, *, minutes_ago: float) -> dict:
+    """One common-model row of the plugin double, relative to the fixture clock.
+
+    The golden seed is deterministic: the fixture clock plus fixed offsets
+    (-18 min P2 and -16 min P1) puts both plugin messages inside the first-run
+    lookback window of ``new`` (``D`` = the newest Apple Mail message, -15 min).
+    """
+    date = int((now - timedelta(minutes=minutes_ago)).timestamp())
+    return {
+        "uid": native_id,
+        "native_order_key": native_id,
+        "global_message_id": 0,
+        "subject": f"Plugin {native_id}",
+        "sender_name": "Plugin Sender",
+        "sender_address": "plugin@example.com",
+        "date_sent": date,
+        "date_received": date,
+        "mailbox_id": "graph-inbox",
+        "read": 0,
+        "flagged": 0,
+        "size": 10,
+        "message_id": f"<{native_id}@plugin.example>",
+        "has_attachments": False,
+    }
+
+
+class MultiDriverGoldenTest(IntegrationBase):
+    """TC-08 (M04): ``search``/``new`` over ``apple_mail`` plus the plugin double.
+
+    The registry seam is patched with an in-memory ``BackendRegistry`` holding the
+    built-in entry points plus the plugin entry point, so the CLI loads the
+    declared plugin without installing it (plan §7.5).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.configure(MULTI_DRIVER_CONFIG)
+        rows = [
+            _plugin_row(self.fx.now, "P1", minutes_ago=16),
+            _plugin_row(self.fx.now, "P2", minutes_ago=18),
+        ]
+        self.entry = FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_factory(rows=rows))
+        self.registry = BackendRegistry(
+            platform=sys.platform,
+            entry_points=[*internal_entry_points(), self.entry],
+        )
+
+    @contextlib.contextmanager
+    def plugin_registry(self):
+        with mock.patch.object(cli, "BackendRegistry", lambda *a, **k: self.registry):
+            yield
+
+    def test_tc_08_01_search_merges_both_drivers(self) -> None:
+        """TC-08.01: search golden with the two declared drivers (golden)."""
+        with self.plugin_registry():
+            payload = self.run_ok("search")
+        uids = [message["uid"] for message in payload["messages"]]
+        self.assertEqual(payload["count"], 14)
+        self.assertEqual(
+            uids[:4],
+            [
+                prefixed_uid(83170),
+                prefixed_uid("P1", PLUGIN_DRIVER),
+                prefixed_uid("P2", PLUGIN_DRIVER),
+                prefixed_uid(83160),
+            ],
+        )
+        self.assertEqual(self.entry.load_calls, 1, "the declared plugin is loaded once")
+        self.assert_golden("search_multidriver.json", payload)
+
+    def test_tc_08_02_new_merges_both_drivers(self) -> None:
+        """TC-08.02: new golden over the merged first-run window (golden)."""
+        with self.plugin_registry():
+            payload = self.run_ok("new")
+        self.assertEqual(
+            [message["uid"] for message in payload["messages"]],
+            [
+                prefixed_uid(83160),
+                prefixed_uid("P2", PLUGIN_DRIVER),
+                prefixed_uid("P1", PLUGIN_DRIVER),
+                prefixed_uid(83170),
+            ],
+        )
+        self.assertEqual(
+            payload["cursor"]["current"]["last_uid"], prefixed_uid(83170)
+        )
+        self.assert_golden("new_multidriver.json", payload)
 
 
 # --------------------------------------------------------------------------- #

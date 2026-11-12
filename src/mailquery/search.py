@@ -16,21 +16,29 @@ from __future__ import annotations
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
+import dataclasses
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
+from functools import cmp_to_key
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Sequence
 
 from mailquery import config as config_module
 from mailquery import output
 from mailquery import uid as uid_module
 from mailquery.backends.base import ExcludedStoreError
 from mailquery.errors import MailqueryError
+from mailquery.plugins import wrap_driver
 from mailquery.state import Cursor, EmittedUid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mailquery.backends.base import AccountRow, BodyRow, MailBackend, MailboxRow
     from mailquery.config import Config
     from mailquery.state import StateStore
+
+#: Built-in drivers (frozen in C1/RF-35): they keep the 2.0.1 ``show`` shape
+#: until M08 changes it; an external driver uses the API 1 attachment metadata.
+_INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
+
 
 # Limits fixed by the product contract (PRD 15.6).
 SEARCH_MAX_LIMIT = 200
@@ -86,6 +94,25 @@ class ScanStats:
     candidates: int
     messages_read: int
     duration_ms: int
+
+
+@dataclass
+class _DriverRun:
+    """One driver participating in a command: its backend and its resolved scope.
+
+    ``allowed_ids`` and ``mailbox_map`` start with the declared accounts' folders
+    and grow with the ``--include-mailbox`` folders that belong to this driver
+    (M04); ``label_map`` is filled after the candidate rows of the driver are
+    known (dedupe/display only need it for those rows).
+    """
+
+    driver: str
+    backend: "MailBackend"
+    accounts: "dict[str, AccountRow]"
+    mailbox_map: "dict[Any, MailboxRow]"
+    allowed_ids: frozenset[Any]
+    label_map: "dict[Any, set[Any]]" = field(default_factory=dict)
+
 
 
 # --------------------------------------------------------------------------- #
@@ -164,105 +191,334 @@ def matches(pattern: str, text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# Driver pool (multi-driver engine, M04)
+# --------------------------------------------------------------------------- #
+
+
+def _native_driver(backend: "MailBackend | None", native: str | None) -> str:
+    """Native driver name of the command (injected backend or the platform)."""
+    if native:
+        return str(native)
+    driver = _driver(backend) if backend is not None else ""
+    return driver or str(uid_module.platform_native_driver())
+
+
+def _driver_pool(
+    backend: "MailBackend | None",
+    drivers: "Mapping[str, MailBackend] | None",
+    native: str | None,
+) -> tuple[str, "dict[str, MailBackend]"]:
+    """Native driver name and every backend the caller opened for this command.
+
+    ``backend`` is the platform driver (``None`` when the config does not declare
+    it); ``drivers`` maps the other declared drivers. The order is the caller's:
+    native first, then the mapping order. Every backend is wrapped with the M05
+    driver-call wrapper, so all metadata operations are mapped and bounded by the
+    metadata deadline (the wrapper is idempotent: wrapping twice is a no-op).
+    """
+    native_name = _native_driver(backend, native)
+    pool: dict[str, Any] = {}
+    if backend is not None:
+        key = _driver(backend) or native_name
+        pool[key] = wrap_driver(
+            backend, driver=key, internal=key in _INTERNAL_DRIVERS
+        )
+    for name, driver_backend in (drivers or {}).items():
+        key = str(name)
+        if key not in pool:
+            pool[key] = wrap_driver(
+                driver_backend, driver=key, internal=key in _INTERNAL_DRIVERS
+            )
+    return native_name, pool
+
+
+def _scopes_by_driver(resolved: Sequence[Any]) -> "dict[str, list[Any]]":
+    """Resolved scopes grouped by driver, in ``[scope]`` block order."""
+    groups: dict[str, list[Any]] = {}
+    for scope in resolved:
+        groups.setdefault(str(getattr(scope, "driver", "") or ""), []).append(scope)
+    return groups
+
+
+def _driver_runs(
+    groups: "Mapping[str, Sequence[Any]]", pool: "Mapping[str, MailBackend]"
+) -> "dict[str, _DriverRun]":
+    """Backend, accounts and folders of every driver that declares an account."""
+    runs: dict[str, _DriverRun] = {}
+    for driver, scopes in groups.items():
+        backend = pool.get(driver)
+        if backend is None:
+            raise uid_module.driver_unknown(driver)
+        runs[driver] = _DriverRun(
+            driver=driver,
+            backend=backend,
+            accounts=_accounts_by_uuid(backend),
+            mailbox_map=_mailbox_map(backend, scopes),
+            allowed_ids=frozenset(
+                mailbox["id"]
+                for scope in scopes
+                for mailbox in getattr(scope, "mailboxes", ()) or ()
+            ),
+        )
+    return runs
+
+
+def _apply_include_mailboxes(
+    runs: "Mapping[str, _DriverRun]",
+    includes: "Sequence[tuple[str, MailboxRow]]",
+) -> None:
+    """Add the ``--include-mailbox`` folders to the run of their own driver."""
+    for driver, mailbox in includes:
+        run = runs.get(driver)
+        if run is None:  # pragma: no cover - includes resolve inside declared scopes
+            continue
+        run.allowed_ids = frozenset((*run.allowed_ids, mailbox["id"]))
+        run.mailbox_map.setdefault(mailbox["id"], mailbox)
+
+
+def _include_rows(
+    includes: "Sequence[tuple[str, MailboxRow]]",
+) -> "tuple[MailboxRow, ...]":
+    """The included mailboxes as rows (the shape ``_require_bounded_scan`` wants)."""
+    return tuple(mailbox for _driver, mailbox in includes)
+
+
+def _run_backends(runs: "Mapping[str, _DriverRun]") -> "dict[str, MailBackend]":
+    return {driver: run.backend for driver, run in runs.items()}
+
+
+def _page_recipients(
+    page: Sequence[dict], runs: "Mapping[str, _DriverRun]"
+) -> "dict[str, dict[Any, Any]]":
+    """To/Cc of the page rows, fetched once per driver."""
+    grouped: dict[str, list[dict]] = {}
+    for row in page:
+        grouped.setdefault(str(row["_mq_driver"]), []).append(row)
+    return {
+        driver: runs[driver].backend.recipients([row["uid"] for row in rows])
+        for driver, rows in grouped.items()
+    }
+
+
+def _activation_warnings(
+    backends: "Iterable[MailBackend]", excluded: Sequence[dict]
+) -> list[str]:
+    """Scope warnings of the run: excluded stores first, then labels (deduplicated)."""
+    warnings = [_store_excluded_warning(entry) for entry in excluded]
+    for backend in backends:
+        warnings.extend(_labels_warnings(backend))
+    return list(dict.fromkeys(warnings))
+
+
+def _driver_output_order(
+    config: "Config",
+    native: str,
+    groups: "Mapping[str, Sequence[Any]]",
+    pool: "Mapping[str, MailBackend]",
+) -> list[str]:
+    """Drivers in the order their ``[scope]`` blocks first appear (§10.2.9)."""
+    order: list[str] = []
+    for entry in config.scopes:
+        driver = str(entry.driver or native)
+        if driver not in order and (driver in groups or driver in pool):
+            order.append(driver)
+    for driver in groups:
+        if driver not in order:
+            order.append(driver)
+    if not config.scopes and native in pool and native not in order:
+        order.insert(0, native)
+    return order
+
+
+def _merge_ordered(
+    canonical: "Mapping[str, Sequence[dict]]",
+    backends: "Mapping[str, MailBackend]",
+    *,
+    descending: bool,
+) -> list[dict]:
+    """Merge per-driver lists in the total order (PRD-v2.1 §10.2.7).
+
+    Rows are tagged with their driver (``_mq_driver``, internal only) because the
+    merged page is built with the backend and scope of each row's driver. The
+    sort is stable: rows equal in ``(date_received, driver, native_order_key)``
+    keep the per-driver backend order (deterministic; the uid is never compared).
+    """
+    merged: list[dict] = []
+    for driver, rows in canonical.items():
+        for row in rows:
+            tagged = dict(row)
+            tagged["_mq_driver"] = driver
+            merged.append(tagged)
+
+    def compare(left: dict, right: dict) -> int:
+        return _compare_total_order(left, right, backends, descending=descending)
+
+    merged.sort(key=cmp_to_key(compare))
+    return merged
+
+
+def _compare_total_order(
+    left: dict,
+    right: dict,
+    backends: "Mapping[str, MailBackend]",
+    *,
+    descending: bool,
+) -> int:
+    """Compare two tagged rows in the total order of the command."""
+    left_date, right_date = _date_key(left), _date_key(right)
+    if left_date != right_date:
+        return _direction(left_date > right_date, descending)
+    left_driver, right_driver = str(left["_mq_driver"]), str(right["_mq_driver"])
+    if left_driver != right_driver:
+        return -1 if left_driver < right_driver else 1
+    backend = backends[left_driver]
+    left_key = _native_order_key(backend, left)
+    right_key = _native_order_key(backend, right)
+    if left_key == right_key:
+        return 0
+    return _direction(left_key > right_key, descending)
+
+
+def _direction(is_greater: bool, descending: bool) -> int:
+    """``-1`` when the left value sorts first according to the direction."""
+    if descending:
+        return -1 if is_greater else 1
+    return 1 if is_greater else -1
+
+
+# --------------------------------------------------------------------------- #
 # Public commands
 # --------------------------------------------------------------------------- #
 
 
 def run_search(
-    backend: "MailBackend",
+    backend: "MailBackend | None",
     config: "Config",
     filters: Filters,
+    *,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "warnings"}``.
 
     The scope is the set of accounts declared in ``config.toml`` (INBOX always
     included) plus their ``mailbox_list`` folders and the ``--include-mailbox``
-    folders of this run. Metadata filters are applied first, then the optional
-    ``--text`` bounded body scan, then dedupe by the global message key and
-    pagination.
+    folders of this run. Every declared driver is queried with the same filters;
+    the per-driver results are deduplicated inside their driver (RF-07 of the
+    PRD), merged with the total order ``(date_received DESC, driver ASC,
+    native_order_key DESC)`` (PRD-v2.1 §10.2.7) and paginated after the merge.
     """
     started = time.perf_counter()
-    opened_before = _items_opened(backend)
-    accounts = _accounts_by_uuid(backend)
+    native_name, pool = _driver_pool(backend, drivers, native)
 
     excluded: list[dict] = []
-    resolved = _resolved_scope(config, backend, excluded)
-    mailbox_map = _mailbox_map(backend, resolved)
+    resolved = _resolved_scope(config, backend, excluded, drivers=drivers, native=native_name)
+    runs = _driver_runs(_scopes_by_driver(resolved), pool)
+
     text_terms = _filter_terms(filters.text)
     mode = "text" if text_terms else "metadata"
-    opens_recipients = _recipients_open_items(backend)
-    content_flags = _content_flags(filters, opens_recipients)
-    scope_warnings = _scope_warnings(backend, excluded)
+    opens_recipients = {
+        driver: _recipients_open_items(run.backend) for driver, run in runs.items()
+    }
+    opens_any = any(opens_recipients.values())
+    content_flags = _content_flags(filters, opens_any)
+    warning_backends = (
+        [run.backend for run in runs.values()] if runs else list(pool.values())
+    )
+    scope_warnings = _activation_warnings(warning_backends, excluded)
 
-    include = _resolve_include_mailboxes(backend, resolved, filters.include_mailboxes)
-    if not resolved and not include:
-        return _empty_search_result(mode, started, [NO_ACCOUNTS_WARNING, *scope_warnings])
-
-    scope_mailboxes = _scope_mailboxes(resolved, include)
-    allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
-    if not allowed_ids:
+    includes = _include_entries(
+        backend, resolved, filters.include_mailboxes, drivers=drivers, native=native_name
+    )
+    if not resolved and not includes:
+        return _empty_search_result(
+            mode, started, [NO_ACCOUNTS_WARNING, *scope_warnings]
+        )
+    _apply_include_mailboxes(runs, includes)
+    if not any(run.allowed_ids for run in runs.values()):
         return _empty_search_result(mode, started, scope_warnings)
 
     if content_flags:
-        _require_bounded_scan(resolved, include, filters, content_flags, opens_recipients)
+        _require_bounded_scan(
+            resolved, _include_rows(includes), filters, content_flags, opens_any
+        )
 
     warnings: list[str] = list(scope_warnings)
+    opened_before = {
+        driver: _items_opened(run.backend) for driver, run in runs.items()
+    }
+    pending: list[tuple[_DriverRun, list[dict]]] = []
+    candidates = 0
+    for driver, run in runs.items():
+        ids = sorted(run.allowed_ids)
+        if not ids:
+            pending.append((run, []))
+            continue
+        rows = run.backend.query(
+            ids,
+            since=filters.since,
+            until=filters.until,
+            unread=filters.unread,
+            flagged=filters.flagged,
+            has_attachments=filters.has_attachments,
+            order="desc",
+        )
+        # On Windows --to/--cc open every candidate: they are applied after the
+        # max_scan check and the candidates are counted before them (RF-17).
+        rows = _apply_pattern_filters(
+            rows, filters, run.backend, recipients=not opens_recipients[driver]
+        )
+        candidates += len(rows)
+        pending.append((run, rows))
 
-    rows = backend.query(
-        sorted(allowed_ids),
-        since=filters.since,
-        until=filters.until,
-        unread=filters.unread,
-        flagged=filters.flagged,
-        has_attachments=filters.has_attachments,
-        order="desc",
-    )
-    # On Windows --to/--cc open every candidate: they are applied after the
-    # max_scan check and the candidates are counted before them (RF-17).
-    rows = _apply_pattern_filters(rows, filters, backend, recipients=not opens_recipients)
-    candidates = len(rows)
-    messages_read = 0
-
+    # The multi-driver bound is the sum of every driver's candidates (documented
+    # in INTERFACES: one budget for the merged command).
     if content_flags:
         max_scan = _effective_max_scan(config)
         if candidates > max_scan:
-            raise _scan_too_large(content_flags, candidates, max_scan, opens_recipients)
-    recipient_terms = (
-        (_filter_terms(filters.to), _filter_terms(filters.cc)) if opens_recipients else ((), ())
-    )
-    if text_terms:
-        rows, scan_warnings, messages_read = _scan_bodies(
-            backend, rows, text_terms, recipient_terms
+            raise _scan_too_large(content_flags, candidates, max_scan, opens_any)
+
+    canonical: dict[str, list[dict]] = {}
+    scan_reads: dict[str, int] = {driver: 0 for driver in runs}
+    for run, rows in pending:
+        driver_backend = run.backend
+        recipient_terms = (
+            (_filter_terms(filters.to), _filter_terms(filters.cc))
+            if opens_recipients[run.driver]
+            else ((), ())
         )
-        warnings.extend(scan_warnings)
-    elif any(recipient_terms):
-        rows = _filter_recipients(rows, *recipient_terms, backend)
+        if text_terms:
+            rows, scan_warnings, scan_reads[run.driver] = _scan_bodies(
+                driver_backend, rows, text_terms, recipient_terms
+            )
+            warnings.extend(scan_warnings)
+        elif any(recipient_terms):
+            rows = _filter_recipients(rows, *recipient_terms, driver_backend)
+        run.label_map = driver_backend.membership([row["uid"] for row in rows])
+        duplicate_counts = driver_backend.duplicate_counts(run.allowed_ids)
+        canonical[run.driver] = _dedupe(
+            rows, run.mailbox_map, run.label_map, duplicate_counts, driver_backend
+        )
 
-    label_map = backend.membership([row["uid"] for row in rows])
-    duplicate_counts = backend.duplicate_counts(allowed_ids)
-    canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts, backend)
-
+    merged = _merge_ordered(canonical, _run_backends(runs), descending=True)
     limit = _search_limit(config, filters.limit)
-    page = canonical[:limit]
-    truncated = len(canonical) > limit
+    page = merged[:limit]
+    truncated = len(merged) > limit
     if truncated:
-        warnings.append(_truncated_warning(len(canonical) - limit))
+        warnings.append(_truncated_warning(len(merged) - limit))
 
-    recipients = backend.recipients([row["uid"] for row in page])
-    messages, body_warnings, page_reads = _build_messages(
-        backend,
-        accounts,
-        page,
-        mailbox_map,
-        allowed_ids,
-        label_map,
-        recipients,
-        cached_bodies=bool(text_terms),
+    recipients = _page_recipients(page, runs)
+    messages, body_warnings, reads = _build_messages(
+        page, runs, recipients, cached_bodies=bool(text_terms)
     )
     warnings.extend(body_warnings)
-    messages_read += page_reads
-    if opened_before is not None:
-        messages_read = _items_opened(backend) - opened_before
+    messages_read = 0
+    for driver, run in runs.items():
+        before = opened_before[driver]
+        if before is not None:
+            messages_read += _items_opened(run.backend) - before
+        else:
+            messages_read += scan_reads.get(driver, 0) + reads.get(driver, 0)
 
     return {
         "count": len(messages),
@@ -275,13 +531,15 @@ def run_search(
 
 
 def run_new(
-    backend: "MailBackend",
+    backend: "MailBackend | None",
     config: "Config",
     state_store: "StateStore",
     *,
     peek: bool = False,
     limit: int | None = None,
     clock: Callable[[], float] | None = None,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "cursor", "warnings"}``.
 
@@ -289,25 +547,23 @@ def run_new(
     ``clock``, Unix seconds, ``time.time`` by default) never enter ``new`` and
     never move the cursor (PRD 12.3, 17).
 
-    The first run (no persisted cursor) emits, in ascending order, the messages
-    received in ``[D - lookback, D]`` (``D`` = date of the newest valid message
-    of the scope), keeps the newest ``limit`` of them and reports
-    ``W_FIRST_RUN`` last. Later runs emit, in arrival order, the messages
-    received since ``cursor - lookback`` that are not in the ring. Both use the
-    ``[new].lookback`` of the current config, advance the cursor to the last
-    emitted message and append the emitted uids to the ring. ``peek`` never
-    writes state.
+    The cursor is global (one ``last_date_received``/``last_uid``): every
+    declared driver is queried with the same watermark and lookback and each one
+    contributes its deduplicated messages to the merged ascending order
+    ``(date_received ASC, driver ASC, native_order_key ASC)`` (PRD-v2.1 §10.2.8).
+    The first run emits the window ``[D - lookback, D]`` over the merged set
+    (``D`` = newest valid date of the merged set, the newest ``limit`` of them)
+    and reports ``W_FIRST_RUN`` last. Later runs emit, in arrival order, the
+    messages received since ``cursor - lookback`` whose prefixed uid is not in
+    the ring. ``peek`` never writes state.
     """
     started = time.perf_counter()
-    opened_before = _items_opened(backend)
     now = float(clock()) if clock is not None else time.time()
-    accounts = _accounts_by_uuid(backend)
+    native_name, pool = _driver_pool(backend, drivers, native)
 
     excluded: list[dict] = []
-    resolved = _resolved_scope(config, backend, excluded)
-    mailbox_map = _mailbox_map(backend, resolved)
-    scope_mailboxes = _scope_mailboxes(resolved)
-    allowed_ids = frozenset(mailbox["id"] for mailbox in scope_mailboxes)
+    resolved = _resolved_scope(config, backend, excluded, drivers=drivers, native=native_name)
+    runs = _driver_runs(_scopes_by_driver(resolved), pool)
 
     app_state = state_store.load()
     previous = app_state.cursor
@@ -323,8 +579,11 @@ def run_new(
 
     # Scope warnings of any run come first; W_FIRST_RUN is always last.
     scope_warnings: list[str] = [] if resolved else [NO_ACCOUNTS_WARNING]
-    scope_warnings.extend(_scope_warnings(backend, excluded))
-    if not resolved or not allowed_ids:
+    warning_backends = (
+        [run.backend for run in runs.values()] if runs else list(pool.values())
+    )
+    scope_warnings.extend(_activation_warnings(warning_backends, excluded))
+    if not resolved or not any(run.allowed_ids for run in runs.values()):
         return _new_result(
             started,
             scope_warnings + first_run_warnings,
@@ -336,8 +595,16 @@ def run_new(
 
     ring: set = set()
     if previous is None:
-        newest = _newest_scoped_message(backend, sorted(allowed_ids), now)
-        if newest is None:
+        newest_date: int | None = None
+        for run in runs.values():
+            if not run.allowed_ids:
+                continue
+            newest = _newest_scoped_message(
+                run.backend, sorted(run.allowed_ids), now
+            )
+            if newest is not None and (newest_date is None or newest[0] > newest_date):
+                newest_date = int(newest[0])
+        if newest_date is None:
             return _new_result(
                 started,
                 scope_warnings + first_run_warnings,
@@ -346,50 +613,54 @@ def run_new(
                 candidates=0,
                 messages_read=0,
             )
-        threshold = int(newest[0]) - lookback_seconds
+        threshold = newest_date - lookback_seconds
     else:
         threshold = int(previous.last_date_received) - lookback_seconds
         ring = set(app_state.emitted_uids)
 
-    rows = backend.query(sorted(allowed_ids), since=threshold, order="asc")
-    rows = [
-        row
-        for row in rows
-        if _has_valid_date(row, now)
-        and _prefixed_uid(backend, row["uid"]) not in ring
-    ]
-    candidates = len(rows)
+    opened_before = {driver: _items_opened(run.backend) for driver, run in runs.items()}
+    canonical: dict[str, list[dict]] = {}
+    candidates = 0
+    for driver, run in runs.items():
+        ids = sorted(run.allowed_ids)
+        rows = run.backend.query(ids, since=threshold, order="asc") if ids else []
+        rows = [
+            row
+            for row in rows
+            if _has_valid_date(row, now)
+            and _prefixed_uid(run.backend, row["uid"]) not in ring
+        ]
+        candidates += len(rows)
+        run.label_map = run.backend.membership([row["uid"] for row in rows])
+        duplicate_counts = run.backend.duplicate_counts(run.allowed_ids)
+        canonical[driver] = _dedupe(
+            rows, run.mailbox_map, run.label_map, duplicate_counts, run.backend
+        )
 
-    label_map = backend.membership([row["uid"] for row in rows])
-    duplicate_counts = backend.duplicate_counts(allowed_ids)
-    canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts, backend)
-    canonical = _ordered(canonical, backend, descending=False)
-
+    merged = _merge_ordered(canonical, _run_backends(runs), descending=False)
     warnings: list[str] = list(scope_warnings)
-    truncated = len(canonical) > limit_value
+    truncated = len(merged) > limit_value
     if first_run:
         # --limit keeps the most recent messages of the window (PRD 12.3).
-        page = canonical[-limit_value:]
+        page = merged[-limit_value:]
     else:
-        page = canonical[:limit_value]
+        page = merged[:limit_value]
     if truncated:
-        warnings.append(_truncated_warning(len(canonical) - limit_value))
+        warnings.append(_truncated_warning(len(merged) - limit_value))
 
-    recipients = backend.recipients([row["uid"] for row in page])
-    messages, body_warnings, page_reads = _build_messages(
-        backend,
-        accounts,
-        page,
-        mailbox_map,
-        allowed_ids,
-        label_map,
-        recipients,
-        cached_bodies=False,
+    recipients = _page_recipients(page, runs)
+    messages, body_warnings, reads = _build_messages(
+        page, runs, recipients, cached_bodies=False
     )
     warnings.extend(body_warnings)
     warnings.extend(first_run_warnings)
-    if opened_before is not None:
-        page_reads = _items_opened(backend) - opened_before
+    messages_read = 0
+    for driver, run in runs.items():
+        before = opened_before[driver]
+        if before is not None:
+            messages_read += _items_opened(run.backend) - before
+        else:
+            messages_read += reads.get(driver, 0)
 
     if peek or not page:
         current_payload = previous_payload
@@ -397,9 +668,11 @@ def run_new(
         emitted = [
             EmittedUid(
                 date_received=_date_key(row),
-                driver=_driver(backend),
-                native_order_key=_native_order_key(backend, row),
-                uid=_prefixed_uid(backend, row["uid"]),
+                driver=str(row["_mq_driver"]),
+                native_order_key=_native_order_key(
+                    runs[str(row["_mq_driver"])].backend, row
+                ),
+                uid=_prefixed_uid(runs[str(row["_mq_driver"])].backend, row["uid"]),
             )
             for row in page
         ]
@@ -414,37 +687,51 @@ def run_new(
         "truncated": truncated,
         "hint": _new_hint(truncated),
         "messages": messages,
-        "scan": _scan_dict("metadata", candidates, page_reads, started),
+        "scan": _scan_dict("metadata", candidates, messages_read, started),
         "cursor": {"previous": previous_payload, "current": current_payload},
         "warnings": warnings,
     }
 
 
-def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
+def run_show(
+    backend: "MailBackend | None",
+    config: "Config",
+    uid: Any,
+    *,
+    driver: str | None = None,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
+) -> dict:
     """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
-    ``[scope]`` is resolved exactly as ``search`` does, so a block or a
-    ``mailbox_list`` folder that does not resolve fails with the same error.
-    The message may be in any folder of a declared account (PRD 12.4); a uid in
+    The driver of the uid prefix is the one that serves ``show`` (RF-40): the
+    core splits the prefix, resolves only that driver's ``[scope]`` blocks and
+    calls its ``find_message``/``load_body`` (and, for an external driver, the
+    API 1 ``attachments`` operation; M08 adds the attachment command). A uid in
     an undeclared account (or with no declared accounts) raises
-    ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
-    raises ``E_USAGE`` with an actionable hint, as PRD 12 has no specific
-    "message not found" code. A uid whose store is excluded (Outlook) raises
-    ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
+    ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted, raises
+    ``E_USAGE`` with an actionable hint. A uid whose store is excluded (Outlook)
+    raises ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
     """
-    accounts = _accounts_by_uuid(backend)
-    show_uid = _prefixed_uid(backend, uid)
+    native_name, pool = _driver_pool(backend, drivers, native)
+    target = str(driver or (backend is not None and _driver(backend)) or native_name)
+    target_backend = pool.get(target)
+    if target_backend is None:  # pragma: no cover - the CLI opens the target driver
+        raise uid_module.driver_unknown(target)
 
+    target_config = _config_for_driver(config, target, native_name)
     excluded: list[dict] = []
-    resolved = _resolved_scope(config, backend, excluded)
+    resolved = _resolved_scope(target_config, target_backend, excluded, native=target)
+    accounts = _accounts_by_uuid(target_backend)
     declared = {_scope_account_uuid(scope) for scope in resolved}
+    show_uid = uid_module.format_uid(target, str(uid))
 
     try:
-        found = backend.find_message(uid)
+        found = target_backend.find_message(uid)
     except ExcludedStoreError as exc:
         raise _excluded_store_error(show_uid, exc.entry) from None
     # A backend may word the not-found hint itself (Outlook points to excluded_stores).
-    not_found_hint = getattr(backend, "not_found_hint", None)
+    not_found_hint = getattr(target_backend, "not_found_hint", None)
     if found is None:
         raise _message_not_found(show_uid, not_found_hint)
     row, mailbox = found
@@ -460,11 +747,11 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
             "declare the account in ~/.mailquery/config.toml",
             "the message belongs to an account that is not declared",
         )
-    recipients = backend.recipients([uid])
+    recipients = target_backend.recipients([uid])
     to_list, cc_list = _recipient_lists(recipients, uid)
 
-    body = backend.load_body(row)
-    warnings = _scope_warnings(backend, excluded) + list(body["warnings"])
+    body = target_backend.load_body(row)
+    warnings = _activation_warnings([target_backend], excluded) + list(body["warnings"])
 
     body_readable = bool(body["readable"])
     body_text = ""
@@ -479,35 +766,18 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
                 f"{output.SHOW_BODY_MAX_CHARS} characters"
             )
 
-    # An unreadable body (S/MIME included) never contributes MIME attachment
-    # names: they come from the backend's metadata (PRD 12.10).
-    attachment_names = (
-        [str(entry["name"]) for entry in body["attachments"]] if body_readable else []
-    )
-    # Outlook cannot read the names without the item: its hook applies the
-    # Windows rule of PRD 12.10 (``has_attachments``, S/MIME excepted).
-    unreadable_attachments = (
-        None if body_readable else getattr(backend, "unreadable_attachments", None)
-    )
-    if unreadable_attachments is not None:
-        attachment_names, attachments_warning = unreadable_attachments(row)
-        if attachments_warning:
-            warnings.append(attachments_warning)
-    elif not attachment_names:
-        stored_names = backend.attachment_names(uid)
-        if stored_names:
-            attachment_names = stored_names
-            if not body_readable:
-                warnings.append(
-                    "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the "
-                    "envelope index; the message body could not be read"
-                )
+    if target in _INTERNAL_DRIVERS:
+        attachments = _internal_show_attachments(
+            target_backend, uid, row, body, body_readable, warnings
+        )
+    else:
+        attachments = _plugin_show_attachments(target_backend, uid)
 
     partial = bool(body["partial"])
     headers = _show_headers(body["headers"], row, to_list, cc_list)
 
     message = {
-        "uid": _prefixed_uid(backend, row["uid"]),
+        "uid": _prefixed_uid(target_backend, row["uid"]),
         "message_id": row.get("message_id") or "",
         "subject": row.get("subject") or "",
         "from": {
@@ -526,7 +796,7 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
         "headers": headers,
         "body_text": body_text,
         "body_truncated": body_truncated,
-        "attachments": [{"name": str(name)} for name in attachment_names],
+        "attachments": attachments,
         "partial": partial,
         "readable": body_readable,
         "source": {
@@ -537,62 +807,87 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     return {"message": message, "warnings": warnings}
 
 
-def run_mailboxes(backend: "MailBackend", config: "Config") -> dict:
+def run_mailboxes(
+    backend: "MailBackend | None",
+    config: "Config",
+    *,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
+) -> dict:
     """Return ``{"accounts", "mailboxes", "excluded_stores", "warnings"}``.
 
-    ``accounts[]`` lists the accounts of the backend with their resolved
-    labels and a ``declared`` flag; ``mailboxes[]`` lists every folder with the
-    counters the backend computed and an ``included`` flag (declared account +
-    INBOX + configured ``mailbox_list`` folders).
+    Drivers are concatenated in the order their ``[scope]`` blocks first appear
+    in the config (PRD-v2.1 §10.2.9): ``accounts[]`` of each driver (declared
+    first, with their ``declared`` flag), then every folder of the driver with
+    its counters and ``included`` flag, then its ``excluded_stores[]``. The
+    native driver stays out of a command whose config declares only other
+    drivers; with no ``[scope]`` blocks at all it is listed with every account
+    undeclared (2.0.1 behavior: discovery and ``W_NO_ACCOUNTS``).
     """
-    accounts_by_uuid = _accounts_by_uuid(backend)
-    backend_mailboxes = list(backend.mailboxes())
+    native_name, pool = _driver_pool(backend, drivers, native)
     excluded: list[dict] = []
-    resolved = _resolved_scope(config, backend, excluded)
-    scope_mailboxes = _scope_mailboxes(resolved)
-    allowed_ids = {mailbox["id"] for mailbox in scope_mailboxes}
-    declared_ids = {_scope_account_uuid(scope) for scope in resolved}
+    resolved = _resolved_scope(config, backend, excluded, drivers=drivers, native=native_name)
+    groups = _scopes_by_driver(resolved)
+    order = _driver_output_order(config, native_name, groups, pool)
 
     warnings: list[str] = []
     if not resolved:
         warnings.append(NO_ACCOUNTS_WARNING)
-    warnings.extend(_scope_warnings(backend, excluded))
+    warnings.extend(_activation_warnings([pool[driver] for driver in order], excluded))
 
     accounts: list[dict] = []
-    seen_accounts: set[str] = set()
-    for scope in resolved:
-        uuid = _scope_account_uuid(scope)
-        if not uuid or uuid in seen_accounts:
+    mailboxes: list[dict] = []
+    excluded_stores: list[dict] = []
+    seen_accounts: set[tuple[str, str]] = set()
+    for driver in order:
+        driver_backend = pool.get(driver)
+        if driver_backend is None:  # pragma: no cover - pool holds every driver in order
             continue
-        seen_accounts.add(uuid)
-        account = _account_payload(accounts_by_uuid, uuid)
-        account["declared"] = True
-        accounts.append(account)
-    for mailbox in backend_mailboxes:
-        uuid = mailbox["account_uuid"]
-        if not uuid or uuid in seen_accounts:
-            continue
-        seen_accounts.add(uuid)
-        account = _account_payload(accounts_by_uuid, uuid)
-        account["declared"] = uuid in declared_ids
-        accounts.append(account)
-
-    mailboxes = [
-        {
-            "account": _account_payload(accounts_by_uuid, mailbox["account_uuid"]),
-            "name": mailbox["name"],
-            "path": mailbox["path"],
-            "url": mailbox["url"],
-            "total": int(mailbox["total"]),
-            "unread": int(mailbox["unread"]),
-            "included": mailbox["id"] in allowed_ids,
+        accounts_by_uuid = _accounts_by_uuid(driver_backend)
+        backend_mailboxes = list(driver_backend.mailboxes())
+        scopes = groups.get(driver, ())
+        declared_ids = {_scope_account_uuid(scope) for scope in scopes}
+        allowed_ids = {
+            mailbox["id"]
+            for scope in scopes
+            for mailbox in getattr(scope, "mailboxes", ()) or ()
         }
-        for mailbox in backend_mailboxes
-    ]
+        for scope in scopes:
+            uuid = _scope_account_uuid(scope)
+            key = (driver, uuid)
+            if not uuid or key in seen_accounts:
+                continue
+            seen_accounts.add(key)
+            account = _account_payload(accounts_by_uuid, uuid)
+            account["declared"] = True
+            accounts.append(account)
+        for mailbox in backend_mailboxes:
+            uuid = mailbox["account_uuid"]
+            key = (driver, str(uuid or ""))
+            if not uuid or key in seen_accounts:
+                continue
+            seen_accounts.add(key)
+            account = _account_payload(accounts_by_uuid, uuid)
+            account["declared"] = uuid in declared_ids
+            accounts.append(account)
+        mailboxes.extend(
+            {
+                "account": _account_payload(accounts_by_uuid, mailbox["account_uuid"]),
+                "name": mailbox["name"],
+                "path": mailbox["path"],
+                "url": mailbox["url"],
+                "total": int(mailbox["total"]),
+                "unread": int(mailbox["unread"]),
+                "included": mailbox["id"] in allowed_ids,
+            }
+            for mailbox in backend_mailboxes
+        )
+        excluded_stores.extend(driver_backend.excluded_stores())
+
     return {
         "accounts": accounts,
         "mailboxes": mailboxes,
-        "excluded_stores": list(backend.excluded_stores()),
+        "excluded_stores": excluded_stores,
         "warnings": warnings,
     }
 
@@ -638,14 +933,35 @@ def _newest_scoped_message(
 
 
 def _resolved_scope(
-    config: "Config", backend: "MailBackend", excluded: list[dict] | None = None
+    config: "Config",
+    backend: "MailBackend | None",
+    excluded: list[dict] | None = None,
+    *,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
 ) -> list[Any]:
     """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`.
 
     ``excluded`` receives the entry of each declared account that is an
-    excluded store (Outlook, PRD 15.3).
+    excluded store (Outlook, PRD 15.3). ``drivers`` maps the other declared
+    backends and ``native`` names the platform driver (M04, multi-driver).
+
+    The catalog handed to :mod:`mailquery.config` uses the M05 wrapped drivers,
+    so the ``accounts``/``mailboxes``/``resolve_mailbox`` calls of the scope
+    resolution are mapped and bounded too.
     """
-    resolved = config_module.resolve_scope(config, backend, excluded=excluded)
+    native_name, pool = _driver_pool(backend, drivers, native)
+    native_backend = pool.get(native_name)
+    other_backends = {
+        name: instance for name, instance in pool.items() if name != native_name
+    }
+    resolved = config_module.resolve_scope(
+        config,
+        native_backend,
+        excluded=excluded,
+        drivers=other_backends,
+        native=native_name,
+    )
     return list(resolved or ())
 
 
@@ -666,23 +982,33 @@ def _scope_mailboxes(
     return tuple(unique.values())
 
 
-def _resolve_include_mailboxes(
-    backend: "MailBackend",
+def _include_entries(
+    backend: "MailBackend | None",
     resolved: Sequence[Any],
     references: Sequence[str],
-) -> tuple["MailboxRow", ...]:
+    *,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
+) -> "tuple[tuple[str, MailboxRow], ...]":
     """Resolve ``--include-mailbox`` refs inside the declared accounts.
 
     Values may be repeated or comma-separated, and each item is a folder name,
-    path or URL as shown by ``mailquery mailboxes``. A folder that only exists
-    in an undeclared account raises ``E_ACCOUNT_NOT_IN_SCOPE``; a folder that
-    does not exist in any declared account raises ``E_MAILBOX_NOT_FOUND``.
+    path or URL as shown by ``mailquery mailboxes``. The result is a sequence of
+    ``(driver, mailbox)`` pairs: with more than one driver the same folder id may
+    belong to two drivers, so the driver is part of the identity. A folder that
+    only exists in an undeclared account raises ``E_ACCOUNT_NOT_IN_SCOPE``; a
+    folder that does not exist in any declared account raises
+    ``E_MAILBOX_NOT_FOUND``.
     """
     if not references:
         return ()
-    declared = {_scope_account_uuid(scope) for scope in resolved}
-    selected: list["MailboxRow"] = []
-    seen: set[Any] = set()
+    _native_name, pool = _driver_pool(backend, drivers, native)
+    declared = {
+        (str(getattr(scope, "driver", "") or ""), _scope_account_uuid(scope))
+        for scope in resolved
+    }
+    selected: list[tuple[str, MailboxRow]] = []
+    seen: set[tuple[str, Any]] = set()
     for raw in references:
         if raw is None:
             continue
@@ -690,37 +1016,57 @@ def _resolve_include_mailboxes(
             reference = reference.strip()
             if not reference:
                 continue
-            mailbox = _resolve_reference(backend, resolved, reference)
-            if mailbox is not None:
-                if mailbox["id"] not in seen:
-                    seen.add(mailbox["id"])
-                    selected.append(mailbox)
+            found = _resolve_reference(pool, resolved, reference)
+            if found is not None:
+                driver, mailbox = found
+                key = (driver, mailbox["id"])
+                if key not in seen:
+                    seen.add(key)
+                    selected.append((driver, mailbox))
                 continue
-            elsewhere = _find_reference_outside_scope(backend, declared, reference)
+            elsewhere = _find_reference_outside_scope(pool, declared, reference)
             if elsewhere is not None:
+                driver, account_uuid = elsewhere
                 raise MailqueryError(
                     "E_ACCOUNT_NOT_IN_SCOPE",
                     f"mailbox {reference!r} belongs to account "
-                    f"{elsewhere['account_uuid']!r}, which is not declared in config.toml",
+                    f"{account_uuid!r}, which is not declared in config.toml",
                     "only accounts declared with a [scope.<account>] block are "
                     "read; declare the account in ~/.mailquery/config.toml or "
                     "drop --include-mailbox",
                     "an included mailbox belongs to an account that is not declared",
                 )
-            # The hint lists the folders of all declared accounts, in block order.
-            ordered = dict.fromkeys(_scope_account_uuid(scope) for scope in resolved)
-            raise config_module.include_mailbox_not_found(
-                reference, [uuid for uuid in ordered if uuid], backend
-            )
+            raise _include_mailbox_not_found(pool, resolved, reference)
     return tuple(selected)
 
 
+def _resolve_include_mailboxes(
+    backend: "MailBackend | None",
+    resolved: Sequence[Any],
+    references: Sequence[str],
+    *,
+    drivers: "Mapping[str, MailBackend] | None" = None,
+    native: str | None = None,
+) -> tuple["MailboxRow", ...]:
+    """The included mailboxes as rows (compatibility wrapper around ``_include_entries``)."""
+    return tuple(
+        mailbox
+        for _driver, mailbox in _include_entries(
+            backend, resolved, references, drivers=drivers, native=native
+        )
+    )
+
+
 def _resolve_reference(
-    backend: "MailBackend", resolved: Sequence[Any], reference: str
-) -> "MailboxRow | None":
+    pool: "Mapping[str, MailBackend]", resolved: Sequence[Any], reference: str
+) -> "tuple[str, MailboxRow] | None":
     for scope in resolved:
+        driver = str(getattr(scope, "driver", "") or "")
         account_uuid = _scope_account_uuid(scope)
         if not account_uuid:
+            continue
+        backend = pool.get(driver)
+        if backend is None:  # pragma: no cover - every resolved driver is opened
             continue
         try:
             mailbox = backend.resolve_mailbox(account_uuid, reference)
@@ -729,28 +1075,80 @@ def _resolve_reference(
         except Exception:
             mailbox = None
         if mailbox is not None:
-            return mailbox
+            return driver, mailbox
     return None
 
 
 def _find_reference_outside_scope(
-    backend: "MailBackend", declared: set[str], reference: str
-) -> "MailboxRow | None":
-    seen: set[str] = set()
-    for mailbox in config_module.listed_mailboxes(backend):
-        account_uuid = mailbox["account_uuid"]
-        if not account_uuid or account_uuid in declared or account_uuid in seen:
-            continue
-        seen.add(account_uuid)
-        try:
-            candidate = backend.resolve_mailbox(account_uuid, reference)
-        except MailqueryError:
-            raise
-        except Exception:
-            candidate = None
-        if candidate is not None:
-            return candidate
+    pool: "Mapping[str, MailBackend]",
+    declared: "set[tuple[str, str]]",
+    reference: str,
+) -> "tuple[str, str] | None":
+    for driver, backend in pool.items():
+        driver_declared = {
+            account_uuid for scope_driver, account_uuid in declared if scope_driver == driver
+        }
+        seen: set[str] = set()
+        for mailbox in config_module.listed_mailboxes(backend):
+            account_uuid = mailbox["account_uuid"]
+            if not account_uuid or account_uuid in driver_declared or account_uuid in seen:
+                continue
+            seen.add(account_uuid)
+            try:
+                candidate = backend.resolve_mailbox(account_uuid, reference)
+            except MailqueryError:
+                raise
+            except Exception:
+                candidate = None
+            if candidate is not None:
+                return driver, account_uuid
     return None
+
+
+def _include_mailbox_not_found(
+    pool: "Mapping[str, MailBackend]", resolved: Sequence[Any], reference: str
+) -> MailqueryError:
+    """``E_MAILBOX_NOT_FOUND`` with the folders of every declared account.
+
+    The single-driver hint keeps the 2.0.1 wording (the config helper); with
+    several drivers each declared account is prefixed with its driver.
+    """
+    drivers = list(
+        dict.fromkeys(str(getattr(scope, "driver", "") or "") for scope in resolved)
+    )
+    if len(drivers) == 1:
+        ordered = dict.fromkeys(_scope_account_uuid(scope) for scope in resolved)
+        return config_module.include_mailbox_not_found(
+            reference, [uuid for uuid in ordered if uuid], pool[drivers[0]]
+        )
+    parts: list[str] = []
+    for driver in drivers:
+        backend = pool[driver]
+        accounts = _accounts_by_uuid(backend)
+        backend_mailboxes = config_module.listed_mailboxes(backend)
+        for scope in resolved:
+            if str(getattr(scope, "driver", "") or "") != driver:
+                continue
+            account_uuid = _scope_account_uuid(scope)
+            if not account_uuid:
+                continue
+            account = accounts.get(account_uuid) or {}
+            label = str(account.get("label") or account_uuid)
+            folders = sorted(
+                {
+                    str(mailbox["path"] or mailbox["name"])
+                    for mailbox in backend_mailboxes
+                    if mailbox["account_uuid"] == account_uuid
+                }
+            )
+            parts.append(f"[{driver}] {label}: {', '.join(folders) or '(no folders)'}")
+    return MailqueryError(
+        "E_MAILBOX_NOT_FOUND",
+        f"mailbox {reference!r} was not found in the declared accounts",
+        f"valid folders: {'; '.join(parts)}; run `mailquery mailboxes` to list "
+        "names, paths and URLs",
+        "an included mailbox was not found in the declared accounts",
+    )
 
 
 def _recipients_open_items(backend: "MailBackend") -> bool:
@@ -1056,48 +1454,122 @@ def _mailbox_priority_for_row(
 
 
 def _build_messages(
-    backend: "MailBackend",
-    accounts: "dict[str, AccountRow]",
     page: Sequence[dict],
-    mailbox_map: dict[Any, "MailboxRow"],
-    allowed_ids: frozenset[Any],
-    label_map: dict[Any, set[Any]],
-    recipients: dict[Any, dict[str, list[dict]]],
+    runs: "Mapping[str, _DriverRun]",
+    recipients: "Mapping[str, dict[Any, Any]]",
     *,
     cached_bodies: bool,
-) -> tuple[list[dict], list[str], int]:
-    """Build the page message objects, reading only the returned page.
+) -> tuple[list[dict], list[str], "dict[str, int]"]:
+    """Build the merged page, reading only the returned page of each driver.
 
     The body always comes from the message's physical mailbox (a Gmail message
     labelled INBOX is stored under ``[Gmail]/All Mail``), while the reported
-    ``mailbox`` is the effective in-scope one (INBOX).
+    ``mailbox`` is the effective in-scope one (INBOX). ``messages_read`` is
+    returned per driver so the caller can combine it with the ``items_opened``
+    hook of a driver that opens items instead of bodies (Outlook).
     """
     messages: list[dict] = []
     warnings: list[str] = []
-    messages_read = 0
+    messages_read: dict[str, int] = {driver: 0 for driver in runs}
     for row in page:
-        display_mailbox = _display_mailbox(row, mailbox_map, allowed_ids, label_map)
-        to_list, cc_list = _recipient_lists(recipients, row["uid"])
+        driver = str(row["_mq_driver"])
+        run = runs[driver]
+        display_mailbox = _display_mailbox(
+            row, run.mailbox_map, run.allowed_ids, run.label_map
+        )
+        to_list, cc_list = _recipient_lists(recipients.get(driver, {}), row["uid"])
         if cached_bodies and "_body_text" in row:
             snippet, body_fields = _body_from_cached(row)
         else:
-            snippet, body_fields, body = _body_fields(backend, row)
+            snippet, body_fields, body = _body_fields(run.backend, row)
             warnings.extend(body["warnings"])
             if _was_read(body):
-                messages_read += 1
+                messages_read[driver] += 1
         messages.append(
             _message_payload(
-                accounts,
+                run.accounts,
                 row,
                 display_mailbox,
                 to_list,
                 cc_list,
                 snippet,
                 body_fields,
-                _driver(backend),
+                driver,
             )
         )
     return messages, warnings, messages_read
+
+
+def _config_for_driver(config: "Config", driver: str, native: str) -> "Config":
+    """The config with only the ``[scope]`` blocks of ``driver`` (show dispatch)."""
+    scopes = tuple(
+        entry for entry in config.scopes if str(entry.driver or native) == driver
+    )
+    if len(scopes) == len(config.scopes):
+        return config
+    return dataclasses.replace(config, scopes=scopes)
+
+
+def _plugin_show_attachments(
+    backend: "MailBackend", uid: Any
+) -> list[dict]:
+    """``show.attachments`` of an external driver (API 1, AC-07 partial).
+
+    ``attachments: "none"`` returns ``[]`` without calling the plugin; any other
+    capability asks the driver for the ordered metadata and reports
+    ``{index, name, cached_path}`` with ``cached_path: null`` (the cache path is
+    computed by M08; ``show`` writes nothing).
+    """
+    capabilities = getattr(backend, "capabilities", None) or {}
+    if str(capabilities.get("attachments", "local")) == "none":
+        return []
+    entries = backend.attachments(uid) or []
+    ordered = sorted(entries, key=lambda entry: int(entry.get("index") or 0))
+    return [
+        {
+            "index": int(entry.get("index") or 0),
+            "name": str(entry.get("name") or ""),
+            "cached_path": None,
+        }
+        for entry in ordered
+    ]
+
+
+def _internal_show_attachments(
+    backend: "MailBackend",
+    uid: Any,
+    row: dict,
+    body: dict,
+    body_readable: bool,
+    warnings: list[str],
+) -> list[dict]:
+    """``show.attachments`` of a built-in driver: the 2.0.1 shape until M08.
+
+    An unreadable body (S/MIME included) never contributes MIME attachment
+    names: they come from the backend's metadata (PRD 12.10). Outlook cannot
+    read the names without the item: its hook applies the Windows rule of PRD
+    12.10 (``has_attachments``, S/MIME excepted).
+    """
+    attachment_names = (
+        [str(entry["name"]) for entry in body["attachments"]] if body_readable else []
+    )
+    unreadable_attachments = (
+        None if body_readable else getattr(backend, "unreadable_attachments", None)
+    )
+    if unreadable_attachments is not None:
+        attachment_names, attachments_warning = unreadable_attachments(row)
+        if attachments_warning:
+            warnings.append(attachments_warning)
+    elif not attachment_names:
+        stored_names = backend.attachment_names(uid)
+        if stored_names:
+            attachment_names = stored_names
+            if not body_readable:
+                warnings.append(
+                    "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the "
+                    "envelope index; the message body could not be read"
+                )
+    return [{"name": str(name)} for name in attachment_names]
 
 
 def _message_payload(
@@ -1197,15 +1669,6 @@ def _account_payload(accounts: "dict[str, AccountRow]", uuid: str) -> dict:
             "email": entry["email"],
         }
     return {"uuid": account_uuid, "label": account_uuid, "email": None}
-
-
-def _scope_warnings(backend: "MailBackend", excluded: Sequence[dict]) -> list[str]:
-    """Scope warnings after ``W_NO_ACCOUNTS`` (PRD 12.3 step 6).
-
-    ``W_STORE_EXCLUDED`` for each declared account that is an excluded store
-    (PRD 15.3), then ``W_ACCOUNT_LABELS_UNAVAILABLE`` (Annex A.5.2).
-    """
-    return [_store_excluded_warning(entry) for entry in excluded] + _labels_warnings(backend)
 
 
 def _store_excluded_warning(entry: dict) -> str:

@@ -143,7 +143,7 @@ class FormatTests(_LogHomeTestCase):
         self.assertTrue(lines[0].split(" ")[2] == "INFO")
 
     def test_ut_log_03_02_start_line_names_command_and_backend(self) -> None:
-        """UT-LOG-03.02: event=start command=... backend=apple_mail."""
+        """UT-LOG-03.02: event=start command=... backend=... drivers=... (M04)."""
         fx = build_store()
         self.addCleanup(fx.cleanup)
         self.addCleanup(_close_log_handlers)
@@ -155,7 +155,7 @@ class FormatTests(_LogHomeTestCase):
         self.assertRegex(
             text,
             r"(?m) INFO  mailquery\.cli run=[0-9a-f]{12} "
-            r"event=start command=search backend=apple_mail$",
+            r"event=start command=search backend=apple_mail drivers=apple_mail$",
         )
 
     def test_ut_log_03_03_store_line_has_strategy_and_version(self) -> None:

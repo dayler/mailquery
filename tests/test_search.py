@@ -60,6 +60,13 @@ from tests.fixtures.make_fixtures import (
     write_config,
     write_state,
 )
+from tests.fakes.plugin import (
+    ACCOUNT_LABEL as PLUGIN_ACCOUNT_LABEL,
+    ACCOUNT_UUID as PLUGIN_ACCOUNT_UUID,
+    DEFAULT_MAILBOXES as PLUGIN_MAILBOXES,
+    DRIVER as PLUGIN_DRIVER,
+    FakePluginBackend,
+)
 from tests.mocks import accounts_db_unavailable
 
 ICLOUD_ONLY = f'[scope."{ICLOUD_LABEL}"]\n'
@@ -356,6 +363,37 @@ class SearchFixtureTest(unittest.TestCase):
             self.backend, self.config, search.Filters(**filters)
         )
 
+    def multi_driver_config(self, *, mailbox_list: tuple[str, ...] = ()) -> Config:
+        """The loaded config plus the plugin account (M04; no config.toml roundtrip)."""
+        scopes = self.config.scopes + (
+            ScopeEntry(
+                key=f"{PLUGIN_DRIVER}:{PLUGIN_ACCOUNT_LABEL}",
+                driver=PLUGIN_DRIVER,
+                account=PLUGIN_ACCOUNT_LABEL,
+                mailbox_list=mailbox_list,
+            ),
+        )
+        return dataclasses.replace(self.config, scopes=scopes)
+
+    def plugin_row(self, native_id: str, *, minutes_ago: float, mailbox_id: str = "graph-inbox"):
+        date = int((self.fx.now - timedelta(minutes=minutes_ago)).timestamp())
+        return {
+            "uid": native_id,
+            "native_order_key": native_id,
+            "global_message_id": 0,
+            "subject": f"Plugin {native_id}",
+            "sender_name": "Plugin Sender",
+            "sender_address": "plugin@example.com",
+            "date_sent": date,
+            "date_received": date,
+            "mailbox_id": mailbox_id,
+            "read": 0,
+            "flagged": 0,
+            "size": 10,
+            "message_id": f"<{native_id}@plugin.example>",
+            "has_attachments": False,
+        }
+
     @staticmethod
     def uids(result: dict) -> list[str]:
         return [message["uid"] for message in result["messages"]]
@@ -639,6 +677,53 @@ class SearchMetadataTest(SearchFixtureTest):
         self.assertNotIn("Recovered Messages", context.exception.hint)
         self.assertNotIn("[Gmail]/All Mail", context.exception.hint)
 
+    def test_ut_sr_04_02_include_mailbox_resolves_in_its_own_driver(self) -> None:
+        """UT-SR-04.02: --include-mailbox resolves a folder inside its own driver (M04)."""
+        archive = {
+            "id": "graph-archive",
+            "account_uuid": PLUGIN_ACCOUNT_UUID,
+            "name": "Archive",
+            "path": "Archive",
+            "url": "graph://graph-account/Archive",
+            "is_inbox": False,
+            "is_aggregate": False,
+            "total": 1,
+            "unread": 0,
+        }
+        plugin = FakePluginBackend(
+            rows=[self.plugin_row("P1", minutes_ago=12, mailbox_id="graph-archive")],
+            mailboxes=[*PLUGIN_MAILBOXES, archive],
+        )
+        config = self.multi_driver_config()
+        scoped = search.run_search(
+            self.backend,
+            config,
+            search.Filters(),
+            drivers={PLUGIN_DRIVER: plugin},
+        )
+        self.assertNotIn(prefixed_uid("P1", PLUGIN_DRIVER), self.uids(scoped))
+        included = search.run_search(
+            self.backend,
+            config,
+            search.Filters(include_mailboxes=("Archive",)),
+            drivers={PLUGIN_DRIVER: plugin},
+        )
+        self.assertIn(prefixed_uid("P1", PLUGIN_DRIVER), self.uids(included))
+        plugin_only = dataclasses.replace(
+            config,
+            scopes=tuple(
+                scope for scope in config.scopes if scope.driver == PLUGIN_DRIVER
+            ),
+        )
+        unknown = search.run_search(
+            None,
+            plugin_only,
+            search.Filters(include_mailboxes=("Archive",)),
+            drivers={PLUGIN_DRIVER: plugin},
+            native="apple_mail",
+        )
+        self.assertIn(prefixed_uid("P1", PLUGIN_DRIVER), self.uids(unknown))
+
     def test_include_mailbox_outside_declared_accounts(self) -> None:
         self.use_config(ICLOUD_ONLY)
         with self.assertRaises(MailqueryError) as context:
@@ -743,6 +828,70 @@ class SearchTextTest(SearchFixtureTest):
         result = self.run_search(text=("invoice",), to=("me@fixture.example",))
         self.assertEqual(self.uids(result), [prefixed_uid(2714)])
         self.assertEqual(result["scan"]["candidates"], 8)
+
+    def test_ut_sr_03_06_multi_driver_scan_budget_is_the_sum(self) -> None:
+        """UT-SR-03.06: multi-driver max_scan compares the summed candidates (M04)."""
+        config = self.multi_driver_config()
+        plugin = FakePluginBackend(
+            rows=[
+                self.plugin_row("P1", minutes_ago=12),
+                self.plugin_row("P2", minutes_ago=18),
+                self.plugin_row("P3", minutes_ago=24),
+            ]
+        )
+        filters = search.Filters(
+            text=("invoice",), subject=("*",), since=search.parse_relative_time("7d")
+        )
+        plugin_only = dataclasses.replace(
+            config,
+            scopes=tuple(
+                scope for scope in config.scopes if scope.driver == PLUGIN_DRIVER
+            ),
+        )
+        native_only = dataclasses.replace(
+            config,
+            scopes=tuple(
+                scope for scope in config.scopes if scope.driver != PLUGIN_DRIVER
+            ),
+        )
+        native = search.run_search(self.backend, native_only, filters)
+        only_plugin = search.run_search(
+            None,
+            plugin_only,
+            filters,
+            drivers={PLUGIN_DRIVER: plugin},
+            native="apple_mail",
+        )
+        permissive = dataclasses.replace(
+            config,
+            search=dataclasses.replace(config.search, max_scan=50000),
+        )
+        merged = search.run_search(
+            self.backend, permissive, filters, drivers={PLUGIN_DRIVER: plugin}
+        )
+        self.assertEqual(
+            merged["scan"]["candidates"],
+            native["scan"]["candidates"] + only_plugin["scan"]["candidates"],
+        )
+        exact = merged["scan"]["candidates"]
+        allowed = dataclasses.replace(
+            config, search=dataclasses.replace(config.search, max_scan=exact)
+        )
+        self.assertEqual(
+            search.run_search(
+                self.backend, allowed, filters, drivers={PLUGIN_DRIVER: plugin}
+            )["scan"]["candidates"],
+            exact,
+        )
+        too_small = dataclasses.replace(
+            config, search=dataclasses.replace(config.search, max_scan=exact - 1)
+        )
+        with self.assertRaises(MailqueryError) as context:
+            search.run_search(
+                self.backend, too_small, filters, drivers={PLUGIN_DRIVER: plugin}
+            )
+        self.assertEqual(context.exception.code, "E_SCAN_TOO_LARGE")
+        self.assertIn(str(exact), context.exception.message)
 
     def test_text_narrowed_by_since(self) -> None:
         result = self.run_search(
