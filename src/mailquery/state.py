@@ -1,13 +1,13 @@
-"""Persistent cursor state and run lock (PRD.md 11.2, 18, 21.3; PRD-v2.1 §10.2).
+"""Persistent cursor state and run lock.
 
-State lives in ``~/.mailquery/state.json`` only, schema 2 (PRD-v2.1 §10.2.4): the
+State lives in ``~/.mailquery/state.json`` only, schema 2: the
 ``new`` cursor ``(last_date_received, last_uid)``, the ring of the last 1.000
 emitted uids and the last run metadata. Uids are opaque prefixed strings
 ``"<driver>:<native_id>"``; a schema-1 file (integer Apple Mail uids or
 upper-case hexadecimal Outlook ``EntryID``) is migrated in memory by value type
-(PRD-v2.1 §10.2.5, D8) and persisted as schema 2 by the next non-``--peek``
-``new`` run. Writes are atomic (temporary + fsync + ``os.replace``) with mode
-0600, and the file never contains subjects, bodies or addresses.
+and persisted as schema 2 by the next non-``--peek`` ``new`` run. Writes are
+atomic (temporary + fsync + ``os.replace``) with mode 0600, and the file never
+contains subjects, bodies or addresses.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ else:
 
 MAX_EMITTED_UIDS = 1000
 STATE_SCHEMA = 2
-"""Current ``state.json`` schema (PRD-v2.1 §10.2.4)."""
+"""Current ``state.json`` schema."""
 
 SUPPORTED_SCHEMAS = (1, 2)
 
@@ -42,7 +42,7 @@ LOCK_DIRNAME = "locks"
 LOCK_FILENAME = "mailquery.lock"
 DEFAULT_LOOKBACK_SECONDS = 600
 
-#: Shape of a legacy Outlook ``EntryID`` (upper-case hexadecimal, PRD.md §12.4).
+#: Shape of a legacy Outlook ``EntryID`` (upper-case hexadecimal).
 _LEGACY_HEX_UID = re.compile(r"[0-9A-F]+")
 
 _RENAME_HINT = (
@@ -56,7 +56,7 @@ _MISSING_DRIVER_HINT = (
     "'mailquery new' is a first run that emits the messages of the lookback window"
 )
 
-#: ``state.json`` uid validator: whether a driver name is installed (M01 registry).
+#: ``state.json`` uid validator: whether a driver name is installed (registry).
 UidInstalled = Callable[[str], bool]
 
 
@@ -88,7 +88,7 @@ class AppState:
 
 @dataclass(frozen=True)
 class EmittedUid:
-    """One uid a ``new`` run emits, with the keys of the total order (PRD-v2.1 §10.2.7).
+    """One uid a ``new`` run emits, with the keys of the total order.
 
     ``native_order_key`` is the backend row's key already typed by the core: an
     ``int`` for a ``numeric`` driver (Apple Mail) and a ``str`` for a ``text``
@@ -126,20 +126,20 @@ class _MissingFile(Exception):
 class StateStore:
     """Load/save ``state.json`` atomically.
 
-    ``load`` is tolerant with missing keys (they take documented defaults) and
+    ``load`` is tolerant with missing keys (they take defaults) and
     with unknown keys (they are ignored), but it is strict about the file being
     a JSON object with a known ``schema`` and about the types of the known
-    fields: a damaged state must fail loudly with ``E_STATE_CORRUPT`` (PRD
-    11.2) instead of silently re-baselining and re-emitting a window of mail.
+    fields: a damaged state must fail loudly with ``E_STATE_CORRUPT``
+    instead of silently re-baselining and re-emitting a window of mail.
 
     A ``schema: 1`` file is migrated **in memory** to schema 2: integer uids
     ``>= 1`` become ``apple_mail:<n>`` and upper-case hexadecimal strings become
-    ``outlook:<HEX>`` (PRD-v2.1 §10.2.5, D8), independent of the platform. The
+    ``outlook:<HEX>``, independent of the platform. The
     resulting uids are then validated like any schema-2 uid, with
     ``is_installed`` (the registry) for the driver part: a ``cursor.last_uid``
     whose driver is not installed is ``E_STATE_CORRUPT``, while ring items of
     drivers that are not installed are pruned in silence and reported by
-    :attr:`load_info` (PRD-v2.1 §10.2.6).
+    :attr:`load_info`.
     """
 
     def __init__(self, home: Path, is_installed: UidInstalled) -> None:
@@ -261,16 +261,16 @@ class StateStore:
         """Advance the cursor and the emitted-uid ring, returning the new state.
 
         ``emitted`` holds the uids this run emits, each with its
-        ``(date_received, driver, native_order_key)`` total-order key
-        (PRD-v2.1 §10.2.7). The cursor only ever moves forward (a Mail index
-        rebuild may change uids but never the dates, PRD 18); ``lookback_seconds``
-        is the lookback of the current config (PRD 12.3) and is the one stored in
+        ``(date_received, driver, native_order_key)`` total-order key. The cursor
+        only ever moves forward (a Mail index rebuild may change uids but never the
+        dates); ``lookback_seconds``
+        is the lookback of the current config and is the one stored in
         the cursor, and the emitted uids are appended to the ring in total order
         (newest last) capped at 1.000 entries.
 
         This method does **not** persist the new state: the caller
         (``search.run_new``) saves it only when the run is not ``--peek``, so a
-        peek can never advance the cursor (PRD 12.3, 18).
+        peek can never advance the cursor.
         """
         entries = list(emitted)
         previous = state.cursor
@@ -304,7 +304,7 @@ class StateStore:
 
 
 def migrate_uid(value: object) -> str:
-    """Pure schema-1 -> schema-2 uid conversion (PRD-v2.1 §10.2.5, D8).
+    """Pure schema-1 -> schema-2 uid conversion.
 
     Deterministic by the value type and independent of the platform: an integer
     ``>= 1`` becomes ``apple_mail:<n>`` and an upper-case hexadecimal string
@@ -315,7 +315,7 @@ def migrate_uid(value: object) -> str:
 
 
 def _write_error(exc: OSError, directory: Path) -> MailqueryError | None:
-    """Map a failed state write (PRD 17): ENOSPC is internal, EACCES/EPERM a permission error.
+    """Map a failed state write: ENOSPC is internal, EACCES/EPERM a permission error.
 
     Returns ``None`` for any other I/O error, which keeps its current handling.
     The previous ``state.json`` is never touched by a failed write.
@@ -360,7 +360,7 @@ class RunLock:
     Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows.
 
     Every invocation takes the lock before touching the store so two harness
-    calls cannot overlap (PRD 21.3). A contended lock raises ``E_LOCKED``
+    calls cannot overlap. A contended lock raises ``E_LOCKED``
     (exit 5) immediately; the harness may retry.
     """
 
@@ -577,7 +577,7 @@ def _state_uid(value: object, field: str, *, legacy: bool) -> uid_module.ParsedU
 
 
 def _migrate_legacy_uid(value: object, field: str) -> str:
-    """Deterministic schema-1 uid conversion by value type (D8)."""
+    """Deterministic schema-1 uid conversion by value type."""
     if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
         return f"apple_mail:{value}"
     if isinstance(value, str) and _LEGACY_HEX_UID.fullmatch(value) is not None:
@@ -612,7 +612,7 @@ def _advance_ring(
 
 
 def _emitted_order_key(entry: EmittedUid) -> tuple[int, str, int | str]:
-    """Total order key of one emitted uid (PRD-v2.1 §10.2.7)."""
+    """Total order key of one emitted uid."""
     return (entry.date_received, entry.driver, entry.native_order_key)
 
 

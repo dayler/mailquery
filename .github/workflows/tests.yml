@@ -1,7 +1,7 @@
 name: tests
 
 on:
-  # Batch PRs are the only gate: no push trigger in this phase (plan §7.5).
+  # Runs only on pull requests to main and develop; pushes do not trigger it.
   pull_request:
     branches: [main, develop]
 

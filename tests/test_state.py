@@ -1,4 +1,4 @@
-"""Tests for :mod:`mailquery.state` (PRD.md 11.2, 18, 21.3; PRD-v2.1 §10.2.5-6).
+"""Tests for :mod:`mailquery.state` (PRD.md 11.2, 18, 21.3; PRD §11.2).
 
 Covers the atomic ``state.json`` lifecycle (defaults, roundtrip, 0600 mode,
 corruption), the schema-1 to schema-2 uid migration (UT-ST-06/07), the ``new``
@@ -185,7 +185,7 @@ class StateStoreTest(unittest.TestCase):
                     )
 
     def test_other_write_errors_keep_their_current_code(self) -> None:
-        """B-24: errors other than ENOSPC/EACCES/EPERM are not remapped."""
+        """Errors other than ENOSPC/EACCES/EPERM are not remapped."""
         import errno
 
         self.store.save(AppState(updated_at="previous"))
@@ -375,7 +375,7 @@ class StateStoreTest(unittest.TestCase):
 
 
 class MigrationTest(unittest.TestCase):
-    """UT-ST-06.01-.03: schema-1 uid migration by value type (PRD-v2.1 §10.2.5, D8)."""
+    """UT-ST-06.01-.03: schema-1 uid migration by value type (PRD §11.2)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
@@ -423,7 +423,7 @@ class MigrationTest(unittest.TestCase):
         """UT-ST-06.02: upper-case hexadecimal strings => outlook:<HEX>; digits-only hex is accepted."""
         self.assertEqual(migrate_uid(_HEX), f"outlook:{_HEX}")
         # A string of digits is valid upper-case hexadecimal (Outlook's own shape), so it
-        # migrates by type (D8/D3) and must not be reinterpreted as an Apple Mail uid.
+        # migrates by type and must not be reinterpreted as an Apple Mail uid.
         self.assertEqual(migrate_uid("83143"), "outlook:83143")
         self._write_legacy(_HEX, ["0000000000000001", _HEX])
         state = self.store.load()
@@ -477,7 +477,7 @@ class MigrationTest(unittest.TestCase):
 
 
 class Schema2ValidationTest(unittest.TestCase):
-    """UT-ST-07: schema-2 validation and ring pruning (PRD-v2.1 §10.2.6)."""
+    """UT-ST-07: schema-2 validation and ring pruning (PRD §11.2)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
@@ -625,7 +625,7 @@ class Schema2ValidationTest(unittest.TestCase):
 
 
 class RecordNewTest(unittest.TestCase):
-    """Cursor advancement, ring cap and ordering semantics (PRD-v2.1 §10.2.7)."""
+    """Cursor advancement, ring cap and ordering semantics (PRD §11.3)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-state-")
@@ -716,7 +716,7 @@ class RecordNewTest(unittest.TestCase):
         self.assertEqual(new_state.emitted_uids, ("apple_mail:5",))
 
     def test_cursor_advances_on_newer_date_and_stores_the_given_lookback(self) -> None:
-        # B-03: the lookback comes from the current config, not from the state.
+        # The lookback comes from the current config, not from the state.
         state = AppState(
             cursor=Cursor(
                 last_date_received=500, last_uid="apple_mail:900", lookback_seconds=900
@@ -856,7 +856,7 @@ class RunLockTest(unittest.TestCase):
 
 
 class PeekThroughRunNewTest(unittest.TestCase):
-    """``--peek`` must not persist the cursor (PRD 18, 12.3; PRD-v2.1 UT-ST-06.04/.05)."""
+    """``--peek`` must not persist the cursor (PRD 18, 12.3; UT-ST-06.04/.05)."""
 
     _PREFIXED_WINDOW = {
         "apple_mail:83143",

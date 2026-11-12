@@ -30,7 +30,7 @@ La recuperación de adjuntos y el motor multi-driver forman parte del futuro
 (3.0.0-alpha) en `--version`, pero no publica nada: sin tag, sin release y sin
 merge a `main`.
 
-Referencias: [`docs/PRD-v2.1.md`](docs/PRD-v2.1.md) (contrato del delta),
+Referencias: [`docs/PRD.md`](docs/PRD.md) (contrato del producto, v2.1),
 [`docs/recipes/`](docs/recipes/) (recetas para el harness),
 [`docs/config.example.toml`](docs/config.example.toml) y
 [`docs/INTERFACES.md`](docs/INTERFACES.md) (desarrollo y pruebas),

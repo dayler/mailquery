@@ -1,18 +1,18 @@
 """Subprocess launcher: build the Outlook fake and run ``cli.main(argv, backend=...)``.
 
 Used by the timeout tests (OL-04), which need ``cli`` in its own process because
-the D-03 watchdog ends the process with ``os._exit``. Usage::
+the call watchdog ends the process with ``os._exit``. Usage::
 
     python tests/fakes/run_cli.py [--scenario NAME] [--home DIR] [--timeout SECONDS]
                                   [--hang first|Kind.Member] [--hang-timeout SECONDS]
                                   -- <mailquery arguments>
     python tests/fakes/run_cli.py --list-scenarios
 
-The caller sets ``HOME`` and ``USERPROFILE`` to a temporary directory (plan 7.1).
+The caller sets ``HOME`` and ``USERPROFILE`` to a temporary directory.
 ``--timeout`` patches ``outlook_com.CALL_TIMEOUT_SECONDS`` and the fake's
-``drive_type`` replaces ``outlook_com.get_drive_type`` (seams of the W3 design
-note); ``--hang`` blocks the first OOM access (``first``) or the first access to
-``Kind.Member`` (e.g. ``NameSpace.Stores``).
+``drive_type`` replaces ``outlook_com.get_drive_type``; ``--hang`` blocks the first
+OOM access (``first``) or the first access to ``Kind.Member``
+(e.g. ``NameSpace.Stores``).
 """
 
 from __future__ import annotations

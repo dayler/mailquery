@@ -1,7 +1,7 @@
 """SMOKE-INSTALL / SMOKE-NEW: real install and read-only run against the host mail client.
 
-These are the only tests that read the installed Outlook / Apple Mail (PRD 13.2, 23.2,
-annex B.10). They install the package with ``pipx`` into temporary pipx dirs, run the
+These are the only tests that read the installed Outlook / Apple Mail (PRD 13.2). They
+install the package with ``pipx`` into temporary pipx dirs, run the
 installed ``mailquery`` with a temporary HOME/USERPROFILE and skip (never fail) where
 they do not apply: Linux, Windows without classic Outlook running, macOS without an
 Apple Mail store (V9/V10/V11) under ``~/Library/Mail`` or with no account that exposes
@@ -43,10 +43,10 @@ BUDGET_COL = 1 if sys.platform == "win32" else 0
 
 
 def version_line_regex(backend: str) -> str:
-    """Regex of the current ``mailquery -v`` line (M11: derived from ``__version__``).
+    """Regex of the current ``mailquery -v`` line (derived from ``__version__``).
 
     The line keeps the base prefix, the native ``backend <driver>`` and the additive
-    ``; drivers: <driver> <version>, ...`` part (PRD-v2.1 §11.9); the expected version
+    ``; drivers: <driver> <version>, ...`` part (PRD §12.9); the expected version
     is always ``mailquery.__version__`` so the tests never pin a literal.
     """
     version = re.escape(mailquery.__version__)
@@ -346,8 +346,8 @@ class SmokeTest(unittest.TestCase):
         }
         if text["scan"]["candidates"] <= 500:
             commands["search_text"] = ["search", "--text", "*e*", "--since", "1d"]
-        # Orchestrator decision: PRD 19 budgets are per OPERATION and the macOS ones were
-        # validated in-process (annex A.9), so they exclude interpreter start and the pipx
+        # PRD 19 budgets are per OPERATION and the macOS ones were
+        # validated in-process, so they exclude interpreter start and the pipx
         # launcher. The asserted value is therefore the operation time the CLI logs as
         # ``duration_ms`` in the ``event=end`` line of the run (backend connection + work);
         # ``doctor`` logs no duration_ms, so its wall-time p95 is asserted. Wall-time
@@ -400,7 +400,7 @@ class SmokeTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# SMOKE-ATT-OL — real Outlook attachment recovery (Windows host, M10)
+# SMOKE-ATT-OL — real Outlook attachment recovery (Windows host)
 # --------------------------------------------------------------------------- #
 
 

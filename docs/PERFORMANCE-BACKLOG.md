@@ -9,10 +9,9 @@ Medición **histórica** del 2026-11-04, `develop` @ `11b81fa`, Mac del dueño, 
 (`backend apple_mail`). Store: 3 cuentas, 44 carpetas, 148.054 mensajes (Gmail
 30/137.873; iCloud 10/10.178; `On My Device` 4/3).
 
-## Presupuestos de adjuntos (PRD-v2.1 §12.2)
+## Presupuestos de adjuntos (PRD §19)
 
-Presupuesto p95 de `mailquery attachment` (delta no publicado; la versión vigente
-del paquete es 2.0.1):
+Presupuesto p95 de `mailquery attachment` (`3.0.0`, todavía no publicado):
 
 | Operación | Apple Mail | Outlook | Plugin local | Plugin remoto |
 |-----------|------------|---------|--------------|---------------|
@@ -57,41 +56,35 @@ que un solo pico hace fallar `mailboxes`; con n = 20 (`show`) es la segunda más
   contadores, incluidas las no declaradas (`included: false`), porque RF-03 lista cuentas
   y carpetas aunque no estén en `[scope]` (`run_mailboxes`, `src/mailquery/search.py`).
   Con 44 carpetas y 148.054 mensajes el costo ronda 170–200 ms.
-- `show` abre el mensaje: cabeceras + cuerpo `.emlx` + nombres de adjuntos.
-- El presupuesto de 150 ms viene del spike de macOS (anexo A.9, citado en
+- `show` abre el mensaje: cabeceras + cuerpo `.emlx` + nombres de adjuntos. En Apple Mail,
+  `attachments()` decodifica cada adjunto para calcular `size_bytes`
+  (`emlx.parse_attachments`), así que un mensaje con adjuntos grandes alarga `show`.
+- El presupuesto de 150 ms viene del spike de macOS (citado en
   [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3), validado
   «en proceso»; es probable que se midiera con menos cuentas y mensajes.
 - Hipótesis sin verificar: las mediciones de arriba se tomaron dentro del sandbox del
   harness, que puede añadir latencia de I/O; falta la medición sin sandbox en la
   Terminal del dueño.
 
-## Medición M11 (cierre de fase)
+## Medición del 2026-11-11 (adjuntos integrados)
 
-Se re-miden en el host macOS del dueño los presupuestos de §12.2 y los de
-`SMOKE-NEW.07` (`mailboxes` y `show`). Los resultados se registran aquí y en
-`docs/plan/evidence/M11.md` (la escribe el orquestador); si el host no puede
-medir la extracción real de Outlook, queda como deuda/host pendiente y no bloquea
-el cierre (PRD-v2.1 §15).
-
-Medición del 2026-11-11, worktree de M11 (`feature/prd-v2.1-w3` + docs M11),
-Mac del dueño, macOS 27.0.1 arm64, Python 3.12.13, versión `__version__` = 2.0.1,
-store real con 1 cuenta incluida. `SMOKE-NEW.07`, 20 corridas por comando (10 en
+Rama `feature/prd-v2.1-w3` con los adjuntos integrados, Mac del dueño, macOS 27.0.1
+arm64, Python 3.12.13, versión `__version__` = 2.0.1, store real con 1 cuenta incluida. `SMOKE-NEW.07`, 20 corridas por comando (10 en
 `mailboxes`), p95 por rango más cercano del `duration_ms`:
 
-| Comando | Presupuesto p95 | Medición M11 | Estado |
+| Comando | Presupuesto p95 | Medido | Estado |
 |---------|-----------------|--------------|--------|
 | `mailboxes` | < 150 ms | 218 ms | **no cumple** (deuda conocida) |
 | `show` | < 150 ms | 164 ms | **no cumple** (deuda conocida) |
 | `search` | < 500 ms | 312 ms | cumple |
 | `new` | < 500 ms | 266 ms | cumple |
 | `doctor` | < 2 s (pared) | 443 ms (pared) | cumple |
-| `attachment` caché / extracción | §12.2 | sin host real de Outlook en esta fase; cubierto por el doble y por `SMOKE-ATT-AM`/`SMOKE-ATT-OL` (se saltan donde no aplica) | deuda de host |
+| `attachment` caché / extracción | §19 | sin medir: no hubo equipo Windows con Outlook clásico; cubierto por el doble y por `SMOKE-ATT-AM`/`SMOKE-ATT-OL` (se saltan donde no aplica) | pendiente de equipo |
 
-Los dos fallos de `SMOKE-NEW.07` (`mailboxes`, `show`) son la **deuda conocida**
-del host macOS del dueño (plan maestro §7.6); no son fallos nuevos del delta y
-M11 los registra sin convertirlos en criterio de aceptación. La extracción real
-de Outlook (materialización COM) sigue pendiente del host Windows del dueño
-(riesgo aceptado, PRD-v2.1 §15).
+Los dos fallos de `SMOKE-NEW.07` (`mailboxes`, `show`) son la misma deuda de la
+medición anterior; los adjuntos no la introdujeron. La extracción real de Outlook
+(materialización COM) y el presupuesto de `attachment` siguen sin medirse en un
+equipo Windows (riesgo aceptado, PRD §23.1).
 
 ## Impacto
 
@@ -116,7 +109,7 @@ contadores intactos.
 
 - [`PRD.md` §19](PRD.md) — presupuestos p95.
 - [`tests/test_smoke.py`](../tests/test_smoke.py) — SMOKE-NEW.07 y SMOKE-ATT.
-- [`PRD-v2.1.md` §12.2](PRD-v2.1.md) — presupuestos de `attachment`.
+- [`PRD.md` §19](PRD.md) — presupuestos de `attachment`.
 - [`src/mailquery/search.py`](../src/mailquery/search.py) — `run_mailboxes`.
 - [`src/mailquery/cli.py`](../src/mailquery/cli.py) — `duration_ms` de `event=end`.
 - [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3 —

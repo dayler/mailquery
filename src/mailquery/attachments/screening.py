@@ -1,12 +1,13 @@
-"""Whole-message attachment screening (M06, C6).
+"""Whole-message attachment screening.
 
-Implements the M06 half of the §11.3 order: ``screen_names`` evaluates **all**
-attachment names of the message (it runs before the limits of M07) and
+Implements the pure half of the attachment screening order: ``screen_names``
+evaluates **all** attachment names of the message (it runs before the engine's
+size limits) and
 ``screen_content`` inspects only the requested attachments' first decoded block
 (it runs after the limits and during extraction). A name hit blocks the whole
 message before any size check; a content hit blocks it without partial
 extraction. Availability reasons surfaced by the driver metadata map to the
-§11.7 codes. Neither function writes files nor opens cached paths.
+core attachment codes. Neither function writes files nor opens cached paths.
 """
 
 from __future__ import annotations
@@ -21,30 +22,30 @@ from mailquery.attachments.blocking import (
     classify_name,
 )
 
-#: Error codes owned by the core (§11.7); M07/M08 turn them into ``MailqueryError``.
+#: Error codes owned by the core; the engine turns them into ``MailqueryError``.
 BLOCKED_CODE: Final[str] = "E_ATTACHMENT_BLOCKED"
 UNREADABLE_CODE: Final[str] = "E_ATTACHMENT_UNREADABLE"
 UNAVAILABLE_CODE: Final[str] = "E_ATTACHMENT_UNAVAILABLE"
-#: ``reason`` of a stream read failure (§11.7 enum, attachment operations).
+#: ``reason`` of a stream read failure (closed enum of the attachment operations).
 REASON_READ_ERROR: Final[str] = "unreadable"
-#: Driver ``reason`` values that map to ``E_ATTACHMENT_UNAVAILABLE`` (§11.7).
+#: Driver ``reason`` values that map to ``E_ATTACHMENT_UNAVAILABLE``.
 UNAVAILABLE_REASONS: Final[frozenset[str]] = frozenset(
     {"not_local", "not_downloaded", "unsupported", "network"}
 )
-#: Driver ``reason`` values that map to ``E_ATTACHMENT_UNREADABLE`` (§11.7).
+#: Driver ``reason`` values that map to ``E_ATTACHMENT_UNREADABLE``.
 UNREADABLE_REASONS: Final[frozenset[str]] = frozenset({"corrupt", "smime", "unreadable"})
 
 
 @dataclass(frozen=True, slots=True)
 class ScreenDecision:
-    """Outcome of one screening step (§11.3 rows 11-14, C6).
+    """Outcome of one screening step.
 
     ``code`` is ``None`` on success or one of the three attachment codes;
     ``reason`` is a name/content reason for a block, the driver reason for
     availability/unreadability or ``"unreadable"`` for a stream read error;
     ``index``/``name`` identify the causing attachment and ``detail`` is the
     message fragment for a block (``has a dangerous filename pattern`` or
-    ``has executable content``). M07/M08 build the user-facing error from it.
+    ``has executable content``). The engine builds the user-facing error from it.
     """
 
     code: str | None = None
@@ -97,12 +98,12 @@ def read_first_block(stream: Iterable[bytes]) -> bytes:
 
 
 def screen_names(entries: Iterable[Mapping[str, object]]) -> ScreenDecision:
-    """Evaluate the names of **all** attachments, in index order (§10.3.1).
+    """Evaluate the names of **all** attachments, in index order.
 
-    Runs before the M07 limits and regardless of the requested ``--index``: a
-    single dangerous name blocks the whole message (§11.3 row 11). An empty list
+    Runs before the engine's size limits and regardless of the requested ``--index``: a
+    single dangerous name blocks the whole message. An empty list
     is a valid message without attachments: it does not block and it is never
-    reported as "no attachments" here (that is the command's row 9, M08).
+    reported as "no attachments" here (the command reports that case).
     """
     for index, row in _ordered(entries):
         name = _name_of(row)
@@ -123,14 +124,14 @@ def screen_content(
     requested_indices: Iterable[int] | None,
     open_stream: Callable[[int], Iterable[bytes]],
 ) -> ScreenDecision:
-    """Inspect the first decoded block of the requested attachments (C6).
+    """Inspect the first decoded block of the requested attachments.
 
     ``requested_indices`` is ``--index N`` (``[N]``) or ``--all`` (``None`` for
     every index); only those streams are opened. Blocking content has global
-    precedence over the row-14 faults (a block wins over unreadable/unavailable
-    because §11.3 row 13 precedes row 14); among row-14 faults the first one in
-    index order is returned. ``open_stream`` receives a 1-based index and must
-    be safe to call again for extraction (M07 opens a fresh stream for it).
+    precedence over unreadable/unavailable faults (content blocking is checked
+    before availability); among those faults the first one in index order is
+    returned. ``open_stream`` receives a 1-based index and must
+    be safe to call again for extraction (the engine opens a fresh stream for it).
     """
     ordered = _ordered(entries)
     by_index = {index: row for index, row in ordered}

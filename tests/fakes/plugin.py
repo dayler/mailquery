@@ -1,18 +1,18 @@
-"""Installable-looking plugin double for the API 1 contract (M01; extended by M04).
+"""Installable-looking plugin double for the API 1 contract.
 
 The double represents an external backend whose author only imports the public
-package :mod:`mailquery.plugins` (PRD-v2.1 §9.3, plan §7.4): it must not import
+package :mod:`mailquery.plugins` (PRD §9.2): it must not import
 ``mailquery.backends`` nor the store. Tests inject its metadata through
 :class:`FakeEntryPoint` so the registry and ``--version`` can be exercised
-without ``pip install`` (CI never installs the package; plan §7.5).
+without ``pip install`` (CI never installs the package).
 
-M04 extends the double with the data operations the multi-driver engine needs
+The double also provides the data operations the multi-driver engine needs
 (``accounts``, ``mailboxes``, ``query``, ``find_message``, ``load_body`` and
-``attachments``) and with :func:`plugin_factory`, an entry-point target that
+``attachments``) and :func:`plugin_factory`, an entry-point target that
 builds one instance per command so tests can hand it rows relative to the
-fixture clock. M05 adds configurable failures, per-operation delays (hangs for
-the metadata deadline of every command) and invalid return values (the M05
-wrapper must turn them into ``E_PLUGIN_FAILED``). Pure Python: no pywin32, no
+fixture clock. It also supports configurable failures, per-operation delays
+(hangs for the metadata deadline of every command) and invalid return values (the
+plugin wrapper must turn them into ``E_PLUGIN_FAILED``). Pure Python: no pywin32, no
 network, no filesystem writes.
 """
 
@@ -87,7 +87,7 @@ DEFAULT_MAILBOXES: list[dict[str, Any]] = [
     }
 ]
 
-#: Default rows of ``query``: a tiny common-model row with the C1 ordering key.
+#: Default rows of ``query``: a tiny common-model row with the protocol ordering key.
 DEFAULT_ROWS: list[dict[str, Any]] = [
     {
         "uid": "B",
@@ -145,14 +145,14 @@ class FakePluginBackend:
         self.capabilities = dict(self.capabilities if capabilities is None else capabilities)
         self.native_order = str(self.capabilities.get("native_order", "text"))
         self.failures = dict(failures or {})
-        #: Per-operation delay in seconds (M05 timeout tests; the call blocks).
+        #: Per-operation delay in seconds (timeout tests; the call blocks).
         self.delays = dict(delays or {})
-        #: Per-operation return value override (M05 invalid-return tests).
+        #: Per-operation return value override (invalid-return tests).
         self.results = dict(results or {})
         self.stream_chunks = list(stream_chunks or [b"plugin-bytes"])
         self.closed = False
         self.calls: list[str] = []
-        #: Keyword arguments of every ``query`` call (M04 cursor/merge tests).
+        #: Keyword arguments of every ``query`` call (cursor/merge tests).
         self.queries: list[dict[str, Any]] = []
 
     # -- contract metadata -------------------------------------------------- #
@@ -175,7 +175,7 @@ class FakePluginBackend:
     def describe(self) -> dict[str, Any]:
         return {"backend": self.driver, "version": VERSION, "strategy": "plugin", "schema_ok": True}
 
-    # -- the operations of protocol v1 (M01 freezes the names) -------------- #
+    # -- the operations of protocol v1 -------------------------------------- #
 
     def accounts(self) -> list[dict[str, Any]]:
         self.calls.append("accounts")
@@ -272,7 +272,7 @@ class FakePluginBackend:
     def load_body(self, row: dict[str, Any]) -> dict[str, Any]:
         """Body of the double: readable text unless the row marks it unavailable.
 
-        Row keys (M04 tests only): ``body_text``, ``readable``, ``available``,
+        Row keys (multi-driver tests only): ``body_text``, ``readable``, ``available``,
         ``partial``, ``headers`` and ``warnings``.
         """
         self.calls.append("load_body")
@@ -294,7 +294,7 @@ class FakePluginBackend:
         )
 
     def attachments(self, uid: str) -> list[dict[str, Any]]:
-        """Ordered attachment metadata (M06–M10 consume it): index, name, size and reason."""
+        """Ordered attachment metadata: index, name, size and reason."""
         self.calls.append("attachments")
         return self._fail("attachments", [dict(entry) for entry in self._attachments])
 
@@ -339,7 +339,7 @@ def plugin_class(**attributes: Any) -> type[FakePluginBackend]:
 
 
 def plugin_factory(**instance_kwargs: Any) -> Any:
-    """Entry-point target that builds a fresh double per command (M04 goldens).
+    """Entry-point target that builds a fresh double per command (multi-driver goldens).
 
     The returned callable carries the plugin metadata the registry validates
     (``driver``/``plugin_api``/``capabilities``) and receives the

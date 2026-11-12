@@ -494,7 +494,7 @@ class HtmlToTextTests(unittest.TestCase):
 class RealStoreIntegrationTests(unittest.TestCase):
     """Canary: ``resolve_path`` against the real ``EnvelopeStore``.
 
-    Runs on every OS (no skips, plan D-07).
+    Runs on every OS (no skips).
     """
 
     @classmethod

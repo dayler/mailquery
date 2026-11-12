@@ -29,7 +29,7 @@ SKILLS_INSTALL_SH = SKILLS_DIR / "install.sh"
 SKILLS_INSTALL_PS1 = SKILLS_DIR / "install.ps1"
 TEMPLATE = REPO_ROOT / "docs" / "config.example.toml"
 
-#: Full ``mailquery -v`` line of the current package (M11-T01: derived from
+#: Full ``mailquery -v`` line of the current package (derived from
 #: ``mailquery.__version__``, never from a literal; includes the new ``drivers:`` part).
 GOOD_VERSION = (
     f"mailquery {mailquery.__version__} (backend outlook; Python 3.14.0; "
@@ -44,7 +44,7 @@ SH = shutil.which("sh")
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
-# Isolation (plan 7.1): no subprocess may see the user's real home.
+# Isolation: no subprocess may see the user's real home.
 _ISOLATED_HOME = tempfile.mkdtemp(prefix="mailquery-test-home-")
 atexit.register(shutil.rmtree, _ISOLATED_HOME, ignore_errors=True)
 
@@ -387,7 +387,7 @@ class InstallerVersionTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# INS-SMOKE-01 — installers (AC-21, M11-T05)
+# INS-SMOKE-01 — installers (AC-21)
 # --------------------------------------------------------------------------- #
 
 

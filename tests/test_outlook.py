@@ -1,11 +1,11 @@
-"""Outlook backend tests (plan 7.5).
+"""Outlook backend tests.
 
 This module starts with sanity tests of the in-memory Outlook Object Model fake
 (``tests/fakes/outlook.py``) and of the subprocess launcher
 (``tests/fakes/run_cli.py``): every scenario builds, every member access is
-logged and mutations are counted. The OL-* cases follow (W3-T02 onwards).
+logged and mutations are counted. The OL-* cases follow.
 Pure Python: runs on Linux, macOS and Windows without pywin32 or Outlook; the
-only exception is OL-05.02, which needs a real Windows host (plan 7.7).
+only exception is OL-05.02, which needs a real Windows host.
 """
 
 from __future__ import annotations
@@ -566,14 +566,14 @@ _DISPATCH_NAMES = frozenset({"Dispatch", "DispatchEx", "EnsureDispatch"})
 
 
 def _oc():
-    """``mailquery.backends.outlook_com``, imported lazily (it is created in W3-T02)."""
+    """``mailquery.backends.outlook_com``, imported lazily."""
     from mailquery.backends import outlook_com
 
     return outlook_com
 
 
 def _backend(fake: fk.FakeOutlook, **overrides):
-    """The production Outlook backend over the fake (plan 4.2 injection)."""
+    """The production Outlook backend over the fake (injected connector)."""
     from mailquery.backends import get_backend
 
     kwargs = {
@@ -651,7 +651,7 @@ def _assert_internal(case: unittest.TestCase, action) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# OL-01 — Read-only proxy (annex B.2 point 2)
+# OL-01 — Read-only proxy
 # --------------------------------------------------------------------------- #
 
 
@@ -826,7 +826,7 @@ class OutlookReadOnlyProxyTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-02 — Client detection (PRD 12.6, annex B.7, RF-28)
+# OL-02 — Client detection (PRD 12.6, RF-28)
 # --------------------------------------------------------------------------- #
 
 
@@ -923,7 +923,7 @@ class OutlookDetectionTests(_OutlookCliCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-03 — COM errors (annex B.7); failure injected in the first COM call
+# OL-03 — COM errors; failure injected in the first COM call
 # --------------------------------------------------------------------------- #
 
 
@@ -968,7 +968,7 @@ class OutlookComErrorTests(_OutlookCliCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-04 — Timeout (RF-33, PRD 12.8, D-03); 0.2 s deadline
+# OL-04 — Timeout (RF-33, PRD 12.8); 0.2 s deadline
 # --------------------------------------------------------------------------- #
 
 
@@ -1149,7 +1149,7 @@ class OutlookTimeoutTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-05 — pywin32 cache (annex B.2 point 6)
+# OL-05 — pywin32 cache
 # --------------------------------------------------------------------------- #
 
 
@@ -1203,7 +1203,7 @@ class OutlookPywin32CacheTests(unittest.TestCase):
             self.assertEqual(finder.gen_path_at_client_import, [str(gen_path)])
             self.assertTrue(gen_path.is_dir())
 
-    @unittest.skipUnless(sys.platform == "win32", "OL-05.02 needs a real Windows host (plan 7.7)")
+    @unittest.skipUnless(sys.platform == "win32", "OL-05.02 needs a real Windows host")
     def test_ol_05_02_real_cache_files_only_under_home_gen_py(self) -> None:
         """OL-05.02: on real Windows, no pywin32 cache file outside <home>/tmp/gen_py."""
         script = (
@@ -1280,7 +1280,7 @@ def _tree_snapshot(directories) -> list[tuple[str, int, int]]:
 
 
 # --------------------------------------------------------------------------- #
-# Stores and accounts (annex B.3, B.4; W3-T03)
+# Stores and accounts
 # --------------------------------------------------------------------------- #
 
 _STORE_LEVEL_MEMBERS = frozenset(
@@ -1378,8 +1378,8 @@ class OutlookAccountUuidTests(_StoreCase):
 
 
 class OutlookStoreClassificationTests(_StoreCase):
-    def test_store_matrix_candidates_have_the_annex_labels(self) -> None:
-        """Annex B.3: candidates and their labels, email (null for PST) and uuid, in profile order."""
+    def test_store_matrix_candidates_have_their_labels(self) -> None:
+        """Candidates and their labels, email (null for PST) and uuid, in profile order."""
         fake = fk.FakeOutlook.store_matrix()
         rows = [row for row in self.make(fake).accounts() if "excluded" not in row]
         expected = [
@@ -1389,7 +1389,7 @@ class OutlookStoreClassificationTests(_StoreCase):
         self.assertEqual(rows, expected)
 
     def test_store_matrix_excluded_stores_have_label_path_and_reason(self) -> None:
-        """Annex B.3 / RF-34: every excluded store with its label, path and reason, in profile order."""
+        """RF-34: every excluded store with its label, path and reason, in profile order."""
         fake = fk.FakeOutlook.store_matrix()
         got = self.make(fake).excluded_stores()
         expected = [
@@ -1428,7 +1428,7 @@ class OutlookStoreClassificationTests(_StoreCase):
         self.assertEqual(labels, [expected_by_key[spec.key] for spec in fake.stores])
 
     def test_second_exchange_account_with_store_type_4_is_a_candidate(self) -> None:
-        """Annex B.11: the delivery store of a second account (ExchangeStoreType 4) is a candidate."""
+        """The delivery store of a second account (ExchangeStoreType 4) is a candidate."""
         fake = fk.FakeOutlook()
         fake.add_exchange_account("first", "uno@example.com")
         second = fake.add_exchange_account("second", "dos@example.com")
@@ -1545,7 +1545,7 @@ class OutlookExcludedScopeResolutionTests(_StoreCase):
             scopes=tuple(ScopeEntry(key=key, mailbox_list=tuple(mailbox_list)) for key in keys),
         )
         excluded: list[dict] = []
-        # Folders are W3-T04: an excluded account never needs them.
+        # An excluded account never needs its folders.
         with mock.patch.object(backend, "mailboxes_without_counters", return_value=[]):
             resolved = resolve_scope(config, backend, excluded=excluded)
         return resolved, excluded
@@ -1607,7 +1607,7 @@ class OutlookExcludedScopeResolutionTests(_StoreCase):
 
 
 # --------------------------------------------------------------------------- #
-# Folders (annex B.3, B.4, PRD 15.3; W3-T04)
+# Folders (PRD 15.3)
 # --------------------------------------------------------------------------- #
 
 # Paths of the "es" account of the folder matrix, in depth-first enumeration order.
@@ -1873,7 +1873,7 @@ class OutlookInboxReferenceTests(_FolderCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-14, OL-15, OL-16, OL-19 — Items (annex B.4)
+# OL-14, OL-15, OL-16, OL-19 — Items
 # --------------------------------------------------------------------------- #
 
 _ITEMS_NOW = datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
@@ -1883,7 +1883,7 @@ _ADDRESS_BOOK_MEMBERS = frozenset(
 
 
 def _searchable_specs(fake: fk.FakeOutlook) -> list:
-    """Items annex B.4 makes searchable: mail and meetings, minus IMAP-deleted."""
+    """Searchable items: mail and meetings, minus IMAP-deleted."""
     return [
         spec
         for spec in fake.items.values()
@@ -1892,12 +1892,12 @@ def _searchable_specs(fake: fk.FakeOutlook) -> list:
 
 
 class _ItemCase(_StoreCase):
-    """The item matrix (annex B.4) in one cached Exchange account."""
+    """The item matrix in one cached Exchange account."""
 
     def make_items(self, zone=None):
         fake = fk.FakeOutlook.item_matrix(_ITEMS_NOW)
         if zone is not None:
-            fake.zone = zone  # the host zone: only the built-in time columns use it (P-5)
+            fake.zone = zone  # the host zone: only the built-in time columns use it
         return fake, self.make(fake)
 
     @staticmethod
@@ -1969,7 +1969,7 @@ class OutlookDateTests(_ItemCase):
         self.assertEqual(received, spec.received.astimezone(zone).isoformat(timespec="seconds"))
         self.assertEqual(sent, spec.sent.astimezone(zone).isoformat(timespec="seconds"))
         self.assertTrue(received.endswith("-04:00"), received)
-        # The built-in ReceivedTime/SentOn are never read (P-5).
+        # The built-in ReceivedTime/SentOn are never read.
         self.assertFalse(
             {member for _kind, member in fake.call_log.members()} & {"ReceivedTime", "SentOn"}
         )
@@ -2080,7 +2080,7 @@ class OutlookFlagAttachmentTests(_ItemCase):
 
 
 class OutlookItemLookupTests(_ItemCase):
-    """membership, duplicate_counts and find_message (annex B.4, PRD 12.4, RF-07)."""
+    """membership, duplicate_counts and find_message (PRD 12.4, RF-07)."""
 
     def test_membership_is_the_folder_of_each_uid(self) -> None:
         fake, backend = self.make_items()
@@ -2176,7 +2176,7 @@ class OutlookItemLookupTests(_ItemCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-17, OL-20…OL-23 — dedupe, body and show (PRD 12.4, 12.5, 12.10, annex B.4)
+# OL-17, OL-20…OL-23 — dedupe, body and show (PRD 12.4, 12.5, 12.10)
 # --------------------------------------------------------------------------- #
 
 #: Field order of ``show``'s ``message`` (PRD 12.4).
@@ -2188,7 +2188,7 @@ _SHOW_FIELDS = [
 _HEADER_NAMES = ["From", "To", "Cc", "Subject", "Date", "Message-ID"]
 _SMIME_ENCRYPTED = "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
 _SMIME_SIGNED = "W_BODY_UNREADABLE: S/MIME signed content is not supported"
-#: Item members that read content or could ask for a download (annex B.2 points 4 and 5).
+#: Item members that read content or could ask for a download.
 _CONTENT_MEMBERS = frozenset({"Body", "HTMLBody", "Attachments", "MarkForDownload"})
 _ITEM_SCOPE = '[scope."ana@example.com"]\nmailbox_list = ["INBOX/Facturas"]\n'
 _SINCE_ALL = ["--since", "2026-01-01", "--limit", "200"]
@@ -2234,7 +2234,7 @@ class _OutlookCommandCase(_OutlookCliCase):
         return self.run_json("show", self.fake.item(key).entry_id)
 
     def content_members(self) -> set[tuple[str, str]]:
-        """Body, attachment and download members read so far (annex B.2 points 4 and 5)."""
+        """Body, attachment and download members read so far."""
         return {
             (kind, member) for kind, member in self.fake.call_log.members()
             if (kind == "Item" and member in _CONTENT_MEMBERS)
@@ -2574,12 +2574,12 @@ class OutlookShowUidTests(_OutlookCommandCase):
 
 
 # --------------------------------------------------------------------------- #
-# Commands end to end (W3-T07): candidates, exclusions, W_STORE_EXCLUDED,
-# neutral fields, log, counters and the read-only gate of the W3 commands
+# Commands end to end: candidates, exclusions, W_STORE_EXCLUDED,
+# neutral fields, log, counters and the read-only gate of the read commands
 # --------------------------------------------------------------------------- #
 
 _NO_ACCOUNTS = "W_NO_ACCOUNTS: no accounts are declared in config.toml; nothing is observed"
-#: Codes annex B.7 excludes from the Outlook backend (OL-30.04).
+#: Codes the Outlook backend never returns (OL-30.04).
 _FOREIGN_CODES = (
     "E_STORE_NOT_FOUND",
     "E_SCHEMA_UNSUPPORTED",
@@ -2962,7 +2962,7 @@ class OutlookCounterTests(_CommandScenarioCase):
     _COUNTER_COLUMNS = [fk.PR_MESSAGE_FLAGS, fk.PR_MSG_STATUS]
 
     def test_search_and_show_read_no_folder_counters(self) -> None:
-        """Only `mailboxes` scans folder tables for `total`/`unread` (PRD 19, annex B.9)."""
+        """Only `mailboxes` scans folder tables for `total`/`unread` (PRD 19)."""
         fake = self.use(fk.FakeOutlook.default(), _scope_toml("ana.perez@example.com"))
         self.run_json("search", "--since", "2026-01-01")
         tables = _tables(fake)
@@ -3313,7 +3313,7 @@ class OutlookInternalErrorLogTests(_CommandScenarioCase):
 
 
 class OutlookReadOnlyGateTests(_CommandScenarioCase):
-    """OL-30 (full sweep, W4-T04): the 5 commands with all their flags, over every scenario.
+    """OL-30 (full sweep): the 5 commands with all their flags, over every scenario.
 
     `mailboxes`; `search` with every filter, including `--text`, `--to` and
     `--cc` (bounded, combined and one unbounded: E_UNBOUNDED_SCAN); `new` with
@@ -3361,7 +3361,7 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
     )
     _DOCTORS = (("--json",), ())
     #: Exit codes a read-only run may end with, and the error codes of each
-    #: (M10 adds the attachment protocol codes; a read-only run never mutates).
+    #: (including the attachment protocol codes; a read-only run never mutates).
     _ERRORS = {
         2: ("E_USAGE", "E_ACCOUNT_NOT_IN_SCOPE"),
         3: (
@@ -3461,7 +3461,7 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             self.assertEqual(fake.call_log.count(action="forbidden"), 0)
 
     def test_ol_30_05_attachment_writes_stay_under_home_and_clean_staging(self) -> None:
-        """OL-30.05: attachment runs write only under ``<home>`` and leave staging clean (M10)."""
+        """OL-30.05: attachment runs write only under ``<home>`` and leave staging clean."""
         # Run the sweep first so the assertions see every attachment invocation.
         self.results()
         staging = self.home / "tmp" / "staging"
@@ -3471,8 +3471,8 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
         for path in self.root.rglob("*"):
             self.assertTrue(path == self.home or self.home in path.parents, path)
 
-    def test_ol_30_04_never_the_codes_annex_b7_excludes(self) -> None:
-        """OL-30.04: no error or warning that annex B.7 excludes from this backend; no E_INTERNAL."""
+    def test_ol_30_04_never_the_excluded_codes(self) -> None:
+        """OL-30.04: no error or warning the Outlook backend never returns; no E_INTERNAL."""
         for _fake, outcomes in self.results():
             commands = {argv[0] for argv, _code, _payload in outcomes}
             self.assertEqual(
@@ -3493,7 +3493,7 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-18, OL-25 — `new` on Windows and searchable items (W4-T01)
+# OL-18, OL-25 — `new` on Windows and searchable items
 # --------------------------------------------------------------------------- #
 
 _FIRST_RUN = (
@@ -3540,7 +3540,7 @@ class _NewCase(_CommandScenarioCase):
 
 
 class OutlookSearchableItemTests(_NewCase):
-    """OL-18 (annex B.4): which items `search`, `new` and `show` see."""
+    """OL-18: which items `search`, `new` and `show` see."""
 
     def appearances(self, *keys: str) -> dict[str, tuple[bool, bool, int]]:
         """``key -> (in search, in new, exit code of show)`` over the item matrix."""
@@ -3713,7 +3713,7 @@ class OutlookNewTests(_NewCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-24 — `--text`, `--to` and `--cc` on Windows (W4-T02)
+# OL-24 — `--text`, `--to` and `--cc` on Windows
 # --------------------------------------------------------------------------- #
 
 _ANA = ("Ana", "ana@example.com")
@@ -3722,7 +3722,7 @@ _NARROWING = ("--since", "--until", "--from", "--subject", "--include-mailbox")
 
 
 class OutlookContentScanTests(_CommandScenarioCase):
-    """OL-24 (PRD RF-17, 9.5; annex B.4): bounded `--text`, `--to` and `--cc` on Windows."""
+    """OL-24 (PRD RF-17, 9.5): bounded `--text`, `--to` and `--cc` on Windows."""
 
     _SCOPE = _scope_toml("ana@example.com")  # INBOX only: no narrowing folder
 
@@ -3875,7 +3875,7 @@ class OutlookContentScanTests(_CommandScenarioCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-26 — doctor on Windows (PRD 12.8, annex B.8, PRD 15.3)
+# OL-26 — doctor on Windows (PRD 12.8, PRD 15.3)
 # --------------------------------------------------------------------------- #
 
 
@@ -3897,7 +3897,7 @@ class OutlookDoctorTests(_OutlookCommandCase):
         return {check["name"]: check for check in payload["checks"]}
 
     def test_doctor_all_checks_pass_on_the_default_profile(self) -> None:
-        """Annex B.8: every check of the default profile passes; the strategy is com_readonly."""
+        """Every check of the default profile passes; the strategy is com_readonly."""
         checks = self.doctor(fk.FakeOutlook.default(), _scope_toml("ana.perez@example.com"))
         for name, check in checks.items():
             with self.subTest(check=name):
@@ -3911,7 +3911,7 @@ class OutlookDoctorTests(_OutlookCommandCase):
         )
 
     def test_doctor_stores_lists_candidates_and_excluded_stores(self) -> None:
-        """Annex B.8 / RF-34: `stores` lists candidates (label, type) and excluded (label, path, reason)."""
+        """RF-34: `stores` lists candidates (label, type) and excluded (label, path, reason)."""
         checks = self.doctor(fk.FakeOutlook.store_matrix())
         detail = checks["stores"]["detail"]
         self.assertTrue(checks["stores"]["ok"])
@@ -3989,7 +3989,7 @@ class OutlookDoctorTests(_OutlookCommandCase):
 
 
 class OutlookNotRunningTests(_OutlookCommandCase):
-    """Exit 6 end to end (PRD 12.6, 21.1; annex B.7): Outlook closed, never launched."""
+    """Exit 6 end to end (PRD 12.6, 21.1): Outlook closed, never launched."""
 
     def test_exit_6_for_every_data_command_while_doctor_still_exits_0(self) -> None:
         """PRD 12.6: every data command ⇒ E_OUTLOOK_NOT_RUNNING (exit 6); doctor diagnoses it with exit 0."""
@@ -4048,7 +4048,7 @@ class OutlookNotRunningTests(_OutlookCommandCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-27 — object_model_guard (annex B.6); injected registry and security_center
+# OL-27 — object_model_guard; injected registry and security_center
 # --------------------------------------------------------------------------- #
 
 _POLICY_KEY = r"Software\Policies\Microsoft\Office\16.0\Outlook\Security"
@@ -4136,7 +4136,7 @@ class OutlookObjectModelGuardTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# M10 — Outlook attachments (UT-OL-ATT-01..04, TC-09)
+# Outlook attachments (UT-OL-ATT-01..04, TC-09)
 # --------------------------------------------------------------------------- #
 
 #: Declared account of the attachment fixtures (the fake's cached Exchange account).
@@ -4169,7 +4169,7 @@ def _normalize_golden(value: object, root: Path) -> object:
         text = _ISO_RE.sub("<ISO>", value)
         text = text.replace(str(root), "<ROOT>").replace("\\", "/")
         # The message directory is a native id on macOS and the stable 32-hex
-        # fallback when the Windows path budget is exceeded (D9): placeholder it.
+        # fallback when the Windows path budget is exceeded: placeholder it.
         return _MESSAGE_DIR_RE.sub(r"\1<MESSAGE_DIR>", text)
     return value
 
@@ -4193,7 +4193,7 @@ def _assert_outlook_golden(
 
 
 class _AttachmentCase(_OutlookCommandCase):
-    """Commands and backend operations over the M10 attachment fixture profile."""
+    """Commands and backend operations over the attachment fixture profile."""
 
     def attachments_fake(self) -> fk.FakeOutlook:
         return self.use(fk.FakeOutlook.attachments_matrix(), _ATTACHMENT_SCOPE)
@@ -4382,7 +4382,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
 
 
 class OutlookAttachmentMaterializationTests(_AttachmentCase):
-    """UT-OL-ATT-02: COM materialization, staging and cleanup (AC-10/AC-12, §15)."""
+    """UT-OL-ATT-02: COM materialization, staging and cleanup (AC-10/AC-12, PRD §23.1)."""
 
     def test_ut_ol_att_02_01_local_attachment_is_materialized_in_staging(self) -> None:
         """UT-OL-ATT-02.01: SaveAsFile writes a 0600 regular file under a 0700 staging session."""

@@ -1,4 +1,4 @@
-"""Read-only access to the Apple Mail store (PRD 9.5, 9.6, 11.1).
+"""Read-only access to the Apple Mail store.
 
 Locates ``~/Library/Mail/V*`` from ``PersistenceInfo.plist``, validates the
 ``Envelope Index`` schema by feature detection, opens it read-only (URI
@@ -26,7 +26,7 @@ from mailquery.logging_setup import get_logger
 
 SUPPORTED_VERSIONS = ("V9", "V10", "V11")
 
-# Minimum column fingerprint required from each table (PRD 11.1). Keys are
+# Minimum column fingerprint required from each table. Keys are
 # table names, values the columns that must exist for the schema to be usable.
 REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "messages": (
@@ -53,7 +53,7 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "message_global_data": ("ROWID", "message_id_header"),
 }
 
-# Connection strategies (PRD 9.6).
+# Connection strategies.
 STRATEGY_LIVE = "live_ro"
 STRATEGY_COPY = "copy_ro"
 
@@ -285,7 +285,7 @@ def run_query(
     *,
     first: bool = False,
 ) -> Any:
-    """Run a read query; a locked database is retried once after 100 ms (PRD A.4).
+    """Run a read query; a locked database is retried once after 100 ms.
 
     Returns ``fetchall()`` (or ``fetchone()`` with ``first``). A lock that
     persists raises ``E_DB_BUSY``; any other ``sqlite3`` error propagates.
@@ -396,7 +396,7 @@ def _ensure_tmp_dir(tmp_root: Path | None, mail_root: Path) -> Path:
 
 
 def _make_private(path: Path) -> None:
-    """Restrict a temporary copy to its owner (0600, RNF-05); best effort."""
+    """Restrict a temporary copy to its owner (0600); best effort."""
     try:
         path.chmod(0o600)
     except OSError:  # pragma: no cover - best effort on foreign filesystems
@@ -404,7 +404,7 @@ def _make_private(path: Path) -> None:
 
 
 def _copy_for_readonly(version: StoreVersion, tmp_root: Path | None) -> tuple[Path, Path]:
-    """Copy ``Envelope Index`` (+ ``-wal``) to the app temp dir (PRD 9.6)."""
+    """Copy ``Envelope Index`` (+ ``-wal``) to the app temp dir."""
     tmp_dir = _ensure_tmp_dir(tmp_root, version.mail_root)
     try:
         work_dir = Path(tempfile.mkdtemp(prefix="mailquery-envelope-", dir=tmp_dir))
@@ -559,7 +559,7 @@ def _mailbox_from_row(
 
 
 def _mailbox_counters(connection: sqlite3.Connection) -> dict[int, tuple[int, int]]:
-    """Recalculate counts from ``messages`` + ``labels`` (PRD 11.1).
+    """Recalculate counts from ``messages`` + ``labels``.
 
     Membership is ``messages.mailbox = X`` OR a ``labels`` row pointing at X,
     so a Gmail message physically stored in ``[Gmail]/All Mail`` still counts
@@ -654,7 +654,7 @@ class EnvelopeStore:
             raise KeyError(f"mailbox ROWID {rowid} does not exist") from None
 
     def resolve_mailbox(self, account_uuid: str, ref: str) -> Mailbox | None:
-        """Resolve a mailbox name/path/URL inside one account (PRD 15.3).
+        """Resolve a mailbox name/path/URL inside one account.
 
         Case-insensitive. ``INBOX`` is always the account inbox; otherwise an
         exact path or URL beats a name match, and among several name matches
@@ -738,7 +738,7 @@ class EnvelopeStore:
 
 
 def probe_envelope_index(version: StoreVersion, tmp_root: Path | None = None) -> str:
-    """Open the Envelope Index with the PRD A.4 strategy, read it and close it.
+    """Open the Envelope Index with the read-only connection strategy, read it and close it.
 
     Returns ``live_ro`` (``-shm`` present) or ``copy_ro``. The schema is not
     checked: that is the ``schema`` check of ``doctor``.

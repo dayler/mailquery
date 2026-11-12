@@ -1,12 +1,12 @@
-"""Public plugin API of mailquery (API 1, PRD-v2.1 §9.3).
+"""Public plugin API of mailquery (API 1).
 
 An external backend plugin imports only this package from the core::
 
     from mailquery.plugins import PluginContext, PluginError, Reason
 
-The backend protocol (operations and exact signatures) is documented in
-``docs/INTERFACES.md``; this package holds only the contract values, errors and
-metadata types (plan §5.1 C1) plus the core-side error protocol of M05
+The backend protocol (operations and exact signatures) is defined by
+``mailquery.backends.base.MailBackend``; this package holds only the contract
+values, errors and metadata types plus the core-side error protocol
 (``call_driver``/``wrap_driver``, used by the core — not by plugins).
 """
 

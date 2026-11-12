@@ -1,20 +1,18 @@
-"""Classic Outlook backend (Windows, annex B).
+"""Classic Outlook backend (Windows).
 
-Implemented so far: the connection (``describe``), ``name``,
-``labels_available``, ``parse_uid`` and ``parse_native_id`` (uid validation,
-D-05), ``close``, the D-03 ``bind_command`` hook
-the stores of the profile (``accounts``, ``excluded_stores``; annex B.3,
-B.4), their folders (``mailboxes``, ``resolve_mailbox``; annex B.3, B.4,
-PRD 15.3), their items (``query``, ``membership``, ``duplicate_counts``,
-``recipients``, ``attachment_names``, ``find_message``; annex B.4, PRD 12.4)
-and their bodies (``load_body`` plus the ``show`` hooks ``not_found_hint`` and
-``unreadable_attachments``; PRD 12.4, 12.5, 12.10). Folder counters are read
-only by ``mailboxes`` (core hook ``mailboxes_without_counters``; PRD 19). The
-``search`` hooks ``recipients_open_items``, ``items_opened`` and
-``load_snippet`` serve the bounded ``--text``/``--to``/``--cc`` scan (PRD RF-17,
-19). ``doctor_checks`` and the D-03 hook ``bind_doctor_timeout`` serve
-``doctor`` (PRD 12.8, annex B.6, B.8). ``attachments``/``attachment_stream``
-implement the C1 attachment protocol (M10): ordered local metadata, availability
+Implemented: the connection (``describe``), ``name``, ``labels_available``,
+``parse_uid`` and ``parse_native_id`` (uid validation), ``close``, the watchdog
+``bind_command`` hook, the stores of the profile (``accounts``,
+``excluded_stores``), their folders (``mailboxes``, ``resolve_mailbox``), their
+items (``query``, ``membership``, ``duplicate_counts``, ``recipients``,
+``attachment_names``, ``find_message``) and their bodies (``load_body`` plus the
+``show`` hooks ``not_found_hint`` and ``unreadable_attachments``). Folder
+counters are read only by ``mailboxes`` (core hook
+``mailboxes_without_counters``). The ``search`` hooks ``recipients_open_items``,
+``items_opened`` and ``load_snippet`` serve the bounded ``--text``/``--to``/``--cc``
+scan. ``doctor_checks`` and the watchdog hook ``bind_doctor_timeout`` serve
+``doctor``. ``attachments``/``attachment_stream`` implement the backend attachment
+protocol: ordered local metadata, availability
 reasons and the COM materialization exception (``Attachment.SaveAsFile`` into the
 core staging, always removed). Every COM access goes through
 :mod:`mailquery.backends.outlook_com` (the only module that imports pywin32),
@@ -61,7 +59,7 @@ OL_POP3 = 2
 OL_HTTP = 3
 OL_EAS = 4
 OL_OTHER_ACCOUNT = 5
-#: Label prefix of each account type (annex B.3); unknown types are "Other".
+#: Label prefix of each account type; unknown types are "Other".
 ACCOUNT_KINDS = {
     OL_EXCHANGE: "Exchange",
     OL_IMAP: "IMAP",
@@ -83,7 +81,7 @@ PR_RECORD_KEY = PROPTAG + "0FF90102"
 PR_FOLDER_TYPE = PROPTAG + "36010003"
 PR_MESSAGE_FLAGS = PROPTAG + "0E070003"
 PR_MSG_STATUS = PROPTAG + "0E170003"
-# Item properties (annex B.4; W3 design note sections 5, 6 and 10).
+# Item properties.
 PR_LONGTERM_ENTRYID_FROM_TABLE = PROPTAG + "66700102"
 PR_MESSAGE_DELIVERY_TIME = PROPTAG + "0E060040"
 PR_CLIENT_SUBMIT_TIME = PROPTAG + "00390040"
@@ -105,9 +103,9 @@ PR_EMAIL_ADDRESS = PROPTAG + "3003001F"
 PR_ATTACHMENT_HIDDEN = PROPTAG + "7FFE000B"
 PR_TRANSPORT_MESSAGE_HEADERS = PROPTAG + "007D001F"
 
-#: Headers of ``show`` (PRD 12.4), read from the transport headers when present.
+#: Headers of ``show``, read from the transport headers when present.
 SHOW_HEADER_NAMES = ("From", "To", "Cc", "Subject", "Date", "Message-ID")
-#: Warnings of ``load_body`` and ``show`` (PRD 12.10).
+#: Warnings of ``load_body`` and ``show``.
 SMIME_ENCRYPTED_WARNING = "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
 SMIME_SIGNED_WARNING = "W_BODY_UNREADABLE: S/MIME signed content is not supported"
 HTML_NO_TEXT_WARNING = "W_HTML_NO_TEXT: HTML body produced no plain text"
@@ -115,7 +113,7 @@ ATTACHMENTS_UNAVAILABLE_WARNING = (
     "W_ATTACHMENTS_UNAVAILABLE: the message has attachments, but their names cannot "
     "be read because the item could not be read"
 )
-#: Hint of ``show`` when a uid is not found (PRD 12.4, annex B.4).
+#: Hint of ``show`` when a uid is not found.
 NOT_FOUND_HINT = (
     "run `mailquery search` to find the uid; a message of a store that is not read "
     "is not found: see excluded_stores in `mailquery mailboxes`"
@@ -145,7 +143,7 @@ MESSAGE_COLUMNS = (
 DEDUPE_COLUMNS = (PR_INTERNET_MESSAGE_ID, PR_MSG_STATUS)
 #: Columns of the folder counters of ``mailboxes``.
 COUNTER_COLUMNS = (PR_MESSAGE_FLAGS, PR_MSG_STATUS)
-#: Rows per ``Table.GetArray`` call (bulk read; design note "Performance").
+#: Rows per ``Table.GetArray`` call (bulk read).
 TABLE_CHUNK_ROWS = 1000
 
 # Folder counters (read-only folder properties; equal to the item table rows and
@@ -178,7 +176,7 @@ COUNTER_EXCEPTIONS_FILTER = (
 
 UNKNOWN_LABEL = "unknown"
 
-# OlDefaultFolders: the inbox and the hidden sync folders, found by function (annex B.3).
+# OlDefaultFolders: the inbox and the hidden sync folders, found by function.
 OL_FOLDER_INBOX = 6
 OL_FOLDER_CONFLICTS = 19
 OL_FOLDER_SYNC_ISSUES = 20
@@ -194,7 +192,7 @@ OL_MAIL_ITEM = 0  # OlItemType of a mail folder (Folder.DefaultItemType)
 FOLDER_SEARCH = 2  # PR_FOLDER_TYPE of a search folder
 OL_USER_ITEMS = 0  # OlTableContents
 
-#: Default columns of ``Folder.GetTable`` (design note 5); added ones follow them.
+#: Default columns of ``Folder.GetTable``; added ones follow them.
 TABLE_DEFAULT_COLUMNS = ("EntryID", "Subject", "CreationTime", "LastModificationTime", "MessageClass")
 _MESSAGE_CLASS_COLUMN = TABLE_DEFAULT_COLUMNS.index("MessageClass")
 MSGFLAG_READ = 0x1
@@ -219,24 +217,24 @@ OL_BY_VALUE = 1
 OL_BY_REFERENCE = 4
 OL_EMBEDDED_ITEM = 5
 OL_OLE = 6
-#: Staging directory under ``<home>/tmp`` shared with the core (M07 §10.1, RNF-14).
+#: Staging directory under ``<home>/tmp`` shared with the core.
 STAGING_DIR_NAME = "staging"
 #: Bytes per chunk yielded by ``attachment_stream``.
 _ATTACHMENT_CHUNK_BYTES = 64 * 1024
-#: Templates of the attachment protocol errors of this driver (§11.7, C8/C9).
+#: Templates of the attachment protocol errors of this driver.
 _ATTACHMENT_SMIME_HINT = "S/MIME attachments cannot be extracted"
 _DOWNLOAD_HINT = (
     "open the message in Outlook so it downloads the attachment, then retry"
 )
-#: A store's identifier inside an EntryID: 16 bytes from offset 4 (annex B.4).
+#: A store's identifier inside an EntryID: 16 bytes from offset 4.
 ENTRYID_STORE_KEY = slice(4, 20)
-#: Margins of the DASL date pre-filter: Outlook ignores seconds (P-7), so it is
+#: Margins of the DASL date pre-filter: Outlook ignores seconds, so it is
 #: widened by whole minutes and the exact cut is done in Python.
 FILTER_MARGIN_BEFORE = timedelta(minutes=1)
 FILTER_MARGIN_AFTER = timedelta(minutes=2)
 #: Opened items kept per command (the first ones opened, which are the newest
 #: candidates in ``search`` order), so the page's recipients and bodies open each
-#: item once (PRD 19). The maximum ``--limit`` fits.
+#: item once. The maximum ``--limit`` fits.
 ITEM_CACHE_SIZE = 200
 _UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -244,11 +242,11 @@ INBOX = "INBOX"
 URL_SCHEME = "outlook://"
 
 
-#: Backend checks of ``doctor`` in the order of PRD 12.8 (annex B.8).
+#: Backend checks of ``doctor``, in report order.
 DOCTOR_CHECKS = ("pywin32", "outlook", "stores", "readonly_strategy", "object_model_guard")
-#: Checks that need Outlook, in the evaluation order of D-03.
+#: Checks that need Outlook, in evaluation order.
 DOCTOR_COM_CHECKS = ("outlook", "readonly_strategy", "stores")
-#: Direct dependency of each check (annex B.8); the others are independent.
+#: Direct dependency of each check; the others are independent.
 DOCTOR_DEPENDENCIES = {"outlook": "pywin32", "readonly_strategy": "outlook", "stores": "outlook"}
 
 
@@ -257,14 +255,14 @@ def _not_evaluated(name: str, dependency: str) -> dict[str, Any]:
 
 
 def _error_with_hint(exc: MailqueryError) -> str:
-    """``CODE: message (hint: ...)``: the doctor detail of a detection error (annex B.7)."""
+    """``CODE: message (hint: ...)``: the doctor detail of a detection error."""
     detail = error_detail(exc)
     return f"{detail} (hint: {exc.hint})" if exc.hint else detail
 
 
 @dataclass
 class StoreInfo:
-    """One store of the profile, classified per annex B.3 (only store-level data).
+    """One store of the profile, classified as candidate or excluded (only store-level data).
 
     ``reason`` is ``None`` for a candidate, else the ``excluded_stores`` reason.
     ``uuid`` is ``None`` only for an ``unavailable`` store (its ``PR_RECORD_KEY``
@@ -289,7 +287,7 @@ class StoreInfo:
 
 
 def is_searchable_class(message_class: Any) -> bool:
-    """Mail (``IPM.Note`` and ``IPM.Note.*``, S/MIME included) or a meeting item (annex B.4).
+    """Mail (``IPM.Note`` and ``IPM.Note.*``, S/MIME included) or a meeting item.
 
     Every ``IPM.Schedule.Meeting.*`` class counts (requests, cancellations,
     responses); receipts (``IPM.Report.*``), tasks, posts and the rest do not.
@@ -314,7 +312,7 @@ def is_smime_class(message_class: Any) -> bool:
 
 
 def encode_segment(name: str) -> str:
-    """A folder name as a ``path`` segment: ``%`` ⇒ ``%25``, then ``/`` ⇒ ``%2F`` (annex B.4)."""
+    """A folder name as a ``path`` segment: ``%`` ⇒ ``%25``, then ``/`` ⇒ ``%2F``."""
     return name.replace("%", "%25").replace("/", "%2F")
 
 
@@ -324,7 +322,7 @@ def folder_url(account_uuid: str, names: Sequence[str]) -> str:
 
 
 def is_network_path(path: str) -> bool:
-    """UNC path or a drive letter whose ``GetDriveTypeW`` is ``DRIVE_REMOTE`` (annex B.3)."""
+    """UNC path or a drive letter whose ``GetDriveTypeW`` is ``DRIVE_REMOTE``."""
     if path.startswith("\\\\"):
         return True
     if len(path) >= 2 and path[1] == ":":
@@ -336,10 +334,10 @@ class OutlookBackend(MailBackend):
     """Outlook through the read-only COM proxy; nothing is opened until first use.
 
     ``outlook_app``, ``registry``, ``security_center`` and ``pywin32`` are the
-    test injection points of plan 4.2 (``outlook_app`` is the connector that
+    test injection points (``outlook_app`` is the connector that
     stands in for ``win32com.client``). ``tmp_root`` is ``<home>/tmp``, where the
     pywin32 cache lives (``<tmp_root>/gen_py``); ``watchdog`` replaces the
-    process-wide D-03 watchdog.
+    process-wide COM watchdog.
     """
 
     driver = BACKEND_NAME
@@ -384,26 +382,26 @@ class OutlookBackend(MailBackend):
         #: :data:`ITEM_CACHE_SIZE` uids opened, plus the last one opened.
         self._items: dict[str, Any] = {}
         self._last_item: tuple[str, Any] | None = None
-        #: Uids whose item was opened (``scan.messages_read``, PRD RF-17).
+        #: Uids whose item was opened (``scan.messages_read``).
         self._opened: set[str] = set()
         #: ``recipients`` result of each uid read so far.
         self._recipient_cache: dict[str, dict[str, list[dict[str, str]]]] = {}
-        #: ``doctor`` progress: finished checks by name and the running one (D-03).
+        #: ``doctor`` progress: finished checks by name and the running one.
         self._doctor_done: dict[str, dict[str, Any]] = {}
         self._doctor_running: str | None = None
         #: Attachment staging sessions of this instance, removed on ``close`` too
         #: (an aborted extraction may leave the generator suspended before its
-        #: ``finally`` runs; the next run sweeps them as well, RNF-14).
+        #: ``finally`` runs; the next run sweeps them as well).
         self._attachment_sessions: set[Path] = set()
 
     # -- connection ---------------------------------------------------------- #
 
     def bind_command(self, command: str) -> None:
-        """Name the running command for the D-03 watchdog (its timeout JSON reports it)."""
+        """Name the running command for the COM watchdog (its timeout JSON reports it)."""
         self._watchdog.command = command
 
     def _app(self) -> outlook_com.ReadOnlyCom:
-        """The read-only Application proxy; detection (PRD 12.6) runs on first use."""
+        """The read-only Application proxy; detection runs on first use."""
         if self._application is None:
             gen_path = self._tmp_root / "gen_py" if self._tmp_root is not None else None
             self._application = outlook_com.connect(
@@ -415,7 +413,7 @@ class OutlookBackend(MailBackend):
             )
         return self._application
 
-    # -- stores (annex B.3, B.4) ---------------------------------------------- #
+    # -- stores -------------------------------------------------------------- #
 
     def _profile(self) -> list[StoreInfo]:
         """Every store of the profile in ``NameSpace.Stores`` order, classified once."""
@@ -429,7 +427,7 @@ class OutlookBackend(MailBackend):
             ]
         return self._stores
 
-    # -- folders (annex B.3, B.4) --------------------------------------------- #
+    # -- folders ------------------------------------------------------------- #
 
     def _folders(self, account_uuids: Sequence[str] | None = None) -> list[MailboxRow]:
         """Listed folders of the candidate stores (all, or those of ``account_uuids``).
@@ -470,7 +468,7 @@ class OutlookBackend(MailBackend):
             folder = self._folder_objects.get(mailbox_id)
         return folder
 
-    # -- items (annex B.4) ------------------------------------------------------ #
+    # -- items --------------------------------------------------------------- #
 
     def _message_key(self, message_id: Any) -> int:
         """Dedupe key of an Internet Message-ID; ``0`` (unique) when missing or empty."""
@@ -508,10 +506,10 @@ class OutlookBackend(MailBackend):
         )
 
     def _store_of(self, uid: str, *, candidate: bool) -> StoreInfo | None:
-        """Candidate (or excluded) store whose ``PR_RECORD_KEY`` is in the uid (annex B.4).
+        """Candidate (or excluded) store whose ``PR_RECORD_KEY`` is in the uid.
 
         Only store-level data is compared; an unreadable store has no record key
-        and never matches (its uids are "not found", PRD 12.4).
+        and never matches (its uids are "not found").
         """
         try:
             key = bytes.fromhex(uid)[ENTRYID_STORE_KEY]
@@ -572,7 +570,7 @@ class OutlookBackend(MailBackend):
                 return row, MailboxRow(**mailbox)
         return None
 
-    # -- PRD 9.3 ------------------------------------------------------------- #
+    # -- backend protocol ---------------------------------------------------- #
 
     def describe(self) -> dict[str, Any]:
         """Version and strategy for the connection log line (connects to Outlook)."""
@@ -589,7 +587,7 @@ class OutlookBackend(MailBackend):
         Candidates are ``{uuid, label, email, local}`` (``local``: a PST, which
         belongs to no account). Excluded stores come too, with the extra key
         ``excluded`` holding their :meth:`excluded_stores` entry, so that a
-        ``[scope]`` key can resolve to them (PRD 15.3); an ``unavailable`` one
+        ``[scope]`` key can resolve to them; an ``unavailable`` one
         has ``uuid: None`` and resolves by label only.
         """
         rows: list[AccountRow] = []
@@ -613,7 +611,7 @@ class OutlookBackend(MailBackend):
         """Mail folders of the candidate stores: stores in profile order, folders depth-first.
 
         ``id`` is the folder ``EntryID``; ``total``/``unread`` count the
-        searchable items read from the folder table (annex B.4), once per
+        searchable items read from the folder table, once per
         folder and backend.
         """
         rows: list[MailboxRow] = []
@@ -626,11 +624,11 @@ class OutlookBackend(MailBackend):
         return rows
 
     def excluded_stores(self) -> list[dict[str, Any]]:
-        """``[{label, path, reason}]`` of the excluded stores, in profile order (RF-34)."""
+        """``[{label, path, reason}]`` of the excluded stores, in profile order."""
         return [info.excluded_entry() for info in self._profile() if info.reason is not None]
 
     def resolve_mailbox(self, account_uuid: str, ref: str) -> MailboxRow | None:
-        """Folder of one account for ``ref`` (PRD 15.3), case-insensitive, or ``None``.
+        """Folder of one account for ``ref``, case-insensitive, or ``None``.
 
         ``INBOX`` is always the store's inbox (``None`` for a store without
         one); otherwise an exact ``path`` or URL (also percent-decoded) beats a
@@ -670,12 +668,12 @@ class OutlookBackend(MailBackend):
         has_attachments: bool = False,
         order: str = "desc",
     ) -> list[MessageRow]:
-        """Searchable items of the folders, read from ``Folder.GetTable`` (annex B.4).
+        """Searchable items of the folders, read from ``Folder.GetTable``.
 
-        No item is opened. ``uid`` is the permanent EntryID (P-9), dates come
-        from the MAPI UTC properties (P-5); the DASL date pre-filter is widened
+        No item is opened. ``uid`` is the permanent EntryID, dates come
+        from the MAPI UTC properties; the DASL date pre-filter is widened
         by whole minutes and ``since`` (inclusive) / ``until`` (exclusive) are cut
-        to the second here (P-7). Total order ``(date_received, uid)``, ``uid``
+        to the second here. Total order ``(date_received, uid)``, ``uid``
         compared as a string; ``order="desc"`` reverses it.
         """
         filter_text = _date_filter(since, until)
@@ -712,7 +710,7 @@ class OutlookBackend(MailBackend):
         }
 
     def duplicate_counts(self, mailbox_ids: Sequence[Any]) -> dict[Any, int]:
-        """Searchable copies per Internet Message-ID in the folders (RF-07).
+        """Searchable copies per Internet Message-ID in the folders.
 
         A missing or empty Message-ID has no key: the message is unique.
         """
@@ -730,7 +728,7 @@ class OutlookBackend(MailBackend):
         return counts
 
     def recipients(self, uids: Sequence[Uid]) -> dict[Uid, Any]:
-        """``{uid: {"to": [...], "cc": [...]}}`` from each opened item (annex B.4).
+        """``{uid: {"to": [...], "cc": [...]}}`` from each opened item.
 
         The address is the SMTP address the item carries (``PR_SMTP_ADDRESS``,
         else ``PR_EMAIL_ADDRESS`` only when the address type is SMTP), never an
@@ -777,7 +775,7 @@ class OutlookBackend(MailBackend):
         return _visible_attachment_names(item)
 
     def attachments(self, uid: Uid) -> list[AttachmentMetadataRow]:
-        """Ordered attachment metadata of one message (C1, RF-43/RF-47; M10).
+        """Ordered attachment metadata of one message.
 
         Only **local properties** of the item are read (``Attachments``,
         ``FileName``/``DisplayName``, ``Size`` and ``Type``): nothing is downloaded
@@ -791,7 +789,7 @@ class OutlookBackend(MailBackend):
         a web reference/embedded message/OLE object is not a recoverable file ⇒
         ``unsupported``. ``size_bytes`` is ``None`` when it is not local.
 
-        The message-level signal of the C8/C9 convention is raised as the
+        A message-level signal is raised as the
         ``E_ATTACHMENT_UNREADABLE`` protocol error: S/MIME, an unopenable item, or
         a not fully downloaded item that reports attachments (its names cannot be
         read without downloading). ``show`` turns it into ``attachments: []``;
@@ -827,15 +825,15 @@ class OutlookBackend(MailBackend):
         return rows
 
     def attachment_stream(self, uid: Uid, index: int) -> Iterator[bytes]:
-        """Decoded bytes of attachment ``index`` of one message (C1; M10).
+        """Decoded bytes of attachment ``index`` of one message.
 
         Outlook has no local byte stream: the attachment is a COM object of an
         already-downloaded item. The single writing operation of the read-only
-        proxy (``Attachment.SaveAsFile``, PRD-v2.1 §0.2/§15) copies it to an opaque
+        proxy (``Attachment.SaveAsFile``) copies it to an opaque
         ``0600`` file inside a private ``0700`` session directory under
         ``<home>/tmp/staging``; this method validates that the materialized path is
         a regular file inside the session (a symlink or an unexpected directory is
-        ``E_ATTACHMENT_UNAVAILABLE``/``unsupported``, D12), yields the bytes in
+        ``E_ATTACHMENT_UNAVAILABLE``/``unsupported``), yields the bytes in
         chunks and always removes the file and the session (also on errors,
         ``GeneratorExit`` and timeouts). It never resolves a reference and never
         downloads: unavailable attachments are refused before touching COM.
@@ -913,7 +911,7 @@ class OutlookBackend(MailBackend):
         return item
 
     def _attachment_staging(self) -> Path:
-        """Private ``0700`` session directory under ``<home>/tmp/staging`` (M07 layout)."""
+        """Private ``0700`` session directory under ``<home>/tmp/staging``."""
         tmp_root = self._tmp_root
         if tmp_root is None:  # pragma: no cover - cli always passes <home>/tmp
             raise MailqueryError(
@@ -927,7 +925,7 @@ class OutlookBackend(MailBackend):
             if os.name != "nt":
                 os.chmod(root, 0o700)
             # Remove only this driver's own sessions left by a crashed/hung run
-            # (RNF-14; the core sweeps its own session-* directories).
+            # (the core sweeps its own session-* directories).
             for leftover in root.glob("outlook-*"):
                 if leftover.is_dir() and not leftover.is_symlink():
                     shutil.rmtree(leftover, ignore_errors=True)
@@ -950,10 +948,10 @@ class OutlookBackend(MailBackend):
             ) from exc
 
     def find_message(self, uid: Uid) -> tuple[MessageRow, MailboxRow | None] | None:
-        """Row and listed folder of a uid of a candidate store, or ``None`` (PRD 12.4).
+        """Row and listed folder of a uid of a candidate store, or ``None``.
 
-        The store comes from the EntryID (bytes 4..20 = ``PR_RECORD_KEY``,
-        annex B.4). A uid of an excluded store raises :class:`ExcludedStoreError`
+        The store comes from the EntryID (bytes 4..20 = ``PR_RECORD_KEY``).
+        A uid of an excluded store raises :class:`ExcludedStoreError`
         without opening anything of that store. Not found, not a searchable item,
         IMAP-deleted or outside the listed folders (hidden, calendar...) ⇒
         ``None``. An item that exists but cannot be opened gets its row from the
@@ -985,7 +983,7 @@ class OutlookBackend(MailBackend):
         return self._message_row(text, props, folder_id, message_class), MailboxRow(**mailbox)
 
     def load_body(self, row: MessageRow) -> BodyRow:
-        """Body of one item, in the order of annex B.4 (never downloads, PRD RF-06).
+        """Body of one item, in this order (never downloads).
 
         1. S/MIME (the row's ``MessageClass``) ⇒ ``available=True``,
            ``readable=False`` and the S/MIME warning, without opening the item.
@@ -998,7 +996,7 @@ class OutlookBackend(MailBackend):
            for internal mail: ``{}``, and ``show`` synthesizes them).
 
         ``partial`` and ``source.partial`` are always ``False`` and
-        ``source.emlx_path`` ``None`` (PRD 12.5).
+        ``source.emlx_path`` ``None``.
         """
         return self._load_body(row, details=True)
 
@@ -1037,7 +1035,7 @@ class OutlookBackend(MailBackend):
             raise
         return _body(True, True, headers, body_text, attachments, warnings)
 
-    # -- core hooks (looked up with getattr; outside the PRD 9.3 surface) ------ #
+    # -- core hooks (looked up with getattr; outside the backend protocol) --- #
 
     def mailboxes_without_counters(
         self, account_uuids: Sequence[str] | None = None
@@ -1046,34 +1044,34 @@ class OutlookBackend(MailBackend):
 
         ``config.listed_mailboxes`` uses it for everything but the ``mailboxes``
         command (scope resolution, dedupe, display), so ``search``, ``new`` and
-        ``show`` read no table of a folder outside the query (PRD 19, annex B.9).
+        ``show`` read no table of a folder outside the query.
         With ``account_uuids`` only the folders of those accounts are listed (and
         only their stores are walked): the callers that need nothing else.
         """
         return [MailboxRow(**row) for row in self._folders(account_uuids)]
 
-    #: Hint of the ``message uid … was not found`` error of ``show`` (PRD 12.4).
+    #: Hint of the ``message uid … was not found`` error of ``show``.
     not_found_hint = NOT_FOUND_HINT
 
     #: Evaluating ``--to``/``--cc`` opens every candidate item: on Windows they are
-    #: bounded like ``--text`` and do not narrow (PRD RF-17).
+    #: bounded like ``--text`` and do not narrow.
     recipients_open_items = True
 
     @property
     def items_opened(self) -> int:
-        """Distinct items opened so far (``scan.messages_read``, PRD RF-17)."""
+        """Distinct items opened so far (``scan.messages_read``)."""
         return len(self._opened)
 
     def load_snippet(self, row: MessageRow) -> BodyRow:
         """:meth:`load_body` for ``search``/``new``: the body only.
 
         Attachment names and transport headers are only needed by ``show``
-        (``attachments: []``, ``headers: {}``; PRD 19).
+        (``attachments: []``, ``headers: {}``).
         """
         return self._load_body(row, details=False)
 
     def unreadable_attachments(self, row: MessageRow) -> tuple[list[str], str | None]:
-        """``show`` attachments of an item whose body could not be read (PRD 12.10).
+        """``show`` attachments of an item whose body could not be read.
 
         Names cannot be read without the item: ``[]``, with
         ``W_ATTACHMENTS_UNAVAILABLE`` only when ``has_attachments`` is true and the
@@ -1086,7 +1084,7 @@ class OutlookBackend(MailBackend):
 
     @staticmethod
     def parse_uid(raw: Any) -> str:
-        """Validate the ``show`` uid of Outlook: an uppercase hex EntryID (PRD 12.4).
+        """Validate the ``show`` uid of Outlook: an uppercase hex EntryID.
 
         Pure and offline: ``cli`` calls it before it creates the home, reads the
         config or connects to Outlook.
@@ -1103,7 +1101,7 @@ class OutlookBackend(MailBackend):
 
     @staticmethod
     def parse_native_id(native_id: str) -> str:
-        """Validate the native part of a prefixed uid: an uppercase hex EntryID (C1, RF-40).
+        """Validate the native part of a prefixed uid: an uppercase hex EntryID.
 
         Pure and offline. The core splits ``"<driver>:<native_id>"`` at the first
         ``:`` and hands only ``native_id`` to the adapter.
@@ -1120,11 +1118,11 @@ class OutlookBackend(MailBackend):
     def doctor_checks(self) -> list[dict[str, Any]]:
         """``pywin32``, ``outlook``, ``stores``, ``readonly_strategy``, ``object_model_guard``.
 
-        Returned in the order of PRD 12.8; evaluated in the order of D-03: the
+        Returned in :data:`DOCTOR_CHECKS` order; evaluated in this order: the
         checks that never call Outlook first (``pywin32``, ``object_model_guard``),
         then ``outlook``, ``readonly_strategy`` (no COM call) and ``stores``.
         A check whose direct dependency failed is ``not evaluated: <dependency>
-        failed`` (annex B.8). Outlook is never launched. The progress is kept so
+        failed``. Outlook is never launched. The progress is kept so
         that a COM timeout can complete the report (:meth:`bind_doctor_timeout`).
         """
         self._doctor_done = {}
@@ -1142,10 +1140,10 @@ class OutlookBackend(MailBackend):
     def bind_doctor_timeout(
         self, finish: Callable[[list[dict[str, Any]] | None, str], None]
     ) -> None:
-        """D-03 in ``doctor``: on a COM timeout the watchdog calls ``finish``.
+        """COM timeout in ``doctor``: the watchdog calls ``finish``.
 
-        ``finish(backend_checks, detail)`` gets the backend checks completed per
-        PRD 12.8 (the running check ``ok=false`` with ``detail``, its dependents
+        ``finish(backend_checks, detail)`` gets the backend checks completed
+        (the running check ``ok=false`` with ``detail``, its dependents
         ``not evaluated``), or ``None`` when no backend check was running (the
         timeout hit the CLI's ``config`` resolution); it must write the report
         and end the process with exit 0.
@@ -1174,7 +1172,7 @@ class OutlookBackend(MailBackend):
         return None if done is not None and done["ok"] else dependency
 
     def _doctor_interrupted(self) -> list[dict[str, Any]] | None:
-        """The backend checks after a timeout in the running one (PRD 12.8), or ``None``."""
+        """The backend checks after a timeout in the running one, or ``None``."""
         running = self._doctor_running
         if running is None:
             return None
@@ -1198,7 +1196,7 @@ class OutlookBackend(MailBackend):
         return app_home() / "tmp" / "gen_py"
 
     def _check_pywin32(self) -> tuple[bool, str]:
-        """pywin32 importable by this interpreter (fixed by the ``pywin32`` seam, plan 4.2)."""
+        """pywin32 importable by this interpreter (fixed by the ``pywin32`` seam)."""
         if self._pywin32 is False:
             raise outlook_com.dependency_missing()
         if self._pywin32 is None and self._outlook_app is None:
@@ -1206,7 +1204,7 @@ class OutlookBackend(MailBackend):
         return True, "win32com importable"
 
     def _check_outlook(self) -> tuple[bool, str]:
-        """Registered, >= 16.0, running and reachable; only ``GetActiveObject`` (PRD 12.6)."""
+        """Registered, >= 16.0, running and reachable; only ``GetActiveObject``."""
         version = self._app().Version
         return True, f"classic Outlook {version} running (attached with GetActiveObject)"
 
@@ -1225,7 +1223,7 @@ class OutlookBackend(MailBackend):
         )
 
     def _check_stores(self) -> tuple[bool, str]:
-        """Candidate stores (label and type) and excluded ones (label, path, reason; RF-34)."""
+        """Candidate stores (label and type) and excluded ones (label, path, reason)."""
         stores = self._profile()
         candidates = [f"{info.label} [{info.kind}]" for info in stores if info.reason is None]
         excluded = [
@@ -1239,7 +1237,7 @@ class OutlookBackend(MailBackend):
         )
 
     def _check_object_model_guard(self) -> tuple[bool, str]:
-        """Annex B.6: a deciding policy, else an active antivirus (SecurityCenter2)."""
+        """A deciding Object Model Guard policy, else an active antivirus (SecurityCenter2)."""
         registry = self._registry if self._registry is not None else outlook_com.WinRegistry()
         policy = outlook_com.oom_policy(registry)
         if policy is not None:
@@ -1288,7 +1286,7 @@ class OutlookBackend(MailBackend):
 
 
 # --------------------------------------------------------------------------- #
-# Store classification (annex B.3; W3 design note section 3)
+# Store classification
 # --------------------------------------------------------------------------- #
 
 
@@ -1296,7 +1294,7 @@ def _delivery_accounts(session: outlook_com.ReadOnlyCom) -> dict[str, tuple[int,
     """``StoreID`` of each account's delivery store -> ``(AccountType, SmtpAddress)``.
 
     Candidates are identified through ``Account.DeliveryStore`` and not through
-    ``ExchangeStoreType`` (annex B.11: a second account's mailbox has type 4).
+    ``ExchangeStoreType`` (a second account's mailbox has type 4).
     An account whose delivery store cannot be read is skipped: that store is
     classified ``unavailable`` on its own. With two accounts delivering to the
     same store, the first one names it.
@@ -1364,7 +1362,7 @@ def _classify_store(
 def _classify_delivery_store(
     info: StoreInfo, store: outlook_com.ReadOnlyCom, account: tuple[int, str], file_path: str
 ) -> None:
-    """Delivery store of an account: labelled ``<type> (<smtp>)`` (annex B.3)."""
+    """Delivery store of an account: labelled ``<type> (<smtp>)``."""
     account_type, smtp = account
     kind = ACCOUNT_KINDS.get(account_type, ACCOUNT_KINDS[OL_OTHER_ACCOUNT])
     info.label = f"{kind} ({smtp})"
@@ -1406,7 +1404,7 @@ def _classify_other_store(info: StoreInfo, name: str, store_type: int, file_path
 
 
 # --------------------------------------------------------------------------- #
-# Folders (annex B.3, B.4; W3 design note section 4)
+# Folders
 # --------------------------------------------------------------------------- #
 
 
@@ -1502,7 +1500,7 @@ def _count_int(value: Any) -> int | None:
 
 
 def _count_searchable(folder: outlook_com.ReadOnlyCom) -> tuple[int, int]:
-    """``(total, unread)`` of the searchable items of a folder (annex B.4); no item opened.
+    """``(total, unread)`` of the searchable items of a folder; no item opened.
 
     The folder's own counters (``PR_CONTENT_COUNT``/``PR_CONTENT_UNREAD``, one
     read each; equal to the rows of its item table and their unread ones,
@@ -1546,7 +1544,7 @@ def _tally_rows(folder: outlook_com.ReadOnlyCom, filter_text: str) -> tuple[int,
 
 
 # --------------------------------------------------------------------------- #
-# Items (annex B.4; W3 design note sections 5 and 6)
+# Items
 # --------------------------------------------------------------------------- #
 
 #: ``_open_item`` result for an item that exists but cannot be opened.
@@ -1578,7 +1576,7 @@ def _table_rows(
 
 
 def _is_searchable(message_class: Any, props: dict[str, Any]) -> bool:
-    """Searchable class (mail or meeting) and not marked deleted by IMAP (annex B.4)."""
+    """Searchable class (mail or meeting) and not marked deleted by IMAP."""
     return is_searchable_class(message_class) and not (
         _as_int(props.get(PR_MSG_STATUS)) & MSGSTATUS_DELMARKED
     )
@@ -1596,7 +1594,7 @@ def _text(value: Any) -> str:
 
 
 def _smtp_address(smtp: Any, email: Any, addrtype: Any) -> str:
-    """The SMTP address an item carries; never an Exchange DN (annex B.4).
+    """The SMTP address an item carries; never an Exchange DN.
 
     ``PR_*_SMTP_ADDRESS`` first; else ``PR_*_EMAIL_ADDRESS`` only when the
     address type is ``SMTP``; else ``""``.
@@ -1644,7 +1642,7 @@ def _visible_attachment_names(item: outlook_com.ReadOnlyCom) -> list[str]:
 
 
 def _attachment_unreadable_error(message: str, hint: str) -> MailqueryError:
-    """``E_ATTACHMENT_UNREADABLE`` of the C8/C9 message-level signal (§11.7)."""
+    """``E_ATTACHMENT_UNREADABLE``: the message-level attachment signal."""
     return MailqueryError(
         "E_ATTACHMENT_UNREADABLE", message, hint, "the attachment is S/MIME or unreadable"
     )
@@ -1653,7 +1651,7 @@ def _attachment_unreadable_error(message: str, hint: str) -> MailqueryError:
 def _attachment_unavailable_error(
     reason: str, message: str, hint: str
 ) -> MailqueryError:
-    """``E_ATTACHMENT_UNAVAILABLE`` of one attachment reason (§11.7, AC-15)."""
+    """``E_ATTACHMENT_UNAVAILABLE`` of one attachment reason."""
     return MailqueryError(
         "E_ATTACHMENT_UNAVAILABLE",
         message,
@@ -1672,7 +1670,7 @@ def _visible_attachments(item: outlook_com.ReadOnlyCom) -> list[Any]:
 
     The OOM index is only used to enumerate the collection: the reported
     ``index`` is the 1-based position of the visible list (shared by ``show``
-    and ``attachment``), as the core contract requires (C1).
+    and ``attachment``), as the core contract requires.
     """
     attachments = item.Attachments
     visible: list[Any] = []
@@ -1685,14 +1683,14 @@ def _visible_attachments(item: outlook_com.ReadOnlyCom) -> list[Any]:
 
 
 def _attachment_unavailable_reason(attachment: Any) -> str | None:
-    """Local availability of one attachment from its ``OlAttachmentType`` (M10).
+    """Local availability of one attachment from its ``OlAttachmentType``.
 
     A by-value attachment is a copy of the file stored in the item (local). The
     other types are not content of the message: a by-reference attachment points
     to a file outside the store and would have to be fetched from its origin
     (``not_downloaded``); an embedded message or an OLE object is not a
     recoverable file (``unsupported``). When the type cannot be read without
-    downloading, the safest §11.7 reason is ``not_downloaded``.
+    downloading, the safest reason is ``not_downloaded``.
     """
     try:
         attachment_type = int(attachment.Type)
@@ -1711,7 +1709,7 @@ def _attachment_size(attachment: Any) -> int | None:
     ``Attachment.Size`` (``PR_ATTACH_SIZE``) includes the MAPI property overhead,
     so it is an upper-bound estimate of the decoded bytes, never their exact
     count. The core only uses it for the limits checked before extraction; cache
-    hits are verified against the per-message manifest (CR-01).
+    hits are verified against the per-message manifest.
     """
     try:
         size = int(attachment.Size)
@@ -1758,14 +1756,14 @@ def _create_staging_file(session: Path) -> Path:
 def _materialize(
     attachment: Any, path: Path, session: Path
 ) -> None:
-    """``Attachment.SaveAsFile`` into ``path`` and the D12 path validation.
+    """``Attachment.SaveAsFile`` into ``path`` and the staging path validation.
 
-    The only writing operation of the read-only COM proxy (M10 COM exception,
-    PRD-v2.1 §0.2/§15). A COM failure that meant "not in the local store" is
+    The only writing operation of the read-only COM proxy (COM exception for
+    attachments). A COM failure that meant "not in the local store" is
     ``E_ATTACHMENT_UNAVAILABLE``/``not_downloaded``; any other failure is
     ``E_ATTACHMENT_UNREADABLE``/``corrupt``. The materialized path must be a
     regular file inside the staging session: a symlink, a directory or a path
-    outside the session is ``E_ATTACHMENT_UNAVAILABLE``/``unsupported`` (D12),
+    outside the session is ``E_ATTACHMENT_UNAVAILABLE``/``unsupported``,
     before the bytes are read.
     """
     try:
@@ -1803,7 +1801,7 @@ def _unlink_quietly(path: Path) -> None:
 
 
 def _item_text(item: outlook_com.ReadOnlyCom) -> tuple[str, list[str]]:
-    """Plain ``Body``; if empty, ``HTMLBody`` converted with the common code (annex B.4).
+    """Plain ``Body``; if empty, ``HTMLBody`` converted with the common code.
 
     A MeetingItem has no ``HTMLBody`` (``AttributeError`` under dynamic
     dispatch, verified on the host): it counts as no HTML. HTML that yields no
@@ -1858,7 +1856,7 @@ def _body(
     attachments: list[dict[str, str]],
     warnings: list[str],
 ) -> BodyRow:
-    """A ``load_body`` result: ``partial`` always false, no ``.emlx`` (PRD 12.5)."""
+    """A ``load_body`` result: ``partial`` always false, no ``.emlx``."""
     return {
         "available": available,
         "readable": readable,
@@ -1877,7 +1875,7 @@ def _unavailable_body(warning: str) -> BodyRow:
 
 
 def _smime_body(message_class: Any) -> BodyRow:
-    """S/MIME item: ``true/false/false`` without reading any content (annex B.2 point 5)."""
+    """S/MIME item: ``true/false/false`` without reading any content."""
     signed = "signed" in _text(message_class).casefold()
     return _body(
         True, False, {}, "", [], [SMIME_SIGNED_WARNING if signed else SMIME_ENCRYPTED_WARNING]
@@ -1889,7 +1887,7 @@ def _unopenable_warning(uid: str) -> str:
 
 
 def _utc_epoch(value: Any) -> int | None:
-    """Unix seconds of a MAPI time property, whose wall clock is UTC (P-5)."""
+    """Unix seconds of a MAPI time property, whose wall clock is UTC."""
     if not isinstance(value, datetime):
         return None
     try:
@@ -1910,9 +1908,9 @@ def _dasl_time(epoch: float, margin: timedelta) -> str | None:
 
 
 def _date_filter(since: float | None, until: float | None) -> str:
-    """DASL pre-filter on the delivery time, at minute granularity and widened (P-7).
+    """DASL pre-filter on the delivery time, at minute granularity and widened.
 
-    DASL compares in UTC (verified on the host, design note). ``""`` without
+    DASL compares in UTC (verified on the host). ``""`` without
     dates; a bound outside the MAPI date range is simply not pre-filtered.
     """
     clauses: list[str] = []

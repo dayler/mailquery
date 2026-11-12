@@ -2,7 +2,7 @@
 
 ``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a0),
 not yet released: the tests derive every expected version from the package
-instead of pinning a literal (M11-T01, milestone PKG-02; plan D15/D17).
+instead of pinning a literal (PKG-02).
 """
 
 import importlib.metadata

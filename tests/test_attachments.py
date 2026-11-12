@@ -1,12 +1,12 @@
-"""UT-ATT-01..05: attachment blocking, sanitization and cache paths (M06).
+"""UT-ATT-01..05: attachment blocking, sanitization and cache paths.
 
-Pure-core tests for the attachment milestone: the dangerous-extension catalog,
-the name rules (§10.3.1 point 1), the magic-byte rules (§10.3.1 point 2), the
-whole-message screening order, the deterministic ``sanitized_name`` (§10.3.3),
+Pure-core tests for the attachment policy: the dangerous-extension catalog,
+the name rules (PRD §10.3.1 point 1), the magic-byte rules (PRD §10.3.1 point 2), the
+whole-message screening order, the deterministic ``sanitized_name`` (PRD §10.3.3),
 the cache path and the availability reasons (AC-09/AC-10/AC-11/AC-15).
 
-Nothing here writes files or opens cached paths: the milestone delivers the
-policy that M07 (cache/staging) and M08 (``show``/``attachment``) consume.
+Nothing here writes files or opens cached paths: these tests cover the
+policy that the cache/staging engine and ``show``/``attachment`` consume.
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def _screen_message(
     requested: list[int] | None,
     streams: dict[int, bytes],
 ) -> "object":
-    """Model the M07 order names -> content (limits live between them in M07)."""
+    """Model the engine order names -> content (limits live between them in the engine)."""
 
     def open_stream(index: int):
         return [streams[index]]
@@ -134,10 +134,10 @@ def _screen_message(
 
 
 class AttachmentNameBlockingTests(unittest.TestCase):
-    """UT-ATT-01: name blocking (§10.3.1 point 1, §10.3.2, AC-10)."""
+    """UT-ATT-01: name blocking (PRD §10.3.1 point 1, §10.3.2, AC-10)."""
 
     def test_ut_att_01_01_catalog_blocks_every_extension_by_category(self) -> None:
-        """UT-ATT-01.01: every §10.3.2 extension blocks, per category."""
+        """UT-ATT-01.01: every PRD §10.3.2 extension blocks, per category."""
         self.assertEqual(set(CATALOG), set(samples.EXPECTED_CATALOG))
         expected_all: set[str] = set()
         for category, extensions in samples.EXPECTED_CATALOG.items():
@@ -219,7 +219,7 @@ class AttachmentNameBlockingTests(unittest.TestCase):
         self.assertEqual(decision.normalized_name, single_pass)
 
     def test_ut_att_01_07_safe_names_are_allowed(self) -> None:
-        """UT-ATT-01.07: the §10.3.2/§10.3.3 allowed examples pass the name screen."""
+        """UT-ATT-01.07: the PRD §10.3.2/§10.3.3 allowed examples pass the name screen."""
         for name in samples.SAFE_NAMES:
             with self.subTest(name=name):
                 decision = classify_name(name)
@@ -266,7 +266,7 @@ class AttachmentNameBlockingTests(unittest.TestCase):
 
 
 class AttachmentContentBlockingTests(unittest.TestCase):
-    """UT-ATT-02: magic-byte blocking (§10.3.1 point 2, AC-10)."""
+    """UT-ATT-02: magic-byte blocking (PRD §10.3.1 point 2, AC-10)."""
 
     def test_ut_att_02_01_magic_bytes_of_executables_block(self) -> None:
         """UT-ATT-02.01: MZ, ELF, the four Mach-O variants, universal and ``#!`` block."""
@@ -359,7 +359,7 @@ class AttachmentContentBlockingTests(unittest.TestCase):
 
 
 class AttachmentMessageScreeningTests(unittest.TestCase):
-    """UT-ATT-03: whole-message screening (§10.3.1, RF-48, AC-09)."""
+    """UT-ATT-03: whole-message screening (PRD §10.3.1, RF-48, AC-09)."""
 
     def test_ut_att_03_01_hostile_name_blocks_whole_message(self) -> None:
         """UT-ATT-03.01: safe or hostile ``--index`` and ``--all`` all block."""
@@ -509,10 +509,10 @@ class AttachmentMessageScreeningTests(unittest.TestCase):
 
 
 class AttachmentSanitizeAndPathTests(unittest.TestCase):
-    """UT-ATT-04: ``sanitized_name`` and cache path (§10.3.3, AC-11)."""
+    """UT-ATT-04: ``sanitized_name`` and cache path (PRD §10.3.3, AC-11)."""
 
     def test_ut_att_04_01_normative_examples(self) -> None:
-        """UT-ATT-04.01: `` invoice.pdf `` => 01_invoice.pdf; the §10.3.3 examples."""
+        """UT-ATT-04.01: `` invoice.pdf `` => 01_invoice.pdf; the PRD §10.3.3 examples."""
         for original, index, expected in samples.SANITIZE_CASES:
             with self.subTest(original=original, index=index):
                 self.assertEqual(sanitize_name(original, index), expected)
@@ -611,7 +611,7 @@ class AttachmentSanitizeAndPathTests(unittest.TestCase):
             self.assertNotIn(".", identifier)
             self.assertNotIn(" ", identifier)
 
-            # Windows uses the conservative 240-byte path budget (D9).
+            # Windows uses the conservative 240-byte path budget.
             windows_home = Path("/tmp") / ("h" * 170)
             self.assertGreater(
                 len(str(windows_home / "attachments" / "apple_mail" / "83143").encode("utf-8"))
@@ -642,7 +642,7 @@ class AttachmentSanitizeAndPathTests(unittest.TestCase):
                 attachment_path(short_home, "apple_mail:83143", "01_invoice.pdf").parent.name,
                 "83143",
             )
-            # A POSIX path over the real PATH_MAX also falls back (D9).
+            # A POSIX path over the real PATH_MAX also falls back.
             deep_home = Path(tmp) / "/".join(["a" * 200] * 20)
             self.assertEqual(
                 message_dir(deep_home, "apple_mail:83143").name,
@@ -670,7 +670,7 @@ class AttachmentSanitizeAndPathTests(unittest.TestCase):
 
 
 class AttachmentAvailabilityTests(unittest.TestCase):
-    """UT-ATT-05: availability and stream errors (§11.3 rows 8/14, AC-15)."""
+    """UT-ATT-05: availability and stream errors (PRD §12.11 rows 8/14, AC-15)."""
 
     def test_ut_att_05_01_unavailable_reasons_map_to_unavailable(self) -> None:
         """UT-ATT-05.01: ``not_local``/``not_downloaded``/``unsupported``/``network``."""
@@ -757,15 +757,15 @@ class AttachmentAvailabilityTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# M07 engine helpers: temporary application homes, cache seeding and asserts.
+# Attachment engine helpers: temporary application homes, cache seeding and asserts.
 # ---------------------------------------------------------------------------
 
-#: One MiB as fixed by §13.3 (1 MB = 1.048.576 bytes).
+#: One MiB as fixed by PRD §15.6 (1 MB = 1.048.576 bytes).
 MIB = 1_048_576
 
 
 class FakeClock:
-    """Injectable monotonic clock for the M07 ``deadline`` tests."""
+    """Injectable monotonic clock for the engine ``deadline`` tests."""
 
     def __init__(self, now: float = 0.0) -> None:
         self.now = now
@@ -906,7 +906,7 @@ def _assert_no_staging(test: unittest.TestCase, home: Path) -> None:
 
 
 class AttachmentLimitTests(unittest.TestCase):
-    """UT-ATT-06: ``[attachments]`` limits (AC-13, RF-49, §11.3 row 12)."""
+    """UT-ATT-06: ``[attachments]`` limits (AC-13, RF-49, PRD §12.11 row 12)."""
 
     def test_ut_att_06_01_boundary_is_strictly_greater_in_mib(self) -> None:
         """UT-ATT-06.01 B: the exact limit passes; one byte more exceeds ."""
@@ -1045,7 +1045,7 @@ class AttachmentLimitTests(unittest.TestCase):
             _assert_no_staging(self, home)
 
     def test_ut_att_06_06_limit_messages_and_hints(self) -> None:
-        """UT-ATT-06.06 P: the §11.3 templates include limit, index and name."""
+        """UT-ATT-06.06 P: the PRD §12.11 templates include limit, index and name."""
         cases = (
             (
                 "file",
@@ -1094,7 +1094,7 @@ class AttachmentLimitTests(unittest.TestCase):
                 self.assertEqual("--index" in error.hint, wants_index_hint)
 
     def test_ut_att_06_07_blocked_name_precedes_known_size_limit(self) -> None:
-        """UT-ATT-06.07 N: names are evaluated before limits (§11.3 rows 11-12)."""
+        """UT-ATT-06.07 N: names are evaluated before limits (PRD §12.11 rows 11-12)."""
         with tempfile.TemporaryDirectory(prefix="mailquery-m07-") as tmp:
             home = _new_home(tmp)
             driver = FakeAttachmentDriver(

@@ -1,12 +1,12 @@
-"""Name and content blocking rules (M06, C6).
+"""Name and content blocking rules.
 
 Pure predicates that turn one attachment name or one decoded byte block into a
-decision; they never raise a user-facing error themselves (the engine in M07
+decision; they never raise a user-facing error themselves (the engine
 maps the decision to ``E_ATTACHMENT_BLOCKED``). Name rules run on the raw form
 (control characters) and on the once-NFKC-normalized form (separators, ``..``
 segments, drive prefix, NTFS ADS, chained dangerous extensions, Windows
 reserved roots). Content rules are a non-recursive blocklist over the first
-:data:`CONTENT_INSPECTION_BYTES` decoded bytes at offset 0 (§10.3.1 point 2).
+:data:`CONTENT_INSPECTION_BYTES` decoded bytes at offset 0.
 """
 
 from __future__ import annotations
@@ -34,11 +34,11 @@ REASON_DANGEROUS_EXTENSION: Final[str] = "dangerous_extension"
 REASON_RESERVED_NAME: Final[str] = "reserved_name"
 REASON_EXECUTABLE_CONTENT: Final[str] = "executable_content"
 
-#: Message fragments owned by the core (§11.5 examples C and D).
+#: Message fragments owned by the core.
 NAME_BLOCK_DETAIL: Final[str] = "has a dangerous filename pattern"
 CONTENT_BLOCK_DETAIL: Final[str] = "has executable content"
 
-#: Magic bytes of §10.3.1 point 2, only at offset 0. ``macho`` covers the four
+#: Magic bytes checked only at offset 0. ``macho`` covers the four
 #: 32/64-bit byte orders and ``universal`` the fat header; ``#!`` is a script.
 MAGIC_SIGNATURES: Final[tuple[tuple[str, bytes], ...]] = (
     ("mz", b"MZ"),
@@ -57,7 +57,7 @@ _DRIVE_PREFIX: Final[re.Pattern[str]] = re.compile(r"[A-Za-z]:")
 
 @dataclass(frozen=True, slots=True)
 class NameDecision:
-    """Outcome of the name rules for one attachment (C6).
+    """Outcome of the name rules for one attachment.
 
     ``reason`` is one of the ``REASON_*`` constants, ``normalized_name`` is the
     single NFKC pass used by the rule (the raw form is used for controls) and
@@ -74,7 +74,7 @@ class NameDecision:
 
 @dataclass(frozen=True, slots=True)
 class ContentDecision:
-    """Outcome of the magic-byte rules for one decoded first block (C6)."""
+    """Outcome of the magic-byte rules for one decoded first block."""
 
     blocked: bool
     reason: str | None = None
@@ -97,7 +97,7 @@ def _final_extension(value: str) -> str | None:
 
 
 def classify_name(original_name: str) -> NameDecision:
-    """Apply the §10.3.1 point 1 name rules and return the decision.
+    """Apply the attachment name rules and return the decision.
 
     The raw form is checked for controls (``Cc``/``Cf``/``Cs``/``Co``, including
     RLO ``\\u202e``) and the once-NFKC-normalized form for separators, ``..``
@@ -171,7 +171,7 @@ def classify_name(original_name: str) -> NameDecision:
 
 
 def classify_content(first_block: bytes) -> ContentDecision:
-    """Apply the §10.3.1 point 2 magic-byte rules to the first decoded block.
+    """Apply the magic-byte rules to the first decoded block.
 
     Only a signature at offset 0 counts; the block is truncated defensively to
     :data:`CONTENT_INSPECTION_BYTES` bytes and never inspected recursively. A

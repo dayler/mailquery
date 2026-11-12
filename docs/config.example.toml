@@ -1,5 +1,5 @@
 # ============================================================================
-# mailquery — example configuration (version 3.0.0 of PRD-v2.1, not yet
+# mailquery — example configuration (version 3.0.0 of the PRD, not yet
 # released, macOS and Windows)
 #
 # The installers (`scripts/install.sh` or `scripts/install.ps1`) copy this file
@@ -38,7 +38,7 @@
 # default_limit = 100            # 1..500
 # lookback = "10min"             # 1min..1d
 
-# --- Local attachment recovery (PRD-v2.1; future, not-yet-released 3.0.0) ---
+# --- Local attachment recovery (PRD §6.6 and §15.1; not-yet-released 3.0.0) ---
 # Limits of `mailquery attachment`; `show` is not affected by `enabled`.
 # Recovered files go to ~/.mailquery/attachments/<driver>/<native_id>/ with
 # directories 0700 and files 0600 on POSIX; the whole message is blocked when

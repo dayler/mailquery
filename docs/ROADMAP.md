@@ -101,7 +101,7 @@ soportan Outlook nuevo (`olk.exe`).
 - Es CLI, no MCP: para hosts que solo hablan MCP requiere un envoltorio.
 - Depende de internos no documentados (esquema del Envelope Index, Object
   Model Guard de Outlook).
-- No descarga adjuntos, solo lista nombres.
+- ~~No descarga adjuntos, solo lista nombres.~~
 - Un autor, sin publicar en PyPI.
 
 ## 4. Diseño objetivo
@@ -131,19 +131,19 @@ un adaptador y por backends instalables.
 | Agregar | Adaptador MCP por stdio sobre el mismo núcleo, ~5 herramientas | Entrar en Claude Desktop y Cursor sin perder la CLI |
 | Agregar | Backend Thunderbird (mbox/maildir) | Linux pasa de "solo CI" a soportado sin tocar la invariante |
 | Agregar | `--fields` para elegir campos del JSON | Reduce tokens de salida, que es donde realmente se gasta |
-| Agregar | Descarga de adjuntos (ver §6) | Carencia más citada frente a los MCP servers |
+| ~~Agregar~~ | ~~Descarga de adjuntos (ver §6)~~ | ~~Carencia más citada frente a los MCP servers~~ |
 | Cambiar | Publicar en PyPI (`pipx install mailquery`) | Hoy exige clonar; el nombre está libre |
-| Cambiar | `search --text` sobre un índice local opcional (SQLite FTS) | Evita `E_UNBOUNDED_SCAN` en la mayoría de casos |
+| ~~Cambiar~~ | ~~`search --text` sobre un índice local opcional (SQLite FTS)~~ | ~~Evita `E_UNBOUNDED_SCAN` en la mayoría de casos~~ |
 | Quitar | `scripts/install.sh` e `install.ps1` | Con PyPI sobran; la siembra del config pasa a `doctor --init` |
 | Quitar | `README.es.md` como copia paralela | Dos READMEs se desincronizan; inglés canónico y enlace a docs en español |
 
 ## 5. Plugins de backend
 
-Decisión: los backends de red (y cualquier backend futuro de terceros) se
+~~Decisión: los backends de red (y cualquier backend futuro de terceros) se
 distribuyen como paquetes separados que se instalan junto al núcleo. El núcleo
 sigue sin dependencias de red ni `msal`; "sin red" pasa de frase del README a
 hecho verificable: si no está instalado el plugin, no hay código que abra un
-socket. Instalar el plugin es el consentimiento explícito del usuario.
+socket. Instalar el plugin es el consentimiento explícito del usuario.~~
 
 Primer plugin previsto: `mailquery-graph`, que lee Exchange Online por
 Microsoft Graph (ver §8). Se llama así y no `mailquery-outlookgraph` porque no
@@ -152,25 +152,25 @@ móvil o sin cliente.
 
 ### Contrato que el núcleo debe formalizar
 
-1. **Interfaz de backend explícita.** Un `Protocol` con las cuatro operaciones
+1. ~~**Interfaz de backend explícita.** Un `Protocol` con las cuatro operaciones
    (`mailboxes`, `search`, `show`, `new`) y una declaración de capacidades:
    `network: bool`, `readonly: "structural" | "promise"`, `body_local: bool`.
    `doctor` la muestra y el JSON la expone en un campo `backend`, para que el
-   harness sepa con qué está hablando.
-2. **Descubrimiento por entry points.** El plugin declara
+   harness sepa con qué está hablando.~~
+2. ~~**Descubrimiento por entry points.** El plugin declara
    `[project.entry-points."mailquery.backends"]`; el núcleo lo encuentra con
    `importlib.metadata`. Los dos backends internos se registran por la misma
-   vía para que el mecanismo se ejercite a diario.
-3. **Versión de la interfaz.** `PLUGIN_API = 1` en el núcleo; el plugin declara
-   la que implementa; si no coincide, `doctor` lo marca y el backend no carga.
-4. **Instalación con pipx.** `pipx inject mailquery mailquery-graph`.
-   Documentarlo: `pipx install` del plugin a secas crea un venv aparte.
-5. **Config con espacio de nombres.** Sección propia por plugin, por ejemplo
+   vía para que el mecanismo se ejercite a diario.~~
+3. ~~**Versión de la interfaz.** `PLUGIN_API = 1` en el núcleo; el plugin declara
+   la que implementa; si no coincide, `doctor` lo marca y el backend no carga.~~
+4. ~~**Instalación con pipx.** `pipx inject mailquery mailquery-graph`.
+   Documentarlo: `pipx install` del plugin a secas crea un venv aparte.~~
+5. ~~**Config con espacio de nombres.** Sección propia por plugin, por ejemplo
    `[backend.graph]`, aceptada si el plugin está cargado y rechazada con
-   `E_CONFIG_INVALID` si no.
-6. **Invariantes por backend en el README.** La tabla de requisitos pasa de ser
+   `E_CONFIG_INVALID` si no.~~
+6. ~~**Invariantes por backend en el README.** La tabla de requisitos pasa de ser
    por plataforma a ser por backend; la fila de Graph dice: red sí, credenciales
-   sí, solo lectura por promesa.
+   sí, solo lectura por promesa.~~
 
 Detalles que encajan sin cambios: `uid` ya es un token opaco (los ids de Graph
 son cadenas largas); el cursor de `new` mapea a las consultas delta de Graph.
@@ -184,11 +184,11 @@ exista.
 Copiar bytes a disco no modifica el buzón; la invariante de solo lectura se
 mantiene. Condiciones:
 
-- Solo con `--out DIR` explícito; nunca a una ruta por defecto.
-- Límite de tamaño y de cantidad por ejecución, con warning si se trunca.
-- Nunca ejecutar ni abrir el fichero. El JSON devuelve ruta, tamaño y hash.
-- En Outlook, un adjunto no descargado localmente se reporta como no
-  disponible; no se fuerza la descarga.
+- ~~Solo con `--out DIR` explícito; nunca a una ruta por defecto.~~
+- ~~Límite de tamaño y de cantidad por ejecución, con warning si se trunca.~~
+- ~~Nunca ejecutar ni abrir el fichero. El JSON devuelve ruta, tamaño y hash.~~
+- ~~En Outlook, un adjunto no descargado localmente se reporta como no
+  disponible; no se fuerza la descarga.~~
 
 ## 7. Escritura (enviar, responder, reenviar): no
 
@@ -225,7 +225,7 @@ No existe una vía soportada para leer Outlook nuevo localmente.
 | IMAP | Protocolo estándar | Misma necesidad de app OAuth y consentimiento que Graph (auth básica desactivada en M365 desde 2022); además suele estar apagado por política de tenant |
 
 Decisión: nada en el núcleo. `doctor` detecta `olk.exe` y lo dice con
-claridad (`E_CLIENT_UNSUPPORTED`). El README explica en tres líneas por qué.
+claridad (`E_CLIENT_UNSUPPORTED`). ~~El README explica en tres líneas por qué.~~
 Outlook clásico tiene soporte oficial hasta al menos 2029 en Microsoft 365.
 
 ### Estado de Graph en un tenant corporativo (2026-11-06)
@@ -271,11 +271,30 @@ requiere la app en Entra ID.
 
 ## 9. Orden sugerido
 
-1. Formalizar la interfaz de backend y el descubrimiento por entry points
-   (§5, puntos 1 a 3).
+1. ~~Formalizar la interfaz de backend y el descubrimiento por entry points
+   (§5, puntos 1 a 3).~~
 2. Publicar en PyPI; retirar los instaladores.
-3. `--fields` y descarga de adjuntos.
+3. `--fields` y ~~descarga de adjuntos~~.
 4. Adaptador MCP por stdio.
 5. Backend Thunderbird.
 6. `mailquery-graph` con cuenta personal; solicitud de consentimiento a IT
    cuando esté terminado.
+
+## 10. Para publicar 3.0.0
+
+Las features de `3.0.0` están en `develop` con la versión `3.0.0a0`, sin tag ni
+merge a `main`. Falta:
+
+1. Subir la versión de `3.0.0a0` a `3.0.0` en `pyproject.toml`,
+   `mailquery.__version__`, los goldens `doctor` y la documentación; reinstalar el
+   paquete y comprobar TC-06, PKG-01, PKG-02 y DOC-03
+   ([`TEST-CATALOG.md`](TEST-CATALOG.md)).
+2. Comprobar con el paquete instalado los entry points de los backends y los
+   instaladores (PKG-02, INS-SMOKE-01).
+3. Correr las SMOKE en los equipos del dueño: SMOKE-INSTALL, SMOKE-NEW y
+   SMOKE-ATT-AM en macOS; SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-OL en Windows con
+   Outlook clásico. La materialización COM de adjuntos nunca se ha verificado en
+   un Windows real.
+4. Decidir si [BUG-01](KNOWN-DEFECTS.md) se corrige antes del release.
+5. CI verde en el pull request a `main` (3 SO × Python 3.11–3.14), tag `v3.0.0` y
+   su corrida de CI como evidencia del release.

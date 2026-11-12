@@ -1,6 +1,6 @@
-"""Prefixed message ``uid`` format (C1): ``"<driver>:<native_id>"``.
+"""Prefixed message ``uid`` format: ``"<driver>:<native_id>"``.
 
-The core owns the format (PRD-v2.1 §6.1 RF-40, §10.2 point 1): every emitted
+The core owns the format: every emitted
 uid is an opaque ``str``; the prefix is split at the **first** ``:`` and only the
 ``<native_id>`` is handed to the driver. The plugin validates its own part with
 ``parse_native_id``; this module validates syntax, the installed-driver check
@@ -8,7 +8,7 @@ and the legacy unprefixed input resolved with the platform's native driver.
 
 Everything here is pure and side-effect free: it is safe to call before the
 application home exists, before ``config.toml`` is read and before the store is
-opened (PRD-v2.1 §11.3 row 2, AC-05).
+opened.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ _UID_HINT = (
 
 @dataclass(frozen=True, slots=True)
 class ParsedUid:
-    """A validated uid split into its driver prefix and native id (RF-40)."""
+    """A validated uid split into its driver prefix and native id."""
 
     driver: str
     native_id: str
@@ -60,7 +60,7 @@ def is_valid_driver(value: object) -> bool:
 
 
 def is_valid_native_id(value: object) -> bool:
-    """Whether ``value`` is a valid native id (RF-40: charset, no leading dot, no ``..``)."""
+    """Whether ``value`` is a valid native id (charset, no leading dot, no ``..``)."""
     if not isinstance(value, str):
         return False
     if NATIVE_ID_PATTERN.fullmatch(value) is None:
@@ -100,7 +100,7 @@ def parse_uid(
     native_driver: str | None = None,
     is_installed: Callable[[str], bool] | None = None,
 ) -> ParsedUid:
-    """Validate a user-supplied uid and return its driver and native id (AC-05).
+    """Validate a user-supplied uid and return its driver and native id.
 
     ``native_driver`` overrides the platform's native driver for the legacy
     unprefixed form (tests and non-standard hosts). ``is_installed`` is the
@@ -122,8 +122,8 @@ def parse_uid(
 def stable_identifier(uid: str) -> str:
     """Stable 32-hex path identifier: first 32 chars of ``SHA-256(uid UTF-8)``.
 
-    M06/M07 use it when ``<native_id>`` or the cache path exceeds the file-system
-    limits (PRD-v2.1 §10.3.3); it is deterministic across platforms.
+    The attachment cache uses it when ``<native_id>`` or the cache path exceeds the file-system
+    limits; it is deterministic across platforms.
     """
     if not isinstance(uid, str) or not uid:
         raise _invalid_uid(uid, "expected a non-empty uid string")
@@ -132,7 +132,7 @@ def stable_identifier(uid: str) -> str:
 
 
 def driver_unknown(driver: str) -> MailqueryError:
-    """``E_DRIVER_UNKNOWN`` (exit 2): the prefix is not an installed driver (RF-35)."""
+    """``E_DRIVER_UNKNOWN`` (exit 2): the prefix is not an installed driver."""
     return MailqueryError(
         "E_DRIVER_UNKNOWN",
         f"unknown driver {driver!r}",

@@ -1,9 +1,9 @@
-"""In-memory attachment backend double for the ``attachment`` command (M08, plan §7.4).
+"""In-memory attachment backend double for the ``attachment`` command.
 
 The double is a duck-typed API 1 backend the CLI can inject through
 ``cli.main(..., backend=...)`` (native path) or through an injected
 :class:`~tests.fakes.plugin.FakeEntryPoint` (declared plugin path). It provides
-the M08 surface with controllable data:
+the attachment surface with controllable data:
 
 * capabilities (``attachments`` ``local``/``remote``/``none``),
 * ordered attachment metadata (index, name, size, ``unavailable_reason``),
@@ -38,7 +38,7 @@ MAILBOX_ID = 1
 NATIVE_UID = 83143
 MESSAGE_ID = "<attachment-83143@fixture.example>"
 
-#: Default ordered attachment metadata (the three attachments of §11.5 example A).
+#: Default ordered attachment metadata (the three attachments of PRD §12.5 example A).
 DEFAULT_ATTACHMENTS: list[dict[str, Any]] = [
     {
         "index": 1,

@@ -1,7 +1,7 @@
-"""UT-UID-01: prefixed uid format, parsing and stable path identifier (M01, AC-05/RF-40).
+"""UT-UID-01: prefixed uid format, parsing and stable path identifier (AC-05/RF-40).
 
 Pure module tests: ``mailquery.uid`` must validate before any home/config/store
-work (PRD-v2.1 §6.1 RF-40, §11.3 row 2, §14 AC-05).
+work (PRD §6.5 RF-40, §12.11 row 2, §20 AC-05).
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ class UidFormatTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-UID-02: prefixed uid in commands (M03, AC-05)
+# UT-UID-02: prefixed uid in commands (AC-05)
 # --------------------------------------------------------------------------- #
 
 

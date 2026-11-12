@@ -243,7 +243,7 @@ _ATTACHMENT_HELP_EXPECTED = "\n".join(
     )
 ) + "\n"
 
-#: Every subcommand of the six-command CLI (M08).
+#: Every subcommand of the six-command CLI.
 ALL_COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
 
 
@@ -265,7 +265,7 @@ class HelpContractTests(_CliTestCase):
         return stdout
 
     def test_ut_atc_09_01_root_help_lists_six_commands_and_exit_line(self) -> None:
-        """UT-ATC-09.01: root --help lists the six commands and the §11.1 exit line."""
+        """UT-ATC-09.01: root --help lists the six commands and the PRD §12.7 exit line."""
         unused_home = self.fx.root / "unused-home"
         code, stdout, stderr = self.run_cli(["--help"], home=unused_home)
         self.assertEqual(code, 0)
@@ -300,7 +300,7 @@ class HelpContractTests(_CliTestCase):
         self.assertFalse(unused_home.exists(), "--help must not touch the filesystem")
 
     def test_ut_atc_09_02_attachment_help_matches_the_prd(self) -> None:
-        """UT-ATC-09.02: ``attachment --help`` is the literal text of PRD-v2.1 §11.4."""
+        """UT-ATC-09.02: ``attachment --help`` is the literal text of PRD §12.7."""
         stdout = self.help_text("attachment")
         self.assertEqual(stdout, _ATTACHMENT_HELP_EXPECTED)
         self.assert_human_readable(stdout)
@@ -645,7 +645,7 @@ class SuccessContractTests(_CliTestCase):
 
 class ErrorContractTests(_CliTestCase):
     def test_ut_cli_09_01_error_codes_map_to_documented_exit_codes(self) -> None:
-        """UT-CLI-09.01: each of the 32 E_* codes of PRD-v2.1 §11.7 maps to its exit code."""
+        """UT-CLI-09.01: each of the 32 E_* codes of PRD §12.6 maps to its exit code."""
         cases = (
             ("E_USAGE", 2),
             ("E_CONFIG_INVALID", 2),
@@ -670,7 +670,7 @@ class ErrorContractTests(_CliTestCase):
             ("E_CLIENT_BUSY", 5),
             ("E_OUTLOOK_NOT_RUNNING", 6),
             ("E_INTERNAL", 1),
-            # PRD-v2.1 §11.7 new codes (M01).
+            # PRD §12.6 new codes.
             ("E_DRIVER_UNKNOWN", 2),
             ("E_ATTACHMENTS_DISABLED", 2),
             ("E_PLUGIN_INCOMPATIBLE", 3),
@@ -855,7 +855,7 @@ class DispatchTests(_CliTestCase):
             exit_code, stdout, _ = self.run_cli(["show", "83143"])
         self.assertEqual(exit_code, 0)
         run_mock.assert_called_once()
-        # run_show(backend, config, uid): B-01 gives it the config.
+        # run_show(backend, config, uid): it receives the config.
         _, call_config, call_uid = run_mock.call_args.args
         self.assertEqual(call_config.home, self.fx.home)
         self.assertEqual(call_uid, 83143)
@@ -912,7 +912,7 @@ class _InjectedBackend(_FakeBackend):
 
 
 class BackendInjectionTests(_CliTestCase):
-    """``main(..., backend=...)``: the CLI obtains, uses and closes the backend (plan 4.2)."""
+    """``main(..., backend=...)``: the CLI obtains, uses and closes the backend."""
 
     def run_injected(self, argv, backend, **kwargs):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -1374,7 +1374,7 @@ class DoctorTests(_CliTestCase):
 
     def test_ut_cli_12_02_unreadable_envelope_index_fails(self) -> None:
         """UT-CLI-12.02: base unreadable (permission, mocked on every OS) => ok=false."""
-        # File modes/ACLs are not reliable across OSes and users (D-07): make the
+        # File modes/ACLs are not reliable across OSes and users: make the
         # open of the base itself fail with a permission error, on every OS.
         with mock.patch("mailquery.store.shutil.copy2", side_effect=PermissionError("denied")):
             payload = self._doctor()
@@ -1448,7 +1448,7 @@ class DoctorTests(_CliTestCase):
         self.assertFalse(by_name["home"]["ok"])
         if sys.platform != "win32":
             # On Windows reading "<file>/config.toml" is "not found", so the
-            # config check legitimately passes there (D-07).
+            # config check legitimately passes there.
             self.assertFalse(by_name["config"]["ok"])
 
     def _home_check(self, home: Path) -> dict:
@@ -1502,7 +1502,7 @@ class DoctorTests(_CliTestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DRV-05 — doctor `driver` check (AC-02, AC-18, PRD-v2.1 §11.6)
+# UT-DRV-05 — doctor `driver` check (AC-02, AC-18, PRD §12.8)
 # --------------------------------------------------------------------------- #
 
 MACOS_DRIVER_ORDER = [
@@ -1814,7 +1814,7 @@ _ERROR_MESSAGE = "carpeta ñandú \U0001f600"
 
 
 class PipeEncodingTests(unittest.TestCase):
-    """Subprocess with pipes, cp1252 and ``PYTHONUTF8=0`` (plan 7.1 isolation)."""
+    """Subprocess with pipes, cp1252 and ``PYTHONUTF8=0`` (isolated home)."""
 
     def setUp(self) -> None:
         self.fx = build_store()
@@ -1873,10 +1873,10 @@ class PipeEncodingTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# M08 — ``attachment`` command and ``show.attachments`` (UT-ATC-01..10)
+# ``attachment`` command and ``show.attachments`` (UT-ATC-01..10)
 # --------------------------------------------------------------------------- #
 
-from mailquery import search as search_module  # noqa: E402  (M08 test section)
+from mailquery import search as search_module  # noqa: E402
 
 _ATTACHMENT_PLUGIN_LABEL = "Fake attachments"
 _ATTACHMENT_CAPABILITIES: dict = {
@@ -2128,7 +2128,7 @@ class AttachmentArgumentTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_02_01_exactly_one_mode_is_required(self) -> None:
-        """UT-ATC-02.01: no mode or both ⇒ E_USAGE with the §11.3 literal text."""
+        """UT-ATC-02.01: no mode or both ⇒ E_USAGE with the PRD §12.11 literal text."""
         for argv in (
             ["attachment", self.UID],
             ["attachment", self.UID, "--index", "1", "--all"],
@@ -2143,7 +2143,7 @@ class AttachmentArgumentTests(AttachmentTestBase):
                 )
 
     def test_ut_atc_02_02_invalid_index_values(self) -> None:
-        """UT-ATC-02.02: ``--index`` 0/-1/abc/1.5 ⇒ the §11.3 literal error."""
+        """UT-ATC-02.02: ``--index`` 0/-1/abc/1.5 ⇒ the PRD §12.11 literal error."""
         for value in ("0", "-1", "abc", "1.5"):
             with self.subTest(value=value):
                 payload = self.assert_error(
@@ -2295,7 +2295,7 @@ class AttachmentArgumentTests(AttachmentTestBase):
         )
 
     def test_ut_atc_02_09_adjacent_row_precedence(self) -> None:
-        """UT-ATC-02.09: §11.3 row order is respected on its adjacent-row boundaries."""
+        """UT-ATC-02.09: PRD §12.11 row order is respected on its adjacent-row boundaries."""
         # Row 10 (index range) before row 11 (name blocking).
         backend = self.attachment_backend(
             attachments=[
@@ -2415,7 +2415,7 @@ class AttachmentValidationTests(AttachmentTestBase):
                 self.assertNotIn("has no attachments", payload["error"]["message"])
 
     def test_ut_atc_03_04_index_out_of_range_text(self) -> None:
-        """UT-ATC-03.04: ``--index N > M`` ⇒ the §11.5 example G message and hint."""
+        """UT-ATC-03.04: ``--index N > M`` ⇒ the PRD §12.5 example G message and hint."""
         backend = self.attachment_backend()
         payload = self.assert_error(
             2,
@@ -2490,7 +2490,7 @@ class AttachmentJsonCacheTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_04_01_exact_json_contract(self) -> None:
-        """UT-ATC-04.01: the §11.2 JSON shape with an absolute output_dir and eight fields."""
+        """UT-ATC-04.01: the PRD §12.11 JSON shape with an absolute output_dir and eight fields."""
         backend = self.attachment_backend()
         code, stdout, _ = self.run_attachment(
             ["attachment", self.UID, "--index", "2"], backend
@@ -2553,7 +2553,7 @@ class AttachmentJsonCacheTests(AttachmentTestBase):
         )
 
     def test_ut_atc_04_03_blocked_message_text_and_no_files(self) -> None:
-        """UT-ATC-04.03: a blocked message ⇒ E_ATTACHMENT_BLOCKED (exit 4) with §11.5 C/D text."""
+        """UT-ATC-04.03: a blocked message ⇒ E_ATTACHMENT_BLOCKED (exit 4) with PRD §12.5 C/D text."""
         backend = self.attachment_backend(
             attachments=[
                 {"index": 1, "name": "factura.pdf", "size_bytes": 8,
@@ -2694,7 +2694,7 @@ class AttachmentReasonTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_06_01_unavailable_reasons(self) -> None:
-        """UT-ATC-06.01: not_local/not_downloaded/unsupported/network ⇒ the §11.7 message/hint."""
+        """UT-ATC-06.01: not_local/not_downloaded/unsupported/network ⇒ the PRD §12.6 message/hint."""
         cases = {
             "not_local": "is not available in the local store",
             "not_downloaded": "is not available in the local store",
@@ -2723,7 +2723,7 @@ class AttachmentReasonTests(AttachmentTestBase):
 
     def test_ut_atc_06_02_unreadable_never_becomes_no_attachments(self) -> None:
         """UT-ATC-06.02: S/MIME/corrupt/unreadable ⇒ E_ATTACHMENT_UNREADABLE, never E_USAGE."""
-        # Message-level signal (convention C8): attachments() raises the protocol error.
+        # Message-level signal: attachments() raises the protocol error.
         backend = self.attachment_backend(
             attachments=[],
             attachments_error=MailqueryError(
@@ -2875,7 +2875,7 @@ class AttachmentLogTests(AttachmentTestBase):
         )
 
     def test_ut_atc_08_04_failure_logs_error_without_end(self) -> None:
-        """UT-ATC-08.04: a failed attachment logs ``event=error`` and no ``event=end`` (D7)."""
+        """UT-ATC-08.04: a failed attachment logs ``event=error`` and no ``event=end``."""
         backend = self.attachment_backend(
             attachments=[
                 {"index": 1, "name": "install.sh", "size_bytes": 4,

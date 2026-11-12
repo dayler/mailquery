@@ -937,7 +937,7 @@ class FixtureScopeResolutionTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# M02 — UT-DRV-01: [scope."<driver>:<cuenta>"] schema (AC-03, RF-36)
+# UT-DRV-01: [scope."<driver>:<cuenta>"] schema (AC-03, RF-36)
 # --------------------------------------------------------------------------- #
 
 
@@ -1062,7 +1062,7 @@ class DriverScopeSchemaTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# M02 — UT-DRV-02: account resolution inside each driver (AC-03, RF-36)
+# UT-DRV-02: account resolution inside each driver (AC-03, RF-36)
 # --------------------------------------------------------------------------- #
 
 
@@ -1142,7 +1142,7 @@ class DriverAccountResolutionTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# M02 — UT-DRV-03: installed-but-not-declared drivers (AC-03, RF-36)
+# UT-DRV-03: installed-but-not-declared drivers (AC-03, RF-36)
 # --------------------------------------------------------------------------- #
 
 
@@ -1188,7 +1188,7 @@ class DriverInScopeTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# M02 — UT-DRV-04: [attachments] table (AC-14, RF-42/49, §13)
+# UT-DRV-04: [attachments] table (AC-14, RF-42/49, PRD §15)
 # --------------------------------------------------------------------------- #
 
 
@@ -1264,7 +1264,7 @@ class AttachmentsConfigTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# M02 — UT-DRV-01/02 against the synthetic store (prefixed fixture config)
+# UT-DRV-01/02 against the synthetic store (prefixed fixture config)
 # --------------------------------------------------------------------------- #
 
 

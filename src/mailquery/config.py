@@ -1,9 +1,9 @@
-"""Configuration loading, validation and scope resolution (PRD 15, PRD-v2.1 §13).
+"""Configuration loading, validation and scope resolution.
 
 Owns the optional ``~/.mailquery/config.toml``: parsing with ``tomllib``,
 strict validation (unknown keys are errors), defaults, the declaration of
-observed accounts (``[scope."<driver>:<cuenta>"]``, RF-36) and the
-``[attachments]`` limits (RF-42/RF-49, AC-14).
+observed accounts (``[scope."<driver>:<account>"]``) and the ``[attachments]``
+limits.
 
 The driver prefix is split at the **first** ``:``: a block without one uses the
 platform's native driver (``apple_mail`` on macOS, ``outlook`` on Windows). The
@@ -43,7 +43,7 @@ DEFAULT_SEARCH_MAX_SCAN = 5000
 DEFAULT_NEW_LIMIT = 100
 DEFAULT_LOOKBACK = "10min"
 
-#: ``[attachments]`` defaults and accepted ranges (PRD-v2.1 §13.1, RF-42/RF-49).
+#: ``[attachments]`` defaults and accepted ranges.
 DEFAULT_ATTACHMENTS_ENABLED = True
 DEFAULT_MAX_FILE_SIZE_MB = 100
 DEFAULT_MAX_TOTAL_SIZE_MB = 200
@@ -72,7 +72,7 @@ MIN_UUID_PREFIX = 8
 # Fixed order used for top-level validation and error hints.
 _TOP_LEVEL_KEYS = ("logging", "search", "new", "attachments", "scope")
 
-#: Built-in drivers: ``[scope]`` accounts of these resolve with PRD.md §15.2 forms.
+#: Built-in drivers: ``[scope]`` accounts of these resolve by label, email or UUID/prefix.
 _INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
 
 _DURATION_RE = re.compile(r"^(\d+)(min|h|d)$")
@@ -110,7 +110,7 @@ class NewConfig:
 
 @dataclass(frozen=True)
 class AttachmentsConfig:
-    """``[attachments]`` table: defaults, limits and the ``enabled`` switch (RF-42/RF-49)."""
+    """``[attachments]`` table: defaults, limits and the ``enabled`` switch."""
 
     enabled: bool = DEFAULT_ATTACHMENTS_ENABLED
     max_file_size_mb: int = DEFAULT_MAX_FILE_SIZE_MB
@@ -170,7 +170,7 @@ class ResolvedScope:
 
 
 def app_home() -> Path:
-    """Return ``~/.mailquery`` (fixed product value, PRD 15.6)."""
+    """Return ``~/.mailquery`` (fixed product value)."""
     return Path.home() / DEFAULT_APP_HOME_DIRNAME
 
 
@@ -424,7 +424,7 @@ def _parse_new(value: Any) -> NewConfig:
 
 
 def _parse_attachments(value: Any) -> AttachmentsConfig:
-    """``[attachments]``: closed schema, defaults and the ranges of PRD-v2.1 §13.1."""
+    """``[attachments]``: closed schema, defaults and accepted ranges."""
     if value is None:
         return AttachmentsConfig()
     table = _as_table(value, "attachments")
@@ -492,10 +492,10 @@ def _parse_scopes(
                 'use a label, a unique email or a UUID, e.g. [scope."iCloud (user@example.com)"]',
                 "invalid account block in config.toml",
             )
-        # RF-36: the key is split at the FIRST ':' into driver and account.
+        # The key is split at the FIRST ':' into driver and account.
         # Without a prefix the block uses the platform's native driver, resolved
         # later by ``resolve_scope``; a label containing ':' must declare the
-        # prefix explicitly (documented limitation).
+        # prefix explicitly.
         driver: str | None = None
         account: str | None = None
         if ":" in account_key:
@@ -572,8 +572,8 @@ def listed_mailboxes(
 
     A backend whose ``total``/``unread`` cost a table scan per folder (Outlook)
     offers ``mailboxes_without_counters()``: the same rows without counting.
-    Only the ``mailboxes`` command needs the counters (PRD 19, annex B.9);
-    other backends answer with ``mailboxes()``. ``account_uuids`` tells that
+    Only the ``mailboxes`` command needs the counters; other backends answer
+    with ``mailboxes()``. ``account_uuids`` tells that
     only the folders of those accounts are used: the hook may then list (and
     read) only those (Outlook walks one store's folder tree per account); other
     backends return every folder, as without it.
@@ -596,18 +596,17 @@ def resolve_scope(
 ) -> list[ResolvedScope]:
     """Resolve declared accounts and their mailbox list, driver by driver.
 
-    ``backend`` is the platform's native backend (the only one the data
-    commands open in this phase) and ``native`` its driver name (defaults to
-    ``backend.driver``); ``drivers`` maps additional declared driver names to
-    their backend instance. Blocks without a prefix resolve against the native
-    driver; a prefixed block resolves inside the ``accounts()`` of its driver:
-    the PRD.md §15.2 forms for the built-in drivers and opaque ``label``/``uuid``
-    for plugins (no UUID-prefix matching).
+    ``backend`` is the platform's native backend and ``native`` its driver name
+    (defaults to ``backend.driver``); ``drivers`` maps additional declared driver
+    names to their backend instance. Blocks without a prefix resolve against the
+    native driver; a prefixed block resolves inside the ``accounts()`` of its
+    driver: label, unique email or UUID/prefix for the built-in drivers and
+    opaque ``label``/``uuid`` for plugins (no UUID-prefix matching).
 
     INBOX is always included first; ``mailbox_list`` entries are additive, and
     blocks that resolve to the same ``(driver, account)`` are merged. A key that
     resolves to an excluded store (Outlook account row with an ``excluded``
-    entry, PRD 15.3) is not read and is left out of the result; its
+    entry) is not read and is left out of the result; its
     ``{label, path, reason}`` entry is appended once to ``excluded`` when the
     caller passes a list (for ``W_STORE_EXCLUDED``).
     Raises E_DRIVER_UNKNOWN (driver backend not available to this call),
@@ -700,7 +699,7 @@ def resolve_scope(
 
 
 def _is_internal_driver(driver: str) -> bool:
-    """Whether the driver is one of the built-in adapters (PRD.md §15.2 forms)."""
+    """Whether the driver is one of the built-in adapters."""
     return driver in _INTERNAL_DRIVERS
 
 
@@ -759,12 +758,12 @@ def _resolve_account(
     *,
     opaque: bool = False,
 ) -> "AccountRow":
-    """Resolve one config key: label -> unique email -> UUID/prefix (PRD 15.2).
+    """Resolve one config key: label -> unique email -> UUID/prefix.
 
-    ``opaque=True`` is the plugin form (RF-36): ``label``/``uuid`` are opaque and
+    ``opaque=True`` is the plugin form: ``label``/``uuid`` are opaque and
     stable identifiers matched exactly (the ``uuid`` prefix of at least 8
     characters is an internal-backend form only). Returns the matched account
-    row; it may be an excluded store (Outlook row with ``excluded``, PRD 15.3),
+    row; it may be an excluded store (Outlook row with ``excluded``),
     which the caller reports instead of reading.
     """
     key_folded = key.casefold()
@@ -808,7 +807,7 @@ def _resolve_account(
         raise _unknown_account(key, entries)
 
     if opaque:
-        # RF-36: plugin identifiers are opaque and stable; match the uuid exactly.
+        # Plugin identifiers are opaque and stable; match the uuid exactly.
         for account in entries:
             if account["uuid"] and account["uuid"].casefold() == key_folded:
                 return account
@@ -901,7 +900,7 @@ def _account_identity(
 def _find_mailbox(
     backend: "MailBackend", account_uuid: str, ref: str
 ) -> "MailboxRow | None":
-    # PRD 15.3: INBOX is always the account inbox, an exact path or URL beats a
+    # INBOX is always the account inbox, an exact path or URL beats a
     # name match and the first name match wins; all of that lives in the backend.
     mailbox = backend.resolve_mailbox(account_uuid, ref)
     if mailbox is not None and mailbox["account_uuid"] == account_uuid:
@@ -915,7 +914,7 @@ def _valid_folders(account_mailboxes: Sequence["MailboxRow"]) -> str:
 
 
 def declared_drivers(config: Config, *, native: str | None = None) -> tuple[str, ...]:
-    """Drivers a ``[scope]`` config declares, in evaluation order (RF-36).
+    """Drivers a ``[scope]`` config declares, in evaluation order.
 
     A block without a prefix declares the platform's native driver
     (``native``, ``apple_mail`` when omitted), listed first; the explicit
@@ -935,7 +934,7 @@ def declared_drivers(config: Config, *, native: str | None = None) -> tuple[str,
 
 
 def driver_in_scope(config: Config, driver: str, *, native: str | None = None) -> bool:
-    """Whether ``driver`` appears in a ``[scope]`` block (M03/M08 dispatch check)."""
+    """Whether ``driver`` appears in a ``[scope]`` block (dispatch check)."""
     return bool(driver) and driver in declared_drivers(config, native=native)
 
 
@@ -945,7 +944,7 @@ def require_driver_in_scope(
     """``E_ACCOUNT_NOT_IN_SCOPE`` (exit 2) for an installed but undeclared driver.
 
     ``show``/``attachment`` call it with the driver of the uid prefix before
-    loading it (RF-36, M03/M08): the hint tells the user to declare an account.
+    loading it: the hint tells the user to declare an account.
     """
     if driver_in_scope(config, driver, native=native):
         return
@@ -963,7 +962,7 @@ def include_mailbox_not_found(
     account_uuids: Sequence[str],
     backend: "MailBackend",
 ) -> MailqueryError:
-    """``E_MAILBOX_NOT_FOUND`` for an ``--include-mailbox`` reference (PRD 15.3).
+    """``E_MAILBOX_NOT_FOUND`` for an ``--include-mailbox`` reference.
 
     The hint lists the folders of every declared account.
     """

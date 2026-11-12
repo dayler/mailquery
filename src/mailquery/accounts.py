@@ -1,4 +1,4 @@
-"""Read-only resolution of visible account labels (PRD 11.3).
+"""Read-only resolution of visible account labels.
 
 Reads ``~/Library/Accounts/Accounts4.sqlite`` in SQLite read-only mode to map a
 Mail account UUID to a human label such as ``iCloud (you@icloud.com)``,
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from mailquery.logging_setup import get_logger
 
-# Column fingerprint required from the Core Data accounts schema (PRD 11.3).
+# Column fingerprint required from the Core Data accounts schema.
 REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "ZACCOUNT": (
         "Z_PK",
@@ -31,7 +31,7 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 # Only identifiers and visible names are selected: no credential, token,
-# password or data-class column is ever queried (PRD 11.3 / invariant I-1).
+# password or data-class column is ever queried.
 _LABEL_QUERY = """
     SELECT
         c.ZIDENTIFIER AS uuid,
@@ -97,7 +97,7 @@ def _is_within(path: Path, parent: Path) -> bool:
 
 
 def _make_private(path: Path) -> None:
-    """Restrict a temporary copy to its owner (0600, RNF-05); best effort."""
+    """Restrict a temporary copy to its owner (0600); best effort."""
     try:
         path.chmod(0o600)
     except OSError:  # pragma: no cover - best effort on foreign filesystems

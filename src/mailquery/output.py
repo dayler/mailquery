@@ -2,8 +2,8 @@
 
 All commands emit exactly one formatted JSON object on ``stdout``. These helpers
 keep serialization deterministic, strip control characters from untrusted
-message content (prompt-injection hygiene, PRD 16.3) and build 200-character
-snippets. ``html_to_text`` is the common HTML to plain text conversion (PRD 9.2).
+message content (prompt-injection hygiene) and build 200-character
+snippets. ``html_to_text`` is the common HTML to plain text conversion.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone, tzinfo
 from html.parser import HTMLParser
 
-# Fixed product values (PRD 15.6).
+# Fixed product values.
 SNIPPET_CHARS = 200
 SHOW_BODY_MAX_CHARS = 20_000
 
@@ -155,7 +155,7 @@ def make_snippet(body_text: str, max_chars: int = SNIPPET_CHARS) -> str:
 
 
 #: Zone of :func:`iso_timestamp`; ``None`` is the system zone. Test seam only: on
-#: Windows there is no ``TZ``/``tzset`` to change it (plan 7.5).
+#: Windows there is no ``TZ``/``tzset`` to change it.
 LOCAL_ZONE: tzinfo | None = None
 
 
@@ -179,7 +179,7 @@ def iso_timestamp(epoch_seconds: float | int | None) -> str | None:
         moment = datetime.fromtimestamp(value, tz=timezone.utc).astimezone(LOCAL_ZONE)
         return moment.isoformat(timespec="seconds")
     except (OverflowError, OSError, ValueError):
-        # Unrepresentable on this platform (for example 1e20): null (PRD 17).
+        # Unrepresentable on this platform (for example 1e20): null.
         return None
 
 
@@ -194,7 +194,7 @@ def dumps_json(payload: dict) -> str:
 
 
 def configure_streams() -> None:
-    """Force UTF-8 and LF on ``stdout``/``stderr`` (RF-32), also when piped on Windows."""
+    """Force UTF-8 and LF on ``stdout``/``stderr``, also when piped on Windows."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

@@ -31,7 +31,7 @@ dependencies = ["pywin32; sys_platform == \"win32\""]
 [project.scripts]
 mailquery = "mailquery.cli:main"
 
-# Backend driver registry (PRD-v2.1 RF-35, C1). External plugins register in the
+# Backend driver registry. External plugins register in the
 # same group; the registry also has a static fallback for development/CI.
 [project.entry-points."mailquery.backends"]
 apple_mail = "mailquery.backends.apple_mail:AppleMailBackend"

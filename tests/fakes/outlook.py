@@ -1,7 +1,7 @@
-"""In-memory fake of the classic Outlook Object Model (plan 7.5, annex B.10).
+"""In-memory fake of the classic Outlook Object Model.
 
 The fake implements **only** the OOM members the Outlook backend uses (the
-read-only whitelist ``OOM_MEMBERS``, fixed by the W3 design note) and stands in
+read-only whitelist ``OOM_MEMBERS``) and stands in
 for ``win32com.client`` as the *connector* passed as ``get_backend(outlook_app=...)``:
 production code calls ``outlook_app.GetActiveObject("Outlook.Application")``
 and wraps the returned Application in its read-only proxy.
@@ -154,7 +154,7 @@ MSGSTATUS_DELMARKED = 0x8
 FLAG_STATUS_COMPLETE = 1
 FLAG_STATUS_FLAGGED = 2
 
-# Registry (plan 4.4, PRD 12.6)
+# Registry (PRD 12.6)
 HKCR = "HKCR"
 HKCU = "HKCU"
 HKLM = "HKLM"
@@ -211,7 +211,7 @@ _BUILTIN_COLUMNS = {
 }
 
 # --------------------------------------------------------------------------- #
-# Read-only whitelist: {kind: {member: returned kind or None}} (W3 design note)
+# Read-only whitelist: {kind: {member: returned kind or None}}
 # --------------------------------------------------------------------------- #
 
 OOM_MEMBERS: dict[str, dict[str, str | None]] = {
@@ -266,7 +266,7 @@ OOM_MEMBERS: dict[str, dict[str, str | None]] = {
         "FileName": None,
         "DisplayName": None,
         "PropertyAccessor": "PropertyAccessor",
-        # M10 COM exception (PRD-v2.1 §0.2): Size/Type are local metadata and
+        # Attachment COM exception (PRD §4): Size/Type are local metadata and
         # SaveAsFile is the single allowed materialization operation.
         "Size": None,
         "Type": None,
@@ -578,7 +578,7 @@ def _comparison(schema: str, op: str, kind: str, literal: str) -> Predicate:
 
         def date_test(item: "ItemSpec") -> bool:
             current = item.mapi(schema)
-            # Outlook ignores seconds in date restrictions (P-7).
+            # Outlook ignores seconds in date restrictions.
             return current is not _MISSING and compare(
                 current.replace(second=0, microsecond=0), moment
             )
@@ -658,7 +658,7 @@ class _FilterParser:
 
 
 def parse_filter(text: Any) -> Predicate:
-    """Parse the DASL grammar the backend sends (design note 5 and its "Performance" section).
+    """Parse the DASL grammar the backend sends.
 
     ``""`` (no filter) or ``@SQL=`` + a boolean expression (``NOT``, ``AND``, ``OR``,
     parentheses) of restrictions on: the delivery/submit time
@@ -762,7 +762,7 @@ class FakeZone(tzinfo):
 
 
 # --------------------------------------------------------------------------- #
-# Registry and SecurityCenter2 doubles (plan 4.2)
+# Registry and SecurityCenter2 doubles
 # --------------------------------------------------------------------------- #
 
 
@@ -846,7 +846,7 @@ class AttachmentSpec:
     name: str
     hidden: bool | None = None  # None: PR_ATTACHMENT_HIDDEN absent (visible)
     display_name: str | None = None
-    #: Decoded bytes written by ``SaveAsFile`` (M10); an empty attachment is valid.
+    #: Decoded bytes written by ``SaveAsFile``; an empty attachment is valid.
     content: bytes = b""
     #: Local size reported by the ``Size`` property; ``None`` derives it from
     #: ``content`` plus :data:`MAPI_SIZE_OVERHEAD`, like real Outlook (CR-01).
@@ -1043,7 +1043,7 @@ class StoreSpec:
 
     @property
     def uuid(self) -> str:
-        """``account.uuid`` expected by the backend (design note 3)."""
+        """``account.uuid`` expected by the backend."""
         return str(_uuid.UUID(bytes=self.record_key)).upper()
 
     @property
@@ -1496,7 +1496,7 @@ class FakeTable(_ComObject):
             moment = item.received
         if moment is None:
             return None
-        # Built-in time columns: local wall clock labelled as UTC (P-5).
+        # Built-in time columns: local wall clock labelled as UTC.
         return moment.astimezone(self._zone).replace(tzinfo=timezone.utc)
 
 
@@ -1554,7 +1554,7 @@ class FakeAttachment(_ComObject):
         return int(self._spec.attachment_type)
 
     def _call_SaveAsFile(self, path: Any) -> None:
-        """Materialize the local attachment into ``path`` (the M10 COM exception).
+        """Materialize the local attachment into ``path`` (the attachment COM exception).
 
         Stands in for ``Attachment.SaveAsFile``: writes the decoded bytes to the
         backend-provided staging path, or raises the configured COM error. The
@@ -1858,7 +1858,7 @@ class FakeOutlook:
     # -- changes made by the user in Outlook ----------------------------------- #
 
     def move_item(self, key: str, folder: FolderSpec) -> ItemSpec:
-        """Move an item to ``folder`` as the user would: its EntryID changes (annex B.4)."""
+        """Move an item to ``folder`` as the user would: its EntryID changes."""
         spec = self.items[key]
         if spec.folder is not None:
             spec.folder.items.remove(spec)
@@ -2110,7 +2110,7 @@ class FakeOutlook:
 
     @classmethod
     def store_matrix(cls) -> "FakeOutlook":
-        """Every candidate and excluded store kind of annex B.3, each with a message."""
+        """Every candidate and excluded store kind, each with a message."""
         fake = cls()
         fake.drive_types.update({"E:": DRIVE_REMOVABLE, "Z:": DRIVE_REMOTE})
         fake.add_exchange_account("exchange_cached", "ana@example.com")
@@ -2187,7 +2187,7 @@ class FakeOutlook:
 
     @classmethod
     def item_matrix(cls, now: datetime | None = None) -> "FakeOutlook":
-        """Every item case of annex B.4 in one cached Exchange account.
+        """Every item case in one cached Exchange account.
 
         ``facturas_recent`` is received 3 days before ``now`` (default: the real
         current time), so recipes with ``--since 1mo`` find it (TC-04).
@@ -2256,7 +2256,7 @@ class FakeOutlook:
 
     @classmethod
     def attachments_matrix(cls) -> "FakeOutlook":
-        """Every attachment case of annex B.4 in one cached Exchange account (M10).
+        """Every attachment case in one cached Exchange account.
 
         Deterministic (fixed dates, EntryIDs derived from the fixed record key and
         the creation order) so the TC-09 goldens are stable. Only the ``local``

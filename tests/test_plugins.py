@@ -1,8 +1,8 @@
-"""M01: plugin API 1, backend registry, ``--version`` and plugin hygiene (UT-PL-01..04).
+"""Plugin API 1, backend registry, ``--version`` and plugin hygiene (UT-PL-01..04).
 
 Covers AC-01 (entry point group, driver/plugin_api validation, duplicates),
 AC-02 (capability validation), AC-18 (``--version`` additive ``drivers:``) and
-the plugin-file boundaries of RF-39 (PRD-v2.1 §6.1, §11.7, §11.9; plan §5.1 C1).
+the plugin-file boundaries of RF-39 (PRD §6.5, §12.6, §12.9).
 """
 
 from __future__ import annotations
@@ -701,7 +701,7 @@ class PluginApiTests(_PluginTestCase):
 
 
 # --------------------------------------------------------------------------- #
-# M05 — plugin error protocol and metadata timeout (UT-ERR-01..04)
+# Plugin error protocol and metadata timeout (UT-ERR-01..04)
 # --------------------------------------------------------------------------- #
 
 #: Config with only the plugin account declared: the native driver is never opened.
@@ -710,7 +710,7 @@ PLUGIN_ONLY_CONFIG = f'[scope."{DRIVER}:{PLUGIN_ACCOUNT_LABEL}"]\n'
 #: Config for the minimal injected native backend (UT-ERR-03.03).
 NATIVE_FAKE_CONFIG = '[scope."Fake"]\n'
 
-#: §11.7 mapping in attachment operations: reason -> (code, exit).
+#: PRD §12.6 mapping in attachment operations: reason -> (code, exit).
 ATTACHMENT_REASON_MAP = (
     ("invalid_uid", "E_USAGE", 2),
     ("not_found", "E_USAGE", 2),
@@ -727,7 +727,7 @@ ATTACHMENT_REASON_MAP = (
     ("timeout", "E_CLIENT_TIMEOUT", 3),
 )
 
-#: §11.7 mapping in every other operation: the attachment-only reasons fail as E_PLUGIN_FAILED.
+#: PRD §12.6 mapping in every other operation: the attachment-only reasons fail as E_PLUGIN_FAILED.
 REST_REASON_MAP = tuple(
     (reason, "E_PLUGIN_FAILED", 3)
     if reason
@@ -744,7 +744,7 @@ REST_REASON_MAP = tuple(
     for reason, code, exit_code in ATTACHMENT_REASON_MAP
 )
 
-#: Core-owned English message templates of §11.7 (the driver name is substituted).
+#: Core-owned English message templates of PRD §12.6 (the driver name is substituted).
 MESSAGE_TEMPLATES = {
     "not_local": "not available in the local store",
     "not_downloaded": "could not be retrieved from its origin",
@@ -796,13 +796,13 @@ class _ReasonMappingCase(unittest.TestCase):
         self.assertNotEqual(error.code, "E_INTERNAL")
 
 
-# UT-ERR-01 — reason -> code/exit mapping (AC-16, §11.7)
+# UT-ERR-01 — reason -> code/exit mapping (AC-16, PRD §12.6)
 # --------------------------------------------------------------------------- #
 
 
 class PluginErrorMappingTests(_ReasonMappingCase):
     def test_ut_err_01_01_attachment_operations_map_the_whole_reason_table(self) -> None:
-        """UT-ERR-01.01: every §11.7 reason in an attachment operation maps to its code."""
+        """UT-ERR-01.01: every PRD §12.6 reason in an attachment operation maps to its code."""
         for reason, code, exit_code in ATTACHMENT_REASON_MAP:
             with self.subTest(reason=reason):
                 error = self.mapped(reason, operation="attachments")
@@ -903,7 +903,7 @@ class PluginErrorSanitizationTests(_ReasonMappingCase):
                     self.assertNotIn(control, field)
 
     def test_ut_err_02_03_message_uses_the_reason_template_plus_sanitized_detail(self) -> None:
-        """UT-ERR-02.03: each §11.7 motive yields its template, then `: detail`."""
+        """UT-ERR-02.03: each PRD §12.6 motive yields its template, then `: detail`."""
         for reason, template in MESSAGE_TEMPLATES.items():
             with self.subTest(reason=reason):
                 with_detail = self.mapped(

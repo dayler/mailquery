@@ -1,4 +1,4 @@
-"""Search, new-mail, show and mailboxes queries (PRD 9.3, 9.4, 12).
+"""Search, new-mail, show and mailboxes queries.
 
 Applies the configured scope (declared accounts only,
 INBOX always included), deduplicates by ``global_message_id`` with INBOX
@@ -6,8 +6,8 @@ priority, bounds content scans (``--text``) and assembles the JSON message
 objects. This module renders no JSON: it returns plain dictionaries that the
 CLI wraps with ``ok``/``command``/``generated_at``.
 
-Everything backend-specific goes through :class:`mailquery.backends.base.MailBackend`
-(PRD 9.3): this module holds no SQL and no COM, never opens a database, a
+Everything backend-specific goes through :class:`mailquery.backends.base.MailBackend`:
+this module holds no SQL and no COM, never opens a database, a
 ``.emlx`` file or a mail client on its own, and never writes anything.
 """
 
@@ -37,18 +37,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from mailquery.config import Config
     from mailquery.state import StateStore
 
-#: Built-in drivers (frozen in C1/RF-35): their ``show`` attachment fallback
-#: predates the M09/M10 metadata operation; the API 1 ``attachments`` call is
+#: Built-in drivers: their ``show`` attachment fallback predates the
+#: ``attachments`` metadata operation; the API 1 ``attachments`` call is
 #: preferred for every driver once it is implemented.
 _INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
 
 
-# Limits fixed by the product contract (PRD 15.6).
+# Limits fixed by the product contract.
 SEARCH_MAX_LIMIT = 200
 NEW_MAX_LIMIT = 500
 MAX_SCAN_HARD_LIMIT = 50_000
 
-# Stable warning strings (PRD 12.5 "warnings[]").
+# Stable warning strings ("warnings[]").
 NO_ACCOUNTS_WARNING = (
     "W_NO_ACCOUNTS: no accounts are declared in config.toml; nothing is observed"
 )
@@ -64,7 +64,7 @@ FIRST_RUN_WARNING_TEMPLATE = (
     "{lookback} before the newest message"
 )
 
-# Relative-time parsing (PRD 12.2 / RF-12).
+# Relative-time parsing.
 _RELATIVE_UNITS = {
     "min": 60,
     "h": 60 * 60,
@@ -108,8 +108,8 @@ class _DriverRun:
     """One driver participating in a command: its backend and its resolved scope.
 
     ``allowed_ids`` and ``mailbox_map`` start with the declared accounts' folders
-    and grow with the ``--include-mailbox`` folders that belong to this driver
-    (M04); ``label_map`` is filled after the candidate rows of the driver are
+    and grow with the ``--include-mailbox`` folders that belong to this driver;
+    ``label_map`` is filled after the candidate rows of the driver are
     known (dedupe/display only need it for those rows).
     """
 
@@ -198,7 +198,7 @@ def matches(pattern: str, text: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Driver pool (multi-driver engine, M04)
+# Driver pool (multi-driver engine)
 # --------------------------------------------------------------------------- #
 
 
@@ -219,7 +219,7 @@ def _driver_pool(
 
     ``backend`` is the platform driver (``None`` when the config does not declare
     it); ``drivers`` maps the other declared drivers. The order is the caller's:
-    native first, then the mapping order. Every backend is wrapped with the M05
+    native first, then the mapping order. Every backend is wrapped with the
     driver-call wrapper, so all metadata operations are mapped and bounded by the
     metadata deadline (the wrapper is idempotent: wrapping twice is a no-op).
     """
@@ -323,7 +323,7 @@ def _driver_output_order(
     groups: "Mapping[str, Sequence[Any]]",
     pool: "Mapping[str, MailBackend]",
 ) -> list[str]:
-    """Drivers in the order their ``[scope]`` blocks first appear (§10.2.9)."""
+    """Drivers in the order their ``[scope]`` blocks first appear."""
     order: list[str] = []
     for entry in config.scopes:
         driver = str(entry.driver or native)
@@ -343,7 +343,7 @@ def _merge_ordered(
     *,
     descending: bool,
 ) -> list[dict]:
-    """Merge per-driver lists in the total order (PRD-v2.1 §10.2.7).
+    """Merge per-driver lists in the total order.
 
     Rows are tagged with their driver (``_mq_driver``, internal only) because the
     merged page is built with the backend and scope of each row's driver. The
@@ -411,9 +411,9 @@ def run_search(
     The scope is the set of accounts declared in ``config.toml`` (INBOX always
     included) plus their ``mailbox_list`` folders and the ``--include-mailbox``
     folders of this run. Every declared driver is queried with the same filters;
-    the per-driver results are deduplicated inside their driver (RF-07 of the
-    PRD), merged with the total order ``(date_received DESC, driver ASC,
-    native_order_key DESC)`` (PRD-v2.1 §10.2.7) and paginated after the merge.
+    the per-driver results are deduplicated inside their driver,
+    merged with the total order ``(date_received DESC, driver ASC,
+    native_order_key DESC)`` and paginated after the merge.
     """
     started = time.perf_counter()
     native_name, pool = _driver_pool(backend, drivers, native)
@@ -471,15 +471,15 @@ def run_search(
             order="desc",
         )
         # On Windows --to/--cc open every candidate: they are applied after the
-        # max_scan check and the candidates are counted before them (RF-17).
+        # max_scan check and the candidates are counted before them.
         rows = _apply_pattern_filters(
             rows, filters, run.backend, recipients=not opens_recipients[driver]
         )
         candidates += len(rows)
         pending.append((run, rows))
 
-    # The multi-driver bound is the sum of every driver's candidates (documented
-    # in INTERFACES: one budget for the merged command).
+    # The multi-driver bound is the sum of every driver's candidates: one
+    # budget for the merged command.
     if content_flags:
         max_scan = _effective_max_scan(config)
         if candidates > max_scan:
@@ -552,12 +552,12 @@ def run_new(
 
     Messages with a null, non-positive or future ``date_received`` (relative to
     ``clock``, Unix seconds, ``time.time`` by default) never enter ``new`` and
-    never move the cursor (PRD 12.3, 17).
+    never move the cursor.
 
     The cursor is global (one ``last_date_received``/``last_uid``): every
     declared driver is queried with the same watermark and lookback and each one
     contributes its deduplicated messages to the merged ascending order
-    ``(date_received ASC, driver ASC, native_order_key ASC)`` (PRD-v2.1 §10.2.8).
+    ``(date_received ASC, driver ASC, native_order_key ASC)``.
     The first run emits the window ``[D - lookback, D]`` over the merged set
     (``D`` = newest valid date of the merged set, the newest ``limit`` of them)
     and reports ``W_FIRST_RUN`` last. Later runs emit, in arrival order, the
@@ -648,7 +648,7 @@ def run_new(
     warnings: list[str] = list(scope_warnings)
     truncated = len(merged) > limit_value
     if first_run:
-        # --limit keeps the most recent messages of the window (PRD 12.3).
+        # --limit keeps the most recent messages of the window.
         page = merged[-limit_value:]
     else:
         page = merged[:limit_value]
@@ -711,10 +711,10 @@ def run_show(
 ) -> dict:
     """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
-    The driver of the uid prefix is the one that serves ``show`` (RF-40): the
+    The driver of the uid prefix is the one that serves ``show``: the
     core splits the prefix, resolves only that driver's ``[scope]`` blocks and
     calls its ``find_message``/``load_body`` plus the API 1 ``attachments``
-    operation (M08 composes ``{index, name, cached_path}``; ``show`` never
+    operation (the core composes ``{index, name, cached_path}``; ``show`` never
     writes). A uid in an undeclared account (or with no declared accounts)
     raises ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
     raises ``E_USAGE`` with an actionable hint. A uid whose store is excluded
@@ -829,7 +829,7 @@ def run_mailboxes(
     """Return ``{"accounts", "mailboxes", "excluded_stores", "warnings"}``.
 
     Drivers are concatenated in the order their ``[scope]`` blocks first appear
-    in the config (PRD-v2.1 §10.2.9): ``accounts[]`` of each driver (declared
+    in the config: ``accounts[]`` of each driver (declared
     first, with their ``declared`` flag), then every folder of the driver with
     its counters and ``included`` flag, then its ``excluded_stores[]``. The
     native driver stays out of a command whose config declares only other
@@ -932,7 +932,7 @@ def _has_valid_date(row: dict, now: float) -> bool:
 def _newest_scoped_message(
     backend: "MailBackend", mailbox_ids: Sequence[Any], now: float
 ) -> tuple[int, Any] | None:
-    """``(date_received, uid)`` of the newest message with a valid date (PRD 12.3)."""
+    """``(date_received, uid)`` of the newest message with a valid date."""
     for row in backend.query(mailbox_ids, order="desc"):
         if _has_valid_date(row, now):
             return int(row["date_received"]), row["uid"]
@@ -955,10 +955,10 @@ def _resolved_scope(
     """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`.
 
     ``excluded`` receives the entry of each declared account that is an
-    excluded store (Outlook, PRD 15.3). ``drivers`` maps the other declared
-    backends and ``native`` names the platform driver (M04, multi-driver).
+    excluded store (Outlook). ``drivers`` maps the other declared
+    backends and ``native`` names the platform driver.
 
-    The catalog handed to :mod:`mailquery.config` uses the M05 wrapped drivers,
+    The catalog handed to :mod:`mailquery.config` uses the wrapped drivers,
     so the ``accounts``/``mailboxes``/``resolve_mailbox`` calls of the scope
     resolution are mapped and bounded too.
     """
@@ -1164,14 +1164,14 @@ def _include_mailbox_not_found(
 
 
 def _recipients_open_items(backend: "MailBackend") -> bool:
-    """Whether evaluating ``--to``/``--cc`` opens every item (Outlook; RF-17)."""
+    """Whether evaluating ``--to``/``--cc`` opens every item (Outlook)."""
     return bool(getattr(backend, "recipients_open_items", False))
 
 
 def _items_opened(backend: "MailBackend") -> int | None:
     """Items the backend opened so far (Outlook), or ``None`` (Apple Mail).
 
-    With it, ``scan.messages_read`` is the number of items opened (RF-17);
+    With it, ``scan.messages_read`` is the number of items opened;
     without it, the bodies read (``_was_read``).
     """
     opened = getattr(backend, "items_opened", None)
@@ -1180,7 +1180,7 @@ def _items_opened(backend: "MailBackend") -> int | None:
 
 def _content_flags(filters: Filters, opens_recipients: bool) -> tuple[str, ...]:
     """Flags that force reading message content: ``--text``, and ``--to``/``--cc``
-    where the recipients are read from each item (RF-17)."""
+    where the recipients are read from each item."""
     flags: list[str] = []
     if _filter_terms(filters.text):
         flags.append("--text")
@@ -1205,7 +1205,7 @@ def _require_bounded_scan(
     content_flags: Sequence[str] = ("--text",),
     opens_recipients: bool = False,
 ) -> None:
-    """Reject content-reading queries without a narrowing filter (RF-17).
+    """Reject content-reading queries without a narrowing filter.
 
     Validated once for every flag in ``content_flags``. Where ``--to``/``--cc``
     open every item they do not narrow, and the error names the flags that
@@ -1247,7 +1247,7 @@ def _require_bounded_scan(
 def _scan_too_large(
     content_flags: Sequence[str], candidates: int, max_scan: int, opens_recipients: bool
 ) -> MailqueryError:
-    """``E_SCAN_TOO_LARGE``; the hint lists only the filters that narrow (RF-17)."""
+    """``E_SCAN_TOO_LARGE``; the hint lists only the filters that narrow."""
     if not opens_recipients:
         return MailqueryError(
             "E_SCAN_TOO_LARGE",
@@ -1392,9 +1392,9 @@ def _dedupe(
 ) -> list[dict]:
     """Dedupe by the global message key (INBOX > normal folder > aggregate).
 
-    The canonical copy is chosen with the PRD Anexo B ordering, and the result
-    is returned in the documented total order ``(date_received DESC, driver
-    ASC, native_order_key DESC)`` (PRD-v2.1 §10.2.7). Messages without a usable
+    The canonical copy is chosen by that mailbox priority, and the result
+    is returned in the total order ``(date_received DESC, driver
+    ASC, native_order_key DESC)``. Messages without a usable
     ``global_message_id`` are unique.
     """
     if not rows:
@@ -1533,21 +1533,21 @@ def _show_attachments(
     body_readable: bool,
     warnings: list[str],
 ) -> list[dict]:
-    """``show.attachments`` as the PRD-v2.1 §11.2 contract (M08, RF-43/AC-07).
+    """``show.attachments``: one entry per attachment of the message.
 
     ``{"index", "name", "cached_path"}`` with the original name and the stable
-    1..N index of the driver. ``cached_path`` is computed with the M07 helper
+    1..N index of the driver. ``cached_path`` is computed with the cache helper
     from the sanitized name and is ``null`` when the name is not safe or the
     cached entry is not a regular file; ``show`` never creates, opens or reads
     a cache entry. A driver with ``attachments: "none"`` returns ``[]``.
 
     The API 1 ``attachments(uid)`` operation is the source of truth for every
-    driver that implements it (M09/M10). Until then a built-in driver falls back
+    driver that implements it. Until then a built-in driver falls back
     to the 2.0.1 sources (MIME names of a readable body, the envelope index for
     an unreadable non-S/MIME body). A driver may signal an S/MIME or unreadable
-    message by raising the attachment-protocol error from ``attachments()``
-    (convention C8/C9): ``show`` then returns ``[]`` and keeps only the body
-    warning, without ``W_ATTACHMENTS_UNAVAILABLE`` (D6).
+    message by raising the attachment-protocol error from ``attachments()``:
+    ``show`` then returns ``[]`` and keeps only the body
+    warning, without ``W_ATTACHMENTS_UNAVAILABLE``.
     """
     capabilities = getattr(backend, "capabilities", None) or {}
     if str(capabilities.get("attachments", "local")) == "none":
@@ -1582,7 +1582,7 @@ def _driver_attachments(
     """Metadata rows of the driver, or ``None`` when it only has the 2.0.1 fallback.
 
     A protocol error from ``attachments()`` (S/MIME/unreadable message) becomes
-    an empty list for ``show`` (D6): the body warning already explains it.
+    an empty list for ``show``: the body warning already explains it.
     """
     try:
         entries = backend.attachments(native_uid)
@@ -1622,7 +1622,7 @@ def _unreadable_names(
     warnings: list[str],
     internal: bool,
 ) -> list[tuple[int, str]]:
-    """Attachment names of an unreadable non-S/MIME body (PRD 12.10, M09/M10)."""
+    """Attachment names of an unreadable non-S/MIME body."""
     if not internal:
         return _metadata_pairs(entries)
     hook = getattr(backend, "unreadable_attachments", None)
@@ -1650,7 +1650,7 @@ def _unreadable_names(
 
 
 def _is_smime_body(body: dict) -> bool:
-    """Whether the 2.0.1 body warnings mark the message as S/MIME (D6)."""
+    """Whether the 2.0.1 body warnings mark the message as S/MIME."""
     return any(
         "S/MIME" in str(warning) for warning in (body.get("warnings") or ())
     )
@@ -1782,7 +1782,7 @@ def _store_where(entry: dict) -> str:
 
 
 def _labels_warnings(backend: "MailBackend") -> list[str]:
-    """``W_ACCOUNT_LABELS_UNAVAILABLE`` for data commands (Annex A.5.2)."""
+    """``W_ACCOUNT_LABELS_UNAVAILABLE`` for data commands."""
     return [] if backend.labels_available else [LABELS_UNAVAILABLE_WARNING]
 
 
@@ -1811,7 +1811,7 @@ def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
     """``load_body``, or the backend's body-only ``load_snippet`` when it has one.
 
     ``search``/``new`` use only the body; ``show`` always calls ``load_body``
-    (attachments and headers; PRD 19).
+    (attachments and headers).
     """
     loader = getattr(backend, "load_snippet", None)
     return loader if callable(loader) else backend.load_body
@@ -1944,7 +1944,7 @@ def _effective_max_scan(config: "Config") -> int:
 
 
 def _filter_terms(values: Iterable[str], *, split: bool = False) -> tuple[str, ...]:
-    """Expand filter values into AND terms (PRD 12.2).
+    """Expand filter values into AND terms.
 
     With ``split`` (``--subject``) every value is split on whitespace and each
     word is an AND term, with or without wildcards. Without it (``--text``,
@@ -2002,7 +2002,7 @@ def _driver(backend: "MailBackend") -> str:
 
 
 def _prefixed_uid(backend: "MailBackend", uid: Any) -> str:
-    """``"<driver>:<native_id>"`` of a native uid (PRD-v2.1 RF-40).
+    """``"<driver>:<native_id>"`` of a native uid.
 
     The core is the only place that builds the emitted uid; the adapters keep
     exchanging their native uid (``int`` on Apple Mail, upper-case hex on Outlook).
@@ -2014,7 +2014,7 @@ def _prefixed_uid(backend: "MailBackend", uid: Any) -> str:
 
 
 def _native_order_key(backend: "MailBackend", row: dict) -> int | str:
-    """Typed native order key of a row (contract C1; PRD-v2.1 §10.2.7).
+    """Typed native order key of a row.
 
     The driver reports ``native_order_key`` as a string; the core compares it as
     an integer when the capability ``native_order`` is ``numeric`` (Apple Mail)
@@ -2032,7 +2032,7 @@ def _native_order_key(backend: "MailBackend", row: dict) -> int | str:
 def _ordered(
     rows: Sequence[dict], backend: "MailBackend", *, descending: bool
 ) -> list[dict]:
-    """Sort rows in the driver's total order (PRD-v2.1 §10.2.7).
+    """Sort rows in the driver's total order.
 
     ``descending`` is ``search``/``show`` (``date DESC, driver ASC, key DESC``);
     ``ascending`` is ``new`` (``date ASC, driver ASC, key ASC``). Three stable
@@ -2121,7 +2121,7 @@ def _bad_time(value: Any) -> MailqueryError:
 
 
 def _excluded_store_error(uid: Any, entry: dict) -> MailqueryError:
-    """``E_ACCOUNT_NOT_IN_SCOPE`` for a uid of an excluded store (PRD 12.4)."""
+    """``E_ACCOUNT_NOT_IN_SCOPE`` for a uid of an excluded store."""
     where = _store_where(entry)
     return MailqueryError(
         "E_ACCOUNT_NOT_IN_SCOPE",
