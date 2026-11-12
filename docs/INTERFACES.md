@@ -795,11 +795,26 @@ tras el merge, `truncated`/`hint` se calculan sobre el total fusionado,
 devuelve `excluded_stores: []`); el driver nativo sin bloques no aporta nada y,
 sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con `W_NO_ACCOUNTS`.
 `run_show` despacha por el driver del prefijo: resuelve solo los bloques de ese
-driver, llama a su `find_message`/`load_body` y —para un driver externo— a su
-operación `attachments()`; `attachments: "none"` devuelve `[]` sin llamarla y el
-payload de un plugin es `[{index, name, cached_path: null}]` (M08 calcula la
-caché; `show` no escribe). Los drivers internos conservan hasta M08 la forma
-2.0.1 `[{name}]`.
+driver, llama a su `find_message`/`load_body` y a su operación `attachments()`
+(API 1, C1) para componer `message.attachments[]` (M08, RF-43/AC-07):
+`[{index, name, cached_path}]` con el nombre **original**, el índice estable
+1..N del driver y `cached_path` calculado con `attachments.cache.cached_path`
+(M07) — `null` si el nombre dispara `classify_name` (regla de nombre) o si la
+entrada de caché no es un archivo regular. `show` **no crea, abre ni lee** la
+caché ni escribe en disco; tampoco inspecciona contenido: un adjunto que
+`attachment` bloquearía por *magic bytes* sigue mostrando `cached_path` si el
+archivo regular existe. Capacidad `attachments: "none"` ⇒ `[]` sin llamar al
+driver. Un driver remoto puede listar nombres (`show` solo calcula caché local,
+que será `null` si no hay archivo). **Convención C8/C9 (S/MIME/ilegible):** el
+driver puede propagar el motivo del mensaje lanzando el error de protocolo al
+listar los adjuntos (`PluginError(reason=smime|unreadable)` en un plugin,
+`MailqueryError E_ATTACHMENT_UNREADABLE` en un backend interno); `show` lo
+captura ⇒ `attachments: []`, conserva el `W_BODY_*` de 2.0.1 y **no** añade
+`W_ATTACHMENTS_UNAVAILABLE` (D6). Mientras un backend interno no implemente
+`attachments()` (antes de M09/M10), `run_show` usa el fallback 2.0.1: nombres
+MIME del cuerpo legible, nombres del `Envelope Index` con
+`W_ATTACHMENTS_UNAVAILABLE` para un cuerpo ilegible no S/MIME, y `[]` para
+S/MIME.
 
 **Envoltura de llamadas (M05, C5).** `_driver_pool` envuelve cada backend con
 `plugins.wrap_driver`, así que todas las operaciones de `MailBackend` pasan por
@@ -878,8 +893,43 @@ registro lo considera instalado; DP-02 solo filtra `--version`). `new` crea
 `event=start` registra `command=... backend=<driver nativo> drivers=<lista
 declarada separada por comas>` (el nativo primero; `-` si no hubiera ninguno):
 `backend` es siempre el driver de la plataforma aunque no se abra, y nunca
-incluye uids, `native_id`, cuentas, rutas, asuntos ni términos. `event=end`
-conserva sus campos actuales.
+incluye uids, `native_id`, cuentas, rutas, asuntos ni términos. El `event=end`
+de `attachment` (solo en éxito; D7) registra `exit_code=0 count=<N>
+cached=<M> bytes=<total> duration_ms=<ms>`; el resto de comandos conserva sus
+campos actuales y un fallo registra `event=error` sin `event=end`.
+
+**Comando `attachment` (M08, C8; PRD-v2.1 §11.2–11.5, AC-07/08/12/14/15/17/19).**
+`mailquery attachment <uid> (--index N | --all) [--force]`. `--index` acepta
+solo un entero positivo (se valida en `main` con el texto literal de §11.3, no
+con el `type=int` de argparse) y `--index`/`--all` son mutuamente excluyentes
+con el texto `attachment requires exactly one of --index or --all`. La ayuda
+(`attachment --help`) reproduce literalmente §11.4 (usage, positional,
+options, examples y notes; columnas alineadas a 17 y ≤ 100 columnas) y la
+ayuda raíz lista los seis comandos con la línea de exits de §11.1.
+`_run_command` implementa la precedencia de §11.3 filas 1–10 **antes** de
+llamar al motor M07: (1) argumentos; (2) sintaxis del uid y driver instalado,
+antes de crear el home; (3) config (incluye `[attachments]` y `[scope]`);
+(4) `[attachments].enabled=false` solo para `attachment` ⇒
+`E_ATTACHMENTS_DISABLED` (2); (5) el driver del prefijo debe estar declarado
+(`E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo), se abre y se comprueban sus
+capacidades: `attachments: "none"` **y** `"remote"` ⇒
+`E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store (el
+núcleo no puede materializar adjuntos remotos); (6) resolución de cuenta con
+`config.resolve_scope` (el driver se envuelve antes con `plugins.wrap_driver`);
+(7) `find_message` ⇒ `E_USAGE "message uid <uid> was not found"`; (8) la
+llamada `attachments()` puede lanzar la señal S/MIME/ilegible de la convención
+C8/C9 y el error de protocolo se propaga tal cual (`E_ATTACHMENT_UNREADABLE`,
+exit 3, antes del caso “0 adjuntos”); (9) lista vacía ⇒ `E_USAGE "message <uid>
+has no attachments"`; (10) índice fuera de rango ⇒ el texto del ejemplo G.
+Después, `AttachmentsEngine.recover(...)` ejecuta las filas 11–15 con las filas
+de metadatos ya obtenidas (`entries`), de modo que el driver no se consulta dos
+veces; la CLI no reimplementa bloqueo, límites ni caché. El éxito es el JSON
+de §11.2 con `uid` prefijado, `output_dir` absoluto (`message_dir`), `count`,
+ocho campos por adjunto y `warnings: []`. El presupuesto de extracción es
+`EXTRACTION_TIMEOUT_SECONDS` (120 s, RNF-16): se pasa al motor como factoría
+`lambda: time.monotonic() + 120`, una por adjunto, y al vencer ⇒
+`E_CLIENT_TIMEOUT` (3), sin reintento, staging limpio y sin archivos nuevos.
+`show` no aplica `[attachments].enabled`.
 `bind_command(command)` del backend si existe; todo `E_INTERNAL`
 (también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
 su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
@@ -1134,7 +1184,9 @@ class AttachmentsEngine:
   y sin archivos nuevos. El motor **no** fija políticas de tiempo por sí solo.
 - Resultado: un registro §11.2 por adjunto solicitado, en orden de índice y
   con `path` absoluto. Un fallo no devuelve registros parciales.
-- `output_dir` de M08 = `attachments.paths.message_dir(home, uid)`.
+- `output_dir` de M08 = `attachments.paths.message_dir(home, uid)`. M08 ya
+  validó las filas 7–10 (`find_message`, `attachments()`, “0 adjuntos”, rango
+  del índice) y pasa esas filas en `entries`; el motor solo ejecuta 11–15.
 
 #### Flujo interno (§11.3)
 
@@ -1297,9 +1349,11 @@ menciona E/S de caché está superada por DP-01, §11.3 fila 15 y AC-12. Los
 > ordenados por `(date_received, driver, native_order_key)` (DESC en
 > `search`, ASC en `new`), con `duplicate_count` calculado dentro de cada driver
 > (PRD-v2.1 §10.2.7-9). El log `event=start` añade `drivers=` (fuera del
-> contrato JSON). `show` de un driver externo declarado ya devuelve
-> `attachments: [{index, name, cached_path: null}]` (AC-07 parcial, M04); los
-> drivers internos conservan la forma 2.0.1 `[{name}]` hasta M08.
+> contrato JSON). **M08** cierra la forma de `show.attachments` para todos los
+> drivers: `{index, name, cached_path}` (AC-07) y el driver con
+> `attachments: "none"` devuelve `[]`; es la única edición de forma/valor de
+> esos goldens (M09/M10 no los reescriben). M08 añade el comando `attachment`
+> con el payload de §11.2 y el `event=end` con conteos (§12.1).
 
 Resumen de coordinación; el contrato completo es el PRD §12.5. Los ejemplos
 están compactados en una línea por brevedad: la salida real es JSON
@@ -1350,10 +1404,32 @@ Igual que `search` más:
   "size_bytes": 202913,
   "headers": {"From": "", "To": "", "Cc": "", "Subject": "", "Date": "", "Message-ID": ""},
   "body_text": "", "body_truncated": false,
-  "attachments": [{"name": "..."}],
+  "attachments": [{"index": 1, "name": "<original_name>", "cached_path": "<abs path>|null"}],
   "partial": true, "readable": true,
   "source": {"emlx_path": "/...", "partial": true}}}
 ```
+
+`index` es la posición 1..N estable que comparte con `attachment`; `name` es el
+nombre original del driver y `cached_path` la ruta absoluta del archivo de caché
+(regular) o `null` (sin caché, nombre no seguro o entrada no regular). En S/MIME
+`attachments` es `[]` y solo queda el `W_BODY_UNREADABLE` de 2.0.1 (D6). Un
+driver con `attachments: "none"` devuelve `[]`; `show` nunca escribe.
+
+### `attachment`
+```json
+{"uid": "apple_mail:83143",
+ "output_dir": "/Users/<user>/.mailquery/attachments/apple_mail/83143",
+ "count": 1,
+ "attachments": [{"index": 2, "original_name": "Factura Octubre 2026.pdf",
+   "sanitized_name": "02_Factura_Octubre_2026.pdf", "saved": true, "cached": false,
+   "path": "/Users/<user>/.mailquery/attachments/apple_mail/83143/02_Factura_Octubre_2026.pdf",
+   "size_bytes": 128450, "sha256": "<64 hex>"}],
+ "warnings": []}
+```
+`ok`/`command`/`generated_at` los añade `cli` (§11.2). Un acierto de caché
+devuelve `cached: true` y `saved: true` con el `size_bytes`/`sha256` del archivo
+servido; `--force` re-extrae (`cached: false`). El error sigue el contrato
+`{ok:false, command, error:{code,message,hint}}` de §11.5 C/D/G/H/E/F.
 
 ### `mailboxes`
 ```json

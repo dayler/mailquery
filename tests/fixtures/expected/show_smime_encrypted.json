@@ -42,11 +42,7 @@
     },
     "body_text": "",
     "body_truncated": false,
-    "attachments": [
-      {
-        "name": "smime.p7m"
-      }
-    ],
+    "attachments": [],
     "partial": false,
     "readable": false,
     "source": {
@@ -55,7 +51,6 @@
     }
   },
   "warnings": [
-    "W_BODY_UNREADABLE: S/MIME encrypted content is not supported",
-    "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the envelope index; the message body could not be read"
+    "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
   ]
 }

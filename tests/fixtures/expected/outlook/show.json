@@ -44,7 +44,9 @@
     "body_truncated": false,
     "attachments": [
       {
-        "name": "factura-2026-10.pdf"
+        "index": 1,
+        "name": "factura-2026-10.pdf",
+        "cached_path": null
       }
     ],
     "partial": false,

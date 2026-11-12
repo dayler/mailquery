@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Sequence
 from mailquery import config as config_module
 from mailquery import output
 from mailquery import uid as uid_module
+from mailquery.attachments import classify_name
+from mailquery.attachments.cache import cached_path as attachment_cached_path
 from mailquery.backends.base import ExcludedStoreError
 from mailquery.errors import MailqueryError
 from mailquery.plugins import wrap_driver
@@ -35,8 +37,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from mailquery.config import Config
     from mailquery.state import StateStore
 
-#: Built-in drivers (frozen in C1/RF-35): they keep the 2.0.1 ``show`` shape
-#: until M08 changes it; an external driver uses the API 1 attachment metadata.
+#: Built-in drivers (frozen in C1/RF-35): their ``show`` attachment fallback
+#: predates the M09/M10 metadata operation; the API 1 ``attachments`` call is
+#: preferred for every driver once it is implemented.
 _INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
 
 
@@ -51,6 +54,10 @@ NO_ACCOUNTS_WARNING = (
 )
 LABELS_UNAVAILABLE_WARNING = (
     "W_ACCOUNT_LABELS_UNAVAILABLE: account labels are unavailable; UUIDs are shown instead"
+)
+_ATTACHMENTS_UNAVAILABLE_WARNING = (
+    "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the envelope index; "
+    "the message body could not be read"
 )
 FIRST_RUN_WARNING_TEMPLATE = (
     "W_FIRST_RUN: first run: emitted the messages received in the last "
@@ -706,12 +713,12 @@ def run_show(
 
     The driver of the uid prefix is the one that serves ``show`` (RF-40): the
     core splits the prefix, resolves only that driver's ``[scope]`` blocks and
-    calls its ``find_message``/``load_body`` (and, for an external driver, the
-    API 1 ``attachments`` operation; M08 adds the attachment command). A uid in
-    an undeclared account (or with no declared accounts) raises
-    ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted, raises
-    ``E_USAGE`` with an actionable hint. A uid whose store is excluded (Outlook)
-    raises ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
+    calls its ``find_message``/``load_body`` plus the API 1 ``attachments``
+    operation (M08 composes ``{index, name, cached_path}``; ``show`` never
+    writes). A uid in an undeclared account (or with no declared accounts)
+    raises ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
+    raises ``E_USAGE`` with an actionable hint. A uid whose store is excluded
+    (Outlook) raises ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
     """
     native_name, pool = _driver_pool(backend, drivers, native)
     target = str(driver or (backend is not None and _driver(backend)) or native_name)
@@ -766,12 +773,17 @@ def run_show(
                 f"{output.SHOW_BODY_MAX_CHARS} characters"
             )
 
-    if target in _INTERNAL_DRIVERS:
-        attachments = _internal_show_attachments(
-            target_backend, uid, row, body, body_readable, warnings
-        )
-    else:
-        attachments = _plugin_show_attachments(target_backend, uid)
+    attachments = _show_attachments(
+        target_backend,
+        config,
+        show_uid,
+        uid,
+        target,
+        row,
+        body,
+        body_readable,
+        warnings,
+    )
 
     partial = bool(body["partial"])
     headers = _show_headers(body["headers"], row, to_list, cc_list)
@@ -1510,66 +1522,151 @@ def _config_for_driver(config: "Config", driver: str, native: str) -> "Config":
     return dataclasses.replace(config, scopes=scopes)
 
 
-def _plugin_show_attachments(
-    backend: "MailBackend", uid: Any
-) -> list[dict]:
-    """``show.attachments`` of an external driver (API 1, AC-07 partial).
-
-    ``attachments: "none"`` returns ``[]`` without calling the plugin; any other
-    capability asks the driver for the ordered metadata and reports
-    ``{index, name, cached_path}`` with ``cached_path: null`` (the cache path is
-    computed by M08; ``show`` writes nothing).
-    """
-    capabilities = getattr(backend, "capabilities", None) or {}
-    if str(capabilities.get("attachments", "local")) == "none":
-        return []
-    entries = backend.attachments(uid) or []
-    ordered = sorted(entries, key=lambda entry: int(entry.get("index") or 0))
-    return [
-        {
-            "index": int(entry.get("index") or 0),
-            "name": str(entry.get("name") or ""),
-            "cached_path": None,
-        }
-        for entry in ordered
-    ]
-
-
-def _internal_show_attachments(
+def _show_attachments(
     backend: "MailBackend",
-    uid: Any,
+    config: "Config",
+    show_uid: str,
+    native_uid: Any,
+    driver: str,
     row: dict,
     body: dict,
     body_readable: bool,
     warnings: list[str],
 ) -> list[dict]:
-    """``show.attachments`` of a built-in driver: the 2.0.1 shape until M08.
+    """``show.attachments`` as the PRD-v2.1 §11.2 contract (M08, RF-43/AC-07).
 
-    An unreadable body (S/MIME included) never contributes MIME attachment
-    names: they come from the backend's metadata (PRD 12.10). Outlook cannot
-    read the names without the item: its hook applies the Windows rule of PRD
-    12.10 (``has_attachments``, S/MIME excepted).
+    ``{"index", "name", "cached_path"}`` with the original name and the stable
+    1..N index of the driver. ``cached_path`` is computed with the M07 helper
+    from the sanitized name and is ``null`` when the name is not safe or the
+    cached entry is not a regular file; ``show`` never creates, opens or reads
+    a cache entry. A driver with ``attachments: "none"`` returns ``[]``.
+
+    The API 1 ``attachments(uid)`` operation is the source of truth for every
+    driver that implements it (M09/M10). Until then a built-in driver falls back
+    to the 2.0.1 sources (MIME names of a readable body, the envelope index for
+    an unreadable non-S/MIME body). A driver may signal an S/MIME or unreadable
+    message by raising the attachment-protocol error from ``attachments()``
+    (convention C8/C9): ``show`` then returns ``[]`` and keeps only the body
+    warning, without ``W_ATTACHMENTS_UNAVAILABLE`` (D6).
     """
-    attachment_names = (
-        [str(entry["name"]) for entry in body["attachments"]] if body_readable else []
+    capabilities = getattr(backend, "capabilities", None) or {}
+    if str(capabilities.get("attachments", "local")) == "none":
+        return []
+    entries = _driver_attachments(backend, native_uid)
+    smime = (not body_readable) and _is_smime_body(body)
+    if not body_readable and smime:
+        names: list[tuple[int, str]] = []
+    elif body_readable:
+        names = (
+            _metadata_pairs(entries)
+            if entries is not None
+            else _body_pairs(body)
+        )
+    else:
+        names = _unreadable_names(
+            backend, native_uid, row, entries, warnings, driver in _INTERNAL_DRIVERS
+        )
+    return [
+        {
+            "index": index,
+            "name": name,
+            "cached_path": _show_cached_path(config.home, show_uid, index, name),
+        }
+        for index, name in names
+    ]
+
+
+def _driver_attachments(
+    backend: "MailBackend", native_uid: Any
+) -> list[Mapping[str, Any]] | None:
+    """Metadata rows of the driver, or ``None`` when it only has the 2.0.1 fallback.
+
+    A protocol error from ``attachments()`` (S/MIME/unreadable message) becomes
+    an empty list for ``show`` (D6): the body warning already explains it.
+    """
+    try:
+        entries = backend.attachments(native_uid)
+    except NotImplementedError:
+        return None
+    except MailqueryError as exc:
+        if exc.code == "E_ATTACHMENT_UNREADABLE":
+            return []
+        raise
+    return [entry for entry in (entries or []) if isinstance(entry, Mapping)]
+
+
+def _metadata_pairs(
+    entries: Iterable[Mapping[str, Any]] | None,
+) -> list[tuple[int, str]]:
+    """Ordered ``(index, original name)`` pairs of the driver metadata rows."""
+    pairs = [
+        (int(entry.get("index") or position), str(entry.get("name") or ""))
+        for position, entry in enumerate(entries or [], start=1)
+    ]
+    return sorted(pairs, key=lambda pair: pair[0])
+
+
+def _body_pairs(body: dict) -> list[tuple[int, str]]:
+    """``(index, name)`` pairs from the MIME names of a readable body (2.0.1)."""
+    return [
+        (index, str(entry.get("name") or ""))
+        for index, entry in enumerate(body.get("attachments") or (), start=1)
+    ]
+
+
+def _unreadable_names(
+    backend: "MailBackend",
+    native_uid: Any,
+    row: dict,
+    entries: Iterable[Mapping[str, Any]] | None,
+    warnings: list[str],
+    internal: bool,
+) -> list[tuple[int, str]]:
+    """Attachment names of an unreadable non-S/MIME body (PRD 12.10, M09/M10)."""
+    if not internal:
+        return _metadata_pairs(entries)
+    hook = getattr(backend, "unreadable_attachments", None)
+    if callable(hook):
+        hook_names, hook_warning = hook(row)
+        if hook_warning:
+            warnings.append(str(hook_warning))
+        if entries is not None:
+            return _metadata_pairs(entries)
+        return [
+            (index, str(name))
+            for index, name in enumerate(hook_names or (), start=1)
+        ]
+    if entries is not None:
+        names = _metadata_pairs(entries)
+        if names:
+            warnings.append(_ATTACHMENTS_UNAVAILABLE_WARNING)
+        return names
+    stored = [str(name) for name in (backend.attachment_names(native_uid) or ())]
+    if stored:
+        warnings.append(_ATTACHMENTS_UNAVAILABLE_WARNING)
+    return [
+        (index, str(name)) for index, name in enumerate(stored, start=1)
+    ]
+
+
+def _is_smime_body(body: dict) -> bool:
+    """Whether the 2.0.1 body warnings mark the message as S/MIME (D6)."""
+    return any(
+        "S/MIME" in str(warning) for warning in (body.get("warnings") or ())
     )
-    unreadable_attachments = (
-        None if body_readable else getattr(backend, "unreadable_attachments", None)
-    )
-    if unreadable_attachments is not None:
-        attachment_names, attachments_warning = unreadable_attachments(row)
-        if attachments_warning:
-            warnings.append(attachments_warning)
-    elif not attachment_names:
-        stored_names = backend.attachment_names(uid)
-        if stored_names:
-            attachment_names = stored_names
-            if not body_readable:
-                warnings.append(
-                    "W_ATTACHMENTS_UNAVAILABLE: attachment names come from the "
-                    "envelope index; the message body could not be read"
-                )
-    return [{"name": str(name)} for name in attachment_names]
+
+
+def _show_cached_path(
+    home: Any, show_uid: str, index: int, name: str
+) -> str | None:
+    """``cached_path`` of one attachment: safe name plus a regular cache file only."""
+    try:
+        if classify_name(name).blocked:
+            return None
+        path = attachment_cached_path(home, show_uid, name, index)
+    except (OSError, ValueError):  # pragma: no cover - defensive, no writes happen
+        return None
+    return None if path is None else str(path)
 
 
 def _message_payload(
