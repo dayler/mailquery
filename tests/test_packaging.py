@@ -1,9 +1,8 @@
-"""TC-06, PKG-01 and PKG-02: packaging metadata and version derivation (no bump).
+"""TC-06, PKG-01 and PKG-02: packaging metadata and version derivation.
 
-M11 keeps the package on the current version (``mailquery.__version__``, 2.0.1):
-the PRD-v2.1 features are part of a future, not-yet-released 3.0.0, so the tests
-derive every expected version from the package instead of pinning a literal
-(M11-T01, milestone PKG-02; plan §5.1 D15).
+``develop`` carries the development major (``mailquery.__version__``, 3.0.0),
+not yet released: the tests derive every expected version from the package
+instead of pinning a literal (M11-T01, milestone PKG-02; plan D15/D17).
 """
 
 import importlib.metadata
@@ -44,7 +43,7 @@ class PackagingTests(unittest.TestCase):
         """TC-06.01: version without bump, entry point group and console script."""
         project = _load()["project"]
         self.assertEqual(project["version"], mailquery.__version__)
-        self.assertFalse(mailquery.__version__.startswith("3."), "this phase does not bump to 3.x")
+        self.assertEqual(mailquery.__version__.split(".")[0], "3", "develop carries the 3.0.0 major")
         self.assertEqual(
             project.get("entry-points", {}).get(ENTRY_POINT_GROUP), EXPECTED_TARGETS
         )
@@ -121,12 +120,12 @@ class PluginPackagingTests(unittest.TestCase):
 
 class ReleasePackagingTests(unittest.TestCase):
     def test_pkg_02_01_packaging_is_ready_without_a_version_bump(self) -> None:
-        """PKG-02.01: entry points/console script are final and the version is not bumped."""
+        """PKG-02.01: entry points/console script are final and the version is the development major."""
         project = _load()["project"]
         self.assertEqual(project["version"], mailquery.__version__)
         self.assertEqual(project["scripts"], {"mailquery": "mailquery.cli:main"})
         self.assertEqual(project.get("entry-points", {}).get(ENTRY_POINT_GROUP), EXPECTED_TARGETS)
-        self.assertFalse(mailquery.__version__.startswith("3."))
+        self.assertEqual(mailquery.__version__.split(".")[0], "3")
         installed = _installed_version()
         if installed is not None:
             self.assertEqual(installed, mailquery.__version__)

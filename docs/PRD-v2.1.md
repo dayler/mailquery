@@ -100,7 +100,7 @@ En Windows, `3.0.0` cambia exactamente esto; el resto debe quedar idéntico:
 
 `3.0.0` (mayor). El cambio de tipo y forma de `uid` (incluido `cursor.*.last_uid`), la forma de `show.attachments`, el esquema de `[scope]` y la semántica de errores son incompatibles para un harness que consume la 2.0.x. El formato de `--version` es aditivo. Se aplica la regla que el propio `PRD.md` usó para justificar `2.0.0`.
 
-**Cuándo se aplica el bump:** al publicar el `3.0.0` completo, no al implementar este delta. Mientras estos features estén solo en `develop`, el paquete conserva la versión vigente (`2.0.1`), no se crea tag de release y ningún documento debe presentar `3.0.0` como publicado.
+**Cuándo se aplica el bump:** el número mayor se aplicó en `develop` al cerrar la implementación del delta (2026-11-11, instrucción del dueño: el cambio de tipo de `uid` y de esquema de estado ya lo justifica). Sigue siendo un estado **no publicado**: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance.
 
 ### 0.6 Decisiones de producto aprobadas
 

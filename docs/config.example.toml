@@ -1,6 +1,6 @@
 # ============================================================================
-# mailquery — example configuration (version 2.0.1; features for the future,
-# not-yet-released 3.0.0 of PRD-v2.1, macOS and Windows)
+# mailquery — example configuration (version 3.0.0 of PRD-v2.1, not yet
+# released, macOS and Windows)
 #
 # The installers (`scripts/install.sh` or `scripts/install.ps1`) copy this file
 # to `~/.mailquery/config.toml` when that file does not exist yet. The

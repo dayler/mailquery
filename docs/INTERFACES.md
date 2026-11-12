@@ -1,10 +1,10 @@
 # Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
 
 > **Estado del contrato:** implementado en la rama de integración del delta
-> (PRD-v2.1) y **no publicado**. El paquete conserva la versión vigente
-> (`mailquery.__version__` = 2.0.1); el `3.0.0` es futuro y no se ha publicado.
-> Este documento describe el contrato tal como lo implementan M01–M10 y lo
-> cierra M11, sin bump de versión, sin tag de release y sin merge a `main`.
+> (PRD-v2.1) y **no publicado**. El paquete anuncia
+> `mailquery.__version__` = 3.0.0 en `develop`, todavía sin tag de release ni
+> merge a `main`. Este documento describe el contrato tal como lo implementan
+> M01–M10 y lo cierra M11.
 
 Documento de coordinación para el equipo de implementación y guía de
 desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) y manda sobre
@@ -1567,7 +1567,7 @@ y después de `schema` (macOS) / `stores` (Windows) como hasta ahora.
 primero si hay bloques sin prefijo),
 `<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>; body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`,
 unidos por `; `; la versión es la de la distribución (`package_version()`,
-`2.0.1` en esta fase) y el nativo se obtiene del backend seleccionado (así el
+`3.0.0` en esta fase) y el nativo se obtiene del backend seleccionado (así el
 fake de Outlook sobre `platform="win32"` reporta `outlook` en cualquier host).
 Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒
 `; no declared drivers` (valida solo el nativo); config que no parsea ⇒

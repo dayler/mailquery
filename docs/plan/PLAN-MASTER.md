@@ -70,7 +70,7 @@ Reglas:
 | M10 | [Backend Outlook: adjuntos](milestones/M10-outlook-attachments.md) | E | M08, M09 | AC-10, AC-12, AC-15, AC-17 (Outlook), AC-19, AC-20 (integración) | UT-OL-ATT-01..04, TC-09, OL-30, SMOKE-ATT-OL | INTERFACES Outlook y excepción COM 🟢 |
 | M11 | [Documentación, cierre de fase y conciliación](milestones/M11-docs-release-and-reconciliation.md) | F | M01–M10 | Cierre de AC-01…AC-21; AC-19 (docs), AC-21 | DOC-01..06, PKG-02, INS-SMOKE-01, TC-04/TC-05/TC-06/TC-07 | READMEs, recetas, skills, instaladores, PRD-v2.1 §0.7 🟢 |
 
-**Resumen:** milestones 🟢 11/11 · 🟡 0 · 🔴 0 · ⚪ 0. ACs 🟢 21/21. Documentos consumidores 🟢 10/10. Suite final: 1048 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 8 saltados); 0 fallos nuevos. Fase cerrada **sin publicación** (D15) y **sin tags** (D16): versión 2.0.1, sin tags de milestone ni de release, sin merge a `main`.
+**Resumen:** milestones 🟢 11/11 · 🟡 0 · 🔴 0 · ⚪ 0. ACs 🟢 21/21. Documentos consumidores 🟢 10/10. Suite final: 1048 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 8 saltados); 0 fallos nuevos. Fase cerrada **sin publicación** (D15) y **sin tags** (D16): `develop` anuncia la versión 3.0.0 desde el bump posterior al cierre (D17), sin tags ni release y sin merge a `main`.
 
 ### 3.2 Lotes de integración
 
@@ -217,7 +217,7 @@ Un milestone cerrado no cambia estos contratos sin reabrir el milestone y actual
 6. riesgos abiertos, deuda aceptada y preguntas HITL.
    El resumen (tres líneas) va al registro §11; el detalle queda en el archivo de evidencia. Ver plantilla en [`docs/plan/evidence/README.md`](evidence/README.md).
 
-**Sin release.** Esta fase no cambia la versión del paquete (sigue en `2.0.1`), no crea tags (ni de release ni `prd-v2.1-MNN`, D16), no mergea a `main` y no publica. El bump a `3.0.0` y el release se harán cuando se complete el resto del alcance (D15).
+**Sin release.** Esta fase no publica: no crea tags (ni de release ni `prd-v2.1-MNN`, D16), no mergea a `main` y no publica. El bump del paquete a `3.0.0` se aplicó en `develop` al cerrar, por instrucción del dueño (D17); el release se hará cuando se complete el resto del alcance (D15).
 
 **Higiene.** `git diff --check` limpio; sin archivos temporales, `.pyc` ni salidas de depuración en el repo; sin cambios en `docs/PRD.md`, `docs/PRD-v2.1.md` (salvo el orquestador) ni en este plan.
 
@@ -349,7 +349,7 @@ Todo artefacto consumidor del contrato se actualiza en el milestone que cambia s
 - Documentación completa y sin referencias obsoletas: "cinco comandos"/"five commands", uid entero, `attachments` solo con `name`, `[scope]` sin prefijo, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`/`retention_days` u otras marcas de versiones anteriores. Donde se muestre una versión, coincide con `__version__` (no se anuncia `3.0.0`, que no está publicado).
 - Escaneo de imports de solo stdlib extendido a `attachments/**`, `plugins/**` y `backends/registry.py`; presupuestos de extracción de §12.2 medidos o registrados como deuda explícita.
 - `PRD-v2.1 §0.7`: filas de features 🟢 con su evidencia; filas de publicación (RC-25, CL-05, CL-09, CL-12 y CL-08 en lo que dependa de ellas) quedan ⚪ pendientes del release futuro del `3.0.0`.
-- **Sin release:** versión del paquete sin bump (`2.0.1`), sin tags (ni `v3.0.0` ni `prd-v2.1-MNN`, D16), sin merge a `main`, sin publicación. `develop` conserva los features sin publicar hasta completar el resto del alcance del `3.0.0` (D15).
+- **Sin release:** paquete en `3.0.0` (bump aplicado al cerrar, D17), sin tags (ni `v3.0.0` ni `prd-v2.1-MNN`, D16), sin merge a `main`, sin publicación. `develop` conserva los features sin publicar hasta completar el resto del alcance del `3.0.0` (D15).
 - `git diff` contra `develop` sin cambios en `docs/PRD.md` ni en este plan (salvo su dashboard, registro y evidencias).
 
 ---
@@ -370,7 +370,7 @@ Todo artefacto consumidor del contrato se actualiza en el milestone que cambia s
 | Lote grande oculta una regresión de un milestone | Media | Medio | Evidencia por milestone, suite completa local tras cada integración y PR del lote con matriz completa; el bisect usa los commits de integración |
 | Coste de CI por exceso de corridas | Alta | Bajo | 4 PRs y 4 corridas (§3.2, §7.5); `cancel-in-progress`; sin `push` en `develop` ni en `main` |
 | Confundir el cierre de fase con el release del `3.0.0` | Media | Alto | D15 y D16: sin bump, sin tags, sin `main`; docs y ejemplos usan `__version__`; §0.7 distingue filas de features de las de publicación |
-| Features del `3.0.0` en `develop` con versión `2.0.1` | Media | Medio | Es un estado de desarrollo no publicado; el bump y el release se harán al completar el alcance; la documentación no anuncia `3.0.0` |
+| Features del `3.0.0` en `develop` con versión `3.0.0` sin release | Media | Medio | Estado de desarrollo no publicado; la documentación marca el `3.0.0` como no publicado y sin tag; el release llega al completar el alcance (D15/D17) |
 | PR de lote demasiado grande para revisar | Media | Medio | Revisión por commits, evidencia por milestone y diff acumulado contra `develop`; tres lotes de 3–4 milestones como máximo |
 
 ---
@@ -396,6 +396,7 @@ Se completa al cerrar cada milestone (solo el orquestador).
 | 2026-11-11 | M10 | ⚪ → 🟢 | suite del milestone 1003/2/8 (SMOKE-ATT-OL salta en macOS); UT-OL-ATT-01..04, TC-09 y OL-30 verdes; +29 casos; 4 goldens Outlook nuevos; +1553/−14. Evidencia: [`evidence/M10.md`](evidence/M10.md) | 0 HITL; materialización COM real solo verificable en host Windows (riesgo aceptado) |
 | 2026-11-11 | M11 | ⚪ → 🟢 | suite 1048/2/8 (solo `SMOKE-NEW.07`); DOC-01..06/TC-04/05/07 31/31, PKG-02/TC-06 8 OK, INS-SMOKE-01 4/4, `test_integration` 80/80; +35 casos; 16 archivos +1591/−527; escaneo de referencias obsoletas con 0 hits. Evidencia: [`evidence/M11.md`](evidence/M11.md) | 0 HITL; riesgo aceptado: SMOKE-ATT-OL/materialización COM sin host Windows |
 | 2026-11-11 | Cierre de fase | — | — | PRs I1–I4 mergeados en `develop` (matriz de CI completa verde en los 4, 15 jobs cada uno); AC-01…AC-21 🟢; sin bump de versión, sin tag de release, sin merge a `main` (D15 + instrucción del dueño). Evidencia de CI en [`evidence/M11.md`](evidence/M11.md) §7 | Fase cerrada; sin tags (D16); la publicación del `3.0.0` queda para el release futuro |
+| 2026-11-11 | Post-cierre | — | — | Bump `2.0.1` → `3.0.0` en `develop` (D17): `pyproject.toml`, `__version__`, goldens `doctor`/`outlook/doctor`, ejemplos de los dos READMEs, `INTERFACES`, `config.example.toml`, `threat-model` y aserciones de empaquetado. `test_packaging` y `test_integration` verdes; suite sin fallos nuevos | Verificado localmente antes del push; sin tag, sin release y sin merge a `main` |
 
 ---
 
@@ -435,5 +436,6 @@ Las preguntas que el PRD-v2.1 no cerraba se resuelven así; ningún milestone vu
 | D12 | Ruta materializada de Outlook inválida (fuera de staging/symlink) | Se rechaza con `E_ATTACHMENT_UNAVAILABLE` (`unsupported`) antes de publicar; el detalle se registra en el log sin ruta. | RNF-13/RNF-14 |
 | D13 | Poda del anillo de un plugin desinstalado | Se poda en silencio al cargar/validar el estado y se informa en `doctor state`; la caché se conserva. | §10.2 puntos 6 y 10, DP-03 |
 | D14 | ¿Un PR y una corrida de CI por milestone? | No: integración por lotes (§3.2). 11 ramas por milestone, 4 PRs a `develop` y CI solo en el PR del lote; la evidencia de CI deja de ser requisito de cierre de milestone y se exige al cerrar el lote. | Reduce ~330 jobs de CI a ~60 y 11 bloqueos de merge a 4; la trazabilidad se mantiene con `docs/plan/evidence/MNN.md` y los commits (sin tags, D16) |
-| D15 | ¿Esta fase publica el `3.0.0`? | No. Implementa el delta completo de PRD-v2.1 en `develop` sin bump de versión (sigue `2.0.1`), sin tag de release, sin merge a `main` y sin publicación; los features son parte del `3.0.0`, que se publicará cuando se complete el resto del alcance. `--version` conserva la versión del paquete y añade `drivers:`. | El dueño confirmó 2026-11-11 que el `3.0.0` incluirá más features; no se crean tags de milestone (D16) |
+| D15 | ¿Esta fase publica el `3.0.0`? | No. Implementa el delta completo de PRD-v2.1 en `develop` sin tag de release, sin merge a `main` y sin publicación; los features son parte del `3.0.0`, que se publicará cuando se complete el resto del alcance. El bump de versión se aplicó después del cierre (D17). `--version` conserva la versión del paquete y añade `drivers:`. | El dueño confirmó 2026-11-11 que el `3.0.0` incluirá más features; no se crean tags de milestone (D16) |
 | D16 | ¿Se crean los tags `prd-v2.1-MNN` de trazabilidad previstos en §3.2 y §6.3? | No: el dueño pidió no crear tags en esta fase. La trazabilidad por milestone queda en `docs/plan/evidence/MNN.md`, en los commits de integración y en §11; ningún tag de milestone ni de release se crea o publica. | Instrucción del dueño 2026-11-11; un tag sin release no aporta y añade superficie de error en el remoto |
+| D17 | ¿La fase mantiene la versión `2.0.1`? | No: se sube a `3.0.0` en `develop` al cerrar la fase (instrucción del dueño 2026-11-11). El delta rompe el tipo de `uid` y el esquema de estado, así que el número mayor ya corresponde. Sigue sin publicarse: sin tag, sin release y sin merge a `main`; los features pendientes del `3.0.0` entrarán en `develop` con esa misma versión. | Instrucción del dueño; coherente con `PRD-v2.1 §0.5` (bump mayor) y sin contradecir D15, que prohíbe publicar, no numerar |
