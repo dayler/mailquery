@@ -86,7 +86,7 @@ class ReadOnlyStoreTest(unittest.TestCase):
 
     def setUp(self) -> None:
         # Extended store: WAL-mode Envelope Index with -wal/-shm, S/MIME, deleted
-        # rows... plus the M09 attachment fixtures (``attachments=True``).
+        # rows... plus the attachment fixtures (``attachments=True``).
         self.fx = build_store(extended=True, attachments=True)
         self.addCleanup(self.fx.cleanup)
         # Default fixture config declares the three accounts (two extra folders).
@@ -230,7 +230,7 @@ class ReadOnlyStoreTest(unittest.TestCase):
         self.assert_store_unchanged()
 
     def test_tc_03_02_attachment_flows_leave_the_store_untouched(self) -> None:
-        """TC-03 (M09): attachment success, cache, blocked, limit, S/MIME and empty leave it untouched."""
+        """TC-03: attachment success, cache, blocked, limit, S/MIME and empty leave it untouched."""
         scenarios = [
             (("attachment", prefixed_uid(2714), "--index", "1"), 0, None),
             (("attachment", prefixed_uid(2714), "--index", "1"), 0, None),  # cached

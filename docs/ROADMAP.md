@@ -279,3 +279,22 @@ requiere la app en Entra ID.
 5. Backend Thunderbird.
 6. `mailquery-graph` con cuenta personal; solicitud de consentimiento a IT
    cuando esté terminado.
+
+## 10. Para publicar 3.0.0
+
+Las features de `3.0.0` están en `develop` con la versión `3.0.0a0`, sin tag ni
+merge a `main`. Falta:
+
+1. Subir la versión de `3.0.0a0` a `3.0.0` en `pyproject.toml`,
+   `mailquery.__version__`, los goldens `doctor` y la documentación; reinstalar el
+   paquete y comprobar TC-06, PKG-01, PKG-02 y DOC-03
+   ([`TEST-CATALOG.md`](TEST-CATALOG.md)).
+2. Comprobar con el paquete instalado los entry points de los backends y los
+   instaladores (PKG-02, INS-SMOKE-01).
+3. Correr las SMOKE en los equipos del dueño: SMOKE-INSTALL, SMOKE-NEW y
+   SMOKE-ATT-AM en macOS; SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-OL en Windows con
+   Outlook clásico. La materialización COM de adjuntos nunca se ha verificado en
+   un Windows real.
+4. Decidir si [BUG-01](KNOWN-DEFECTS.md) se corrige antes del release.
+5. CI verde en el pull request a `main` (3 SO × Python 3.11–3.14), tag `v3.0.0` y
+   su corrida de CI como evidencia del release.

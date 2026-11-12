@@ -456,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_parser.set_defaults(command="show")
     _style_parser(show_parser, root=False)
-    # The format is validated by AppleMailBackend.parse_uid in main(), not by argparse.
+    # The uid format is validated in main() by _parse_command_uid, not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
     attachment_parser = subparsers.add_parser(

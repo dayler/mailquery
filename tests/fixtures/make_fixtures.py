@@ -63,7 +63,7 @@ MAILBOX_URLS: dict[int, str] = {
 MAILBOX_ICLOUD_PROYECTOS_INBOX = 20
 MAILBOX_ICLOUD_PROYECTOS_FACTURAS = 21
 MAILBOX_ICLOUD_CLIENTES_FACTURAS = 22
-# B-27: a top-level folder whose *name* ("Proyectos/Inbox", slash encoded as %2F)
+# A top-level folder whose *name* ("Proyectos/Inbox", slash encoded as %2F)
 # equals the *path* of MAILBOX_ICLOUD_PROYECTOS_INBOX. It holds no messages.
 MAILBOX_ICLOUD_SLASH_NAME = 23
 
@@ -84,14 +84,14 @@ FAKE_COUNTERS: dict[int, tuple[int, int]] = {
 ME = ("Fixture User", "me@fixture.example")
 
 
-#: Payloads of the M09 attachment fixtures (fixed bytes: sizes and sha256 are stable).
+#: Payloads of the attachment fixtures (fixed bytes: sizes and sha256 are stable).
 PAYLOAD_PDF_FACTURA = b"%PDF-1.4\n1 0 obj\n<< fixture factura de octubre >>\nendobj\n"
 PAYLOAD_PDF_OCTUBRE = b"%PDF-1.4\n1 0 obj\n<< fixture Factura Octubre 2026 >>\nendobj\n"
 PAYLOAD_PDF_FACTURA_2 = b"%PDF-1.4\n1 0 obj\n<< fixture factura duplicada >>\nendobj\n"
 PAYLOAD_SAFE_TEXT = b"texto seguro sin firma\n"
 PAYLOAD_EXECUTABLE = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xffexec-fixture"
 PAYLOAD_EMPTY = b""
-PAYLOAD_BIG = b"X" * (1536 * 1024)  # 1.5 MiB (M09-T05/T06: known-size limit)
+PAYLOAD_BIG = b"X" * (1536 * 1024)  # 1.5 MiB (known-size limit)
 PAYLOAD_PARTIAL_LOCAL = b"%PDF-1.4\nexternalized fixture attachment\n"
 PAYLOAD_PARTIAL_UNVERIFIABLE = b"%PDF-1.4\nexternalized fixture missing on disk\n"
 PAYLOAD_UNICODE = b"%PDF-1.4\nunicode fixture\n"
@@ -100,7 +100,7 @@ PAYLOAD_CORRUPT = b"payload ignored by the corrupt fixture"
 
 @dataclass(frozen=True)
 class FixtureAttachment:
-    """One attachment of a fixture message (M09).
+    """One attachment of a fixture message.
 
     ``externalized`` marks the attachment of a ``.partial.emlx``: the MIME part
     carries no decoded content and the bytes live in a separate file under
@@ -147,7 +147,7 @@ class FixtureMessage:
     smime: str | None = None
     # attachments rows without a MIME part in the .emlx (DB-only).
     attachment_rows: tuple[str, ...] = ()
-    # M09: ordered attachment parts with their payload and externalization; when
+    # Ordered attachment parts with their payload and externalization; when
     # empty, ``attachment_names`` keeps the 2.0.1 shared synthetic payload.
     attachments: tuple[FixtureAttachment, ...] = ()
     # When True, date_received/date_sent in the DB come from ``date_value``
@@ -474,7 +474,7 @@ EXTENDED_MESSAGES: tuple[FixtureMessage, ...] = (
 )
 
 # --------------------------------------------------------------------------- #
-# M09 attachment fixtures (build_store(attachments=True) only)
+# Attachment fixtures (build_store(attachments=True) only)
 # --------------------------------------------------------------------------- #
 
 #: Three attachments with two repeated names (TC-08 goldens, UT-AM-02.01).
@@ -681,7 +681,7 @@ ATTACHMENT_MESSAGES: tuple[FixtureMessage, ...] = (
     ),
 )
 
-#: Config with the M09 ``max_file_size_mb`` limit (TC-08.05).
+#: Config with the ``max_file_size_mb`` limit (TC-08.05).
 LIMIT_1MB_CONFIG = f"""\
 [attachments]
 max_file_size_mb = 1
@@ -703,7 +703,7 @@ ORPHAN_UID = 99999
 # .emlx whose first line is not a valid length and whose payload is not MIME.
 CORRUPT_EMLX_BYTES = b"this-is-not-a-length\nnot a valid mime payload\x00\x01"
 
-# M02: the fixture config carries a valid ``[attachments]`` table with the
+# The fixture config carries a valid ``[attachments]`` table with the
 # documented defaults (parsing coverage; it changes no output) and the account
 # blocks keep the 2.0.1 unprefixed form (regression: same behavior).
 ATTACHMENTS_CONFIG = """\
@@ -725,7 +725,7 @@ mailbox_list = ["Facturas", "Archivo"]
 [scope."{LOCAL_LABEL}"]
 """
 
-#: Same accounts declared with the explicit driver prefix (M02, RF-36).
+#: Same accounts declared with the explicit driver prefix (RF-36).
 PREFIXED_CONFIG = f"""\
 {ATTACHMENTS_CONFIG}
 [scope."apple_mail:{ICLOUD_LABEL}"]
@@ -745,7 +745,7 @@ class FixturePaths:
     * ``mailboxes``: ``iCloud/Proyectos/Inbox`` (20), ``iCloud/Proyectos/Facturas``
       (21), ``iCloud/Clientes/Facturas`` (22; same name as 21 and as
       ``iCloud/Facturas``, different paths) and ``iCloud/Proyectos%2FInbox`` (23;
-      top-level folder whose name equals the path of 20; no messages, B-27).
+      top-level folder whose name equals the path of 20; no messages).
     * 90101/90102/90103: one message in each of mailboxes 20/21/22.
     * 90110 encrypted S/MIME (pkcs7-mime, ``attachments`` row ``smime.p7m``);
       90111 signed S/MIME (multipart/signed, no ``attachments`` row).
@@ -758,7 +758,7 @@ class FixturePaths:
     * ``wal_path`` / ``shm_path``: the Envelope Index is in WAL journal mode and
       both ``Envelope Index-wal`` and ``Envelope Index-shm`` exist on disk.
 
-    ``build_store(attachments=True)`` adds the M09 attachment fixtures (``uid``
+    ``build_store(attachments=True)`` adds the attachment fixtures (``uid``
     constants ``UID_ATTACH_*``; ``HOSTILE_ATTACHMENT_NAMES`` lists the hostile
     names): three attachments with a repeated name, one hostile filename per
     message, executable content, an empty attachment, a ``.partial.emlx`` with a
@@ -807,7 +807,7 @@ def build_store(
     When ``root`` is ``None`` a new temporary directory is created (the caller
     owns it and can call :meth:`FixturePaths.cleanup`). ``extended=True`` adds
     the edge-case data documented on :class:`FixturePaths`; ``attachments=True``
-    adds the M09 attachment fixtures. Both default to ``False`` (2.0.1 data).
+    adds the attachment fixtures. Both default to ``False`` (2.0.1 data).
     """
     if now is None:
         now = datetime.now()
@@ -962,7 +962,7 @@ def _write_persistence_info(mail_root: Path) -> None:
 def _attachments_of(message: FixtureMessage) -> tuple[FixtureAttachment, ...]:
     """Ordered attachment parts of a fixture message.
 
-    New M09 fixtures declare them explicitly. Legacy fixtures keep
+    Attachment fixtures declare them explicitly. Legacy fixtures keep
     ``attachment_names`` (2.0.1): they share the same synthetic payload and, in a
     ``.partial.emlx``, their content is also written as an externalized file.
     """

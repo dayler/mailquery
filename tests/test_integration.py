@@ -160,7 +160,7 @@ def _normalize(value: object, root: Path) -> object:
         # Goldens use "/" on every OS: normalize separators after the root swap.
         text = text.replace("\\", "/")
         # Windows uses the stable 32-hex directory when the real cache path
-        # exceeds its conservative budget (D9); the message directory is not
+        # exceeds its conservative budget; the message directory is not
         # platform-independent, so goldens keep it as a placeholder.
         return MESSAGE_DIR_RE.sub(r"\1<MESSAGE_DIR>", text)
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) >= 1_000_000_000:
@@ -843,14 +843,14 @@ class ExtendedGoldenTest(IntegrationBase):
 
 
 # --------------------------------------------------------------------------- #
-# M09 — Apple Mail attachments: UT-AM-03/04 and the TC-08 goldens
+# Apple Mail attachments: UT-AM-03/04 and the TC-08 goldens
 # --------------------------------------------------------------------------- #
 
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
 class _AttachmentFixtureCase(IntegrationBase):
-    """Integration base over ``build_store(attachments=True)`` (M09 fixtures)."""
+    """Integration base over ``build_store(attachments=True)`` (attachment fixtures)."""
 
     def setUp(self) -> None:
         self.fx = build_store(attachments=True)
@@ -877,7 +877,7 @@ class _AttachmentFixtureCase(IntegrationBase):
 
 
 class AppleMailAttachmentTest(_AttachmentFixtureCase):
-    """UT-AM-03/04: extraction, availability, read-only and integration (M09)."""
+    """UT-AM-03/04: extraction, availability, read-only and integration."""
 
     # -- UT-AM-03 ---------------------------------------------------------- #
 
@@ -940,7 +940,7 @@ class AppleMailAttachmentTest(_AttachmentFixtureCase):
         )
 
     def test_ut_am_03_05_smime_is_unreadable_never_no_attachments(self) -> None:
-        """UT-AM-03.05: S/MIME ⇒ E_ATTACHMENT_UNREADABLE and show returns [] (D6)."""
+        """UT-AM-03.05: S/MIME ⇒ E_ATTACHMENT_UNREADABLE and show returns []."""
         payload = self.run_error(
             "attachment",
             prefixed_uid(UID_ATTACH_SMIME),
@@ -1080,7 +1080,7 @@ class AppleMailAttachmentTest(_AttachmentFixtureCase):
 
 
 class AttachmentGoldenTest(_AttachmentFixtureCase):
-    """TC-08 (M09): the six attachment goldens over the real Apple Mail fixtures.
+    """TC-08: the six attachment goldens over the real Apple Mail fixtures.
 
     Golden seeds: TC-08.01 runs on a fresh store (``cached: false``); TC-08.02
     runs the same extraction once to seed the cache and compares the second run
@@ -1192,7 +1192,7 @@ def _snapshot_paths(root: Path) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-# TC-08 (M04) — multi-driver goldens: apple_mail + the API 1 plugin double
+# TC-10 — multi-driver goldens: apple_mail + the API 1 plugin double
 # --------------------------------------------------------------------------- #
 
 #: Default fixture config plus the plugin account: apple_mail + graph.
@@ -1228,11 +1228,11 @@ def _plugin_row(now, native_id: str, *, minutes_ago: float) -> dict:
 
 
 class MultiDriverGoldenTest(IntegrationBase):
-    """TC-08 (M04): ``search``/``new`` over ``apple_mail`` plus the plugin double.
+    """TC-10: ``search``/``new`` over ``apple_mail`` plus the plugin double.
 
     The registry seam is patched with an in-memory ``BackendRegistry`` holding the
     built-in entry points plus the plugin entry point, so the CLI loads the
-    declared plugin without installing it (plan §7.5).
+    declared plugin without installing it.
     """
 
     def setUp(self) -> None:
@@ -1253,8 +1253,8 @@ class MultiDriverGoldenTest(IntegrationBase):
         with mock.patch.object(cli, "BackendRegistry", lambda *a, **k: self.registry):
             yield
 
-    def test_tc_08_01_search_merges_both_drivers(self) -> None:
-        """TC-08.01: search golden with the two declared drivers (golden)."""
+    def test_tc_10_01_search_merges_both_drivers(self) -> None:
+        """TC-10.01: search golden with the two declared drivers (golden)."""
         with self.plugin_registry():
             payload = self.run_ok("search")
         uids = [message["uid"] for message in payload["messages"]]
@@ -1271,8 +1271,8 @@ class MultiDriverGoldenTest(IntegrationBase):
         self.assertEqual(self.entry.load_calls, 1, "the declared plugin is loaded once")
         self.assert_golden("search_multidriver.json", payload)
 
-    def test_tc_08_02_new_merges_both_drivers(self) -> None:
-        """TC-08.02: new golden over the merged first-run window (golden)."""
+    def test_tc_10_02_new_merges_both_drivers(self) -> None:
+        """TC-10.02: new golden over the merged first-run window (golden)."""
         with self.plugin_registry():
             payload = self.run_ok("new")
         self.assertEqual(
@@ -1462,7 +1462,7 @@ OUTLOOK_ITEMS_CONFIG = '[scope."ana@example.com"]\nmailbox_list = ["INBOX/Factur
 
 
 def _recipe_commands(name: str) -> list[list[str]]:
-    """Each line that starts with ``mailquery`` inside a code block of the recipe (plan 7.4).
+    """Each line that starts with ``mailquery`` inside a code block of the recipe.
 
     Fenced blocks may be indented (inside a list). The shell comment that
     follows a command is dropped and the quotes are resolved as a shell would.
@@ -1782,7 +1782,7 @@ _VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
 #: ``3.0.0a0`` is not the published 3.0.0).
 _FINAL_3_0_0 = r"mailquery 3\.0\.0(?!(?:a|b|rc)\d)"
 
-#: Stale patterns the 2.1 documentation retires (plan §9.3, CL-07).
+#: Stale patterns the 2.1 documentation retires.
 _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
     "five commands": re.compile(r"five commands", re.IGNORECASE),
     "cinco comandos": re.compile(r"cinco comandos", re.IGNORECASE),

@@ -6,7 +6,7 @@ Two layers are covered:
   ``run_mailboxes``) with the synthetic Apple Mail fixture plus the API 1 plugin
   double as a second driver: merge and total order, global cursor, limits,
   mailboxes composition and ``show`` dispatch;
-* the CLI with an injected :class:`BackendRegistry` (the registry seam M01 left):
+* the CLI with an injected :class:`BackendRegistry` (the registry seam):
   declared-driver loading, fail-fast, closing and the ``event=start`` log.
 
 Every path is temporary (fixture store, fake home): the tests never read the
@@ -102,7 +102,7 @@ def _close_log_handlers() -> None:
 
 
 def capturing_factory(**instance_kwargs):
-    """``plugin_factory`` that records every instance the core builds (M04 close test)."""
+    """``plugin_factory`` that records every instance the core builds (close test)."""
     base = plugin_factory(**instance_kwargs)
     created: list[FakePluginBackend] = []
 
@@ -887,7 +887,7 @@ class ShowPluginTest(MultiDriverCase):
 
 
 # --------------------------------------------------------------------------- #
-# M05 — runtime plugin errors and metadata timeout (UT-ERR-03.04, UT-ERR-04.05)
+# Runtime plugin errors and metadata timeout (UT-ERR-03.04, UT-ERR-04.05)
 # --------------------------------------------------------------------------- #
 
 

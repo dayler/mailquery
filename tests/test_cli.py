@@ -243,7 +243,7 @@ _ATTACHMENT_HELP_EXPECTED = "\n".join(
     )
 ) + "\n"
 
-#: Every subcommand of the six-command CLI (M08).
+#: Every subcommand of the six-command CLI.
 ALL_COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
 
 
@@ -670,7 +670,7 @@ class ErrorContractTests(_CliTestCase):
             ("E_CLIENT_BUSY", 5),
             ("E_OUTLOOK_NOT_RUNNING", 6),
             ("E_INTERNAL", 1),
-            # PRD §12.6 new codes (M01).
+            # PRD §12.6 new codes.
             ("E_DRIVER_UNKNOWN", 2),
             ("E_ATTACHMENTS_DISABLED", 2),
             ("E_PLUGIN_INCOMPATIBLE", 3),
@@ -855,7 +855,7 @@ class DispatchTests(_CliTestCase):
             exit_code, stdout, _ = self.run_cli(["show", "83143"])
         self.assertEqual(exit_code, 0)
         run_mock.assert_called_once()
-        # run_show(backend, config, uid): B-01 gives it the config.
+        # run_show(backend, config, uid): it receives the config.
         _, call_config, call_uid = run_mock.call_args.args
         self.assertEqual(call_config.home, self.fx.home)
         self.assertEqual(call_uid, 83143)
@@ -912,7 +912,7 @@ class _InjectedBackend(_FakeBackend):
 
 
 class BackendInjectionTests(_CliTestCase):
-    """``main(..., backend=...)``: the CLI obtains, uses and closes the backend (plan 4.2)."""
+    """``main(..., backend=...)``: the CLI obtains, uses and closes the backend."""
 
     def run_injected(self, argv, backend, **kwargs):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -1374,7 +1374,7 @@ class DoctorTests(_CliTestCase):
 
     def test_ut_cli_12_02_unreadable_envelope_index_fails(self) -> None:
         """UT-CLI-12.02: base unreadable (permission, mocked on every OS) => ok=false."""
-        # File modes/ACLs are not reliable across OSes and users (D-07): make the
+        # File modes/ACLs are not reliable across OSes and users: make the
         # open of the base itself fail with a permission error, on every OS.
         with mock.patch("mailquery.store.shutil.copy2", side_effect=PermissionError("denied")):
             payload = self._doctor()
@@ -1448,7 +1448,7 @@ class DoctorTests(_CliTestCase):
         self.assertFalse(by_name["home"]["ok"])
         if sys.platform != "win32":
             # On Windows reading "<file>/config.toml" is "not found", so the
-            # config check legitimately passes there (D-07).
+            # config check legitimately passes there.
             self.assertFalse(by_name["config"]["ok"])
 
     def _home_check(self, home: Path) -> dict:
@@ -1814,7 +1814,7 @@ _ERROR_MESSAGE = "carpeta ñandú \U0001f600"
 
 
 class PipeEncodingTests(unittest.TestCase):
-    """Subprocess with pipes, cp1252 and ``PYTHONUTF8=0`` (plan 7.1 isolation)."""
+    """Subprocess with pipes, cp1252 and ``PYTHONUTF8=0`` (isolated home)."""
 
     def setUp(self) -> None:
         self.fx = build_store()
@@ -1873,10 +1873,10 @@ class PipeEncodingTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# M08 — ``attachment`` command and ``show.attachments`` (UT-ATC-01..10)
+# ``attachment`` command and ``show.attachments`` (UT-ATC-01..10)
 # --------------------------------------------------------------------------- #
 
-from mailquery import search as search_module  # noqa: E402  (M08 test section)
+from mailquery import search as search_module  # noqa: E402
 
 _ATTACHMENT_PLUGIN_LABEL = "Fake attachments"
 _ATTACHMENT_CAPABILITIES: dict = {
@@ -2723,7 +2723,7 @@ class AttachmentReasonTests(AttachmentTestBase):
 
     def test_ut_atc_06_02_unreadable_never_becomes_no_attachments(self) -> None:
         """UT-ATC-06.02: S/MIME/corrupt/unreadable ⇒ E_ATTACHMENT_UNREADABLE, never E_USAGE."""
-        # Message-level signal (convention C8): attachments() raises the protocol error.
+        # Message-level signal: attachments() raises the protocol error.
         backend = self.attachment_backend(
             attachments=[],
             attachments_error=MailqueryError(
@@ -2875,7 +2875,7 @@ class AttachmentLogTests(AttachmentTestBase):
         )
 
     def test_ut_atc_08_04_failure_logs_error_without_end(self) -> None:
-        """UT-ATC-08.04: a failed attachment logs ``event=error`` and no ``event=end`` (D7)."""
+        """UT-ATC-08.04: a failed attachment logs ``event=error`` and no ``event=end``."""
         backend = self.attachment_backend(
             attachments=[
                 {"index": 1, "name": "install.sh", "size_bytes": 4,

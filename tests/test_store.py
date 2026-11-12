@@ -641,7 +641,7 @@ class MailboxCounterTests(StoreTestCase, unittest.TestCase):
 
 
 class TemporaryCopyModeTests(unittest.TestCase):
-    """UT-STO-01: temporary copies in ``~/.mailquery/tmp`` are 0600 (RNF-05, B-25)."""
+    """UT-STO-01: temporary copies in ``~/.mailquery/tmp`` are 0600 (RNF-05)."""
 
     def setUp(self) -> None:
         self.fx = fixtures.build_store(extended=True)

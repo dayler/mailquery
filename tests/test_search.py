@@ -364,7 +364,7 @@ class SearchFixtureTest(unittest.TestCase):
         )
 
     def multi_driver_config(self, *, mailbox_list: tuple[str, ...] = ()) -> Config:
-        """The loaded config plus the plugin account (M04; no config.toml roundtrip)."""
+        """The loaded config plus the plugin account (no config.toml roundtrip)."""
         scopes = self.config.scopes + (
             ScopeEntry(
                 key=f"{PLUGIN_DRIVER}:{PLUGIN_ACCOUNT_LABEL}",
@@ -678,7 +678,7 @@ class SearchMetadataTest(SearchFixtureTest):
         self.assertNotIn("[Gmail]/All Mail", context.exception.hint)
 
     def test_ut_sr_04_02_include_mailbox_resolves_in_its_own_driver(self) -> None:
-        """UT-SR-04.02: --include-mailbox resolves a folder inside its own driver (M04)."""
+        """UT-SR-04.02: --include-mailbox resolves a folder inside its own driver."""
         archive = {
             "id": "graph-archive",
             "account_uuid": PLUGIN_ACCOUNT_UUID,
@@ -830,7 +830,7 @@ class SearchTextTest(SearchFixtureTest):
         self.assertEqual(result["scan"]["candidates"], 8)
 
     def test_ut_sr_03_06_multi_driver_scan_budget_is_the_sum(self) -> None:
-        """UT-SR-03.06: multi-driver max_scan compares the summed candidates (M04)."""
+        """UT-SR-03.06: multi-driver max_scan compares the summed candidates."""
         config = self.multi_driver_config()
         plugin = FakePluginBackend(
             rows=[
@@ -1888,7 +1888,7 @@ class ShowAttachmentsUnreadableTest(ExtendedSearchFixtureTest):
             warning_codes(result["warnings"]),
             ["W_EMLX_MISSING", "W_ATTACHMENTS_UNAVAILABLE"],
         )
-        # Encrypted S/MIME is the exception (D6): [] and only the body warning.
+        # Encrypted S/MIME is the exception: [] and only the body warning.
         encrypted = self.show(UID_SMIME_ENCRYPTED)
         self.assertEqual(encrypted["message"]["attachments"], [])
         self.assertEqual(
@@ -2024,7 +2024,7 @@ class DuplicatesExtendedTest(ExtendedSearchFixtureTest):
 
 
 class FolderReferenceTest(ExtendedSearchFixtureTest):
-    """UT-SR-16: folder reference resolution (PRD 15.3, B-27)."""
+    """UT-SR-16: folder reference resolution (PRD 15.3)."""
 
     def set_catalog(self, mailboxes) -> None:
         mailboxes = tuple(mailboxes)

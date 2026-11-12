@@ -1,8 +1,8 @@
 """Tests for the log file: rotation, permissions, format and content.
 
 Covers UT-LOG-01 (rotation), UT-LOG-02 (permissions), UT-LOG-03 (format) and
-UT-LOG-04 (content) of the plan, PRD RF-20 and section 14. UT-LOG-03.04 lives in
-``tests/test_cli.py`` (renamed test, plan 7.1).
+UT-LOG-04 (content), PRD RF-20 and section 14. UT-LOG-03.04 lives in
+``tests/test_cli.py`` (renamed test).
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ class FormatTests(_LogHomeTestCase):
         self.assertTrue(lines[0].split(" ")[2] == "INFO")
 
     def test_ut_log_03_02_start_line_names_command_and_backend(self) -> None:
-        """UT-LOG-03.02: event=start command=... backend=... drivers=... (M04)."""
+        """UT-LOG-03.02: event=start command=... backend=... drivers=..."""
         fx = build_store()
         self.addCleanup(fx.cleanup)
         self.addCleanup(_close_log_handlers)

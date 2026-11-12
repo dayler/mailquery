@@ -1,8 +1,8 @@
-"""M01: plugin API 1, backend registry, ``--version`` and plugin hygiene (UT-PL-01..04).
+"""Plugin API 1, backend registry, ``--version`` and plugin hygiene (UT-PL-01..04).
 
 Covers AC-01 (entry point group, driver/plugin_api validation, duplicates),
 AC-02 (capability validation), AC-18 (``--version`` additive ``drivers:``) and
-the plugin-file boundaries of RF-39 (PRD §6.5, §12.6, §12.9; plan §5.1 C1).
+the plugin-file boundaries of RF-39 (PRD §6.5, §12.6, §12.9).
 """
 
 from __future__ import annotations
@@ -701,7 +701,7 @@ class PluginApiTests(_PluginTestCase):
 
 
 # --------------------------------------------------------------------------- #
-# M05 — plugin error protocol and metadata timeout (UT-ERR-01..04)
+# Plugin error protocol and metadata timeout (UT-ERR-01..04)
 # --------------------------------------------------------------------------- #
 
 #: Config with only the plugin account declared: the native driver is never opened.

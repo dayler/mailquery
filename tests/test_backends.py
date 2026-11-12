@@ -1,4 +1,4 @@
-"""Unit tests for the backend interface and its implementations (PRD 9.3, plan 4.3)."""
+"""Unit tests for the backend interface and its implementations (PRD 9.3)."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ from tests.fixtures.make_fixtures import (
     write_config,
 )
 
-# Operations and metadata declared by the backend protocol v1 (C1; PRD §6.5).
+# Operations and metadata declared by the backend protocol v1 (PRD §6.5).
 EXPECTED_ABSTRACT_OPERATIONS = frozenset(
     {
         "driver",
@@ -75,14 +75,14 @@ EXPECTED_ABSTRACT_OPERATIONS = frozenset(
         "close",
     }
 )
-#: Concrete members added by C1 on top of the abstract ones.
+#: Concrete members the protocol adds on top of the abstract ones.
 EXPECTED_CONCRETE_OPERATIONS = frozenset({"native_order", "attachments", "attachment_stream"})
 EXPECTED_OPERATIONS = EXPECTED_ABSTRACT_OPERATIONS | EXPECTED_CONCRETE_OPERATIONS
 
 
 class MailBackendInterfaceTest(unittest.TestCase):
     def test_ut_be_03_01_declares_exactly_the_prd_operations(self) -> None:
-        """UT-BE-03.01: MailBackend declares exactly the protocol v1 operations (C1)."""
+        """UT-BE-03.01: MailBackend declares exactly the protocol v1 operations."""
         self.assertEqual(set(MailBackend.__abstractmethods__), EXPECTED_ABSTRACT_OPERATIONS)
         public = {
             member
@@ -168,8 +168,7 @@ class BackendContractMixin(BackendResolveContractMixin):
     """UT-BE-04: behavior every backend must show (PRD 9.3, 15.3, RF-12, RF-13).
 
     Mix into a ``unittest.TestCase`` and implement the hooks. The Apple Mail
-    fixture runs it in W2; the Outlook fake runs the resolve cases from W3-T04
-    and the whole contract from W3-T05.
+    fixture and the Outlook fake both run it.
     """
 
     def all_ids(self) -> list[Any]:
@@ -521,13 +520,13 @@ class GetBackendSelectionTest(unittest.TestCase):
         from mailquery.backends import get_backend
 
         if (SRC_ROOT / "backends" / "outlook.py").exists():
-            return  # selection of Outlook is covered by W3-T03 (UT-BE-01.01)
+            return  # selection of Outlook is covered by UT-BE-01.01
         with self.assertRaises(ImportError):
             get_backend(platform="win32")
 
 
 # --------------------------------------------------------------------------- #
-# M09 — UT-AM-01/02: Apple Mail attachments over the synthetic fixture
+# UT-AM-01/02: Apple Mail attachments over the synthetic fixture
 # --------------------------------------------------------------------------- #
 
 
@@ -535,7 +534,7 @@ class AppleMailAttachmentCommandTest(unittest.TestCase):
     """UT-AM-01/02: blocking, indexes, names and sanitization with real fixtures.
 
     The cases drive ``cli.main`` over ``build_store(attachments=True)`` so the
-    whole path (backend metadata + core screening + cache) runs on the M09
+    whole path (backend metadata + core screening + cache) runs on the attachment
     fixture; each test gets its own store so cached files never leak between cases.
     """
 
@@ -763,7 +762,7 @@ class ImportBoundaryTest(unittest.TestCase):
         """UT-BE-02.03: outlook_com.py imports nothing outside stdlib and pywin32."""
         path = SRC_ROOT / "backends" / "outlook_com.py"
         if not path.exists():
-            return  # created in W3; the check applies as soon as it exists
+            return  # the check applies as soon as the module exists
         allowed = set(sys.stdlib_module_names) | _COM_MODULES | _WINDOWS_STDLIB_OK | {"mailquery"}
         offenders = [
             f"line {line}: {root}"

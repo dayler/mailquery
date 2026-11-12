@@ -1,4 +1,4 @@
-"""Synthetic attachment samples for the M06 tests (UT-ATT-01..05).
+"""Synthetic attachment samples for the attachment policy tests (UT-ATT-01..05).
 
 The tables mirror PRD §10.3.1, §10.3.2 and §10.3.3 literally and are kept
 independent from ``mailquery.attachments`` so a regression in the catalog or in
@@ -243,7 +243,7 @@ def entry(
     size_bytes: int | None = None,
     unavailable_reason: str | None = None,
 ) -> dict[str, Any]:
-    """Build an ``AttachmentMetadataRow``-shaped dict (C1)."""
+    """Build an ``AttachmentMetadataRow``-shaped dict."""
     return {
         "index": index,
         "name": name,

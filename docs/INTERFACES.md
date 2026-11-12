@@ -1,10 +1,10 @@
 # Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
 
-> **Estado del contrato:** implementado en la rama de integración del delta
-> (plugins de backend y adjuntos; [`PRD.md`](PRD.md) v2.1) y **no publicado**. El paquete anuncia
+> **Estado del contrato:** implementado en `develop` (plugins de backend y
+> adjuntos; [`PRD.md`](PRD.md) v2.1) y **no publicado**. El paquete anuncia
 > `mailquery.__version__` = 3.0.0a0 (3.0.0-alpha, PEP 440) en `develop`, todavía sin tag de release ni
-> merge a `main`. Este documento describe el contrato tal como lo implementan
-> M01–M10 y lo cierra M11.
+> merge a `main`. Este documento describe el contrato tal como está
+> implementado.
 
 Documento de coordinación para el equipo de implementación y guía de
 desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) y manda sobre
@@ -22,12 +22,15 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 ├── .gitignore                      # .obsidian/, __pycache__/, fixtures generados
 ├── .github/workflows/tests.yml     # CI: suite en 3 SO × Python 3.11–3.14 + instaladores
 ├── docs/
-│   ├── PRD.md                      # PRD v2.1: núcleo común a ambas plataformas
-│   ├── backends/
-│   │   ├── apple-mail.md           # anexo A: Apple Mail (macOS)
-│   │   └── outlook-windows.md      # anexo B: Outlook clásico (Windows)
+│   ├── PRD.md                      # PRD v2.1: requisitos del producto
 │   ├── INTERFACES.md               # este documento
-│   ├── plans/                      # planes de implementación
+│   ├── TEST-CATALOG.md             # qué verifica cada caso de prueba con ID
+│   ├── KNOWN-DEFECTS.md            # defectos abiertos
+│   ├── PERFORMANCE-BACKLOG.md      # deuda de rendimiento
+│   ├── ROADMAP.md                  # evolución del producto y pendientes del release
+│   ├── config.example.toml         # configuración completa de ejemplo
+│   ├── security/threat-model.md    # modelo de amenazas
+│   ├── archive/                    # registros históricos
 │   └── recipes/                    # recetas/preceptos para el harness
 │       ├── 01-new-mail-digest.md
 │       └── 02-search-invoices.md
@@ -45,21 +48,21 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   ├── accounts.py                 # Apple Mail: etiquetas de cuenta (Accounts4.sqlite ro)
 │   ├── store.py                    # Apple Mail: Envelope Index ro + mapeo de mailboxes
 │   ├── emlx.py                     # Apple Mail: resolución uid->ruta + parseo .emlx
-│   ├── attachments/                # motor de adjuntos (C6/C7): catálogo, bloqueo, sanitización, caché
+│   ├── attachments/                # motor de adjuntos: catálogo, bloqueo, sanitización, caché
 │   │   ├── __init__.py
 │   │   ├── catalog.py              # catálogo de extensiones peligrosas (§10.3.2)
 │   │   ├── blocking.py             # bloqueo de nombre y magic bytes (§10.3.1)
 │   │   ├── sanitize.py             # sanitized_name determinista (§10.3.3)
-│   │   ├── paths.py                # message_dir/attachment_path + fallback 32 hex (D9)
+│   │   ├── paths.py                # message_dir/attachment_path + fallback 32 hex
 │   │   ├── screening.py            # pantalla del mensaje completo (§12.11 filas 11–14)
-│   │   ├── engine.py               # AttachmentsEngine.recover (M07)
-│   │   └── cache.py                # staging, publicación atómica y --force (M07)
+│   │   ├── engine.py               # AttachmentsEngine.recover
+│   │   └── cache.py                # staging, publicación atómica y --force
 │   ├── plugins/                    # API pública de plugin (API 1; lo único que importa un plugin externo)
 │   │   ├── __init__.py             # reexporta la API 1 (estable)
 │   │   └── api.py                  # PLUGIN_API, Reason, PluginError, PluginContext, capacidades
 │   └── backends/
 │       ├── __init__.py             # get_backend(...), backend_class(...), BackendRegistry
-│       ├── registry.py             # descubrimiento/validación/carga perezosa de drivers (C1)
+│       ├── registry.py             # descubrimiento/validación/carga perezosa de drivers
 │       ├── base.py                 # MailBackend (protocolo v1), filas TypedDict, ExcludedStoreError
 │       ├── apple_mail.py           # AppleMailBackend (SQL + helpers de Apple Mail)
 │       ├── outlook.py              # OutlookBackend: stores, carpetas, items y cuerpos (sin win32com)
@@ -73,8 +76,8 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     ├── mocks/                      # helpers unittest.mock (TCC, DB busy, esquema roto)
     ├── fakes/
     │   ├── outlook.py              # Outlook falso en memoria (OOM, CallLog, escenarios)
-    │   ├── plugin.py               # doble de plugin API 1 + entry points inyectables (M01)
-    │   ├── attachment_backend.py   # backend de adjuntos inyectable (M08)
+    │   ├── plugin.py               # doble de plugin API 1 + entry points inyectables
+    │   ├── attachment_backend.py   # backend de adjuntos inyectable
     │   └── run_cli.py              # lanzador en subprocess: fake + cli.main(argv, backend=…)
     ├── test_attachments.py         # UT-ATT-01..11: bloqueo, sanitización, límites, staging y caché
     ├── test_multidriver.py         # UT-MD-01..07: merge, orden total y cursor multi-driver
@@ -116,9 +119,9 @@ Reglas globales:
   I-1 (PRD §4).
 - Pruebas: ver §8 (comandos, convención de nombres, fixtures, goldens y CI).
 
-- **Git (D-01):** el orquestador crea la rama de cada fase y hace los commits;
+- **Git:** el orquestador crea la rama de cada cambio y hace los commits;
   los subagentes que corren en paralelo trabajan en su propio worktree y el
-  orquestador integra su trabajo en la rama de la fase. Los merges a `develop`
+  orquestador integra su trabajo en esa rama. Los merges a `develop`
   y los tags los hace o autoriza el dueño tras la revisión del planificador.
 - No ejecutar comandos que escriban en `~/.mailquery` real ni en
   `~/Library/Mail`.
@@ -188,7 +191,7 @@ Reglas:
 - `plugins/**` (API pública de plugin) y `backends/registry.py` solo importan
   stdlib y el propio paquete; ninguno importa `store`, `emlx`, `accounts`,
   `search`, `config` ni una implementación de backend (RNF-12, UT-PL-04.04).
-  Desde M05 `plugins/api.py` importa además `errors` y `output` (módulos base,
+  `plugins/api.py` importa además `errors` y `output` (módulos base,
   sin imports internos), y `search.py` importa el helper `plugins.wrap_driver`
   (envoltura de llamadas, no una implementación de backend).
 - `backends/registry.py` no importa `apple_mail` ni `outlook`: la carga es
@@ -198,10 +201,11 @@ Reglas:
 - `uid.py` importa solo `errors` y stdlib: se puede validar un `uid` antes de
   crear el home, leer `config.toml` o abrir el store.
 - `attachments/**` importa solo stdlib, `errors`, `uid` y sus propios módulos.
-  M06 es puro (sin E/S) y M07 añade `engine.py`/`cache.py`, que toman
+  La política (catálogo, bloqueo, sanitización, rutas y pantalla) es pura (sin
+  E/S); `engine.py`/`cache.py` toman
   `config.AttachmentsConfig` y `MailBackend` por duck typing: **no** importan
   `config`, `plugins`, `backends`, `cli`, `search`, `state`, `store` ni los
-  adaptadores (UT-ATT-01.09). `cli`/`search` son los consumidores (M08).
+  adaptadores (UT-ATT-01.09). `cli`/`search` son los consumidores.
 
 ## 3. Contratos de módulos (firmas estables)
 
@@ -229,8 +233,8 @@ log_message=None)`, `config_error(...)` (misma firma), `bad_time(value)`,
 `bad_filter(message, hint="")`, `exit_code_for(code)` y
 `error_detail(exc) -> str` (detalle de una línea para `doctor`:
 `CODE: message` o `Tipo: texto`). Un plugin nunca elige `code`/`exit`: aporta
-`reason` (enum cerrado de `mailquery.plugins`) y el núcleo lo mapea (M05). El
-protocolo de M05 vive en `plugins/api.py` (`call_driver`/`wrap_driver`) y se
+`reason` (enum cerrado de `mailquery.plugins`) y el núcleo lo mapea. El
+protocolo de errores de plugin vive en `plugins/api.py` (`call_driver`/`wrap_driver`) y se
 detalla en la sección de `plugins/__init__.py` y `plugins/api.py`; ningún camino
 de plugin produce `E_INTERNAL` (RF-50, §12.6) y el objeto `error` del JSON no
 cambia: `{code, message, hint}`.
@@ -260,12 +264,12 @@ y el backend Outlook).
 **rotación por tamaño** (`RotatingFileHandler`, `maxBytes = max_size_mb` MiB,
 5 archivos rotados fijos; `max_size_mb` viene de `[logging].max_size_mb`).
 **Nunca** logear asunto, cuerpo, direcciones, nombres ni términos de búsqueda.
-**M05 no cambia este módulo:** el `log_message` de un plugin se sanea antes, en
+**Este módulo no sanea errores de plugin:** el `log_message` de un plugin se sanea antes, en
 `plugins/api.py`, y el CLI lo registra en lugar del `message` (§14).
 
 ### `plugins/__init__.py` y `plugins/api.py`
 
-API pública de plugin (API 1, C1; PRD §6.5 RF-38, §9.2). Es lo único que
+API pública de plugin (API 1; PRD §6.5 RF-38, §9.2). Es lo único que
 un plugin externo importa de mailquery; `plugins/**` no importa backends ni el
 store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
 
@@ -279,7 +283,7 @@ store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
   plugin; expone `.reason` (normalizado a `Reason` cuando es válido), `.hint`,
   `.detail`, `.log_message`. El plugin **nunca** elige `code`/`exit`: un
   `reason` desconocido se conserva para que el núcleo lo mapee a
-  `E_PLUGIN_FAILED` (M05).
+  `E_PLUGIN_FAILED`.
 - `PluginContext(home, tmp_dir)`: dataclass congelado con las rutas que el
   núcleo entrega al plugin (`home` = `~/.mailquery`, `tmp_dir` =
   `~/.mailquery/tmp`).
@@ -290,8 +294,8 @@ store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
 - `DriverMetadata` (`TypedDict`): `driver`, `plugin_api`, `version`,
   `capabilities`, `internal` (este último lo añade el registro).
 
-**Protocolo de errores de plugin y timeout de metadatos (M05, §12.6, RF-50,
-RNF-15/16; C5).** El núcleo posee `code`, `exit` y la plantilla de `message`; el
+**Protocolo de errores de plugin y timeout de metadatos (§12.6, RF-50,
+RNF-15/16).** El núcleo posee `code`, `exit` y la plantilla de `message`; el
 plugin solo aporta `reason` (cerrado), `hint`, `detail` y `log_message`. Todo
 paso por el módulo usa una única envoltura:
 
@@ -339,7 +343,7 @@ eliminan ANSI, controles C0/C1 (incluidos `\r`/`\n`/`\t`), formatos y bidi
 reutiliza como primer paso.
 
 Timeout: `METADATA_TIMEOUT_SECONDS = 30.0` (y `EXTRACTION_TIMEOUT_SECONDS = 120.0`
-para M08), leídos en cada llamada para que un test inyecte un plazo corto con
+para la extracción de adjuntos), leídos en cada llamada para que un test inyecte un plazo corto con
 `mock.patch`/`timeout=` (nunca se duermen 30 s). Un driver **externo** corre en
 un hilo daemon con `Event.wait(deadline)`; al vencer ⇒ `E_CLIENT_TIMEOUT` (3),
 sin reintento y sin resultados parciales (el hilo no se puede matar: riesgo
@@ -356,7 +360,7 @@ y nunca `hint`/`detail`, sin traceback (el traceback queda solo para
 ### `backends/registry.py`
 
 `BackendRegistry(*, platform=None, entry_points=None)`: descubrimiento,
-validación y carga perezosa de los drivers (C1, AC-01/AC-02). Descubre el grupo
+validación y carga perezosa de los drivers (AC-01/AC-02). Descubre el grupo
 `mailquery.backends` con `importlib.metadata` y fusiona un **fallback estático**
 de `apple_mail`/`outlook` para desarrollo/CI sin `pip install`. `entry_points`
 es la inyección de tests; con `None` usa `installed_entry_points()` (seam
@@ -370,7 +374,7 @@ parcheable, también usado por `--version`).
 | `declared(drivers)` | `list[DriverMetadata]` validada en el orden pedido; driver no instalado ⇒ `E_DRIVER_UNKNOWN` (2) |
 | `info(driver)` | `DriverMetadata` validada de un driver; importa solo ese plugin y una única vez |
 | `load(driver)` | objeto del entry point (clase o factoría) de **un** driver; import fallido ⇒ `E_PLUGIN_INCOMPATIBLE` (3) |
-| `open(driver, *, context=None)` | instancia del driver ya cargado (M04, T01): el entry point externo se invoca con un `PluginContext` posicional; los internos, sin argumentos; un fallo del constructor ⇒ `E_PLUGIN_INCOMPATIBLE` (3) |
+| `open(driver, *, context=None)` | instancia del driver ya cargado: el entry point externo se invoca con un `PluginContext` posicional; los internos, sin argumentos; un fallo del constructor ⇒ `E_PLUGIN_INCOMPATIBLE` (3) |
 | `open_drivers(drivers, *, context=None)` | `dict[driver → instancia]` en el orden pedido; los abre el CLI antes de `event=start` |
 | `versions(platform=None)` | `list[(driver, version)]` alfabética para `--version`; filtra los internos por plataforma (DP-02) |
 
@@ -387,7 +391,7 @@ distribución, o `mailquery.__version__` en desarrollo). `--version` usa
 "mailquery.backends.outlook:OutlookBackend"`); un plugin externo se registra en
 el mismo grupo con `"<nombre> = <paquete>.<módulo>:<clase>"`.
 
-**Convención de instanciación (API 1, M04):** el objeto del entry point es una
+**Convención de instanciación (API 1):** el objeto del entry point es una
 clase o una factoría; el núcleo lo invoca con **un** `PluginContext(home,
 tmp_dir)` posicional (nunca con keywords ni con argumentos extra) y espera un
 objeto que implemente `MailBackend`. Un entry point que ya devuelve una
@@ -396,7 +400,7 @@ Solo se cargan los drivers declarados en `[scope]` (o el nativo cuando
 corresponde); un driver declarado que no importa o no arranca aborta el comando
 con `E_PLUGIN_INCOMPATIBLE` (3) y sin resultados parciales.
 
-**M05 no cambia el registro:** la envoltura de llamadas (`call_driver`) vive en
+**El registro no envuelve llamadas:** la envoltura de llamadas (`call_driver`) vive en
 `plugins/api.py` y se aplica al pool de `search.py` (`wrap_driver`, que incluye
 también `accounts`/`mailboxes`/`resolve_mailbox` usados por la resolución de
 alcance) y al `parse_native_id` de `show` en `cli.py`. La carga/import de un
@@ -405,18 +409,18 @@ instanciado son `E_PLUGIN_FAILED` o el código mapeado por §12.6.
 
 ### `backends/base.py`
 
-Protocolo de backend v1 (C1). `Uid = str` es el uid de contrato
+Protocolo de backend v1. `Uid = str` es el uid de contrato
 (`"<driver>:<native_id>"`, la forma que emite el núcleo); `LegacyUid = int | str`
 es el alias del uid nativo que intercambian los adaptadores internos (un `int` en
-Apple Mail, hex en mayúsculas en Outlook) — M03 lo mantiene para no romper
-M01/M02 (D1) y la prefijación ocurre solo en `search.py`/`cli.py`.
+Apple Mail, hex en mayúsculas en Outlook), un alias de transición; la
+prefijación ocurre solo en `search.py`/`cli.py`.
 `MessageRow` incluye `native_order_key: str`
 en toda fila de listado: el núcleo lo compara como entero si la capacidad
 `native_order` es `numeric` (Apple Mail) o como texto si es `text` (Outlook y
 plugins por defecto), y nunca compara el texto del uid. `AttachmentRow(name)` se
 mantiene para `BodyRow`; `AttachmentMetadataRow(index, name, size_bytes,
-native_order_key, unavailable_reason)` es la lista ordenada de adjuntos (C1).
-`StateUidError` se retira en M03 (el estado valida sus uids en `state.py`);
+native_order_key, unavailable_reason)` es la lista ordenada de adjuntos.
+No hay `StateUidError` (el estado valida sus uids en `state.py`);
 `ExcludedStoreError(entry)` (subclase de `LookupError`) sigue igual.
 
 `MailBackend` (ABC; PRD §9.2 y §6.5). Metadatos declarativos
@@ -428,7 +432,7 @@ native_order_key, unavailable_reason)` es la lista ordenada de adjuntos (C1).
 | Miembro | Devuelve |
 |---------|----------|
 | `driver` (propiedad) | `"apple_mail"`, `"outlook"` o el nombre del plugin |
-| `plugin_api` (propiedad) | `1` (contrato C1) |
+| `plugin_api` (propiedad) | `1` (API 1) |
 | `capabilities` (propiedad) | `{network, readonly, body_local, attachments, native_order}` |
 | `native_order` (propiedad) | `capabilities["native_order"]`, `numeric` o `text` |
 | `describe()` | dict de versión para el log y `doctor` |
@@ -444,10 +448,10 @@ native_order_key, unavailable_reason)` es la lista ordenada de adjuntos (C1).
 | `attachment_names(uid)` | `list[str]` |
 | `find_message(uid)` | `(MessageRow, MailboxRow o None)` o `None`; uid de un store excluido ⇒ `ExcludedStoreError` |
 | `load_body(row)` | `BodyRow`; nunca dispara descargas; S/MIME ⇒ `readable=False` |
-| `parse_uid(text)` | uid legado del backend o `E_USAGE` (se mantiene hasta M04, D1; el núcleo de M03 ya no lo usa) |
-| `parse_native_id(native_id)` | **nuevo C1**: valida la parte nativa de un uid prefijado y devuelve el uid legado; puro y sin abrir cliente/store |
-| `attachments(uid)` | **nuevo C1**: `list[AttachmentMetadataRow]` ordenada por `index` 1..N (M09/M10 la implementan; los plugins deben) |
-| `attachment_stream(uid, index)` | **nuevo C1**: iterador de bytes **decodificados** del adjunto `index`; el plugin no escribe en la caché |
+| `parse_uid(text)` | uid legado del backend o `E_USAGE` (de transición; el núcleo no lo usa: parsea el uid prefijado con `mailquery.uid`) |
+| `parse_native_id(native_id)` | valida la parte nativa de un uid prefijado y devuelve el uid legado; puro y sin abrir cliente/store |
+| `attachments(uid)` | `list[AttachmentMetadataRow]` ordenada por `index` 1..N (la implementan los backends internos; los plugins deben) |
+| `attachment_stream(uid, index)` | iterador de bytes **decodificados** del adjunto `index`; el plugin no escribe en la caché |
 | `doctor_checks()` | chequeos propios del backend (los comunes los añade `cli.py`) |
 | `close()` | libera la conexión SQLite o las referencias COM |
 
@@ -472,12 +476,12 @@ caché de `pywin32` de Outlook (`<tmp_root>/gen_py`). `cli` siempre lo pasa.
 del proxy de producción; `pywin32` (`True`/`False`) fija el resultado del
 import (por defecto `True` si hay `outlook_app`, si no se intenta el import
 real).
-Reexporta el registro C1: `BackendRegistry`, `DriverMetadata` y
+Reexporta el registro: `BackendRegistry`, `DriverMetadata` y
 `package_version` (también en `backends/registry.py`). Importar
 `mailquery.backends` no importa ningún backend ni plugin.
 
 ### `uid.py`
-Formato y parseo del uid prefijado (C1, AC-05). Puro y sin efectos: puede
+Formato y parseo del uid prefijado (AC-05). Puro y sin efectos: puede
 validar antes de crear el home, leer `config.toml` o abrir el store.
 
 `ParsedUid(driver, native_id)` (dataclass congelado) con la propiedad
@@ -499,8 +503,8 @@ validar antes de crear el home, leer `config.toml` o abrir el store.
   `platform_native_driver(platform=None) -> str`, `driver_unknown(driver) ->
   MailqueryError`.
 - `stable_identifier(uid) -> str`: 32 hex en minúsculas = primeros 32
-  caracteres de `SHA-256(uid UTF-8)`; determinista entre plataformas. M06/M07
-  lo usan cuando `<native_id>` o la ruta de caché exceden el límite del sistema
+  caracteres de `SHA-256(uid UTF-8)`; determinista entre plataformas. Las rutas
+  de caché de adjuntos lo usan cuando `<native_id>` o la ruta de caché exceden el límite del sistema
   de ficheros (§10.3.3).
 - Constantes `DRIVER_PATTERN`, `NATIVE_ID_PATTERN`, `DRIVER_NAME_MAX_LENGTH`,
   `NATIVE_ID_MAX_LENGTH`.
@@ -510,14 +514,14 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 
 | Gancho | Lo usa | Para qué |
 |--------|--------|----------|
-| `bind_command(command)` | `cli` antes de ejecutar | Outlook: el vigilante D-03 informa el comando en `E_CLIENT_TIMEOUT` |
+| `bind_command(command)` | `cli` antes de ejecutar | Outlook: el vigilante COM informa el comando en `E_CLIENT_TIMEOUT` |
 | `mailboxes_without_counters(account_uuids=None)` | `config.listed_mailboxes` | Outlook: carpetas sin contadores (`total`/`unread` = `None`); con `account_uuids` solo recorre los stores de esas cuentas |
 | `not_found_hint` (atributo) | `search.run_show` | Outlook: el hint de `message uid … was not found` remite a `excluded_stores` |
 | `unreadable_attachments(row)` | `search.run_show` | Outlook: `(nombres, warning)` de un item ilegible: `[]` y `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` y no es S/MIME (PRD §12.10) |
 | `recipients_open_items` (atributo) | `search.run_search` | Outlook (`True`): `--to`/`--cc` abren cada item, así que se validan como `--text` (acotamiento y `max_scan`), no acotan y se aplican después de contar los candidatos (RF-17) |
 | `items_opened` (propiedad) | `search.run_search`, `search.run_new` | Outlook: items distintos abiertos por la instancia; `scan.messages_read` = la diferencia durante el comando (en Apple Mail sigue siendo los cuerpos leídos) |
 | `load_snippet(row)` | `search.run_search`, `search.run_new` | Outlook: `load_body` sin adjuntos ni cabeceras de transporte (solo los usa `show`; PRD §19) |
-| `bind_doctor_timeout(finish)` | `cli._run_doctor` | Outlook (D-03): al vencer el plazo COM durante `doctor`, el vigilante llama a `finish(backend_checks, detail)` (ver `cli.py`) |
+| `bind_doctor_timeout(finish)` | `cli._run_doctor` | Outlook: al vencer el plazo COM durante `doctor`, el vigilante llama a `finish(backend_checks, detail)` (ver `cli.py`) |
 
 ### `backends/outlook.py`
 `OutlookBackend(*, outlook_app=None, registry=None, security_center=None,
@@ -528,14 +532,14 @@ tests). No abre nada hasta el primer uso; toda llamada COM pasa por
 `network=false, readonly="structural", body_local=true, attachments="local",
 native_order="text"`; cada fila de listado lleva `native_order_key = uid` (hex
 en mayúsculas). `parse_uid` y `parse_native_id` validan el `EntryID` hexadecimal
-en mayúsculas sin abrir COM. Implementa §9.2 según el anexo B:
+en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §11.3 y §15.7:
 
-- Stores (§B.3): el perfil se clasifica una sola vez leyendo solo propiedades
+- Stores (PRD §15.7): el perfil se clasifica una sola vez leyendo solo propiedades
   del store; candidatos vía `Account.DeliveryStore`; `account.uuid` = los 16
   bytes de `PR_RECORD_KEY` en formato UUID. `accounts()` devuelve también los
   excluidos (con `excluded`); `excluded_stores()` los lista en orden del
   perfil. De un store excluido nunca se leen carpetas ni items.
-- Carpetas (§B.3, §B.4): recorrido en profundidad desde `GetRootFolder`; INBOX
+- Carpetas (PRD §11.3, §15.7): recorrido en profundidad desde `GetRootFolder`; INBOX
   y carpetas de sincronización por función (`GetDefaultFolder`); `id` = el
   `EntryID` de la carpeta. El árbol de cada store se recorre de forma perezosa,
   una vez por instancia. `mailboxes()` cuenta `total`/`unread` a partir de
@@ -544,7 +548,7 @@ en mayúsculas sin abrir COM. Implementa §9.2 según el anexo B:
   (clases no buscables o borrados IMAP) clasificadas en Python;
   `mailboxes_without_counters()` y `resolve_mailbox` no leen tablas. Las
   lecturas de tablas usan `Table.GetArray` por bloques de `TABLE_CHUNK_ROWS`.
-- Items (§B.4): `query` con `Folder.GetTable` (uid = `EntryID` permanente,
+- Items (PRD §11.3): `query` con `Folder.GetTable` (uid = `EntryID` permanente,
   fechas UTC, prefiltro DASL ensanchado y corte exacto en Python);
   `find_message` identifica el store por los bytes 4..20 del `EntryID`;
   `load_body` nunca descarga (S/MIME y solo cabeceras sin leer contenido).
@@ -552,9 +556,9 @@ en mayúsculas sin abrir COM. Implementa §9.2 según el anexo B:
   primeros abiertos y el último) y los destinatarios de cada uid se leen una
   vez; `close()` vacía las cachés.
 - `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
-- `parse_native_id(native_id) -> str` (estático, C1): valida la parte nativa de
+- `parse_native_id(native_id) -> str` (estático): valida la parte nativa de
   un uid prefijado (hex en mayúsculas) o `E_USAGE`; puro y offline.
-- `attachments(uid) -> list[AttachmentMetadataRow]` (M10, C1/RF-43/RF-47): lista
+- `attachments(uid) -> list[AttachmentMetadataRow]` (RF-43/RF-47): lista
   ordenada de los adjuntos **visibles** (los `PR_ATTACHMENT_HIDDEN` no se
   listan), `index` 1..N compartido con `show` y `attachment`, `name` original
   (`FileName`, si no `DisplayName`), `size_bytes` de la propiedad local `Size`
@@ -572,26 +576,26 @@ en mayúsculas sin abrir COM. Implementa §9.2 según el anexo B:
   puede enumerar nombres sin descargar ⇒ error de protocolo
   `E_ATTACHMENT_UNREADABLE` (`unreadable`) y `show` devuelve `[]` +
   `W_ATTACHMENTS_UNAVAILABLE` (PRD 12.10); un item ilegible/que no se puede
-  abrir ⇒ el mismo error. **Convención C8/C9:** S/MIME lanza
+  abrir ⇒ el mismo error. **Convención S/MIME/ilegible:** S/MIME lanza
   `E_ATTACHMENT_UNREADABLE` (`smime`) desde `attachments()`; `show` lo captura
   (`attachments: []`) y `attachment` lo propaga antes de “0 adjuntos”. Sin
   adjuntos ⇒ `[]`.
-- `attachment_stream(uid, index) -> Iterator[bytes]` (M10, C1/RF-45/RF-47):
+- `attachment_stream(uid, index) -> Iterator[bytes]` (RF-45/RF-47):
   materializa el adjunto local con `Attachment.SaveAsFile` —la **excepción COM**
   de PRD §4/§23.1— en un subdirectorio propio `0700`
   (`<home>/tmp/staging/outlook-<aleatorio>/`) con un archivo opaco `0600`,
   valida que el resultado es un archivo regular **dentro de esa sesión** (un
   symlink, un directorio o una ruta fuera ⇒
-  `E_ATTACHMENT_UNAVAILABLE`/`unsupported`, D12), entrega los bytes en bloques y
+  `E_ATTACHMENT_UNAVAILABLE`/`unsupported`), entrega los bytes en bloques y
   borra el archivo y la sesión **siempre** (`finally`, `close()` del backend y
   barrido de sesiones huérfanas propias en la llamada siguiente). Un
   `E_ACCESSDENIED` es `E_PERMISSION`, un rechazo transitorio persistente
   `E_CLIENT_BUSY` y un cuelgue el watchdog de 30 s por llamada COM (RF-33,
-  `E_CLIENT_TIMEOUT` por el mecanismo D-03); el tope de 120 s de la extracción
-  lo aplica el motor (M08) mientras consume el stream. No resuelve referencias,
+  `E_CLIENT_TIMEOUT` por el vigilante COM); el tope de 120 s de la extracción
+  lo aplica el motor de adjuntos mientras consume el stream. No resuelve referencias,
   no descarga y no abre red; `size_bytes` desconocido ⇒ `None`.
-- `check_state_uid` se retira en M03: los uids de `state.json` los valida el
-  núcleo (`state.py` + `uid.py`), no el backend (PRD §11.2).
+- Los uids de `state.json` los valida el núcleo (`state.py` + `uid.py`), no
+  el backend (PRD §11.2).
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
   "com_readonly", schema_ok: True}` para el log.
 - `new`: lo resuelve el núcleo (`search.run_new`) con la interfaz común; el
@@ -600,19 +604,19 @@ en mayúsculas sin abrir COM. Implementa §9.2 según el anexo B:
   uid nuevo (PRD §12.3, §18).
 - `doctor_checks() -> list[dict]`: `pywin32`, `outlook`, `stores`,
   `readonly_strategy` y `object_model_guard`, devueltos en el orden de PRD
-  §12.8 (`DOCTOR_CHECKS`) y evaluados en el de D-03: primero los que no llaman
+  §12.8 (`DOCTOR_CHECKS`) y evaluados en este otro orden: primero los que no llaman
   a Outlook (`pywin32`, `object_model_guard`), después `outlook`,
   `readonly_strategy` (sin llamadas COM) y `stores` (`DOCTOR_COM_CHECKS`). Un
-  chequeo cuya dependencia directa (`DOCTOR_DEPENDENCIES`, §B.8) falló sale
+  chequeo cuya dependencia directa (`DOCTOR_DEPENDENCIES`, PRD §12.8) falló sale
   `not evaluated: <dependencia> failed`; un error del chequeo sale en su
   `detail` con su hint. Nunca lanza Outlook (solo `GetActiveObject`).
-  `object_model_guard` (§B.6) lee las directivas con `outlook_com.oom_policy`
+  `object_model_guard` (PRD §12.8) lee las directivas con `outlook_com.oom_policy`
   y, si ninguna decide, el antivirus (`security_center` inyectado o
   `outlook_com.WmiSecurityCenter`); si SecurityCenter2 no responde, `not
   evaluated: SecurityCenter2 unavailable`. `stores` resume
   `N candidate(s): <etiqueta> [<tipo>], …; M excluded: <etiqueta> at <ruta>
   [<motivo>], …`.
-- `bind_doctor_timeout(finish)`: gancho de D-03 en `doctor`. El vigilante
+- `bind_doctor_timeout(finish)`: gancho del vigilante COM en `doctor`. El vigilante
   llama a `finish(backend_checks, detail)` con los chequeos del backend
   completados según PRD §12.8 (el que estaba en curso con `ok=false` y
   `outlook_com.DOCTOR_TIMEOUT_DETAIL`, sus dependientes `not evaluated`), o con
@@ -631,7 +635,7 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
 - `READONLY_MEMBERS` (`{tipo: {miembro: tipo devuelto o None}}`) y
   `ReadOnlyCom(target, kind, watchdog)`: proxy de lista blanca; cualquier otro
   miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM.
-  **Excepción COM de M10** (PRD §4/§23.1, riesgo aceptado): sobre
+  **Excepción COM de adjuntos** (PRD §4/§23.1, riesgo aceptado): sobre
   `Attachment` se autorizan `Size` y `Type` (metadatos locales) y
   `SaveAsFile` —la **única** operación de escritura del proxy—, usada solo para
   materializar en staging un adjunto **ya descargado**; `GetTemporaryFilePath`
@@ -640,10 +644,10 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   objetos de `pywin32` llama directamente a `IDispatch.Invoke` con el DISPID
   cacheado por tipo y miembro (por objeto en los `Item`), sin el coste de la
   información de tipos del dispatch dinámico; el fake sigue pasando por `getattr`.
-- `Watchdog` y `WATCHDOG` (D-03): plazo `CALL_TIMEOUT_SECONDS` (30 s, punto de
+- `Watchdog` y `WATCHDOG` (vigilante COM, RF-33): plazo `CALL_TIMEOUT_SECONDS` (30 s, punto de
   inyección) por llamada; `call_com(watchdog, call)` arma el plazo y reintenta
   una vez a los 100 ms un rechazo transitorio.
-- Errores (§B.7): `hresult_of(exc)`, `map_com_error(exc)` y
+- Errores: `hresult_of(exc)`, `map_com_error(exc)` y
   `ComCallError(hresult)` (`E_INTERNAL` con el HRESULT; el backend captura los
   esperados por `hresult`). `cli` registra todo `E_INTERNAL`, también este,
   con su traceback (PRD §14).
@@ -652,7 +656,7 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   (consulta WMI de `root\SecurityCenter2`; `antivirus_products()` devuelve
   `[{displayName, productState}]` o lanza `OSError` si no se puede consultar;
   la misma interfaz que el `security_center` inyectado de los tests).
-- `doctor` (§B.6, §B.8): `DOCTOR_TIMEOUT_DETAIL` (texto literal de PRD §12.8
+- `doctor` (PRD §12.8): `DOCTOR_TIMEOUT_DETAIL` (texto literal de PRD §12.8
   para el chequeo en curso al vencer el plazo); constantes de la política del
   Object Model Guard (`OOM_POLICY_KEY` en `HKCU`, `AdminSecurityMode`,
   `PromptOOMAddressInformationAccess`, `PromptOOMAddressBookAccess`,
@@ -673,19 +677,19 @@ helpers de Apple Mail que antes vivían en `search.py`, con el mismo orden,
 warnings y reintento (`store.run_query`). Extras propios (fuera de la
 interfaz): `store`, `labels`, `connection`, `tables` (propiedades),
 `prepare()` (valida la conexión y detecta las tablas) y dos métodos estáticos:
-`parse_uid` (uid legado de entrada, hasta M04) y `parse_native_id` (un `int`). Declara `driver = "apple_mail"`, `plugin_api = 1` y capacidades
+`parse_uid` (uid legado de entrada, de transición) y `parse_native_id` (un `int`). Declara `driver = "apple_mail"`, `plugin_api = 1` y capacidades
 `network=false, readonly="structural", body_local=true, attachments="local",
 native_order="numeric"`; cada fila de listado lleva `native_order_key = str(uid)`.
 Los dos métodos estáticos de parseo:
 
 - `parse_uid(raw) -> int`: uid legado de entrada como `int` (`E_USAGE` si no);
-  puro y sin I/O. Se mantiene hasta M04 (D1).
+  puro y sin I/O. De transición: el núcleo no lo usa.
 - `parse_native_id(native_id) -> int`: parte nativa de un uid prefijado, un
   `int`; puro y sin I/O. `show` lo usa antes de abrir el store.
-- `check_state_uid` se retira en M03; la validación del estado vive en
-  `state.py`.
+- La validación de los uids del estado vive en `state.py`, no en el
+  backend.
 
-**Adjuntos (M09, C9; RF-43/RF-46/RF-47, AC-09/AC-10/AC-11/AC-12/AC-15/AC-20).**
+**Adjuntos (RF-43/RF-46/RF-47, AC-09/AC-10/AC-11/AC-12/AC-15/AC-20).**
 El adaptador implementa las dos operaciones del protocolo v1 además de
 `parse_native_id`; no escribe en el store ni en la caché (solo abre el `.emlx`
 en lectura) y nunca dispara descargas.
@@ -694,13 +698,13 @@ en lectura) y nunca dispara descargas.
   con nombre, en orden de parte (1..N estable compartido con `show`); no se
   deduplican nombres repetidos. `size_bytes` es el tamaño **decodificado**
   (base64/QP) y `native_order_key = str(index)` (Apple Mail ordena
-  numéricamente, C1). `unavailable_reason`: `None` si es local, `corrupt` si el
+  numéricamente). `unavailable_reason`: `None` si es local, `corrupt` si el
   payload no se puede decodificar (base64 estricto), `unsupported` si es una
   parte externalizada de `.partial.emlx` cuyo archivo no se puede verificar,
   `not_local` para los nombres del `Envelope Index` cuando el cuerpo falta o es
   ilegible **no S/MIME** (fallback 2.0.1). Un mensaje S/MIME (cifrado o firmado)
   lanza `MailqueryError E_ATTACHMENT_UNREADABLE` — la señal de mensaje de la
-  convención C8/C9: `show` la captura y devuelve `[]` (D6) y `attachment` la
+  convención S/MIME/ilegible: `show` la captura y devuelve `[]` y `attachment` la
   propaga antes de "0 adjuntos" (fila 8 de §12.11); no se listan nombres del
   índice para S/MIME. Un mensaje sin adjuntos devuelve `[]` sin motivo.
 - `attachment_stream(uid, index) -> Iterator[bytes]`: bytes **decodificados** en
@@ -709,7 +713,7 @@ en lectura) y nunca dispara descargas.
   `Data/<shards>/Attachments/<uid>/<part>/<name>` y variantes junto a
   `Messages/`; nunca symlinks). Un fallo de lectura levanta
   `emlx.AttachmentReadError` con `reason` (`corrupt`, `not_local`,
-  `unsupported`, `unreadable`) y el motor M07 lo mapea al código/exit de §12.6.
+  `unsupported`, `unreadable`) y el motor de adjuntos lo mapea al código/exit de §12.6.
   `--all`/`--index` los decide el núcleo; el adaptador solo entrega el índice
   pedido. `load_body` sigue devolviendo `BodyRow.attachments` con **un nombre
   por parte** (mismo orden que `attachments()`), para que `show` y `attachment`
@@ -756,7 +760,7 @@ fórmula falla; si no existe → `None`. `parse_emlx(path)` lee con
 plano preferente, HTML→texto con `output.html_to_text`, nombres de adjuntos;
 corrupto → `readable=False` + warning; `partial` por nombre `.partial.emlx`.
 
-**Adjuntos (M09).** Tipos `EmlxAttachment(index, name, size_bytes,
+**Adjuntos.** Tipos `EmlxAttachment(index, name, size_bytes,
 native_order_key, unavailable_reason, external_path, part_path)` y
 `EmlxAttachments(path, partial, readable, smime, items, available)`; error
 `AttachmentReadError(reason, detail)` (mapea a §12.6 vía el motor).
@@ -768,10 +772,10 @@ deduplicar); en `.partial.emlx` cada parte es externalizada y se resuelve con
 decodificados (`ATTACHMENT_CHUNK_SIZE = 64 KiB`); base64 se valida de forma
 estricta para distinguir `corrupt`. Todo es lectura pura (`open(..., "rb")`), no
 hay escritura ni descarga; `_attachment_names` ya no deduplica (un nombre por
-parte, M09) y `parse_emlx` conserva el comportamiento de 2.0.1 para el cuerpo.
+parte) y `parse_emlx` conserva el comportamiento de 2.0.1 para el cuerpo.
 
 ### `state.py`
-`state.json` **schema 2** (PRD §11.2, C3). Tipos:
+`state.json` **schema 2** (PRD §11.2). Tipos:
 `Cursor(last_date_received, last_uid, lookback_seconds=600)`,
 `LastRun(command, at)`, `AppState(schema=2, updated_at="", last_run=None,
 cursor=None, emitted_uids=())`, `EmittedUid(date_received, driver,
@@ -780,7 +784,7 @@ pruned_emitted_uids, pruned_drivers)` con `.migration_pending`. `last_uid` y
 `emitted_uids` son strings prefijados `"<driver>:<native_id>"`; la forma se
 valida con `mailquery.uid` y la instalación del driver con `is_installed`.
 
-- `migrate_uid(value) -> str` (**función pura**, PRD §11.2, D8):
+- `migrate_uid(value) -> str` (**función pura**, PRD §11.2):
   determinista por tipo y sin depender del SO. Entero (no `bool`) ≥ 1 ⇒
   `apple_mail:<n>`; string hexadecimal en mayúsculas (`[0-9A-F]+`, incluido uno
   solo de dígitos) ⇒ `outlook:<HEX>`; `0`, negativos, `bool`, `None`, listas,
@@ -810,7 +814,7 @@ valida con `mailquery.uid` y la instalación del driver con `is_installed`.
 ### `config.py`
 
 Esquema cerrado de `config.toml`, resolución de alcance por driver y
-`[attachments]` (PRD §6.5 RF-36, §6.6 RF-42/49, §15; C2).
+`[attachments]` (PRD §6.5 RF-36, §6.6 RF-42/49, §15).
 
 Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
@@ -821,7 +825,7 @@ account_label, account_email, mailboxes, driver)`.
 
 - `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`; rangos `1..500`,
   `1..1024` (`>= max_file_size_mb`) y `1..500`; una tabla ausente usa los
-  defaults. MiB = 1.048.576 bytes (los límites los aplica M08).
+  defaults. MiB = 1.048.576 bytes (los límites los aplica el motor de adjuntos).
 - `ScopeEntry`: `driver` es el prefijo explícito del bloque (`None` = driver
   nativo del SO) y `account` la referencia dentro de ese driver (`None` en un
   bloque sin prefijo); `key` conserva la clave escrita y `account_ref` devuelve
@@ -854,7 +858,7 @@ account_label, account_email, mailboxes, driver)`.
   sin prefijo; después los prefijos explícitos en orden de declaración, sin
   duplicados). `driver_in_scope(config, driver, *, native=None)` y
   `require_driver_in_scope(...)` exponen la comprobación de alcance para
-  `show`/`attachment` (M03/M08): un driver instalado sin bloque ⇒
+  `show`/`attachment`: un driver instalado sin bloque ⇒
   `E_ACCOUNT_NOT_IN_SCOPE` (exit 2) con el hint de declarar la cuenta, sin
   cargarlo. Los comandos de datos no consultan un driver no declarado.
 - Validación estricta: `[logging]`, `[search]`, `[new]`, `[attachments]` y
@@ -874,16 +878,16 @@ Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
 `None` cuando la config no lo declara); `drivers` es el mapping
 `{driver: instancia}` de los demás drivers declarados que el CLI abrió y
 `native` el nombre del driver nativo. Sin esos kwargs el comportamiento es el
-de un solo driver (2.0.1/M03). **Todo uid emitido** (`search`, `new`, `show`,
+de un solo driver (2.0.1). **Todo uid emitido** (`search`, `new`, `show`,
 `cursor.previous/current.last_uid` y `state.json`) es el string prefijado
 `format_uid(driver, str(row["uid"]))`; los adaptadores siguen intercambiando el
-uid nativo (D1) y el núcleo es el único que prefija. `uid` de `run_show` es el
+uid nativo y el núcleo es el único que prefija. `uid` de `run_show` es el
 uid **nativo** ya validado por `cli` (`parse_native_id` del driver del prefijo,
 antes de abrir el store, PRD §12.11); los mensajes de error de `run_show`
 (`E_USAGE`, `E_ACCOUNT_NOT_IN_SCOPE`) muestran el uid prefijado.
 `state_store` es un `StateStore` creado con `is_installed` del registro.
 
-**Motor multi-driver (M04, C4; PRD RF-37, §11.3).** Cada driver
+**Motor multi-driver (PRD RF-37, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
 native=)` y se consulta con los mismos filtros; la deduplicación por
 `message_id` se hace **dentro** de cada driver (RF-07 del `PRD.md`, sin dedupe
@@ -901,27 +905,27 @@ devuelve `excluded_stores: []`); el driver nativo sin bloques no aporta nada y,
 sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con `W_NO_ACCOUNTS`.
 `run_show` despacha por el driver del prefijo: resuelve solo los bloques de ese
 driver, llama a su `find_message`/`load_body` y a su operación `attachments()`
-(API 1, C1) para componer `message.attachments[]` (M08, RF-43/AC-07):
+(API 1) para componer `message.attachments[]` (RF-43/AC-07):
 `[{index, name, cached_path}]` con el nombre **original**, el índice estable
 1..N del driver y `cached_path` calculado con `attachments.cache.cached_path`
-(M07) — `null` si el nombre dispara `classify_name` (regla de nombre) o si la
+— `null` si el nombre dispara `classify_name` (regla de nombre) o si la
 entrada de caché no es un archivo regular. `show` **no crea, abre ni lee** la
 caché ni escribe en disco; tampoco inspecciona contenido: un adjunto que
 `attachment` bloquearía por *magic bytes* sigue mostrando `cached_path` si el
 archivo regular existe. Capacidad `attachments: "none"` ⇒ `[]` sin llamar al
 driver. Un driver remoto puede listar nombres (`show` solo calcula caché local,
-que será `null` si no hay archivo). **Convención C8/C9 (S/MIME/ilegible):** el
+que será `null` si no hay archivo). **Convención S/MIME/ilegible:** el
 driver puede propagar el motivo del mensaje lanzando el error de protocolo al
 listar los adjuntos (`PluginError(reason=smime|unreadable)` en un plugin,
 `MailqueryError E_ATTACHMENT_UNREADABLE` en un backend interno); `show` lo
 captura ⇒ `attachments: []`, conserva el `W_BODY_*` de 2.0.1 y **no** añade
-`W_ATTACHMENTS_UNAVAILABLE` (D6). Mientras un backend interno no implemente
-`attachments()` (antes de M09/M10), `run_show` usa el fallback 2.0.1: nombres
+`W_ATTACHMENTS_UNAVAILABLE`. Si un backend interno no implementa
+`attachments()` (`NotImplementedError`), `run_show` usa el fallback 2.0.1: nombres
 MIME del cuerpo legible, nombres del `Envelope Index` con
 `W_ATTACHMENTS_UNAVAILABLE` para un cuerpo ilegible no S/MIME, y `[]` para
 S/MIME.
 
-**Envoltura de llamadas (M05, C5).** `_driver_pool` envuelve cada backend con
+**Envoltura de llamadas.** `_driver_pool` envuelve cada backend con
 `plugins.wrap_driver`, así que todas las operaciones de `MailBackend` pasan por
 `call_driver` con el plazo de metadatos, incluidos los `accounts`/`mailboxes`/
 `resolve_mailbox` de la resolución de alcance (a `config.resolve_scope` se le
@@ -937,8 +941,7 @@ añade `cli`); `run_mailboxes` devuelve `accounts`, `mailboxes`,
 = `(date_received DESC, driver ASC, native_order_key DESC)`; `new` =
 ASCENDENTE `(date_received ASC, driver ASC, native_order_key ASC)`; el key se
 compara como entero si la capacidad es `numeric` (Apple Mail) o como texto si
-es `text` (Outlook/plugins) y **nunca** se compara el texto del uid. En M03 el
-comando abre un solo driver; M04 extiende el merge. El anillo de `new` filtra
+es `text` (Outlook/plugins) y **nunca** se compara el texto del uid. El anillo de `new` filtra
 por uid prefijado y el cursor avanza con esa misma clave total. Dedupe por clave
 global con prioridad INBOX > carpeta normal > buzón agregado;
 `duplicate_count` = copias en el alcance (≥ 1); límites y `truncated`/`hint`
@@ -964,11 +967,11 @@ corrida y, en `new`, `W_FIRST_RUN` al final. `run_show` convierte
 accounts_db=None, backend=None) -> int`. Los 4 kwargs son **solo para tests**
 (no son flags ni variables de entorno del contrato): `mail_root` o
 `accounts_db` ⇒ Apple Mail en cualquier SO; `backend` = instancia ya construida
-(el Outlook falso, desde W3); sin ellos, el backend de la plataforma
+(el Outlook falso); sin ellos, el backend de la plataforma
 (`get_backend`). `-h/--help` y `-v/--version` en texto y exit 0; `--log-level`
 global; JSON de error en `stdout` + resumen humano en `stderr`; exit codes
 según `errors.CODE_EXIT`; lock automático; validación del uid de `show` **antes
-de crear el home** (M03, PRD §12.11): `uid.parse_uid` con el driver nativo y
+de crear el home** (PRD §12.11): `uid.parse_uid` con el driver nativo y
 `BackendRegistry.is_installed` (un formato inválido ⇒ `E_USAGE`, un driver no
 instalado ⇒ `E_DRIVER_UNKNOWN`), y `backend.parse_native_id` del driver nativo
 (puro y offline, también antes del home; un backend inyectado cuenta como
@@ -976,7 +979,7 @@ disponible). Después de leer `config.toml` y antes de construir el backend,
 `show` exige que el driver del prefijo aparezca en `[scope]`
 (`driver_in_scope`/`require_driver_in_scope` de `config.py`): un driver
 instalado sin bloque ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo. **Ciclo de vida
-multi-driver (M04, T01/T05/T06):** el comando crea **un** `BackendRegistry` y
+multi-driver:** el comando crea **un** `BackendRegistry` y
 lo comparte con `load_config(registry=)`, abre los drivers declarados
 (`config.declared_drivers`, nativo primero) dentro del `RunLock` y antes de
 `event=start`, y los cierra todos en un `finally` (best-effort: un fallo de
@@ -986,7 +989,7 @@ un driver declarado que no carga aborta el comando sin resultados parciales.
 `show` abre **solo** el driver del prefijo: si es el nativo pasa `args.uid` ya
 validado; si es otro declarado lo carga con `registry.open_drivers`, valida la
 parte nativa con su `parse_native_id` (`E_USAGE` si no cumple) y lo despacha con
-`run_show(..., driver=, drivers=)`. Desde M05 ese `parse_native_id` de un plugin
+`run_show(..., driver=, drivers=)`. Ese `parse_native_id` de un plugin
 pasa por `call_driver`: un `reason` `invalid_uid`/`not_found` ⇒ `E_USAGE` (2) y
 un fallo no mapeado ⇒ `E_PLUGIN_FAILED` (3), nunca `E_INTERNAL`. El log de error
 (`_log_error`) registra `error.log_message` en nivel `error` con `code=`; un
@@ -999,11 +1002,11 @@ registro lo considera instalado; DP-02 solo filtra `--version`). `new` crea
 declarada separada por comas>` (el nativo primero; `-` si no hubiera ninguno):
 `backend` es siempre el driver de la plataforma aunque no se abra, y nunca
 incluye uids, `native_id`, cuentas, rutas, asuntos ni términos. El `event=end`
-de `attachment` (solo en éxito; D7) registra `exit_code=0 count=<N>
+de `attachment` (solo en éxito) registra `exit_code=0 count=<N>
 cached=<M> bytes=<total> duration_ms=<ms>`; el resto de comandos conserva sus
 campos actuales y un fallo registra `event=error` sin `event=end`.
 
-**Comando `attachment` (M08, C8; PRD §12.11, AC-07/08/12/14/15/17/19).**
+**Comando `attachment` (PRD §12.11, AC-07/08/12/14/15/17/19).**
 `mailquery attachment <uid> (--index N | --all) [--force]`. `--index` acepta
 solo un entero positivo (se valida en `main` con el texto literal de §12.11, no
 con el `type=int` de argparse) y `--index`/`--all` son mutuamente excluyentes
@@ -1012,7 +1015,7 @@ con el texto `attachment requires exactly one of --index or --all`. La ayuda
 options, examples y notes; columnas alineadas a 17 y ≤ 100 columnas) y la
 ayuda raíz lista los seis comandos con la línea de exits de §12.7.
 `_run_command` implementa la precedencia de §12.11 filas 1–10 **antes** de
-llamar al motor M07: (1) argumentos; (2) sintaxis del uid y driver instalado,
+llamar al motor de adjuntos: (1) argumentos; (2) sintaxis del uid y driver instalado,
 antes de crear el home; (3) config (incluye `[attachments]` y `[scope]`);
 (4) `[attachments].enabled=false` solo para `attachment` ⇒
 `E_ATTACHMENTS_DISABLED` (2); (5) el driver del prefijo debe estar declarado
@@ -1022,8 +1025,8 @@ capacidades: `attachments: "none"` **y** `"remote"` ⇒
 núcleo no puede materializar adjuntos remotos); (6) resolución de cuenta con
 `config.resolve_scope` (el driver se envuelve antes con `plugins.wrap_driver`);
 (7) `find_message` ⇒ `E_USAGE "message uid <uid> was not found"`; (8) la
-llamada `attachments()` puede lanzar la señal S/MIME/ilegible de la convención
-C8/C9 y el error de protocolo se propaga tal cual (`E_ATTACHMENT_UNREADABLE`,
+llamada `attachments()` puede lanzar la señal S/MIME/ilegible del
+mensaje y el error de protocolo se propaga tal cual (`E_ATTACHMENT_UNREADABLE`,
 exit 3, antes del caso “0 adjuntos”); (9) lista vacía ⇒ `E_USAGE "message <uid>
 has no attachments"`; (10) índice fuera de rango ⇒ el texto del ejemplo G.
 Después, `AttachmentsEngine.recover(...)` ejecuta las filas 11–15 con las filas
@@ -1050,16 +1053,14 @@ detail)` completa el informe sin volver a llamar al cliente de correo.
 `; drivers: <driver> <versión>, ...` dentro del paréntesis, alfabético: los
 backends internos se filtran por plataforma (DP-02) y los plugins externos se
 listan siempre; la línea usa `BackendRegistry.versions()` (metadata de
-distribución, sin importar plugins) y no lee config ni escribe log. M01 cambia
-`--version` (además de `selected.driver` en `event=start`); M02 añade el
-`driver` check a `doctor` (orden y detalle en `### doctor`). El JSON de los
-comandos de datos no cambia.
+distribución, sin importar plugins) y no lee config ni escribe log. El
+chequeo `driver` de `doctor` (orden y detalle) está en `### doctor`.
 `_collect_doctor_checks(home_path, backend, run=None, *, registry=None)` evalúa
-en el orden de D-03 (`python`, `home`, sintaxis de `config`, `driver`,
+en este orden (`python`, `home`, sintaxis de `config`, `driver`,
 `state`, `lock`, los chequeos del backend y al final la resolución de
 `config`); `registry` es el `BackendRegistry` del `driver` check, de la
 validación de prefijos de `[scope]` y de `is_installed` del chequeo `state`
-(`_run_doctor` crea uno y lo comparte). El chequeo `state` (M03) usa
+(`_run_doctor` crea uno y lo comparte). El chequeo `state` usa
 `StateStore(home, registry.is_installed)` y el detalle conserva el de 2.0.1 con
 el uid prefijado: sin fichero, el mensaje de primera corrida de siempre; con
 fichero, `schema: 2; cursor last_date_received=<n> last_uid=<prefijado>` (o
@@ -1068,26 +1069,26 @@ persistido, y `schema: <n>; no cursor yet` sin cursor); si el anillo podó uids,
 añade `; pruned <N> emitted uid(s) of uninstalled drivers: <drivers>` (sin
 uids). Un cursor de un driver no instalado deja el chequeo `ok=false` con
 `E_STATE_CORRUPT`. `doctor` no escribe estado.
-`_record_driver_check` (M02) valida el driver nativo (el backend en
+`_record_driver_check` valida el driver nativo (el backend en
 diagnóstico) y cada driver declarado; el detalle y los sufijos son el contrato
 de §12.8 (ver `### doctor`). `_record_config_check` resuelve cada bloque (o
 `not evaluated: <chequeo> failed` si falló su dependencia: primero `driver`,
 luego `store` en Apple Mail y `stores` en Outlook; los bloques de un driver
-distinto del nativo solo se reportan como declarados, su resolución de cuentas
-llega con el motor multi-driver de M04) y añade `W_STORE_EXCLUDED` al `detail`
+distinto del nativo solo se reportan como declarados, sin resolver sus
+cuentas) y añade `W_STORE_EXCLUDED` al `detail`
 con `ok=true` (PRD §15.3). `_bind_doctor_timeout` registra en el backend (si
 tiene `bind_doctor_timeout`) un `finish` que escribe el informe con
 `_emit_doctor_report(checks, json_output, logger, client)` (JSON o texto, más
 la línea `event=end` del log), hace `flush` de `stdout`, `stderr` y el log y
-termina con `os._exit(0)` (D-03).
+termina con `os._exit(0)`.
 
-### `attachments/` (M06, C6)
+### `attachments/`
 
 Núcleo **puro** de adjuntos (PRD §6.6 RF-43/RF-47/RF-48/RF-49, §10.3,
 §12.11 filas 8–15, AC-09/AC-10/AC-11 y parte de AC-15). Es la política que
-consumen M07 (límites/staging/caché) y M08 (`show`/`attachment`): **no escribe
+consumen el motor (límites/staging/caché) y los comandos `show`/`attachment`: **no escribe
 en disco, no lee la caché y no abre rutas**. Solo stdlib y el propio paquete
-(RNF-12). C6 congelado: catálogo de extensiones, reglas de bloqueo de
+(RNF-12). Contrato estable: catálogo de extensiones, reglas de bloqueo de
 nombre/contenido, orden de evaluación, `sanitized_name` y rutas de caché.
 
 Módulos: `catalog.py` (catálogo + NFKC), `blocking.py` (bloqueo de nombre y
@@ -1125,7 +1126,7 @@ frozenset[str]`:
 #### Bloqueo de nombre (§10.3.1 punto 1)
 
 `classify_name(original_name) -> NameDecision`, puro y **sin lanzar error de
-usuario** (el motor de M07 decide el `code`). `NameDecision(blocked, reason,
+usuario** (el motor de adjuntos decide el `code`). `NameDecision(blocked, reason,
 normalized_name, extension, category, detail)`; `detail` es
 `NAME_BLOCK_DETAIL = "has a dangerous filename pattern"` (§12.5 ejemplo C).
 Orden de reglas, la primera que dispara gana:
@@ -1171,12 +1172,12 @@ resultado **ya incluye** el prefijo `NN_`.
 `truncate_utf8(value, max_bytes) -> str` es el truncado compartido sin partir
 caracteres.
 
-#### Rutas de caché (§10.3.3, D9)
+#### Rutas de caché (§10.3.3)
 
 - `cache_root(home) -> Path` = `<home>/attachments`.
 - `message_dir(home, uid, *, platform=None) -> Path` =
   `<home>/attachments/<driver>/<native_id>`; `uid` es el canónico
-  `"<driver>:<native_id>"` (C3) y el uid legado sin prefijo se resuelve con el
+  `"<driver>:<native_id>"` y el uid legado sin prefijo se resuelve con el
   driver nativo. Si el componente `<native_id>` o la ruta completa (reservando
   el presupuesto máximo de `sanitized_name`, 153 bytes) supera el límite, se
   sustituye `<native_id>` por `uid.stable_identifier(uid)` (32 hex en
@@ -1191,7 +1192,7 @@ caracteres.
   `WINDOWS_PATH_BUDGET_BYTES = 240` de ruta; en POSIX, el `PC_NAME_MAX`/
   `PC_PATH_MAX` reales del sistema de archivos de `home` (fallback 255/4096).
   `platform` es **solo inyección de tests** (mismo patrón que `output.LOCAL_ZONE`).
-- Ninguna función crea directorios ni abre archivos; M07 los crea con
+- Ninguna función crea directorios ni abre archivos; el motor (`cache.py`) los crea con
   `0700`/`0600` y publica de forma atómica.
 
 #### Pantalla del mensaje completo (§10.3.1, §12.11 filas 11–14)
@@ -1200,12 +1201,12 @@ caracteres.
 `failed` y `blocked`; `index`/`name` identifican el adjunto causante y `detail`
 es el fragmento de mensaje del bloqueo. Códigos:
 `BLOCKED_CODE="E_ATTACHMENT_BLOCKED"`, `UNREADABLE_CODE="E_ATTACHMENT_UNREADABLE"`,
-`UNAVAILABLE_CODE="E_ATTACHMENT_UNAVAILABLE"` (M07/M08 los convierten en
+`UNAVAILABLE_CODE="E_ATTACHMENT_UNAVAILABLE"` (el motor los convierte en
 `MailqueryError`).
 
 - `screen_names(entries) -> ScreenDecision` evalúa los nombres de **todos** los
   adjuntos del mensaje, en orden de índice, y devuelve el primero que dispara
-  una regla (**fila 11**, antes de los límites de M07). Se ejecuta con cualquier
+  una regla (**fila 11**, antes de los límites del motor). Se ejecuta con cualquier
   `--index`. Una lista vacía devuelve una decisión `ok`: no es un bloqueo ni se
   confunde con “sin adjuntos”.
 - `screen_content(entries, requested_indices, open_stream) -> ScreenDecision`
@@ -1216,25 +1217,24 @@ es el fragmento de mensaje del bloqueo. Códigos:
   `not_downloaded`, `unsupported`, `network`; `corrupt`/`smime`/`unreadable`
   ⇒ unreadable). Precedencia: un bloqueo (fila 13) gana sobre las faltas de la
   fila 14; entre faltas de la fila 14 se informa la primera en orden de índice.
-  `open_stream(index)` debe poder llamarse de nuevo para la extracción (M06
+  `open_stream(index)` debe poder llamarse de nuevo para la extracción (`screen_content`
   inspecciona y cierra su propio iterador; no entrega bytes parciales).
 - `read_first_block(stream) -> bytes` lee como máximo
   `CONTENT_INSPECTION_BYTES = 512` y cierra el iterador; un flujo vacío devuelve
   `b""`. Los errores de lectura los traduce `screen_content` a unreadable.
 - Frontera: la señal S/MIME/ilegible **del mensaje** (§12.11 fila 8, el driver
-  propaga el motivo aunque la lista quede vacía) y “0 adjuntos” (fila 9) son de
-  M08; M06 solo mapea el `unavailable_reason` de cada fila de metadatos. Las
+  propaga el motivo aunque la lista quede vacía) y “0 adjuntos” (fila 9) son del
+  comando `attachment`; la pantalla solo mapea el `unavailable_reason` de cada fila de metadatos. Las
   funciones no escriben ni abren rutas de caché/staging (lo verifica UT-ATT-03.06).
 
-### `attachments/engine.py` y `attachments/cache.py` (M07, C7)
+### `attachments/engine.py` y `attachments/cache.py`
 
 Motor de recuperación local: límites, aciertos de caché, staging y publicación
 atómica (PRD RF-45/RF-47/RF-49/RF-51, §10.2, §10.4, §12.11 filas
-11–15, AC-12/AC-13/AC-15/AC-20 y RNF-13/RNF-14). Es el contrato **C7 congelado**
-que consumen M08 (comando `attachment` y `show.attachments`) y los adaptadores
-M09/M10. El motor no abre el store ni resuelve la cuenta; tampoco compone el
+11–15, AC-12/AC-13/AC-15/AC-20 y RNF-13/RNF-14). Es el contrato estable
+que consumen el comando `attachment` y `show.attachments`. El motor no abre el store ni resuelve la cuenta; tampoco compone el
 JSON: devuelve los registros de §12.11 y deja `uid`, `output_dir`, `count` y
-`warnings[]` a `cli.py` (M08). Solo stdlib y el propio paquete: no importa
+`warnings[]` a `cli.py`. Solo stdlib y el propio paquete: no importa
 `mailquery.config`, `mailquery.plugins` ni `mailquery.backends` (el guard
 UT-ATT-01.09 prohíbe `plugins` y los módulos de comando/backend).
 
@@ -1255,8 +1255,8 @@ class AttachmentsEngine:
     def __init__(
         self,
         home: str | Path,
-        config: AttachmentLimits,          # config.AttachmentsConfig (M02), duck typing
-        driver: AttachmentDriver,          # MailBackend cargado (C1), duck typing
+        config: AttachmentLimits,          # config.AttachmentsConfig, duck typing
+        driver: AttachmentDriver,          # MailBackend cargado, duck typing
         clock: Callable[[], float] | None = None,   # solo inyección de tests
     ) -> None: ...
 
@@ -1271,26 +1271,26 @@ class AttachmentsEngine:
     ) -> list[AttachmentResult]: ...
 ```
 
-- `uid` es el canónico `"<driver>:<native_id>"` (C3); el motor obtiene el uid
+- `uid` es el canónico `"<driver>:<native_id>"`; el motor obtiene el uid
   legado para el driver con `driver.parse_native_id(<native_id>)`.
 - `indices=None` ⇒ `--all`; `indices=[N]` ⇒ `--index N`. La validación de
-  argumentos y del rango es de M08 (§12.11 filas 1, 10); el motor la repite de
+  argumentos y del rango es del comando `attachment` (§12.11 filas 1, 10); el motor la repite de
   forma defensiva con `E_USAGE`.
-- `entries` son las filas `AttachmentMetadataRow` (C1) que M08 ya obtuvo y
-  mapeó con la envoltura de M05: pasándolas, el motor **no repite**
+- `entries` son las filas `AttachmentMetadataRow` que el comando `attachment`
+  ya obtuvo y mapeó con la envoltura de llamadas (`wrap_driver`): pasándolas, el motor **no repite**
   `driver.attachments()`. Sin ellas (uso directo del motor o tests) el motor
   hace la llamada.
 - `deadline` es una **factoría** que devuelve el instante absoluto (en unidades
   del `clock`) en que expira la extracción de **un** adjunto, o `None` sin
   límite. El motor la invoca una vez por adjunto, antes de leer su primer
   bloque, y el mismo instante acota la pantalla de contenido y la extracción.
-  M08 pasa `lambda: time.monotonic() + 120` (RNF-16: 120 s por adjunto,
+  El comando `attachment` pasa `lambda: time.monotonic() + 120` (RNF-16: 120 s por adjunto,
   también en `--all`); al vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3), staging limpio
   y sin archivos nuevos. El motor **no** fija políticas de tiempo por sí solo.
 - Resultado: un registro §12.11 por adjunto solicitado, en orden de índice y
   con `path` absoluto. Un fallo no devuelve registros parciales.
-- `output_dir` de M08 = `attachments.paths.message_dir(home, uid)`. M08 ya
-  validó las filas 7–10 (`find_message`, `attachments()`, “0 adjuntos”, rango
+- `output_dir` del comando `attachment` = `attachments.paths.message_dir(home, uid)`.
+  El comando ya validó las filas 7–10 (`find_message`, `attachments()`, “0 adjuntos”, rango
   del índice) y pasa esas filas en `entries`; el motor solo ejecuta 11–15.
 
 #### Flujo interno (§12.11)
@@ -1395,7 +1395,7 @@ de publicar; una entrada **sin verificar** se elimina (CR-01).
   `_atomic_replace` permiten inyectar `EACCES`/`ENOSPC` fallos de `os.replace`
   sin parchear el módulo `os` global (mismo patrón que `output.LOCAL_ZONE`).
 
-#### API de caché (congelada para M08)
+#### API de caché
 
 ```python
 # attachments/cache.py
@@ -1453,14 +1453,14 @@ class StagedAttachment:
 - `cached_path(...)` es el contrato de `show.attachments[].cached_path`
   (AC-07): devuelve la ruta determinista solo si el destino es un **archivo
   regular** (`lstat`, sin seguir symlinks); no crea, no abre ni lee nada. La
-  regla de nombre (`classify_name`) la aplica `show` (M08), no este helper.
-  `platform` es solo inyección de tests (M06/D9).
-- M08 **no** debe reimplementar `stat`/symlink: `output_dir` =
+  regla de nombre (`classify_name`) la aplica `show`, no este helper.
+  `platform` es solo inyección de tests.
+- Los comandos **no** deben reimplementar `stat`/symlink: `output_dir` =
   `message_dir(home, uid)` y `cached_path` = `cache.cached_path(...)`.
-- M09/M10 no usan `AttachmentCache`: reciben `legacy_uid` y devuelven metadatos
+- Los adaptadores de backend no usan `AttachmentCache`: reciben `legacy_uid` y devuelven metadatos
   y bytes decodificados; nunca escriben en la caché (RF-47).
 
-#### Errores del motor (C7, §12.6) y precedencia DP-01
+#### Errores del motor (§12.6) y precedencia DP-01
 
 | Código | Exit | Cuándo |
 |---|---|---|
@@ -1470,17 +1470,16 @@ class StagedAttachment:
 | `E_ATTACHMENT_UNREADABLE` | 3 | `corrupt`/`smime`/`unreadable` o error de lectura del stream; antes de publicar. |
 | `E_PERMISSION` | 3 | Permisos del driver o de la caché/staging (`EACCES`). |
 | `E_IO` | 3 | E/S al escribir el staging, publicar o por `tmp/` y `attachments/` en sistemas de archivos distintos (DP-01). |
-| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por M08. |
+| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por el comando `attachment`. |
 | `E_CLIENT_BUSY` | 5 | `reason=busy` del driver (reintentable). |
 | `E_PLUGIN_FAILED` | 3 | `reason` desconocido o metadatos inválidos del driver; nunca `E_INTERNAL` en la frontera de plugin. |
-| `E_USAGE` | 2 | Índice solicitado fuera de rango o uid inválido (defensivo; M08 valida antes). |
+| `E_USAGE` | 2 | Índice solicitado fuera de rango o uid inválido (defensivo; el comando valida antes). |
 
 **Precedencia DP-01:** los fallos de E/S de caché/staging son `E_IO` y
-`E_PERMISSION` queda para permisos; la fila de `E_PERMISSION` de §12.6 que
-menciona E/S de caché está superada por DP-01, §12.11 fila 15 y AC-12. Los
+`E_PERMISSION` queda para permisos (§12.6, §12.11 fila 15 y AC-12). Los
 `message`/`hint` pueden contener uid y nombre (dueño: núcleo); el
 `log_message` nunca contiene uid, `native_id`, nombres, rutas ni cuentas
-(RNF-15). El motor no emite log (`event=end` es de M08).
+(RNF-15). El motor no emite log (`event=end` lo registra `cli.py`).
 
 ## 4. Contrato JSON
 
@@ -1552,7 +1551,7 @@ Igual que `search` más:
 `index` es la posición 1..N estable que comparte con `attachment`; `name` es el
 nombre original del driver y `cached_path` la ruta absoluta del archivo de caché
 (regular) o `null` (sin caché, nombre no seguro o entrada no regular). En S/MIME
-`attachments` es `[]` y solo queda el `W_BODY_UNREADABLE` de 2.0.1 (D6). Un
+`attachments` es `[]` y solo queda el `W_BODY_UNREADABLE` de 2.0.1. Un
 driver con `attachments: "none"` devuelve `[]`; `show` nunca escribe.
 
 ### `attachment`
@@ -1598,26 +1597,26 @@ Chequeos comunes (los añade `cli.py`): `python`, `home`, `driver`, `config`,
 `state`, `lock`. Los del backend (`MailBackend.doctor_checks()`) en Apple Mail
 son `store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`; en
 Outlook, `pywin32`, `outlook`, `stores`, `readonly_strategy` y
-`object_model_guard` (PRD §12.8, §B.8; con Outlook cerrado, `outlook` falla
+`object_model_guard` (PRD §12.8; con Outlook cerrado, `outlook` falla
 con `E_OUTLOOK_NOT_RUNNING` y su hint, sus dependientes salen `not evaluated`
-y el exit sigue siendo 0). Orden de la lista (PRD §12.8, M02):
+y el exit sigue siendo 0). Orden de la lista (PRD §12.8):
 
 - macOS: `python`, `home`, `driver`, `store`, `envelope_index`, `schema`,
   `readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
 - Windows: `python`, `home`, `driver`, `pywin32`, `outlook`, `stores`,
   `readonly_strategy`, `object_model_guard`, `config`, `state`, `lock`.
 
-El chequeo `driver` (M02, común y con nombre estable) valida que todo driver
+El chequeo `driver` (común y con nombre estable) valida que todo driver
 declarado en `[scope."<driver>:<cuenta>"]` (más el nativo cuando hay bloques
 sin prefijo) esté instalado, declare `driver` válido/único y `plugin_api = 1` y
 tenga capacidades válidas. Es la única comprobación que lista la metadata de
 los drivers; `config` depende primero de ella (`not evaluated: driver failed`)
 y después de `schema` (macOS) / `stores` (Windows) como hasta ahora.
-`detail` (contrato C2): por cada driver, en orden de declaración (nativo
+`detail`: por cada driver, en orden de declaración (nativo
 primero si hay bloques sin prefijo),
 `<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>; body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`,
 unidos por `; `; la versión es la de la distribución (`package_version()`,
-`3.0.0a0` en esta fase) y el nativo se obtiene del backend seleccionado (así el
+`3.0.0a0` en `develop`) y el nativo se obtiene del backend seleccionado (así el
 fake de Outlook sobre `platform="win32"` reporta `outlook` en cualquier host).
 Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒
 `; no declared drivers` (valida solo el nativo); config que no parsea ⇒
@@ -1628,8 +1627,8 @@ lo reporta `config`); un driver que no valida añade
 El chequeo `config` valida el TOML y **la resolución de cada bloque `[scope]` y
 su `mailbox_list`** del driver nativo contra el store y las etiquetas de cuenta
 (por entrada, con el `code`/`hint` de cada error); un bloque de otro driver
-declarado se reporta como `<clave> → declared for driver <driver>` hasta que el
-motor multi-driver (M04) resuelva sus cuentas. Distingue config ausente de
+declarado se reporta como `<clave> → declared for driver <driver>` sin
+resolver sus cuentas. Distingue config ausente de
 config presente sin `[scope]` y, cuando no hay cuentas declaradas, lista las
 disponibles con el formato `0 account block(s) declared; available: <label>, ...`
 sin activarlas.
@@ -1639,7 +1638,7 @@ sin activarlas.
 {"ok": false, "command": "search", "error": {"code": "E_UNBOUNDED_SCAN", "message": "...", "hint": "..."}}
 ```
 Sin `generated_at` (contrato de error del PRD §12.5). El objeto `error` es
-siempre `{code, message, hint}` sin campos nuevos (M05/RF-50); en un error de
+siempre `{code, message, hint}` sin campos nuevos (RF-50); en un error de
 plugin `code`/`exit` salen del conjunto cerrado del núcleo, `message` usa la
 plantilla de §12.6 (con el `detail` saneado tras `": "`) y `hint` es el del
 plugin saneado o el defecto del motivo/código.
@@ -1738,7 +1737,7 @@ cifrado y firmado, `.emlx` ausente con fila de adjuntos, mensaje borrado,
 representables/futuras, y el `Envelope Index` en modo WAL con `-wal` y `-shm`.
 `now` fija el reloj del fixture (las fechas son relativas a él).
 
-`build_store(..., attachments=True)` (M09) añade los fixtures de adjuntos, sin
+`build_store(..., attachments=True)` añade los fixtures de adjuntos, sin
 cambiar el store por defecto: tres adjuntos con un nombre repetido
 (`UID_ATTACH_MULTI`), un mensaje por patrón de nombre hostil
 (`HOSTILE_ATTACHMENT_NAMES`: traversal, separadores, `..`, `C:`, ADS, RLO,
@@ -1753,10 +1752,8 @@ generando igual.
 
 ## 7. Reparto de propiedad de archivos (histórico, v1.x)
 
-Reparto del equipo de la v1.x, conservado como referencia; en 2.0.0 el
-trabajo se divide por fases y tareas del plan de implementación
-(`docs/plans/`), no por esta tabla. Los módulos nuevos de `backends/` los
-asigna cada tarea del plan.
+Reparto del equipo de la v1.x, conservado como referencia; no rige el
+trabajo actual.
 
 | Persona | Archivos (write scope) |
 |---------|------------------------|
@@ -1808,17 +1805,16 @@ python -B -m unittest tests.test_store -v                          # un módulo
   docstring. Por eso `-k <grupo>_<caso>` selecciona un caso concreto. Un test
   renombrado no se duplica.
 - Las expectativas que dependen del SO van **dentro** del test como
-  aserciones condicionales; solo se permiten los saltos documentados en el
-  plan (§7.7: `InstallShTest` sin `sh`, `InstallPs1Test` sin PowerShell,
-  etc.). Fuera de esos saltos el número de tests es el mismo en los 3 SO.
+  aserciones condicionales; solo se permiten saltos con motivo documentado
+  (`InstallShTest` sin `sh`, `InstallPs1Test` sin PowerShell, etc.). Fuera de esos saltos el número de tests es el mismo en los 3 SO.
 - **El test read-only es obligatorio y bloqueante** (`tests/test_readonly.py`):
   compara hashes y `mtime` de cada archivo del store de prueba antes y después
   de ejecutar todos los comandos, y verifica que no se crean archivos nuevos
   en el store ni fuera de `~/.mailquery`. La suite no se considera verde si
   falla.
 - Las pruebas **nunca** tocan el `~/.mailquery` real, `~/Library/Mail` ni el
-  Outlook real: usan directorios temporales, el store sintético (§6) y, desde
-  W3, el Outlook falso en memoria (`tests/fakes/`). Todo subprocess fija
+  Outlook real: usan directorios temporales, el store sintético (§6) y el
+  Outlook falso en memoria (`tests/fakes/`). Todo subprocess fija
   `HOME` y `USERPROFILE` a un directorio temporal. No se necesita Acceso total
   al disco para las pruebas, sí para una corrida real.
 - Los instaladores tienen sus propias pruebas
@@ -1845,15 +1841,14 @@ fechas fijas.
 comparar se normalizan los valores variables (`generated_at`,
 `duration_ms`, fechas ISO y epoch, ruta raíz temporal, separadores de ruta).
 `tests/fixtures/expected/search_multidriver.json` y `new_multidriver.json`
-(M04, TC-08) son las salidas de `search` y `new` con `apple_mail` + el doble de
+(TC-08) son las salidas de `search` y `new` con `apple_mail` + el doble de
 plugin API 1 declarado (`[scope."graph:Graph (user@example.com)"]`). Semilla
 determinista: `build_store()` (fixture base y su reloj) más dos mensajes del
 plugin en `fx.now − 18 min` (P2) y `fx.now − 16 min` (P1), de modo que ambos
 caen en la ventana de primera corrida de `new` (`D` = el mensaje más reciente de
 Apple Mail, −15 min, con `lookback` de 600 s). El registro del CLI se inyecta
 con los entry points internos más el del doble (`FakeEntryPoint`), sin instalar
-nada; la comparación normaliza `<ISO>`, `<EPOCH>` y las rutas. Los goldens de un
-solo driver no cambian en M04.
+nada; la comparación normaliza `<ISO>`, `<EPOCH>` y las rutas.
 `tests/fixtures/expected/outlook/` (`mailboxes`, `search`, `show`,
 `show_header_only`, `show_smime`, `new_first_run` y `doctor`; TC-02) son las
 del backend Outlook sobre `FakeOutlook.default()`, con la misma normalización y
@@ -1863,18 +1858,17 @@ cuenta Exchange y el buzón compartido excluido. El backend se construye con
 `security_center` del fake, así que `doctor` es determinista.
 `tests/fixtures/expected/attachment_saved.json`, `attachment_cached.json`,
 `attachment_blocked_name.json`, `attachment_blocked_content.json`,
-`attachment_too_large.json` y `show_2714_with_cache.json` (M09, TC-08) son los
+`attachment_too_large.json` y `show_2714_with_cache.json` (TC-08) son los
 flujos de adjuntos sobre `build_store(attachments=True)` con `DEFAULT_CONFIG`.
 Semilla: `attachment_saved` corre en un store nuevo (`cached:false`);
 `attachment_cached` ejecuta antes una corrida de siembra (documentada en el
 test) y compara la segunda (`cached:true`); `show_2714_with_cache` ejecuta
 `attachment apple_mail:2714 --index 1` antes del `show`. Los payloads del
 fixture son bytes fijos, así que `size_bytes` y `sha256` son estables; las
-rutas se normalizan a `<ROOT>`. Los goldens existentes de `show`/`search`/`new`
-no cambian en M09 (M08 es su dueño).
+rutas se normalizan a `<ROOT>`.
 
 `tests/fixtures/expected/outlook/attachment_saved.json`, `attachment_cached.json`,
-`attachment_unavailable.json` y `attachment_blocked.json` (M10, TC-09) son los
+`attachment_unavailable.json` y `attachment_blocked.json` (TC-09) son los
 flujos de adjuntos de Outlook sobre `FakeOutlook`; `attachment_cached`
 documenta la corrida de siembra y las rutas se normalizan con la misma
 normalización que los demás goldens (`<MESSAGE_DIR>` para el directorio del
@@ -1908,7 +1902,7 @@ cada comando de datos da `E_OUTLOOK_NOT_RUNNING` y `doctor` sale con exit 0).
 (tests del vigilante, que termina el proceso con `os._exit`). El gate de solo
 lectura de Outlook (OL-30, `test_outlook.OutlookReadOnlyGateTests`) barre los
 6 comandos con todos sus flags sobre todos los escenarios y exige miembros ⊆
-lista blanca, 0 asignaciones, 0 mutaciones y ningún código que §B.7 excluye.
+lista blanca, 0 asignaciones, 0 mutaciones y ningún código de error fuera de los admitidos para una corrida de solo lectura.
 
 Para regenerarlos tras un cambio **intencional** del contrato:
 
@@ -1925,8 +1919,8 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
 
 `.github/workflows/tests.yml`:
 
-- Disparo **solo por PR** del lote (`pull_request` a `develop`/`main`); no hay
-  `push` ni tag en esta fase. `concurrency` con `cancel-in-progress` (un push
+- Disparo **solo por PR** (`pull_request` a `develop`/`main`); no hay
+  `push` ni tag. `concurrency` con `cancel-in-progress` (un push
   nuevo al PR cancela el run anterior) y `timeout-minutes: 30` por job.
 - Job `unittest`: `ubuntu-latest`, `macos-latest` y `windows-latest` ×
   Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`) = 12 jobs. Ejecuta
@@ -1936,10 +1930,10 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
   saltan con motivo (PKG-01/02).
 - Job `install-scripts` (3 OS): valida y ejecuta en seco los instaladores
   (`scripts/install.sh` y `skills/install.sh` en ubuntu/macOS, los `.ps1` en
-  Windows). Total: **15 jobs** por corrida de lote.
+  Windows). Total: **15 jobs** por corrida.
 
-### 8.7 Git (D-01)
+### 8.7 Git
 
-Rige la regla de git de la §1: el orquestador crea la rama de cada fase y
+Rige la regla de git de la §1: el orquestador crea la rama de cada cambio y
 hace los commits; los merges a `develop` y los tags los hace o autoriza el
 dueño tras la revisión del planificador.

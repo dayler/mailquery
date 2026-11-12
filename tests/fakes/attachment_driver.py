@@ -1,6 +1,6 @@
-"""In-memory attachment driver double for the UT-ATT-06..11 engine tests (M07).
+"""In-memory attachment driver double for the UT-ATT-06..11 engine tests.
 
-The double stands in for a ``MailBackend`` (C1) at the attachment boundary
+The double stands in for a ``MailBackend`` at the attachment boundary
 fixed by ``backends/base.py``: it exposes ``driver``, ``parse_native_id``,
 ``attachments(uid)`` and ``attachment_stream(uid, index)`` and never touches
 the application home, the attachment cache or the staging area (the core owns
@@ -16,7 +16,7 @@ injected from the test:
   runs before every yielded chunk.
 
 ``DriverFailure`` is duck-typed like ``mailquery.plugins.PluginError``: it only
-carries a ``reason`` (and optional ``hint``/``detail``) so the M07 engine can be
+carries a ``reason`` (and optional ``hint``/``detail``) so the attachment engine can be
 tested without importing ``mailquery.plugins`` (UT-ATT-01.09 keeps
 ``attachments/**`` free of that package). The double is pure in-memory: it
 writes nothing and reads nothing.
@@ -44,7 +44,7 @@ CAPABILITIES: dict[str, Any] = {
 
 
 class DriverFailure(Exception):
-    """Duck-typed ``PluginError``: only ``reason``/``hint``/``detail`` (M05 contract)."""
+    """Duck-typed ``PluginError``: only ``reason``/``hint``/``detail``."""
 
     def __init__(self, reason: str, hint: str = "", detail: str = "") -> None:
         self.reason = reason
@@ -135,7 +135,7 @@ class FakeAttachmentDriver:
             "schema_ok": True,
         }
 
-    # -- attachment operations (C1) ----------------------------------------- #
+    # -- attachment operations ---------------------------------------------- #
 
     def attachments(self, uid: str) -> list[dict[str, Any]]:
         """Ordered ``AttachmentMetadataRow`` list (1..N) of the fake message."""
