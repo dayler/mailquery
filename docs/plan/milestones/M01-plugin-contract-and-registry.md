@@ -104,7 +104,7 @@ Todos los casos siguen la convención de §7.1 del plan maestro (P/N/B, `test_<g
 2. Contrato C1 documentado en `INTERFACES.md` y usado por los tests del doble de plugin.
 3. Sin cambios de comportamiento de los comandos de datos (`search`, `new`, `show`, `mailboxes`, `doctor`); los goldens existentes no cambian salvo `--version`, que no es golden. `OL-02.06` y `UT-CLI-09.01` quedan verdes con el nuevo catálogo.
 4. Sin dependencias nuevas; sin red; sin tocar el home real.
-5. `.github/workflows/tests.yml` conserva la matriz y los 3 jobs de `install-scripts`; el orquestador valida el disparo en el PR de I1. `docs/plan/evidence/M01.md` y el tag `prd-v2.1-M01` los pone el orquestador.
+5. `.github/workflows/tests.yml` conserva la matriz y los 3 jobs de `install-scripts`; el orquestador valida el disparo en el PR de I1. `docs/plan/evidence/M01.md` lo pone el orquestador; no se crea tag `prd-v2.1-M01` (D16).
 
 ## 7. Handoff y HITL
 

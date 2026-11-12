@@ -31,7 +31,7 @@
 |---|---|---|
 | ⚪ | **No iniciado** | estado inicial de todo milestone y fase |
 | 🟡 | **En curso** | subagente lanzado, rama creada desde la del lote, trabajo sin integrar |
-| 🟢 | **Completado** | rama integrada en la rama del lote con tag `prd-v2.1-MNN`, suite completa sin fallos nuevos, archivo de evidencia en `docs/plan/evidence/`, AC con evidencia, documentación del milestone actualizada y propuesta de §0.7. El release no forma parte de este gate |
+| 🟢 | **Completado** | rama integrada en la rama del lote (sin tags, D16), suite completa sin fallos nuevos, archivo de evidencia en `docs/plan/evidence/`, AC con evidencia, documentación del milestone actualizada y propuesta de §0.7. El release no forma parte de este gate |
 | 🔴 | **Bloqueado** | pregunta HITL sin responder, dependencia incumplida o fallo de entorno; se registra el motivo y la fecha en §11 |
 
 Reglas:
@@ -70,20 +70,20 @@ Reglas:
 | M10 | [Backend Outlook: adjuntos](milestones/M10-outlook-attachments.md) | E | M08, M09 | AC-10, AC-12, AC-15, AC-17 (Outlook), AC-19, AC-20 (integración) | UT-OL-ATT-01..04, TC-09, OL-30, SMOKE-ATT-OL | INTERFACES Outlook y excepción COM 🟢 |
 | M11 | [Documentación, cierre de fase y conciliación](milestones/M11-docs-release-and-reconciliation.md) | F | M01–M10 | Cierre de AC-01…AC-21; AC-19 (docs), AC-21 | DOC-01..06, PKG-02, INS-SMOKE-01, TC-04/TC-05/TC-06/TC-07 | READMEs, recetas, skills, instaladores, PRD-v2.1 §0.7 🟢 |
 
-**Resumen:** milestones 🟢 11/11 · 🟡 0 · 🔴 0 · ⚪ 0. ACs 🟢 21/21. Documentos consumidores 🟢 10/10. Suite final: 1048 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 8 saltados); 0 fallos nuevos. Fase cerrada **sin publicación** (D15): versión 2.0.1, sin tag de release, sin merge a `main`.
+**Resumen:** milestones 🟢 11/11 · 🟡 0 · 🔴 0 · ⚪ 0. ACs 🟢 21/21. Documentos consumidores 🟢 10/10. Suite final: 1048 tests (2 fallos conocidos de `SMOKE-NEW.07` en el host macOS, 8 saltados); 0 fallos nuevos. Fase cerrada **sin publicación** (D15) y **sin tags** (D16): versión 2.0.1, sin tags de milestone ni de release, sin merge a `main`.
 
 ### 3.2 Lotes de integración
 
-La ejecución sigue siendo secuencial (§5); lo que se agrupa es la **integración**. Cada lote cierra con un único PR a `develop` y una única corrida de la matriz completa; el detalle de ramas, tags y evidencia está en §6.3 y el gate del lote en §9.2.
+La ejecución sigue siendo secuencial (§5); lo que se agrupa es la **integración**. Cada lote cierra con un único PR a `develop` y una única corrida de la matriz completa; el detalle de ramas y evidencia está en §6.3 y el gate del lote en §9.2.
 
 | Lote | Milestones | Rama de integración | Tag por milestone | PR destino | Corridas de CI |
 |---|---|---|---|---|---|
-| I1 | M01–M03 | `feature/prd-v2.1-w1` | `prd-v2.1-M01`…`prd-v2.1-M03` | `develop` | 1 (PR) |
-| I2 | M04–M07 | `feature/prd-v2.1-w2` | `prd-v2.1-M04`…`prd-v2.1-M07` | `develop` | 1 (PR) |
-| I3 | M08–M10 | `feature/prd-v2.1-w3` | `prd-v2.1-M08`…`prd-v2.1-M10` | `develop` | 1 (PR) |
-| I4 | M11 | `feature/prd-v2.1-m11` | `prd-v2.1-M11` | `develop` | 1 (PR) |
+| I1 | M01–M03 | `feature/prd-v2.1-w1` | ninguno (D16) | `develop` | 1 (PR) |
+| I2 | M04–M07 | `feature/prd-v2.1-w2` | ninguno (D16) | `develop` | 1 (PR) |
+| I3 | M08–M10 | `feature/prd-v2.1-w3` | ninguno (D16) | `develop` | 1 (PR) |
+| I4 | M11 | `feature/prd-v2.1-m11` | ninguno (D16) | `develop` | 1 (PR) |
 
-Total: **4 PRs y 4 corridas de matriz** (15 jobs cada una: 12 de `unittest` + 3 de `install-scripts`) en lugar de 11 PRs y hasta 22 corridas si cada milestone abriera PR y volviera a disparar CI al mergear en `develop`. La trazabilidad por milestone se conserva con su tag y su archivo de evidencia, no con un PR propio. No hay tag de release ni merge a `main` en esta fase (§9.3).
+Total: **4 PRs y 4 corridas de matriz** (15 jobs cada una: 12 de `unittest` + 3 de `install-scripts`) en lugar de 11 PRs y hasta 22 corridas si cada milestone abriera PR y volviera a disparar CI al mergear en `develop`. La trazabilidad por milestone se conserva con su archivo de evidencia y los commits integrados, no con un PR ni un tag propios (D16). No hay tags de milestone ni de release y no hay merge a `main` en esta fase (§9.3).
 
 ---
 
@@ -185,7 +185,7 @@ Un milestone cerrado no cambia estos contratos sin reabrir el milestone y actual
 ### 6.1 Orquestador
 
 1. Lanza **un subagente por milestone** con el archivo del milestone como tarea completa. No implementa código de producto.
-2. Crea la rama del milestone (`feature/prd-v2.1-MNN-<slug>`) desde la rama del lote vigente (§3.2), revisa el diff contra el PRD y el milestone, corre la suite completa e integra en la rama del lote con `--no-ff` y tag `prd-v2.1-MNN`. **No abre PR por milestone ni espera CI**: el PR y la matriz son del lote (§6.3, §9.2).
+2. Crea la rama del milestone (`feature/prd-v2.1-MNN-<slug>`) desde la rama del lote vigente (§3.2), revisa el diff contra el PRD y el milestone, corre la suite completa e integra en la rama del lote con `--no-ff`, sin tag (D16). **No abre PR por milestone ni espera CI**: el PR y la matriz son del lote (§6.3, §9.2).
 3. Tras integrar: actualiza este dashboard (§3), la matriz AC (§4), el registro de ejecución (§11) y `PRD-v2.1 §0.7`. Es el único que escribe estado.
 4. Reutiliza **un solo worktree** (`../mailquery-prd-v2.1`), reseteado al punto de integración del lote; la rama se crea por milestone y el subagente trabaja solo en los archivos de su milestone. No hay ejecución en paralelo (§5).
 5. Ante una pregunta HITL, la traslada al dueño en el momento, registra la respuesta en §11 y relanza el milestone.
@@ -205,11 +205,11 @@ Un milestone cerrado no cambia estos contratos sin reabrir el milestone y actual
 
 **Ramas.** Una rama por milestone desde la rama del lote vigente (§3.2), no desde `develop`; commits en inglés (`feat(...)`, `test(...)`, `docs(...)`). Un solo worktree (`../mailquery-prd-v2.1`), reseteado al punto de integración del lote; no se crean 11 worktrees.
 
-**Integración.** Cada milestone se integra en la rama del lote con `--no-ff` y tag local `prd-v2.1-MNN` cuando su gate local (§9.1) está verde. El lote se publica como **un PR** a `develop` (4 PRs en total: I1–I4): la revisión por milestone se hace sobre los commits y el tag, no sobre un PR propio. Un milestone no se cierra con la suite local roja y un lote no se mergea con la matriz roja (§9.2).
+**Integración.** Cada milestone se integra en la rama del lote con `--no-ff` cuando su gate local (§9.1) está verde; no se crean tags `prd-v2.1-MNN` (D16). El lote se publica como **un PR** a `develop` (4 PRs en total: I1–I4): la revisión por milestone se hace sobre los commits, no sobre un PR propio. Un milestone no se cierra con la suite local roja y un lote no se mergea con la matriz roja (§9.2).
 
 **Evidencia por milestone.** El orquestador escribe `docs/plan/evidence/MNN.md` tras el gate local; el subagente entrega los datos crudos de la plantilla, nunca edita `docs/plan/`. Contenido mínimo:
 
-1. comandos ejecutados y conteo final (corridos/fallidos/saltados) de la suite completa en el host macOS del dueño, con el commit y el tag;
+1. comandos ejecutados y conteo final (corridos/fallidos/saltados) de la suite completa en el host macOS del dueño, con el commit;
 2. grupos del milestone ejecutados solos (comando y resultado);
 3. goldens afectados (creados/actualizados) por icono y ruta, y comparación estructural cuando se reescribieron;
 4. número de tests nuevos y AC cubiertos con sus IDs;
@@ -217,7 +217,7 @@ Un milestone cerrado no cambia estos contratos sin reabrir el milestone y actual
 6. riesgos abiertos, deuda aceptada y preguntas HITL.
    El resumen (tres líneas) va al registro §11; el detalle queda en el archivo de evidencia. Ver plantilla en [`docs/plan/evidence/README.md`](evidence/README.md).
 
-**Sin release.** Esta fase no cambia la versión del paquete (sigue en `2.0.1`), no crea tag de release, no mergea a `main` y no publica. Los tags `prd-v2.1-MNN` son de trazabilidad interna, no de versión. El bump a `3.0.0` y el release se harán cuando se complete el resto del alcance (D15).
+**Sin release.** Esta fase no cambia la versión del paquete (sigue en `2.0.1`), no crea tags (ni de release ni `prd-v2.1-MNN`, D16), no mergea a `main` y no publica. El bump a `3.0.0` y el release se harán cuando se complete el resto del alcance (D15).
 
 **Higiene.** `git diff --check` limpio; sin archivos temporales, `.pyc` ni salidas de depuración en el repo; sin cambios en `docs/PRD.md`, `docs/PRD-v2.1.md` (salvo el orquestador) ni en este plan.
 
@@ -332,12 +332,12 @@ Todo artefacto consumidor del contrato se actualiza en el milestone que cambia s
 3. Documentación del milestone actualizada (tabla §8).
 4. Sin cambios fuera del write scope; sin `PRD.md`; `git diff --check` limpio.
 5. Sin dependencias nuevas; sin red en el núcleo; invariante I-1 intacto.
-6. Archivo `docs/plan/evidence/MNN.md` con los seis puntos de §6.3 y tag `prd-v2.1-MNN` en la rama del lote.
+6. Archivo `docs/plan/evidence/MNN.md` con los seis puntos de §6.3 en la rama del lote.
 7. Entrega con propuesta de transición; el orquestador actualiza master y PRD §0.7. La matriz de CI **no** es requisito de este gate.
 
 ### 9.2 Cierre de lote (integración)
 
-- La rama del lote contiene los milestones del lote con su tag y su archivo de evidencia; el orquestador corrió la suite completa tras cada integración.
+- La rama del lote contiene los milestones del lote con su archivo de evidencia; el orquestador corrió la suite completa tras cada integración.
 - El PR del lote a `develop` tiene la matriz completa verde (15 jobs, §7.5), sin fallos nuevos frente a la línea base y con los saltos de §7.6 documentados en el run.
 - El `git diff` acumulado del lote contra `develop` solo toca archivos de los write scopes de sus milestones; sin `docs/PRD.md` ni cambios en este plan fuera de dashboard, registro y evidencias.
 - Merge `--no-ff` a `develop` y anotación en §11 con la URL del run. Si la matriz falla, no hay merge: el orquestador relanza el milestone que rompió y adjunta la evidencia del fallo.
@@ -349,7 +349,7 @@ Todo artefacto consumidor del contrato se actualiza en el milestone que cambia s
 - Documentación completa y sin referencias obsoletas: "cinco comandos"/"five commands", uid entero, `attachments` solo con `name`, `[scope]` sin prefijo, `doctor` sin `driver`, `--version` sin `drivers`, `baseline`/`retention_days` u otras marcas de versiones anteriores. Donde se muestre una versión, coincide con `__version__` (no se anuncia `3.0.0`, que no está publicado).
 - Escaneo de imports de solo stdlib extendido a `attachments/**`, `plugins/**` y `backends/registry.py`; presupuestos de extracción de §12.2 medidos o registrados como deuda explícita.
 - `PRD-v2.1 §0.7`: filas de features 🟢 con su evidencia; filas de publicación (RC-25, CL-05, CL-09, CL-12 y CL-08 en lo que dependa de ellas) quedan ⚪ pendientes del release futuro del `3.0.0`.
-- **Sin release:** versión del paquete sin bump (`2.0.1`), sin tag `v3.0.0`, sin merge a `main`, sin publicación. `develop` conserva los features sin publicar hasta completar el resto del alcance del `3.0.0` (D15).
+- **Sin release:** versión del paquete sin bump (`2.0.1`), sin tags (ni `v3.0.0` ni `prd-v2.1-MNN`, D16), sin merge a `main`, sin publicación. `develop` conserva los features sin publicar hasta completar el resto del alcance del `3.0.0` (D15).
 - `git diff` contra `develop` sin cambios en `docs/PRD.md` ni en este plan (salvo su dashboard, registro y evidencias).
 
 ---
@@ -367,11 +367,11 @@ Todo artefacto consumidor del contrato se actualiza en el milestone que cambia s
 | Scope creep (ROADMAP, hardening de contenido) | Media | Alto | Fuera de alcance explícito; el subagente pregunta antes de ampliar |
 | Fallo de E/S a mitad de publicación deja archivos completos | Baja | Bajo | Publicación atómica y `E_IO`; documentado como riesgo aceptado (PRD §15) |
 | Fallos conocidos de `SMOKE-NEW.07` (presupuesto p95) en el host actual | Media | Bajo | No se heredan como criterio de milestone; se re-miden en M11 |
-| Lote grande oculta una regresión de un milestone | Media | Medio | Tag y evidencia por milestone, suite completa local tras cada integración y PR del lote con matriz completa; el bisect usa los tags `prd-v2.1-MNN` |
+| Lote grande oculta una regresión de un milestone | Media | Medio | Evidencia por milestone, suite completa local tras cada integración y PR del lote con matriz completa; el bisect usa los commits de integración |
 | Coste de CI por exceso de corridas | Alta | Bajo | 4 PRs y 4 corridas (§3.2, §7.5); `cancel-in-progress`; sin `push` en `develop` ni en `main` |
-| Confundir el cierre de fase con el release del `3.0.0` | Media | Alto | D15: sin bump, sin tag, sin `main`; docs y ejemplos usan `__version__`; §0.7 distingue filas de features de las de publicación |
+| Confundir el cierre de fase con el release del `3.0.0` | Media | Alto | D15 y D16: sin bump, sin tags, sin `main`; docs y ejemplos usan `__version__`; §0.7 distingue filas de features de las de publicación |
 | Features del `3.0.0` en `develop` con versión `2.0.1` | Media | Medio | Es un estado de desarrollo no publicado; el bump y el release se harán al completar el alcance; la documentación no anuncia `3.0.0` |
-| PR de lote demasiado grande para revisar | Media | Medio | Revisión por commits y tags, evidencia por milestone y diff acumulado contra `develop`; tres lotes de 3–4 milestones como máximo |
+| PR de lote demasiado grande para revisar | Media | Medio | Revisión por commits, evidencia por milestone y diff acumulado contra `develop`; tres lotes de 3–4 milestones como máximo |
 
 ---
 
@@ -395,7 +395,7 @@ Se completa al cerrar cada milestone (solo el orquestador).
 | 2026-11-11 | M09 | ⚪ → 🟢 | suite del milestone 1007/2/6; UT-AM-01..04, TC-08, TC-03.02 y SMOKE-ATT-AM (real, 4 OK) verdes; +33 casos; 6 goldens nuevos con semilla documentada; +1810/−25. Evidencia: [`evidence/M09.md`](evidence/M09.md) | 0 HITL; externalizados `.partial.emlx` best-effort documentado |
 | 2026-11-11 | M10 | ⚪ → 🟢 | suite del milestone 1003/2/8 (SMOKE-ATT-OL salta en macOS); UT-OL-ATT-01..04, TC-09 y OL-30 verdes; +29 casos; 4 goldens Outlook nuevos; +1553/−14. Evidencia: [`evidence/M10.md`](evidence/M10.md) | 0 HITL; materialización COM real solo verificable en host Windows (riesgo aceptado) |
 | 2026-11-11 | M11 | ⚪ → 🟢 | suite 1048/2/8 (solo `SMOKE-NEW.07`); DOC-01..06/TC-04/05/07 31/31, PKG-02/TC-06 8 OK, INS-SMOKE-01 4/4, `test_integration` 80/80; +35 casos; 16 archivos +1591/−527; escaneo de referencias obsoletas con 0 hits. Evidencia: [`evidence/M11.md`](evidence/M11.md) | 0 HITL; riesgo aceptado: SMOKE-ATT-OL/materialización COM sin host Windows |
-| 2026-11-11 | Cierre de fase | — | — | PRs I1–I4 mergeados en `develop` (matriz de CI completa verde en los 4, 15 jobs cada uno); AC-01…AC-21 🟢; sin bump de versión, sin tag de release, sin merge a `main` (D15 + instrucción del dueño). Evidencia de CI en [`evidence/M11.md`](evidence/M11.md) §7 | Fase cerrada; la publicación del `3.0.0` queda para el release futuro |
+| 2026-11-11 | Cierre de fase | — | — | PRs I1–I4 mergeados en `develop` (matriz de CI completa verde en los 4, 15 jobs cada uno); AC-01…AC-21 🟢; sin bump de versión, sin tag de release, sin merge a `main` (D15 + instrucción del dueño). Evidencia de CI en [`evidence/M11.md`](evidence/M11.md) §7 | Fase cerrada; sin tags (D16); la publicación del `3.0.0` queda para el release futuro |
 
 ---
 
@@ -434,5 +434,6 @@ Las preguntas que el PRD-v2.1 no cerraba se resuelven así; ningún milestone vu
 | D11 | ¿`attachment` con uid legado? | Sí, en ambos backends: entero Apple Mail y `EntryID` Outlook, resueltos con el driver nativo; la salida lleva uid prefijado. | §11.2 |
 | D12 | Ruta materializada de Outlook inválida (fuera de staging/symlink) | Se rechaza con `E_ATTACHMENT_UNAVAILABLE` (`unsupported`) antes de publicar; el detalle se registra en el log sin ruta. | RNF-13/RNF-14 |
 | D13 | Poda del anillo de un plugin desinstalado | Se poda en silencio al cargar/validar el estado y se informa en `doctor state`; la caché se conserva. | §10.2 puntos 6 y 10, DP-03 |
-| D14 | ¿Un PR y una corrida de CI por milestone? | No: integración por lotes (§3.2). 11 ramas y tags por milestone, 4 PRs a `develop` y CI solo en el PR del lote; la evidencia de CI deja de ser requisito de cierre de milestone y se exige al cerrar el lote. | Reduce ~330 jobs de CI a ~60 y 11 bloqueos de merge a 4; la trazabilidad se mantiene con tags y `docs/plan/evidence/MNN.md` |
-| D15 | ¿Esta fase publica el `3.0.0`? | No. Implementa el delta completo de PRD-v2.1 en `develop` sin bump de versión (sigue `2.0.1`), sin tag de release, sin merge a `main` y sin publicación; los features son parte del `3.0.0`, que se publicará cuando se complete el resto del alcance. `--version` conserva la versión del paquete y añade `drivers:`. | El dueño confirmó 2026-11-11 que el `3.0.0` incluirá más features; los tags `prd-v2.1-MNN` son de trazabilidad, no de versión |
+| D14 | ¿Un PR y una corrida de CI por milestone? | No: integración por lotes (§3.2). 11 ramas por milestone, 4 PRs a `develop` y CI solo en el PR del lote; la evidencia de CI deja de ser requisito de cierre de milestone y se exige al cerrar el lote. | Reduce ~330 jobs de CI a ~60 y 11 bloqueos de merge a 4; la trazabilidad se mantiene con `docs/plan/evidence/MNN.md` y los commits (sin tags, D16) |
+| D15 | ¿Esta fase publica el `3.0.0`? | No. Implementa el delta completo de PRD-v2.1 en `develop` sin bump de versión (sigue `2.0.1`), sin tag de release, sin merge a `main` y sin publicación; los features son parte del `3.0.0`, que se publicará cuando se complete el resto del alcance. `--version` conserva la versión del paquete y añade `drivers:`. | El dueño confirmó 2026-11-11 que el `3.0.0` incluirá más features; no se crean tags de milestone (D16) |
+| D16 | ¿Se crean los tags `prd-v2.1-MNN` de trazabilidad previstos en §3.2 y §6.3? | No: el dueño pidió no crear tags en esta fase. La trazabilidad por milestone queda en `docs/plan/evidence/MNN.md`, en los commits de integración y en §11; ningún tag de milestone ni de release se crea o publica. | Instrucción del dueño 2026-11-11; un tag sin release no aporta y añade superficie de error en el remoto |

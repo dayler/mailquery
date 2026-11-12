@@ -16,7 +16,7 @@ Un archivo por milestone (`MNN.md`), escrito por el **orquestador** al cerrar su
 
 | Campo | Valor |
 |---|---|
-| Tag | `prd-v2.1-MNN` |
+| Tag | ninguno (D16: el dueño pidió no crear tags en esta fase) |
 | Base del lote | <rama del lote> @ <commit base> |
 | Commit de cierre | <sha corto> |
 | Lote | I<N> |
