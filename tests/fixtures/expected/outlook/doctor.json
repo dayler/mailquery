@@ -13,6 +13,11 @@
       "detail": "<HOME>"
     },
     {
+      "name": "driver",
+      "ok": true,
+      "detail": "outlook (api=1; pkg 2.0.1; network=false; readonly=structural; body_local=true; attachments=local; native_order=text)"
+    },
+    {
       "name": "pywin32",
       "ok": true,
       "detail": "win32com importable"

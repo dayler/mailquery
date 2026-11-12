@@ -6,7 +6,7 @@
   "hint": null,
   "messages": [
     {
-      "uid": 83143,
+      "uid": "apple_mail:83143",
       "message_id": "<duplicate-4@fixture.example>",
       "duplicate_count": 1,
       "subject": "Shared duplicate",
@@ -46,7 +46,7 @@
       }
     },
     {
-      "uid": 83150,
+      "uid": "apple_mail:83150",
       "message_id": "<flagged-83150@fixture.example>",
       "duplicate_count": 1,
       "subject": "Flagged reminder",
@@ -86,7 +86,7 @@
       }
     },
     {
-      "uid": 83160,
+      "uid": "apple_mail:83160",
       "message_id": "<gmail-83160@fixture.example>",
       "duplicate_count": 1,
       "subject": "Gmail labelled",
@@ -126,7 +126,7 @@
       }
     },
     {
-      "uid": 83170,
+      "uid": "apple_mail:83170",
       "message_id": "<missing-83170@fixture.example>",
       "duplicate_count": 1,
       "subject": "Missing body",
@@ -174,12 +174,12 @@
   "cursor": {
     "previous": {
       "last_date_received": "<EPOCH>",
-      "last_uid": 1,
+      "last_uid": "apple_mail:1",
       "lookback_seconds": 600
     },
     "current": {
       "last_date_received": "<EPOCH>",
-      "last_uid": 83170,
+      "last_uid": "apple_mail:83170",
       "lookback_seconds": 600
     }
   },

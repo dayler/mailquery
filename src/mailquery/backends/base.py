@@ -1,30 +1,31 @@
-"""Abstract mail backend interface (PRD 9.3) and common-model row types (PRD 11.1).
+"""Backend protocol v1 (C1) and common-model row types.
 
 ``search.py`` and ``config.py`` depend only on :class:`MailBackend`. Rows are
 plain ``dict`` values typed with ``TypedDict``; the message-row keys are the
 ones ``search.py`` uses today (no field renames in W2, plan 4.3).
+
+C1 (PRD-v2.1 §6.1 RF-38, plan §5.1) freezes the contract every driver
+implements: ``driver``, ``plugin_api`` and ``capabilities`` metadata, the native
+part of the uid and its order key, and the attachment metadata/stream operations
+consumed by M06–M10. The contract uid is the opaque prefixed ``str`` of
+:mod:`mailquery.uid`; the built-in adapters still exchange the legacy native uid
+(``int`` for Apple Mail, upper-case hex ``str`` for Outlook) until M03, so the
+transitional :data:`LegacyUid` alias keeps their values and signatures honest.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from typing import Any, NotRequired, Sequence, TypedDict
 
-# A uid is an ``int`` (Apple Mail) or an upper-case hex ``str`` (Outlook).
-Uid = int | str
+from mailquery.plugins import Capabilities
 
+#: Contract uid: an opaque ``"<driver>:<native_id>"`` string (RF-40).
+Uid = str
 
-class StateUidError(ValueError):
-    """An invalid ``state.json`` uid (PRD 11.2); each backend owns the wording.
-
-    ``cursor_detail`` is the ``E_STATE_CORRUPT`` detail when the uid is
-    ``cursor.last_uid``; ``ring_detail`` when it is an ``emitted_uids`` item.
-    """
-
-    def __init__(self, cursor_detail: str, ring_detail: str) -> None:
-        super().__init__(cursor_detail)
-        self.cursor_detail = cursor_detail
-        self.ring_detail = ring_detail
+#: Transitional alias for the native uid the built-in adapters exchange until M03.
+LegacyUid = int | str
 
 
 class ExcludedStoreError(LookupError):
@@ -75,9 +76,15 @@ class MailboxRow(TypedDict):
 
 
 class MessageRow(TypedDict, total=False):
-    """Message metadata row, with the keys currently produced for ``search.py``."""
+    """Message metadata row, with the keys currently produced for ``search.py``.
 
-    uid: Uid
+    Every listing row carries ``native_order_key`` (contract C1): a string the
+    core compares as an integer when the driver capability ``native_order`` is
+    ``numeric`` and as text when it is ``text`` (PRD-v2.1 §10.2 point 7).
+    """
+
+    uid: LegacyUid
+    native_order_key: str
     global_message_id: int
     subject: str
     sender_name: str
@@ -101,6 +108,23 @@ class AttachmentRow(TypedDict):
     name: str
 
 
+class AttachmentMetadataRow(TypedDict):
+    """Ordered attachment metadata a driver returns for one message (C1, RF-43/RF-47).
+
+    ``index`` is the 1-based, stable position shared by ``show`` and
+    ``attachment``; ``size_bytes`` is the expected size when the driver knows it
+    (``None`` otherwise); ``native_order_key`` orders attachments within the
+    message; ``unavailable_reason`` is one of the §11.7 reasons when the
+    attachment cannot be recovered (``None`` when it is available).
+    """
+
+    index: int
+    name: str
+    size_bytes: int | None
+    native_order_key: str
+    unavailable_reason: str | None
+
+
 class BodySource(TypedDict):
     """Where the body came from (Outlook: ``partial=False``, ``emlx_path=None``)."""
 
@@ -122,12 +146,28 @@ class BodyRow(TypedDict):
 
 
 class MailBackend(ABC):
-    """Operations every backend implements (PRD 9.3)."""
+    """Backend protocol v1: operations and metadata every driver implements (C1, PRD 9.3)."""
+
+    #: Contract metadata (RF-38). Built-in adapters override them with class attributes.
+    @property
+    @abstractmethod
+    def driver(self) -> str:
+        """Driver identifier: ``"apple_mail"``, ``"outlook"`` or the plugin's name."""
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        """Backend identifier: ``"apple_mail"`` or ``"outlook"``."""
+    def plugin_api(self) -> int:
+        """Plugin API version implemented by the driver; always ``1`` (C1)."""
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> Capabilities:
+        """Declared capability map ``{network, readonly, body_local, attachments, native_order}``."""
+
+    @property
+    def native_order(self) -> str:
+        """Native ordering mode of the driver: ``numeric`` or ``text`` (C1)."""
+        return str(self.capabilities["native_order"])
 
     @abstractmethod
     def describe(self) -> dict[str, Any]:
@@ -168,10 +208,10 @@ class MailBackend(ABC):
         has_attachments: bool = False,
         order: str = "desc",
     ) -> list[MessageRow]:
-        """Metadata rows of the common model, in total order ``(date_received, uid)``."""
+        """Metadata rows of the common model; each row carries ``native_order_key`` (C1)."""
 
     @abstractmethod
-    def membership(self, uids: Sequence[Uid]) -> dict[Uid, set[Any]]:
+    def membership(self, uids: Sequence[LegacyUid]) -> dict[LegacyUid, set[Any]]:
         """Folders each uid belongs to (for dedupe and the result ``mailbox``)."""
 
     @abstractmethod
@@ -179,15 +219,17 @@ class MailBackend(ABC):
         """Copies per global message key (for ``duplicate_count``)."""
 
     @abstractmethod
-    def recipients(self, uids: Sequence[Uid]) -> dict[Uid, Any]:
+    def recipients(self, uids: Sequence[LegacyUid]) -> dict[LegacyUid, Any]:
         """Recipients (to/cc) per uid."""
 
     @abstractmethod
-    def attachment_names(self, uid: Uid) -> list[str]:
+    def attachment_names(self, uid: LegacyUid) -> list[str]:
         """Attachment names of one message."""
 
     @abstractmethod
-    def find_message(self, uid: Uid) -> tuple[MessageRow, MailboxRow | None] | None:
+    def find_message(
+        self, uid: LegacyUid
+    ) -> tuple[MessageRow, MailboxRow | None] | None:
         """Message row and its folder, or ``None``; the core checks the account is declared.
 
         Raises :class:`ExcludedStoreError` when the uid identifies an excluded store.
@@ -201,8 +243,35 @@ class MailBackend(ABC):
         """
 
     @abstractmethod
-    def parse_uid(self, text: Any) -> Uid:
-        """Backend uid from user text (int on Apple Mail, upper-case hex on Outlook) or ``E_USAGE``."""
+    def parse_uid(self, text: Any) -> LegacyUid:
+        """Legacy backend uid from user text (int on Apple Mail, upper-case hex on Outlook).
+
+        Transitional until M03 (the core parses the prefixed uid with
+        :mod:`mailquery.uid`); raises ``E_USAGE`` on invalid input.
+        """
+
+    @abstractmethod
+    def parse_native_id(self, native_id: str) -> LegacyUid:
+        """Validate the native part of a prefixed uid and return the legacy uid (C1, RF-40).
+
+        Pure and offline: it never opens the client or the store, so the core can
+        validate a uid before creating the home or reading the config.
+        """
+
+    def attachments(self, uid: LegacyUid) -> list[AttachmentMetadataRow]:
+        """Ordered attachment metadata of one message (C1, RF-43/RF-47).
+
+        Implemented by the adapters in M09/M10; plugins must provide it (API 1).
+        """
+        raise NotImplementedError("the driver does not implement attachment metadata")
+
+    def attachment_stream(self, uid: LegacyUid, index: int) -> Iterator[bytes]:
+        """Decoded bytes of the attachment ``index`` (1-based) of one message (C1).
+
+        Implemented by the adapters in M09/M10; plugins must provide it (API 1).
+        The core never lets the driver write to the attachment cache.
+        """
+        raise NotImplementedError("the driver does not implement attachment streams")
 
     @abstractmethod
     def doctor_checks(self) -> list[dict[str, Any]]:

@@ -2,7 +2,7 @@
   "ok": true,
   "command": "show",
   "message": {
-    "uid": 90110,
+    "uid": "apple_mail:90110",
     "message_id": "<smime-enc-90110@fixture.example>",
     "subject": "Encrypted S/MIME",
     "from": {

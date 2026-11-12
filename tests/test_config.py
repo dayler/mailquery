@@ -17,17 +17,22 @@ from pathlib import Path
 
 from mailquery.accounts import AccountLabel
 from mailquery.backends.apple_mail import AppleMailBackend
+from mailquery.backends.registry import INTERNAL_CAPABILITIES, package_version
 from mailquery.config import (
     APP_HOME_SUBDIRS,
+    AttachmentsConfig,
     Config,
     LoggingConfig,
     NewConfig,
     ScopeEntry,
     SearchConfig,
     app_home,
+    declared_drivers,
+    driver_in_scope,
     ensure_app_home,
     load_config,
     parse_duration,
+    require_driver_in_scope,
     resolve_scope,
 )
 from mailquery.errors import MailqueryError, exit_code_for
@@ -38,6 +43,7 @@ from tests.fixtures.make_fixtures import (
     ACCOUNT_ICLOUD,
     ACCOUNT_LOCAL,
     DEFAULT_CONFIG,
+    PREFIXED_CONFIG,
     build_store,
     write_config,
 )
@@ -114,13 +120,23 @@ def _fake_mailboxes() -> tuple[Mailbox, ...]:
 
 
 class _FakeBackend:
-    """Fake ``MailBackend``: the PRD 9.3 methods that ``resolve_scope`` uses."""
+    """Fake ``MailBackend``: the protocol v1 methods that ``resolve_scope`` uses."""
 
-    name = "apple_mail"
+    driver = "apple_mail"
+    plugin_api = 1
+    capabilities = dict(INTERNAL_CAPABILITIES["apple_mail"])
 
-    def __init__(self, mailboxes: tuple[Mailbox, ...], labels: "_FakeLabels") -> None:
+    def __init__(
+        self,
+        mailboxes: tuple[Mailbox, ...],
+        labels: "_FakeLabels",
+        *,
+        driver: str | None = None,
+    ) -> None:
         self._mailboxes = mailboxes
         self._labels = labels
+        if driver is not None:
+            self.driver = driver
 
     @property
     def labels_available(self) -> bool:
@@ -163,6 +179,164 @@ class _FakeBackend:
             ):
                 return _row(mailbox)
         return None
+
+    @staticmethod
+    def parse_native_id(native_id: str) -> str:
+        return native_id
+
+
+class _StubRegistry:
+    """Minimal ``BackendRegistry`` seam: the driver check ``load_config`` needs."""
+
+    def __init__(self, installed: tuple[str, ...] = ("apple_mail", "outlook")) -> None:
+        self._installed = frozenset(installed)
+
+    def installed(self) -> list[str]:
+        return sorted(self._installed)
+
+    def is_installed(self, driver: str) -> bool:
+        return driver in self._installed
+
+
+PLUGIN_DRIVER = "graph"
+PLUGIN_CAPABILITIES = {
+    "network": True,
+    "readonly": "promise",
+    "body_local": True,
+    "attachments": "remote",
+    "native_order": "text",
+}
+
+
+def _plugin_mailbox(
+    rowid: int,
+    account_uuid: str,
+    name: str,
+    path: str,
+    *,
+    is_inbox: bool = False,
+) -> dict:
+    return {
+        "id": rowid,
+        "account_uuid": account_uuid,
+        "name": name,
+        "path": path,
+        "url": f"plugin://{account_uuid}/{path}",
+        "is_inbox": is_inbox,
+        "is_aggregate": False,
+        "total": 0,
+        "unread": 0,
+    }
+
+
+class _PluginBackend:
+    """Fake external driver with opaque ``label``/``uuid`` account identifiers (RF-36)."""
+
+    driver = PLUGIN_DRIVER
+    plugin_api = 1
+    capabilities = dict(PLUGIN_CAPABILITIES)
+    labels_available = True
+
+    def __init__(
+        self,
+        accounts: list[dict],
+        mailboxes: tuple[dict, ...] = (),
+    ) -> None:
+        self._accounts = [dict(account) for account in accounts]
+        self._mailboxes = [dict(mailbox) for mailbox in mailboxes]
+        self.calls: list[str] = []
+
+    def accounts(self) -> list[dict]:
+        self.calls.append("accounts")
+        return [dict(account) for account in self._accounts]
+
+    def mailboxes(self) -> list[dict]:
+        self.calls.append("mailboxes")
+        return [dict(mailbox) for mailbox in self._mailboxes]
+
+    def excluded_stores(self) -> list[dict]:
+        return []
+
+    def resolve_mailbox(self, account_uuid: str, ref: str) -> dict | None:
+        needle = ref.strip().casefold()
+        for mailbox in self._mailboxes:
+            if mailbox["account_uuid"] != account_uuid:
+                continue
+            if needle in (mailbox["name"].casefold(), mailbox["path"].casefold()):
+                return dict(mailbox)
+        return None
+
+    @staticmethod
+    def parse_native_id(native_id: str) -> str:
+        return native_id
+
+
+class _ExcludedBackend:
+    """Fake Outlook driver whose declared label is an excluded store (PRD 15.3)."""
+
+    driver = "outlook"
+    plugin_api = 1
+    capabilities = dict(INTERNAL_CAPABILITIES["outlook"])
+    labels_available = True
+
+    EXCLUDED = {
+        "label": "Exchange shared (Soporte)",
+        "path": "\\\\nas01\\backup\\soporte.pst",
+        "reason": "shared_mailbox",
+    }
+
+    def accounts(self) -> list[dict]:
+        return [
+            {
+                "uuid": None,
+                "label": self.EXCLUDED["label"],
+                "email": None,
+                "local": False,
+                "excluded": dict(self.EXCLUDED),
+            }
+        ]
+
+    def mailboxes(self) -> list[dict]:
+        return []
+
+    def excluded_stores(self) -> list[dict]:
+        return [dict(self.EXCLUDED)]
+
+    def resolve_mailbox(self, account_uuid: str, ref: str) -> dict | None:
+        return None
+
+    @staticmethod
+    def parse_native_id(native_id: str) -> str:
+        return native_id
+
+
+def _plugin_accounts() -> list[dict]:
+    return [
+        {
+            "uuid": "acct-000001",
+            "label": "work",
+            "email": "work@example.com",
+            "local": False,
+        },
+        {
+            "uuid": "acct-000002",
+            "label": "Home",
+            "email": None,
+            "local": False,
+        },
+    ]
+
+
+def _plugin_backend() -> _PluginBackend:
+    return _PluginBackend(
+        _plugin_accounts(),
+        (
+            _plugin_mailbox(101, "acct-000001", "INBOX", "INBOX", is_inbox=True),
+            _plugin_mailbox(102, "acct-000001", "Facturas", "INBOX/Facturas"),
+            _plugin_mailbox(103, "acct-000002", "INBOX", "INBOX", is_inbox=True),
+        ),
+    )
+
 
 
 def _row(mailbox: Mailbox) -> dict:
@@ -332,6 +506,7 @@ class LoadConfigTests(_ErrorAssertions):
         self.assertEqual(config.logging, LoggingConfig())
         self.assertEqual(config.search, SearchConfig())
         self.assertEqual(config.new, NewConfig())
+        self.assertEqual(config.attachments, AttachmentsConfig())
         self.assertEqual(config.scopes, ())
         self.assertFalse(config.has_scopes)
 
@@ -759,6 +934,362 @@ class FixtureScopeResolutionTests(unittest.TestCase):
         with self.assertRaises(MailqueryError) as context:
             resolve_scope(_config((ACCOUNT_MISSING, ()),), backend)
         self.assertEqual(context.exception.code, "E_CONFIG_ACCOUNT_UNKNOWN")
+
+
+# --------------------------------------------------------------------------- #
+# M02 — UT-DRV-01: [scope."<driver>:<cuenta>"] schema (AC-03, RF-36)
+# --------------------------------------------------------------------------- #
+
+
+class _DriverConfigCase(_ErrorAssertions):
+    """Temporary home plus the load/resolve helpers shared by the UT-DRV cases."""
+
+    INSTALLED = ("apple_mail", "outlook")
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name) / "home"
+        self.backend = _FakeBackend(_fake_mailboxes(), _fake_labels())
+
+    def _load(self, content: str, *, installed: tuple[str, ...] | None = None):
+        write_config(self.home, content)
+        registry = _StubRegistry(self.INSTALLED if installed is None else installed)
+        return load_config(self.home, registry=registry)
+
+    def _load_error(
+        self, content: str, code: str = "E_DRIVER_UNKNOWN", *, installed: tuple[str, ...] | None = None
+    ) -> MailqueryError:
+        write_config(self.home, content)
+        registry = _StubRegistry(self.INSTALLED if installed is None else installed)
+        with self.assertRaises(MailqueryError) as context:
+            load_config(self.home, registry=registry)
+        error = context.exception
+        self.assertEqual(error.code, code)
+        self.assertEqual(error.exit_code, exit_code_for(code))
+        return error
+
+    def _resolve(self, content: str, backend, *, installed: tuple[str, ...] | None = None):
+        return resolve_scope(self._load(content, installed=installed), backend)
+
+
+class DriverScopeSchemaTests(_DriverConfigCase):
+    """UT-DRV-01 — ``[scope."<driver>:<cuenta>"]`` schema and native fallback (AC-03)."""
+
+    def test_ut_drv_01_01_prefixed_block_resolves_the_account_inside_its_driver(self) -> None:
+        """UT-DRV-01.01: `apple_mail:<label>` resolves the account inside that driver."""
+        config = self._load(
+            f'[scope."apple_mail:{ICLOUD_LABEL}"]\nmailbox_list = ["Facturas"]\n'
+        )
+        self.assertEqual(len(config.scopes), 1)
+        entry = config.scopes[0]
+        self.assertEqual(entry.key, f"apple_mail:{ICLOUD_LABEL}")
+        self.assertEqual(entry.driver, "apple_mail")
+        self.assertEqual(entry.account_ref, ICLOUD_LABEL)
+        scopes = resolve_scope(config, self.backend)
+        self.assertEqual(len(scopes), 1)
+        self.assertEqual(scopes[0].driver, "apple_mail")
+        self.assertEqual(scopes[0].account_uuid, ACCOUNT_ICLOUD)
+        self.assertEqual([mailbox["name"] for mailbox in scopes[0].mailboxes], ["INBOX", "Facturas"])
+
+    def test_ut_drv_01_02_unprefixed_block_uses_the_platform_native_driver(self) -> None:
+        """UT-DRV-01.02: an unprefixed key keeps using the native driver of the platform."""
+        config = self._load(f'[scope."{ICLOUD_LABEL}"]\n')
+        entry = config.scopes[0]
+        self.assertIsNone(entry.driver)
+        self.assertIsNone(entry.account)
+        self.assertEqual(entry.account_ref, ICLOUD_LABEL)
+        self.assertEqual(declared_drivers(config, native="apple_mail"), ("apple_mail",))
+        scopes = resolve_scope(config, self.backend)
+        self.assertEqual(scopes[0].driver, "apple_mail")
+        self.assertEqual(scopes[0].account_uuid, ACCOUNT_ICLOUD)
+
+    def test_ut_drv_01_03_account_label_with_colon_needs_the_explicit_prefix(self) -> None:
+        """UT-DRV-01.03: a label containing ':' works with its prefix; without it is E_DRIVER_UNKNOWN."""
+        label = "PST: Archivo"
+        backend = _FakeBackend(
+            (
+                _mailbox(
+                    20, ACCOUNT_ICLOUD, f"imap://{ACCOUNT_ICLOUD}/INBOX", "INBOX", "INBOX", is_inbox=True
+                ),
+                _mailbox(
+                    21,
+                    ACCOUNT_ICLOUD,
+                    f"imap://{ACCOUNT_ICLOUD}/PST%3A%20Archivo",
+                    label,
+                    label,
+                ),
+            ),
+            _FakeLabels([AccountLabel(ACCOUNT_ICLOUD, label, "pst@example.com", "IMAP")]),
+        )
+        scopes = self._resolve(f'[scope."apple_mail:{label}"]\n', backend)
+        self.assertEqual(scopes[0].account_uuid, ACCOUNT_ICLOUD)
+        self.assertEqual(scopes[0].account_label, label)
+        # Documented limitation: the first ':' is the driver separator.
+        error = self._load_error(f'[scope."{label}"]\n')
+        self.assertIn("PST", error.message)
+
+    def test_ut_drv_01_04_invalid_driver_prefix_is_driver_unknown(self) -> None:
+        """UT-DRV-01.04: uppercase, hyphen, empty or >64 driver ⇒ E_DRIVER_UNKNOWN (exit 2)."""
+        for driver in ("Apple_Mail", "apple-mail", "", "a" * 65):
+            with self.subTest(driver=driver):
+                error = self._load_error(f'[scope."{driver}:account"]\n')
+                self.assertEqual(error.exit_code, 2)
+
+    def test_ut_drv_01_05_well_formed_but_not_installed_driver_is_driver_unknown(self) -> None:
+        """UT-DRV-01.05: a well-formed driver that is not installed is not ignored."""
+        error = self._load_error('[scope."graph:trabajo@example.com"]\n')
+        self.assertIn("graph", error.message)
+        self.assertIn("pipx inject", error.hint)
+        # Every data command loads config.toml before doing any work, so the
+        # error above is what makes all of them fail with E_DRIVER_UNKNOWN.
+        self.assertEqual(exit_code_for(error.code), 2)
+
+    def test_ut_drv_01_06_blocks_for_the_same_driver_and_account_are_merged(self) -> None:
+        """UT-DRV-01.06: two blocks of the same (driver, account) merge mailbox_list."""
+        config = self._load(
+            f'[scope."apple_mail:{GMAIL_LABEL}"]\nmailbox_list = ["[Gmail]/All Mail"]\n\n'
+            f'[scope."apple_mail:fixture@gmail.com"]\nmailbox_list = ["[Gmail]/Important"]\n'
+        )
+        scopes = resolve_scope(config, self.backend)
+        self.assertEqual(len(scopes), 1)
+        self.assertEqual(scopes[0].driver, "apple_mail")
+        self.assertEqual(scopes[0].account_uuid, ACCOUNT_GMAIL)
+        self.assertEqual(
+            [mailbox["name"] for mailbox in scopes[0].mailboxes],
+            ["INBOX", "All Mail", "Important"],
+        )
+
+
+# --------------------------------------------------------------------------- #
+# M02 — UT-DRV-02: account resolution inside each driver (AC-03, RF-36)
+# --------------------------------------------------------------------------- #
+
+
+class DriverAccountResolutionTests(_DriverConfigCase):
+    """UT-DRV-02 — account resolution per driver (AC-03)."""
+
+    def test_ut_drv_02_01_internal_backend_forms_resolve_within_the_driver(self) -> None:
+        """UT-DRV-02.01: label, unique email, full UUID and UUID prefix ≥ 8 inside apple_mail."""
+        cases = (
+            (ICLOUD_LABEL, ACCOUNT_ICLOUD),
+            ("fixture@gmail.com", ACCOUNT_GMAIL),
+            (ACCOUNT_GMAIL.lower(), ACCOUNT_GMAIL),
+            ("BBBBBBBB", ACCOUNT_GMAIL),
+        )
+        for reference, account_uuid in cases:
+            with self.subTest(reference=reference):
+                scopes = self._resolve(f'[scope."apple_mail:{reference}"]\n', self.backend)
+                self.assertEqual(scopes[0].driver, "apple_mail")
+                self.assertEqual(scopes[0].account_uuid, account_uuid)
+
+    def test_ut_drv_02_02_plugin_labels_and_uuids_are_opaque(self) -> None:
+        """UT-DRV-02.02: a plugin resolves its short label and opaque UUID exactly, never by prefix."""
+        backend = _plugin_backend()
+        scopes = self._resolve(
+            f'[scope."{PLUGIN_DRIVER}:work"]\nmailbox_list = ["Facturas"]\n',
+            backend,
+            installed=("graph",),
+        )
+        self.assertEqual(scopes[0].driver, PLUGIN_DRIVER)
+        self.assertEqual(scopes[0].account_uuid, "acct-000001")
+        self.assertEqual(
+            [mailbox["name"] for mailbox in scopes[0].mailboxes], ["INBOX", "Facturas"]
+        )
+        scopes = self._resolve(
+            f'[scope."{PLUGIN_DRIVER}:acct-000002"]\n', backend, installed=("graph",)
+        )
+        self.assertEqual(scopes[0].account_uuid, "acct-000002")
+        # The internal "unique UUID prefix >= 8" form does not apply to plugins.
+        with self.assertRaises(MailqueryError) as context:
+            self._resolve(
+                f'[scope."{PLUGIN_DRIVER}:acct-000"]\n', backend, installed=("graph",)
+            )
+        self.assertEqual(context.exception.code, "E_CONFIG_ACCOUNT_UNKNOWN")
+
+    def test_ut_drv_02_03_unknown_and_ambiguous_accounts_keep_their_errors(self) -> None:
+        """UT-DRV-02.03: unknown ⇒ E_CONFIG_ACCOUNT_UNKNOWN; ambiguous ⇒ E_ACCOUNT_AMBIGUOUS."""
+        backend = _plugin_backend()
+        with self.assertRaises(MailqueryError) as context:
+            self._resolve(f'[scope."{PLUGIN_DRIVER}:nope"]\n', backend, installed=("graph",))
+        self.assertEqual(context.exception.code, "E_CONFIG_ACCOUNT_UNKNOWN")
+        duplicated = _PluginBackend(
+            [
+                {"uuid": "acct-a", "label": "Dup", "email": None, "local": False},
+                {"uuid": "acct-b", "label": "Dup", "email": None, "local": False},
+            ],
+            (_plugin_mailbox(104, "acct-a", "INBOX", "INBOX", is_inbox=True),),
+        )
+        with self.assertRaises(MailqueryError) as context:
+            self._resolve(f'[scope."{PLUGIN_DRIVER}:Dup"]\n', duplicated, installed=("graph",))
+        error = context.exception
+        self.assertEqual(error.code, "E_ACCOUNT_AMBIGUOUS")
+        self.assertIn("acct-a", error.hint)
+        self.assertIn("acct-b", error.hint)
+
+    def test_ut_drv_02_04_excluded_store_is_reported_without_aborting(self) -> None:
+        """UT-DRV-02.04: Outlook excluded store ⇒ W_STORE_EXCLUDED entry, no abort (PRD 15.3)."""
+        backend = _ExcludedBackend()
+        config = self._load(
+            f'[scope."outlook:{_ExcludedBackend.EXCLUDED["label"]}"]\n', installed=("outlook",)
+        )
+        excluded: list[dict] = []
+        scopes = resolve_scope(config, backend, excluded=excluded)
+        self.assertEqual(scopes, [])
+        self.assertEqual(excluded, [dict(_ExcludedBackend.EXCLUDED)])
+        self.assertEqual(excluded[0]["label"], _ExcludedBackend.EXCLUDED["label"])
+        self.assertEqual(excluded[0]["path"], _ExcludedBackend.EXCLUDED["path"])
+
+
+# --------------------------------------------------------------------------- #
+# M02 — UT-DRV-03: installed-but-not-declared drivers (AC-03, RF-36)
+# --------------------------------------------------------------------------- #
+
+
+class DriverInScopeTests(_DriverConfigCase):
+    """UT-DRV-03 — a driver installed but not declared stays out of scope (AC-03)."""
+
+    def _native_config(self):
+        return self._load(f'[scope."{ICLOUD_LABEL}"]\n')
+
+    def test_ut_drv_03_01_data_scopes_do_not_query_an_undeclared_driver(self) -> None:
+        """UT-DRV-03.01: only declared drivers are queried; an undeclared plugin is never called."""
+        plugin = _plugin_backend()
+        config = self._native_config()
+        scopes = resolve_scope(config, self.backend, drivers={PLUGIN_DRIVER: plugin})
+        self.assertEqual([scope.driver for scope in scopes], ["apple_mail"])
+        self.assertEqual(plugin.calls, [])
+        self.assertEqual(declared_drivers(config, native="apple_mail"), ("apple_mail",))
+
+    def test_ut_drv_03_02_helper_reports_account_not_in_scope_with_its_hint(self) -> None:
+        """UT-DRV-03.02: the scope helper raises E_ACCOUNT_NOT_IN_SCOPE (exit 2) with the hint."""
+        config = self._native_config()
+        self.assertFalse(driver_in_scope(config, PLUGIN_DRIVER, native="apple_mail"))
+        with self.assertRaises(MailqueryError) as context:
+            require_driver_in_scope(config, PLUGIN_DRIVER, native="apple_mail")
+        error = context.exception
+        self.assertEqual(error.code, "E_ACCOUNT_NOT_IN_SCOPE")
+        self.assertEqual(error.exit_code, 2)
+        self.assertIn("graph", error.message)
+        self.assertIn("config.toml", error.hint)
+        declared = self._load(
+            f'[scope."{PLUGIN_DRIVER}:work"]\n', installed=("graph",)
+        )
+        self.assertTrue(driver_in_scope(declared, PLUGIN_DRIVER, native="apple_mail"))
+        require_driver_in_scope(declared, PLUGIN_DRIVER, native="apple_mail")
+
+    def test_ut_drv_03_03_uninstalled_prefix_is_driver_unknown(self) -> None:
+        """UT-DRV-03.03: a prefix of a driver that is not installed ⇒ E_DRIVER_UNKNOWN (exit 2)."""
+        error = self._load_error(
+            f'[scope."{PLUGIN_DRIVER}:work"]\n', installed=("apple_mail",)
+        )
+        self.assertEqual(error.code, "E_DRIVER_UNKNOWN")
+        self.assertEqual(error.exit_code, 2)
+
+
+# --------------------------------------------------------------------------- #
+# M02 — UT-DRV-04: [attachments] table (AC-14, RF-42/49, §13)
+# --------------------------------------------------------------------------- #
+
+
+class AttachmentsConfigTests(_DriverConfigCase):
+    """UT-DRV-04 — ``[attachments]`` defaults, ranges and closed schema (AC-14)."""
+
+    def _attachments(self, content: str) -> AttachmentsConfig:
+        return self._load(content).attachments
+
+    def test_ut_drv_04_01_absent_table_uses_the_documented_defaults(self) -> None:
+        """UT-DRV-04.01: no [attachments] table ⇒ enabled=true, 100/200/50."""
+        attachments = self._attachments("# no attachments table\n")
+        self.assertEqual(
+            attachments,
+            AttachmentsConfig(
+                enabled=True,
+                max_file_size_mb=100,
+                max_total_size_mb=200,
+                max_count=50,
+            ),
+        )
+
+    def test_ut_drv_04_02_valid_custom_values_are_accepted_and_exposed(self) -> None:
+        """UT-DRV-04.02: valid custom values are exposed as written."""
+        attachments = self._attachments(
+            "[attachments]\nenabled = false\nmax_file_size_mb = 5\n"
+            "max_total_size_mb = 10\nmax_count = 3\n"
+        )
+        self.assertFalse(attachments.enabled)
+        self.assertEqual(attachments.max_file_size_mb, 5)
+        self.assertEqual(attachments.max_total_size_mb, 10)
+        self.assertEqual(attachments.max_count, 3)
+
+    def test_ut_drv_04_03_out_of_range_or_wrong_type_is_config_invalid(self) -> None:
+        """UT-DRV-04.03: wrong types and out-of-range values ⇒ E_CONFIG_INVALID (exit 2)."""
+        cases = (
+            "[attachments]\nenabled = 1\n",
+            '[attachments]\nenabled = "true"\n',
+            "[attachments]\nmax_file_size_mb = 0\n",
+            "[attachments]\nmax_file_size_mb = 501\n",
+            '[attachments]\nmax_file_size_mb = "100"\n',
+            "[attachments]\nmax_file_size_mb = true\n",
+            "[attachments]\nmax_total_size_mb = 0\n",
+            "[attachments]\nmax_total_size_mb = 1025\n",
+            "[attachments]\nmax_count = 0\n",
+            "[attachments]\nmax_count = 501\n",
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                error = self._load_error(content, "E_CONFIG_INVALID")
+                self.assertEqual(error.exit_code, 2)
+
+    def test_ut_drv_04_04_total_below_file_size_is_config_invalid_with_hint(self) -> None:
+        """UT-DRV-04.04: max_total_size_mb < max_file_size_mb ⇒ E_CONFIG_INVALID with both keys."""
+        error = self._load_error(
+            "[attachments]\nmax_file_size_mb = 200\nmax_total_size_mb = 100\n",
+            "E_CONFIG_INVALID",
+        )
+        self.assertIn("max_total_size_mb", error.message)
+        self.assertIn("max_file_size_mb", error.message)
+        self.assertIn("max_total_size_mb", error.hint)
+        self.assertIn("max_file_size_mb", error.hint)
+
+    def test_ut_drv_04_05_unknown_key_or_section_is_config_invalid(self) -> None:
+        """UT-DRV-04.05: unknown key in [attachments] or an unknown section ⇒ E_CONFIG_INVALID."""
+        for content in (
+            "[attachments]\nenabled_extra = true\n",
+            "[attachments.sub]\nenabled = true\n",
+            "[attachment]\nenabled = true\n",
+        ):
+            with self.subTest(content=content):
+                self._load_error(content, "E_CONFIG_INVALID")
+
+
+# --------------------------------------------------------------------------- #
+# M02 — UT-DRV-01/02 against the synthetic store (prefixed fixture config)
+# --------------------------------------------------------------------------- #
+
+
+class PrefixedFixtureScopeTests(unittest.TestCase):
+    """The prefixed fixture config resolves the native driver against the real store."""
+
+    def test_ut_drv_01_02_prefixed_fixture_config_resolves_the_native_driver(self) -> None:
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        write_config(fx.home, PREFIXED_CONFIG)
+        config = load_config(fx.home, registry=_StubRegistry())
+        backend = AppleMailBackend(
+            mail_root=fx.mail_root,
+            accounts_db=fx.accounts_db,
+            tmp_root=fx.home / "tmp",
+        )
+        self.addCleanup(backend.close)
+        scopes = resolve_scope(config, backend)
+        self.assertEqual([scope.driver for scope in scopes], ["apple_mail", "apple_mail"])
+        self.assertEqual(
+            [scope.account_uuid for scope in scopes], [ACCOUNT_ICLOUD, ACCOUNT_GMAIL]
+        )
+        self.assertEqual(
+            [mailbox["name"] for mailbox in scopes[0].mailboxes], ["INBOX", "Facturas"]
+        )
 
 
 if __name__ == "__main__":

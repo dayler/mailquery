@@ -32,6 +32,7 @@ from unittest import mock
 
 from tests.fakes import outlook as fk
 from tests.fakes import run_cli
+from tests.fixtures.make_fixtures import prefixed_uid
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SRC_ROOT = _REPO_ROOT / "src"
@@ -545,8 +546,8 @@ HINT_UNSUPPORTED = "install classic Outlook (version 16.0 or later); the new Out
 HINT_NOT_RUNNING = "open classic Outlook with the same user, without elevation, and retry"
 #: `checks[].name` of the Outlook doctor, in the order of PRD 12.8.
 _OUTLOOK_DOCTOR_CHECKS = (
-    "python", "home", "pywin32", "outlook", "stores", "readonly_strategy",
-    "object_model_guard", "config", "state", "lock",
+    "python", "home", "driver", "pywin32", "outlook", "stores",
+    "readonly_strategy", "object_model_guard", "config", "state", "lock",
 )
 _DOCTOR_TIMEOUT = "timeout after 30 s: Outlook did not respond (possible security prompt)"
 _DISPATCH_NAMES = frozenset({"Dispatch", "DispatchEx", "EnsureDispatch"})
@@ -874,7 +875,7 @@ class OutlookDetectionTests(_OutlookCliCase):
         """OL-02.06: a running instance ⇒ connection with GetActiveObject("Outlook.Application")."""
         fake = fk.FakeOutlook.default()
         backend = _backend(fake)
-        self.assertEqual(backend.name, "outlook")
+        self.assertEqual(backend.driver, "outlook")
         self.assertEqual(backend.describe()["strategy"], "com_readonly")
         connects = [e for e in fake.call_log if e.kind == "Connector"]
         self.assertEqual(
@@ -2214,7 +2215,7 @@ class _OutlookCommandCase(_OutlookCliCase):
         return self.run_json("search", *_SINCE_ALL, *extra)
 
     def message_of(self, payload: dict, key: str) -> dict:
-        uid = self.fake.item(key).entry_id
+        uid = _uid(self.fake.item(key).entry_id)
         return next(message for message in payload["messages"] if message["uid"] == uid)
 
     def show(self, key: str) -> dict:
@@ -2240,8 +2241,8 @@ class OutlookDedupeTests(_OutlookCommandCase):
         fake = self.items()
         payload = self.search()
         uids = [message["uid"] for message in payload["messages"]]
-        self.assertIn(fake.item("duplicate_inbox").entry_id, uids)
-        self.assertNotIn(fake.item("duplicate_facturas").entry_id, uids)
+        self.assertIn(_uid(fake.item("duplicate_inbox").entry_id), uids)
+        self.assertNotIn(_uid(fake.item("duplicate_facturas").entry_id), uids)
         message = self.message_of(payload, "duplicate_inbox")
         self.assertEqual(message["duplicate_count"], 2)
         self.assertEqual(message["message_id"], "<duplicado-1@example.com>")
@@ -2265,9 +2266,15 @@ class OutlookBodyTests(_OutlookCommandCase):
         """``search`` narrowed by the item's subject; its message and the warnings not about others."""
         spec = self.fake.item(key)
         payload = self.search("--subject", spec.subject)
-        messages = [m for m in payload["messages"] if m["uid"] == spec.entry_id]
+        wanted = _uid(spec.entry_id)
+        messages = [m for m in payload["messages"] if m["uid"] == wanted]
         self.assertEqual(len(messages), 1, payload)
-        others = [m["uid"] for m in payload["messages"] if m["uid"] != spec.entry_id]
+        # Warnings quote the native uid of 2.0.1, so the filter uses the native part.
+        others = [
+            m["uid"].split(":", 1)[-1]
+            for m in payload["messages"]
+            if m["uid"] != wanted
+        ]
         warnings = [w for w in payload["warnings"] if not any(uid in w for uid in others)]
         return messages[0], warnings
 
@@ -2285,7 +2292,7 @@ class OutlookBodyTests(_OutlookCommandCase):
         shown = payload["message"]
         self.assertEqual(list(shown), _SHOW_FIELDS)
         spec = fake.item("normal")
-        self.assertEqual(shown["uid"], spec.entry_id)
+        self.assertEqual(shown["uid"], _uid(spec.entry_id))
         self.assertEqual(shown["body_text"], "Estimado cliente, adjuntamos la factura de octubre.")
         self.assertFalse(shown["body_truncated"])
         self.assertEqual(shown["attachments"], [{"name": "factura-2026-10.pdf"}])
@@ -2468,7 +2475,7 @@ class OutlookShowHeaderTests(_OutlookCommandCase):
 class OutlookShowUidTests(_OutlookCommandCase):
     def assert_not_found(self, uid: str) -> None:
         error = self.run_error(2, "E_USAGE", "show", uid)
-        self.assertIn(f"message uid '{uid}' was not found", error["message"])
+        self.assertIn(f"message uid '{_uid(uid)}' was not found", error["message"])
         self.assertIn("excluded_stores", error["hint"])
         self.assertIn("mailboxes", error["hint"])
 
@@ -2478,7 +2485,8 @@ class OutlookShowUidTests(_OutlookCommandCase):
         uid = fake.item("normal").entry_id.lower()
         error = self.run_error(2, "E_USAGE", "show", uid)
         self.assertEqual(
-            error["message"], f"invalid uid {uid!r}: expected an uppercase hexadecimal EntryID"
+            error["message"],
+            f"invalid uid part {uid!r}: expected an uppercase hexadecimal EntryID"
         )
         self.assertEqual(len(fake.call_log), 0)
 
@@ -2545,7 +2553,7 @@ class OutlookShowUidTests(_OutlookCommandCase):
         """OL-23.07: declared account, folder not in mailbox_list ⇒ success."""
         fake = self.use(fk.FakeOutlook.item_matrix(_ITEMS_NOW), '[scope."ana@example.com"]\n')
         payload = self.show("duplicate_facturas")
-        self.assertEqual(payload["message"]["uid"], fake.item("duplicate_facturas").entry_id)
+        self.assertEqual(payload["message"]["uid"], _uid(fake.item("duplicate_facturas").entry_id))
         self.assertEqual(payload["message"]["mailbox"]["path"], "INBOX/Facturas")
         self.assertEqual(payload["message"]["body_text"], "Cuerpo de duplicate_facturas.")
 
@@ -2630,7 +2638,7 @@ class OutlookCandidateStoreTests(_CommandScenarioCase):
         payload = self.run_json("search")
         self.assertEqual(payload["count"], 1, payload)
         message = payload["messages"][0]
-        self.assertEqual(message["uid"], fake.item(f"{key}_message").entry_id)
+        self.assertEqual(message["uid"], _uid(fake.item(f"{key}_message").entry_id))
         account = message["mailbox"]["account"]
         self.assertEqual(account, {"uuid": self.uuid_of(key), "label": label, "email": email})
         self.assertEqual(payload["warnings"], [])
@@ -2745,7 +2753,7 @@ class OutlookExcludedStoreTests(_CommandScenarioCase):
         )
         self.assertTrue(all(account["declared"] for account in mailboxes["accounts"]))
         payload = self.run_json("search")
-        expected = {fake.item(f"{key}_message").entry_id for key in _MATRIX_CANDIDATES}
+        expected = {_uid(fake.item(f"{key}_message").entry_id) for key in _MATRIX_CANDIDATES}
         self.assertEqual({message["uid"] for message in payload["messages"]}, expected)
         self.assert_read_only()
 
@@ -2806,7 +2814,7 @@ class OutlookStoreExcludedWarningTests(_CommandScenarioCase):
         )
         self.assertEqual(
             [message["uid"] for message in payload["messages"]],
-            [fake.item("exchange_cached_message").entry_id],
+            [_uid(fake.item("exchange_cached_message").entry_id)],
         )
 
     def test_ol_09_02_declared_excluded_without_path_omits_at(self) -> None:
@@ -3440,7 +3448,17 @@ _FIRST_RUN = (
     "W_FIRST_RUN: first run: emitted the messages received in the last 10min "
     "before the newest message"
 )
-_HEX_UID = r"^[0-9A-F]+$"
+def _uid(entry_id: str) -> str:
+    """The prefixed uid the core emits for an Outlook EntryID (test helper)."""
+    return prefixed_uid(entry_id, "outlook")
+
+
+def _all_installed(driver: str) -> bool:
+    """``state.json`` driver check for the Outlook tests (built-ins are installed)."""
+    return bool(driver)
+
+
+_HEX_UID = r"^outlook:[0-9A-F]+$"
 
 
 def _epoch(moment: datetime) -> int:
@@ -3487,11 +3505,11 @@ class OutlookSearchableItemTests(_NewCase):
             code, stdout, stderr = self.run_main(["show", uid], backend)
             payload = json.loads(stdout)
             if code == 0:
-                self.assertEqual(payload["message"]["uid"], uid)
+                self.assertEqual(payload["message"]["uid"], _uid(uid))
             else:
                 self.assertEqual(payload["error"]["code"], "E_USAGE", stdout + stderr)
                 self.assertIn("was not found", payload["error"]["message"])
-            out[key] = (uid in searched, uid in emitted, code)
+            out[key] = (_uid(uid) in searched, _uid(uid) in emitted, code)
         self.assert_read_only()
         return out
 
@@ -3525,23 +3543,27 @@ class OutlookNewTests(_NewCase):
         fake = self.use(fk.FakeOutlook.default(), self._SCOPE)
         uid = fake.item("normal").entry_id
         peeked = self.new("--peek")
-        self.assertEqual(self.uids(peeked), [uid])
+        self.assertEqual(self.uids(peeked), [_uid(uid)])
         self.assertEqual(peeked["cursor"], {"previous": None, "current": None})
         self.assertFalse((self.home / "state.json").exists())
 
         payload = self.new()
-        self.assertEqual(self.uids(payload), [uid])
+        self.assertEqual(self.uids(payload), [_uid(uid)])
         self.assertEqual(payload["warnings"], [_FIRST_RUN])
-        cursor = {"last_date_received": self._NORMAL_DATE, "last_uid": uid, "lookback_seconds": 600}
+        cursor = {
+            "last_date_received": self._NORMAL_DATE,
+            "last_uid": _uid(uid),
+            "lookback_seconds": 600,
+        }
         self.assertEqual(payload["cursor"], {"previous": None, "current": cursor})
         state = self.state()
         self.assertEqual(state["cursor"], cursor)
-        self.assertEqual(state["emitted_uids"], [uid])
+        self.assertEqual(state["emitted_uids"], [_uid(uid)])
         self.assertIsInstance(state["cursor"]["last_uid"], str)
         self.assertRegex(state["cursor"]["last_uid"], _HEX_UID)
-        loaded = StateStore(self.home, OutlookBackend.check_state_uid).load()
-        self.assertEqual(loaded.cursor, Cursor(self._NORMAL_DATE, uid, 600))
-        self.assertEqual(loaded.emitted_uids, (uid,))
+        loaded = StateStore(self.home, _all_installed).load()
+        self.assertEqual(loaded.cursor, Cursor(self._NORMAL_DATE, _uid(uid), 600))
+        self.assertEqual(loaded.emitted_uids, (_uid(uid),))
         self.assert_read_only()
 
     def test_ol_25_02_second_run_does_not_re_emit(self) -> None:
@@ -3549,7 +3571,7 @@ class OutlookNewTests(_NewCase):
         fake = self.use(fk.FakeOutlook.default(), self._SCOPE)
         first = self.new()
         normal = fake.item("normal").entry_id
-        self.assertEqual(self.uids(first), [normal])
+        self.assertEqual(self.uids(first), [_uid(normal)])
         # One message arrives inside the lookback window of the saved cursor.
         later = fake.store("exchange").inbox.add_message(
             "later",
@@ -3558,14 +3580,14 @@ class OutlookNewTests(_NewCase):
             received=datetime(2026, 11, 2, 13, 58, 0, tzinfo=timezone.utc),
         )
         second = self.new()
-        self.assertEqual(self.uids(second), [later.entry_id])
+        self.assertEqual(self.uids(second), [_uid(later.entry_id)])
         self.assertEqual(second["warnings"], [])
         self.assertEqual(second["cursor"]["previous"], first["cursor"]["current"])
         third = self.new()
         self.assertEqual(third["count"], 0)
         self.assertEqual(third["cursor"]["previous"], third["cursor"]["current"])
-        self.assertEqual(self.state()["emitted_uids"], [normal, later.entry_id])
-        self.assertEqual(self.state()["cursor"]["last_uid"], later.entry_id)
+        self.assertEqual(self.state()["emitted_uids"], [_uid(normal), _uid(later.entry_id)])
+        self.assertEqual(self.state()["cursor"]["last_uid"], _uid(later.entry_id))
 
     def test_ol_25_03_moved_message_is_emitted_with_its_new_uid(self) -> None:
         """OL-25.03: a message moved inside the window ⇒ exit 0 and emitted once with its new uid (PRD 18)."""
@@ -3573,15 +3595,15 @@ class OutlookNewTests(_NewCase):
         archive = fake.store("exchange").inbox.add_folder("Archivo", key="archivo")
         self.use(fake, self._SCOPE + 'mailbox_list = ["INBOX/Archivo"]\n')
         old_uid = fake.item("normal").entry_id
-        self.assertEqual(self.uids(self.new()), [old_uid])
+        self.assertEqual(self.uids(self.new()), [_uid(old_uid)])
         new_uid = fake.move_item("normal", archive).entry_id
         self.assertNotEqual(new_uid, old_uid)
         moved = self.new()  # run_json asserts exit 0
-        self.assertEqual(self.uids(moved), [new_uid])
+        self.assertEqual(self.uids(moved), [_uid(new_uid)])
         self.assertEqual(moved["messages"][0]["mailbox"]["path"], "INBOX/Archivo")
         self.assertEqual(moved["messages"][0]["message_id"], "<factura-2026-10@proveedor.example>")
         state = self.state()
-        self.assertEqual(state["emitted_uids"], [old_uid, new_uid])
+        self.assertEqual(state["emitted_uids"], [_uid(old_uid), _uid(new_uid)])
         self.assertEqual(state["cursor"]["last_date_received"], self._NORMAL_DATE)
         self.assertEqual(self.new()["count"], 0)
 
@@ -3591,7 +3613,7 @@ class OutlookNewTests(_NewCase):
             fk.FakeOutlook.default(), _scope_toml("ana.perez@example.com", "Exchange shared (Soporte)")
         )
         payload = self.new()
-        self.assertEqual(self.uids(payload), [fake.item("normal").entry_id])
+        self.assertEqual(self.uids(payload), [_uid(fake.item("normal").entry_id)])
         self.assertEqual(payload["warnings"], [self._SHARED, _FIRST_RUN])
         # Only the excluded account declared: no accounts left, nothing emitted nor saved.
         (self.home / "state.json").unlink()
@@ -3623,17 +3645,17 @@ class OutlookNewTests(_NewCase):
         def run(now: int, **kwargs) -> dict:
             backend = _backend(fake)
             self.addCleanup(backend.close)
-            store = StateStore(self.home, backend.check_state_uid)
+            store = StateStore(self.home, _all_installed)
             return run_new(backend, load_config(self.home), store, clock=lambda: now, **kwargs)
 
         first = run(clock, limit=1)  # the future message is not the newest one
-        self.assertEqual(self.uids(first), [recent.entry_id])
+        self.assertEqual(self.uids(first), [_uid(recent.entry_id)])
         self.assertTrue(first["truncated"])
-        self.assertEqual(first["cursor"]["current"]["last_uid"], recent.entry_id)
+        self.assertEqual(first["cursor"]["current"]["last_uid"], _uid(recent.entry_id))
         # Once its date is no longer future it enters, with what --limit left out.
         second = run(clock + 3600)
-        self.assertEqual(self.uids(second), [normal, future.entry_id])
-        self.assertEqual(self.state()["emitted_uids"], [recent.entry_id, normal, future.entry_id])
+        self.assertEqual(self.uids(second), [_uid(normal), _uid(future.entry_id)])
+        self.assertEqual(self.state()["emitted_uids"], [_uid(recent.entry_id), _uid(normal), _uid(future.entry_id)])
         self.assertEqual(run(clock + 3600)["count"], 0)
         self.assert_read_only()
 
@@ -3682,7 +3704,7 @@ class OutlookContentScanTests(_CommandScenarioCase):
         ]
 
     def keys(self, payload: dict) -> list[str]:
-        by_uid = {spec.entry_id: key for key, spec in self.fake.items.items()}
+        by_uid = {_uid(spec.entry_id): key for key, spec in self.fake.items.items()}
         return [by_uid[message["uid"]] for message in payload["messages"]]
 
     def header_reads(self) -> int:
@@ -3952,7 +3974,7 @@ class OutlookNotRunningTests(_OutlookCommandCase):
                 self.assertEqual((code, stderr), (0, ""))
                 if argv == ("doctor",):
                     self.assertIn("[FAIL] outlook", stdout)
-                    self.assertIn("Result: 6/10 checks passed (4 failed)", stdout)
+                    self.assertIn("Result: 7/11 checks passed (4 failed)", stdout)
                     continue
                 checks = {check["name"]: check for check in json.loads(stdout)["checks"]}
                 self.assertEqual(list(checks), list(_OUTLOOK_DOCTOR_CHECKS))

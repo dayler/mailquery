@@ -24,9 +24,9 @@ from mailquery.backends.base import (
     MailBackend,
     MailboxRow,
     MessageRow,
-    StateUidError,
 )
 from mailquery.errors import MailqueryError, error_detail, usage_error
+from mailquery.plugins import PLUGIN_API, Capabilities
 from mailquery.store import (
     detect_version,
     open_store,
@@ -76,7 +76,15 @@ class AppleMailBackend(MailBackend):
     backend owns its store: :meth:`close` closes it.
     """
 
-    name = BACKEND_NAME
+    driver = BACKEND_NAME
+    plugin_api = PLUGIN_API
+    capabilities: Capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "numeric",
+    }
 
     def __init__(
         self,
@@ -308,23 +316,21 @@ class AppleMailBackend(MailBackend):
         return int(text)
 
     @staticmethod
-    def check_state_uid(uid: Any) -> None:
-        """Validate a ``state.json`` uid (PRD 11.2): a JSON integer >= 1, ``bool`` excluded.
+    def parse_native_id(native_id: str) -> int:
+        """Validate the native part of a prefixed uid: an integer (C1, RF-40).
 
-        Raises ``ValueError`` with the rule text; does not share ``parse_uid``'s
-        text parsing or its ``E_USAGE`` error (D-05). Raises ``StateUidError``
-        carrying the exact ``E_STATE_CORRUPT`` details of Apple Mail.
+        Pure and offline. The core splits ``"<driver>:<native_id>"`` at the first
+        ``:`` and hands only ``native_id`` to the adapter; ``0`` and negative
+        integers are valid uids that simply do not exist.
         """
-        if isinstance(uid, int) and not isinstance(uid, bool) and uid >= 1:
-            return
-        if isinstance(uid, int) and not isinstance(uid, bool):
-            cursor_detail = "'cursor.last_uid' must be a uid (an integer >= 1)"
-        else:
-            cursor_detail = "'cursor' must hold integer 'last_date_received' and 'last_uid'"
-        raise StateUidError(
-            cursor_detail,
-            "'emitted_uids' must be a list of uids (integers >= 1)",
-        )
+        if not isinstance(native_id, str) or _UID_PATTERN.fullmatch(native_id) is None:
+            raise usage_error(
+                f"invalid uid part {native_id!r}: expected an integer",
+                "Apple Mail uids are integers; run `mailquery search` to find the uid "
+                "of a message",
+                "invalid uid part: expected an integer",
+            )
+        return int(native_id)
 
     def doctor_checks(self) -> list[dict[str, Any]]:
         """``store``, ``envelope_index``, ``schema``, ``readonly_strategy``, ``accounts_db``.
@@ -619,8 +625,10 @@ def _fetch_rows(
 
 def _row_dict(values: Sequence[Any]) -> dict:
     data = dict(zip(_ROW_COLUMNS, values))
+    uid = int(data["uid"])
     return {
-        "uid": int(data["uid"]),
+        "uid": uid,
+        "native_order_key": str(uid),
         "global_message_id": int(data["global_message_id"] or 0),
         "subject": str(data["subject"] or ""),
         "sender_name": str(data["sender_name"] or ""),

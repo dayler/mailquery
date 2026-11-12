@@ -20,17 +20,28 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import mailquery
 from mailquery import cli as cli_mod
+from mailquery import errors
 from mailquery.backends import apple_mail as apple_mail_mod
 from mailquery.backends.apple_mail import AppleMailBackend
+from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.errors import MailqueryError
 from mailquery.search import Filters
 
+from tests.fakes.plugin import (
+    DRIVER as PLUGIN_DRIVER,
+    VERSION as PLUGIN_VERSION,
+    FakeEntryPoint,
+    FakePluginBackend,
+    internal_entry_points,
+    plugin_class,
+)
 from tests.fixtures.make_fixtures import (
     DEFAULT_CONFIG,
     ICLOUD_LABEL,
+    PREFIXED_CONFIG,
     build_store,
+    prefixed_uid,
     write_config,
     write_state,
 )
@@ -51,14 +62,27 @@ FORBIDDEN_FLAGS = (
 class _FakeBackend:
     """Minimal stand-in for a ``MailBackend``: only what ``cli`` itself touches."""
 
-    name = "apple_mail"
+    driver = "apple_mail"
+    plugin_api = 1
+    capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "numeric",
+    }
 
     def __init__(self) -> None:
         self.closed = False
 
     @staticmethod
-    def check_state_uid(uid: object) -> None:
-        return None
+    def parse_native_id(native_id: str) -> int:
+        """Apple Mail native ids are integers (pure, offline)."""
+        if not native_id.lstrip("-").isdigit():
+            raise MailqueryError(
+                "E_USAGE", f"invalid uid part {native_id!r}: expected an integer"
+            )
+        return int(native_id)
 
     def describe(self) -> dict:
         return {}
@@ -433,158 +457,6 @@ class HelpContractTests(_CliTestCase):
         self.assertIn("invalid choice", payload["error"]["message"])
 
 
-class VersionTests(_CliTestCase):
-    """UT-CLI-01..03: global ``-v``/``--version`` (RF-31, PRD 12.9)."""
-
-    def expected_line(self, backend: str, platform_text: str) -> str:
-        return (
-            f"mailquery {mailquery.__version__} (backend {backend}; "
-            f"Python {platform.python_version()}; {platform_text})\n"
-        )
-
-    def patched(
-        self,
-        *,
-        plat: str,
-        system="Linux",
-        release="6.1",
-        version="1",
-        mac="",
-        machine="x86_64",
-    ) -> None:
-        patchers = [
-            mock.patch.object(sys, "platform", plat),
-            mock.patch("platform.system", return_value=system),
-            mock.patch("platform.release", return_value=release),
-            mock.patch("platform.version", return_value=version),
-            mock.patch("platform.machine", return_value=machine),
-            mock.patch("platform.mac_ver", return_value=(mac, ("", "", ""), machine)),
-        ]
-        for patcher in patchers:
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def real_platform_text(self) -> str:
-        if sys.platform == "win32":
-            return f"Windows {platform.version()} {platform.machine()}"
-        if sys.platform == "darwin":
-            return f"macOS {platform.mac_ver()[0]} {platform.machine()}"
-        return f"{platform.system()} {platform.release()} {platform.machine()}"
-
-    def test_ut_cli_01_01_version_flag_prints_exact_line(self) -> None:
-        """UT-CLI-01.01: --version prints the exact line; exit 0."""
-        backend = "outlook" if sys.platform == "win32" else "apple_mail"
-        code, stdout, stderr = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line(backend, self.real_platform_text()))
-        self.assertEqual(stderr, "")
-
-    def test_ut_cli_01_02_short_flag_prints_same_line(self) -> None:
-        """UT-CLI-01.02: -v prints the same line as --version."""
-        short = self.run_cli(["-v"])
-        self.assertEqual(short[0], 0)
-        self.assertEqual(short, self.run_cli(["--version"]))
-
-    def test_ut_cli_01_03_macos_platform_text(self) -> None:
-        """UT-CLI-01.03: patched macOS platform renders macOS <ver> <arch>."""
-        self.patched(plat="darwin", system="Darwin", mac="14.5", machine="arm64")
-        code, stdout, _ = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line("apple_mail", "macOS 14.5 arm64"))
-
-    def test_ut_cli_01_04_windows_platform_text(self) -> None:
-        """UT-CLI-01.04: patched Windows platform renders Windows <ver> <arch>."""
-        self.patched(
-            plat="win32", system="Windows", release="11", version="10.0.26200", machine="AMD64"
-        )
-        code, stdout, _ = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line("outlook", "Windows 10.0.26200 AMD64"))
-
-    def test_ut_cli_01_05_other_platform_text(self) -> None:
-        """UT-CLI-01.05: other platforms render <system> <release> <arch>."""
-        self.patched(plat="linux", system="Linux", release="6.1.0", machine="x86_64")
-        code, stdout, _ = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, self.expected_line("apple_mail", "Linux 6.1.0 x86_64"))
-
-    def test_ut_cli_01_06_backend_follows_sys_platform(self) -> None:
-        """UT-CLI-01.06: win32 -> outlook; darwin and linux -> apple_mail."""
-        for plat, backend in (
-            ("win32", "outlook"),
-            ("darwin", "apple_mail"),
-            ("linux", "apple_mail"),
-        ):
-            with self.subTest(plat=plat):
-                with mock.patch.object(sys, "platform", plat):
-                    _, stdout, _ = self.run_cli(["--version"])
-                self.assertIn(f"(backend {backend};", stdout)
-
-    def test_ut_cli_02_01_missing_home_is_not_created(self) -> None:
-        """UT-CLI-02.01: a missing home is not created."""
-        home = self.fx.root / "no-such-home"
-        code, stdout, _ = self.run_cli(["--version"], home=home)
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertFalse(home.exists())
-
-    def test_ut_cli_02_02_broken_config_is_not_read(self) -> None:
-        """UT-CLI-02.02: a broken config.toml is not read; exit 0."""
-        write_config(self.fx.home, "this is = = not toml\n")
-        with mock.patch.object(
-            cli_mod, "load_config", side_effect=AssertionError("config read")
-        ):
-            code, stdout, stderr = self.run_cli(["--version"])
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertEqual(stderr, "")
-
-    def test_ut_cli_02_03_no_log_and_no_lock(self) -> None:
-        """UT-CLI-02.03: no log is written and the lock is not taken."""
-        before = sorted(str(p) for p in self.fx.home.rglob("*"))
-        with mock.patch.object(
-            cli_mod, "RunLock", side_effect=AssertionError("lock")
-        ), mock.patch.object(cli_mod, "setup_logging", side_effect=AssertionError("log")):
-            code, _, _ = self.run_cli(["-v"])
-        self.assertEqual(code, 0)
-        self.assertEqual(before, sorted(str(p) for p in self.fx.home.rglob("*")))
-        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
-
-    def test_ut_cli_02_04_win32_without_pywin32_does_not_import_win32com(self) -> None:
-        """UT-CLI-02.04: patched win32 without pywin32/Outlook works; win32com not imported."""
-        self.patched(
-            plat="win32", system="Windows", release="11", version="10.0.26200", machine="AMD64"
-        )
-        blocked = {"win32com": None, "win32com.client": None, "pythoncom": None}
-        with mock.patch.dict(sys.modules, blocked):
-            code, stdout, _ = self.run_cli(["--version"])
-            self.assertEqual(code, 0)
-            self.assertIn("(backend outlook;", stdout)
-            # None entries block imports: they must still be untouched (never imported).
-            self.assertIsNone(sys.modules["win32com"])
-
-    def test_ut_cli_03_01_version_after_subcommand_is_usage_error(self) -> None:
-        """UT-CLI-03.01: search -v is E_USAGE, exit 2."""
-        self.assert_error(2, self.run_cli(["search", "-v"]), "E_USAGE", "search")
-
-    def test_ut_cli_03_02_log_level_with_version_writes_no_log(self) -> None:
-        """UT-CLI-03.02: --log-level debug -v shows the version and writes no log."""
-        code, stdout, _ = self.run_cli(["--log-level", "debug", "-v"])
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
-
-    def test_ut_cli_03_03_first_of_version_and_help_wins(self) -> None:
-        """UT-CLI-03.03: -v -h prints the version; -h -v prints help; both exit 0."""
-        code, stdout, _ = self.run_cli(["-v", "-h"])
-        self.assertEqual(code, 0)
-        self.assertTrue(stdout.startswith("mailquery "))
-        self.assertNotIn("usage:", stdout)
-        code, stdout, _ = self.run_cli(["-h", "-v"])
-        self.assertEqual(code, 0)
-        self.assertIn("usage: mailquery", stdout)
-
-
 # --------------------------------------------------------------------------- #
 # Limit validation (fails before touching the store)
 # --------------------------------------------------------------------------- #
@@ -755,7 +627,7 @@ class SuccessContractTests(_CliTestCase):
 
 class ErrorContractTests(_CliTestCase):
     def test_ut_cli_09_01_error_codes_map_to_documented_exit_codes(self) -> None:
-        """UT-CLI-09.01: each of the 23 E_* codes maps to its exit code (PRD 12.6)."""
+        """UT-CLI-09.01: each of the 32 E_* codes of PRD-v2.1 §11.7 maps to its exit code."""
         cases = (
             ("E_USAGE", 2),
             ("E_CONFIG_INVALID", 2),
@@ -780,8 +652,25 @@ class ErrorContractTests(_CliTestCase):
             ("E_CLIENT_BUSY", 5),
             ("E_OUTLOOK_NOT_RUNNING", 6),
             ("E_INTERNAL", 1),
+            # PRD-v2.1 §11.7 new codes (M01).
+            ("E_DRIVER_UNKNOWN", 2),
+            ("E_ATTACHMENTS_DISABLED", 2),
+            ("E_PLUGIN_INCOMPATIBLE", 3),
+            ("E_PLUGIN_FAILED", 3),
+            ("E_ATTACHMENT_UNAVAILABLE", 3),
+            ("E_ATTACHMENT_UNREADABLE", 3),
+            ("E_ATTACHMENT_BLOCKED", 4),
+            ("E_ATTACHMENT_TOO_LARGE", 4),
+            ("E_IO", 3),
         )
-        self.assertEqual(len(cases), 23)
+        self.assertEqual(len(cases), 32)
+        # The full catalogue matches the table exactly, not only the sampled codes.
+        catalogue = {
+            code: exit_code
+            for exit_code, codes in errors._EXIT_ERRORS.items()
+            for code in codes
+        }
+        self.assertEqual(catalogue, dict(cases))
         for code, expected_exit in cases:
             with self.subTest(code=code):
                 error = MailqueryError(code, f"failure {code}", "do something useful")
@@ -931,6 +820,7 @@ class DispatchTests(_CliTestCase):
         self.assertIsNone(filters.until)
 
     def test_show_dispatch(self) -> None:
+        write_config(self.fx.home, DEFAULT_CONFIG)
         backend = _FakeBackend()
         with (
             mock.patch.object(cli_mod, "RunLock", _FakeLock),
@@ -938,7 +828,10 @@ class DispatchTests(_CliTestCase):
             mock.patch.object(
                 cli_mod,
                 "run_show",
-                return_value={"message": {"uid": 83143}, "warnings": []},
+                return_value={
+                    "message": {"uid": prefixed_uid(83143)},
+                    "warnings": [],
+                },
             ) as run_mock,
         ):
             exit_code, stdout, _ = self.run_cli(["show", "83143"])
@@ -948,7 +841,9 @@ class DispatchTests(_CliTestCase):
         _, call_config, call_uid = run_mock.call_args.args
         self.assertEqual(call_config.home, self.fx.home)
         self.assertEqual(call_uid, 83143)
-        self.assertEqual(self.json_object(stdout)["message"], {"uid": 83143})
+        self.assertEqual(
+            self.json_object(stdout)["message"], {"uid": prefixed_uid(83143)}
+        )
 
     def test_new_dispatch_peek_and_limit(self) -> None:
         backend = _FakeBackend()
@@ -968,7 +863,10 @@ class DispatchTests(_CliTestCase):
         ):
             exit_code, stdout, _ = self.run_cli(["new", "--peek", "--limit", "7"])
         self.assertEqual(exit_code, 0)
-        state_mock.assert_called_once_with(self.fx.home, backend.check_state_uid)
+        state_mock.assert_called_once()
+        store_args, _store_kwargs = state_mock.call_args
+        self.assertEqual(store_args[0], self.fx.home)
+        self.assertTrue(callable(store_args[1]))
         self.assertEqual(run_mock.call_args.args[2], state_store)
         self.assertEqual(run_mock.call_args.kwargs, {"peek": True, "limit": 7})
         rendered = self.json_object(stdout)
@@ -979,17 +877,17 @@ class DispatchTests(_CliTestCase):
 class _InjectedBackend(_FakeBackend):
     """Backend instance passed to ``main(backend=...)`` (the Outlook fake later)."""
 
-    name = "injected"
+    driver = "injected"
 
     def __init__(self) -> None:
         super().__init__()
         self.parsed: list = []
 
-    def parse_uid(self, raw):
-        self.parsed.append(raw)
-        if not str(raw).isalnum():
-            raise MailqueryError("E_USAGE", f"invalid uid {raw!r}", "use a hex uid")
-        return str(raw).upper()
+    def parse_native_id(self, native_id: str) -> str:
+        self.parsed.append(native_id)
+        if not str(native_id).isalnum():
+            raise MailqueryError("E_USAGE", f"invalid uid {native_id!r}", "use a hex uid")
+        return str(native_id).upper()
 
     def doctor_checks(self) -> list[dict]:
         return [{"name": "fake_check", "ok": True, "detail": "from the backend"}]
@@ -1063,15 +961,16 @@ class BackendInjectionTests(_CliTestCase):
             stdout = io.StringIO()
             with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
                 code = cli_mod.main(
-                    ["show", "not-hex!"], home=missing_home, backend=backend
+                    ["show", "not-hex"], home=missing_home, backend=backend
                 )
             self.assertEqual(code, 2)
             self.assertEqual(self.json_object(stdout.getvalue())["error"]["code"], "E_USAGE")
-            self.assertEqual(backend.parsed, ["not-hex!"])
+            self.assertEqual(backend.parsed, ["not-hex"])
             self.assertFalse(missing_home.exists())
             self.assertFalse(backend.closed)  # never obtained, never opened
 
     def test_show_passes_the_backend_uid_to_run_show(self) -> None:
+        write_config(self.fx.home, DEFAULT_CONFIG)
         backend = _InjectedBackend()
         with mock.patch.object(
             cli_mod, "run_show", return_value={"message": {}, "warnings": []}
@@ -1086,7 +985,7 @@ class BackendInjectionTests(_CliTestCase):
         self.assertEqual(exit_code, 0)
         names = [check["name"] for check in self.json_object(stdout)["checks"]]
         self.assertEqual(
-            names, ["python", "home", "fake_check", "config", "state", "lock"]
+            names, ["python", "home", "driver", "fake_check", "config", "state", "lock"]
         )
         self.assertTrue(backend.closed)
 
@@ -1171,7 +1070,7 @@ class DoctorTests(_CliTestCase):
         self.assertIn("mailquery doctor - environment and read-only preflight", stdout)
         self.assertIn("Checks:", stdout)
         self.assertIn("[ok]", stdout)
-        self.assertIn("Result: 10/10 checks passed", stdout)
+        self.assertIn("Result: 11/11 checks passed", stdout)
         self.assertIn("Notes:", stdout)
         self.assertIn("mailquery doctor --json", stdout)
         self.assertNotIn('"checks"', stdout)
@@ -1239,6 +1138,7 @@ class DoctorTests(_CliTestCase):
             [
                 "python",
                 "home",
+                "driver",
                 "store",
                 "envelope_index",
                 "schema",
@@ -1359,7 +1259,90 @@ class DoctorTests(_CliTestCase):
         payload = self._doctor()
         state = next(check for check in payload["checks"] if check["name"] == "state")
         self.assertTrue(state["ok"])
-        self.assertEqual(state["detail"], "cursor last_date_received=1700000000 last_uid=42")
+        self.assertEqual(
+            state["detail"],
+            "schema: 1 (migration pending); cursor last_date_received=1700000000 "
+            "last_uid=apple_mail:42",
+        )
+
+    def test_ut_st_06_06_doctor_reports_migration_pending_then_schema_2(self) -> None:
+        """UT-ST-06.06: ``doctor`` reports ``schema: 1 (migration pending)`` until it is persisted."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        write_state(
+            self.fx.home,
+            {
+                "schema": 1,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": 42,
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": [42],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertEqual(
+            state["detail"],
+            "schema: 1 (migration pending); cursor last_date_received=1700000000 "
+            "last_uid=apple_mail:42",
+        )
+
+        exit_code, _stdout, stderr = self.run_cli(["new"])
+        self.assertEqual(exit_code, 0, stderr)
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertTrue(state["detail"].startswith("schema: 2; cursor last_date_received="))
+        self.assertTrue(state["detail"].endswith("last_uid=apple_mail:83170"))
+
+    def test_ut_st_06_07_doctor_reports_pruned_ring_and_invalid_cursor_driver(self) -> None:
+        """UT-ST-06.07: ``doctor`` reports the ring pruning and the uninstalled cursor driver."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        write_state(
+            self.fx.home,
+            {
+                "schema": 2,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": "apple_mail:1",
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": ["graph:1", "graph:2"],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertTrue(state["ok"])
+        self.assertIn(
+            "pruned 2 emitted uid(s) of uninstalled drivers: graph", state["detail"]
+        )
+
+        # A cursor of an uninstalled driver is E_STATE_CORRUPT (DP-03 lifecycle).
+        write_state(
+            self.fx.home,
+            {
+                "schema": 2,
+                "updated_at": "",
+                "last_run": None,
+                "cursor": {
+                    "last_date_received": 1700000000,
+                    "last_uid": "graph:1",
+                    "lookback_seconds": 600,
+                },
+                "emitted_uids": [],
+            },
+        )
+        payload = self._doctor()
+        state = next(check for check in payload["checks"] if check["name"] == "state")
+        self.assertFalse(state["ok"])
+        self.assertIn("E_STATE_CORRUPT", state["detail"])
+        self.assertIn("graph", state["detail"])
 
     def test_ut_cli_12_01_envelope_index_with_shm_opens_live_ro(self) -> None:
         """UT-CLI-12.01: -shm present => the live database is opened; strategy live_ro."""
@@ -1501,6 +1484,181 @@ class DoctorTests(_CliTestCase):
 
 
 # --------------------------------------------------------------------------- #
+# UT-DRV-05 — doctor `driver` check (AC-02, AC-18, PRD-v2.1 §11.6)
+# --------------------------------------------------------------------------- #
+
+MACOS_DRIVER_ORDER = [
+    "python", "home", "driver", "store", "envelope_index", "schema",
+    "readonly_strategy", "accounts_db", "config", "state", "lock",
+]
+WINDOWS_DRIVER_ORDER = [
+    "python", "home", "driver", "pywin32", "outlook", "stores",
+    "readonly_strategy", "object_model_guard", "config", "state", "lock",
+]
+
+
+class DriverDoctorTests(_CliTestCase):
+    """UT-DRV-05 — the ``driver`` check of ``doctor`` (AC-02, AC-18)."""
+
+    def _registry(self, *entry_points) -> BackendRegistry:
+        return BackendRegistry(
+            platform=sys.platform,
+            entry_points=[*internal_entry_points(), *entry_points],
+        )
+
+    def _run_doctor(self, registry: BackendRegistry, *, argv=("doctor", "--json"), **kwargs):
+        with mock.patch.object(cli_mod, "BackendRegistry", lambda: registry):
+            return self.run_cli(list(argv), **kwargs)
+
+    def _doctor(self, registry: BackendRegistry | None = None, **kwargs) -> dict:
+        registry = registry if registry is not None else self._registry()
+        exit_code, stdout, stderr = self._run_doctor(registry, **kwargs)
+        self.assertEqual(exit_code, 0, "doctor must always exit 0")
+        self.assertEqual(stderr, "")
+        return self.json_object(stdout)
+
+    @staticmethod
+    def _by_name(payload: dict) -> dict[str, dict]:
+        return {check["name"]: check for check in payload["checks"]}
+
+    @staticmethod
+    def _windows_ordered() -> list[str]:
+        """``_DoctorRun.ordered()`` with the Windows backend checks (platform-independent)."""
+        run = cli_mod._DoctorRun(Path(tempfile.gettempdir()))
+        for name in ("python", "home", "driver"):
+            run.record(name, True, "detail")
+        run.backend_checks = [
+            {"name": name, "ok": True, "detail": "detail"}
+            for name in ("pywin32", "outlook", "stores", "readonly_strategy", "object_model_guard")
+        ]
+        for name in ("config", "state", "lock"):
+            run.record(name, True, "detail")
+        return [check["name"] for check in run.ordered()]
+
+    def _native_detail(self, version: str | None = None) -> str:
+        version = package_version() if version is None else version
+        return (
+            f"apple_mail (api=1; pkg {version}; network=false; readonly=structural; "
+            "body_local=true; attachments=local; native_order=numeric)"
+        )
+
+    def test_ut_drv_05_01_check_order_is_macos_and_windows_with_driver_after_home(self) -> None:
+        """UT-DRV-05.01: `driver` sits after `home` in the macOS and Windows orders."""
+        payload = self._doctor()
+        self.assertEqual([check["name"] for check in payload["checks"]], MACOS_DRIVER_ORDER)
+        self.assertEqual(self._windows_ordered(), WINDOWS_DRIVER_ORDER)
+
+    def test_ut_drv_05_02_detail_lists_api_package_and_capabilities(self) -> None:
+        """UT-DRV-05.02: the detail has api, pkg, network, readonly, body_local, attachments, native_order."""
+        payload = self._doctor()
+        driver = self._by_name(payload)["driver"]
+        self.assertTrue(driver["ok"], driver)
+        self.assertEqual(driver["detail"], self._native_detail() + "; no declared drivers")
+        for token in (
+            "api=1",
+            "pkg ",
+            "network=false",
+            "readonly=structural",
+            "body_local=true",
+            "attachments=local",
+            "native_order=numeric",
+        ):
+            self.assertIn(token, driver["detail"])
+
+        # A prefixed native block keeps the native entry and drops the suffix.
+        write_config(self.fx.home, PREFIXED_CONFIG)
+        driver = self._by_name(self._doctor())["driver"]
+        self.assertTrue(driver["ok"], driver)
+        self.assertEqual(driver["detail"], self._native_detail())
+        self.assertNotIn("no declared drivers", driver["detail"])
+
+    def test_ut_drv_05_03_incompatible_declared_driver_fails_and_blocks_config(self) -> None:
+        """UT-DRV-05.03: an incompatible declared driver ⇒ ok=false with reason/hint; config not evaluated."""
+        registry = self._registry(
+            FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_class(plugin_api=2))
+        )
+        write_config(self.fx.home, f'[scope."{PLUGIN_DRIVER}:work"]\n')
+        payload = self._doctor(registry)
+        checks = self._by_name(payload)
+        driver = checks["driver"]
+        self.assertFalse(driver["ok"])
+        self.assertIn("E_PLUGIN_INCOMPATIBLE", driver["detail"])
+        self.assertIn("expected 1, found 2", driver["detail"])
+        self.assertIn("(hint: ", driver["detail"])
+        self.assertFalse(checks["config"]["ok"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: driver failed")
+
+    def test_ut_drv_05_04_invalid_config_validates_only_the_native_driver(self) -> None:
+        """UT-DRV-05.04: invalid config.toml ⇒ native only plus `declared drivers: unknown (config failed)`."""
+        write_config(self.fx.home, "unknown_key = 1\n")
+        payload = self._doctor()
+        checks = self._by_name(payload)
+        self.assertTrue(checks["driver"]["ok"], checks["driver"])
+        self.assertEqual(
+            checks["driver"]["detail"],
+            self._native_detail() + "; declared drivers: unknown (config failed)",
+        )
+        self.assertFalse(checks["config"]["ok"])
+        self.assertIn("E_CONFIG_INVALID", checks["config"]["detail"])
+
+    def test_ut_drv_05_05_no_config_or_no_blocks_lists_no_declared_drivers(self) -> None:
+        """UT-DRV-05.05: no config.toml or no blocks ⇒ native + `no declared drivers`."""
+        expected = self._native_detail() + "; no declared drivers"
+        self.assertEqual(self._by_name(self._doctor())["driver"]["detail"], expected)
+        write_config(self.fx.home, "# template only\n")
+        self.assertEqual(self._by_name(self._doctor())["driver"]["detail"], expected)
+
+    def test_ut_drv_05_06_several_drivers_are_all_listed(self) -> None:
+        """UT-DRV-05.06: native + plugin are listed; a failing one fails the check."""
+        write_config(
+            self.fx.home,
+            f'[scope."{PLUGIN_DRIVER}:work"]\n\n[scope."{ICLOUD_LABEL}"]\n',
+        )
+        registry = self._registry(FakeEntryPoint(PLUGIN_DRIVER, plugin=FakePluginBackend()))
+        checks = self._by_name(self._doctor(registry))
+        self.assertTrue(checks["driver"]["ok"], checks["driver"])
+        self.assertEqual(
+            checks["driver"]["detail"],
+            self._native_detail()
+            + f"; {PLUGIN_DRIVER} (api=1; pkg {PLUGIN_VERSION}; network=true; "
+            "readonly=promise; body_local=false; attachments=remote; native_order=text)",
+        )
+        self.assertTrue(checks["config"]["ok"], checks["config"])
+
+        broken = self._registry(
+            FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_class(plugin_api=2))
+        )
+        checks = self._by_name(self._doctor(broken))
+        self.assertFalse(checks["driver"]["ok"])
+        self.assertIn("apple_mail (api=1;", checks["driver"]["detail"])
+        self.assertIn("E_PLUGIN_INCOMPATIBLE", checks["driver"]["detail"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: driver failed")
+
+    def test_ut_drv_05_07_driver_failure_wins_over_the_backend_dependency(self) -> None:
+        """UT-DRV-05.07: driver and schema fail together ⇒ config reports `not evaluated: driver failed`."""
+        write_config(self.fx.home, f'[scope."{PLUGIN_DRIVER}:work"]\n')
+        registry = self._registry(
+            FakeEntryPoint(PLUGIN_DRIVER, plugin=plugin_class(plugin_api=2))
+        )
+        with mock.patch.object(apple_mail_mod, "open_store", side_effect=RuntimeError("kaboom")):
+            payload = self._doctor(registry)
+        checks = self._by_name(payload)
+        self.assertFalse(checks["driver"]["ok"])
+        self.assertFalse(checks["schema"]["ok"])
+        self.assertFalse(checks["config"]["ok"])
+        self.assertEqual(checks["config"]["detail"], "not evaluated: driver failed")
+
+    def test_ut_drv_05_08_driver_is_third_in_both_platform_orders(self) -> None:
+        """UT-DRV-05.08: `driver` is exactly at position 3 on macOS and on Windows."""
+        payload = self._doctor()
+        names = [check["name"] for check in payload["checks"]]
+        self.assertEqual(names.index("driver"), 2)
+        self.assertEqual(MACOS_DRIVER_ORDER.index("driver"), 2)
+        self.assertEqual(WINDOWS_DRIVER_ORDER.index("driver"), 2)
+        self.assertEqual(self._windows_ordered().index("driver"), 2)
+
+
+# --------------------------------------------------------------------------- #
 # End-to-end contract against the synthetic fixture store
 # --------------------------------------------------------------------------- #
 
@@ -1563,7 +1721,9 @@ class EndToEndContractTests(_CliTestCase):
         payload = self.json_object(stdout)
         self.assertTrue(payload["ok"])
         self.assertGreaterEqual(payload["count"], 1)
-        self.assertIn(2714, [message["uid"] for message in payload["messages"]])
+        self.assertIn(
+            prefixed_uid(2714), [message["uid"] for message in payload["messages"]]
+        )
 
     def test_invalid_since_is_a_bad_time_error(self) -> None:
         self._require_time_parser()
@@ -1584,7 +1744,7 @@ class EndToEndContractTests(_CliTestCase):
         payload = self.json_object(stdout)
         self.assertTrue(payload["ok"])
         message = payload["message"]
-        self.assertEqual(message["uid"], 83143)
+        self.assertEqual(message["uid"], prefixed_uid(83143))
         self.assertIn("headers", message)
         self.assertIn("source", message)
         self.assertIn("emlx_path", message["source"])

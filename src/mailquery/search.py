@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
 from mailquery import config as config_module
 from mailquery import output
+from mailquery import uid as uid_module
 from mailquery.backends.base import ExcludedStoreError
 from mailquery.errors import MailqueryError
-from mailquery.state import Cursor
+from mailquery.state import Cursor, EmittedUid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mailquery.backends.base import AccountRow, BodyRow, MailBackend, MailboxRow
@@ -239,7 +240,7 @@ def run_search(
 
     label_map = backend.membership([row["uid"] for row in rows])
     duplicate_counts = backend.duplicate_counts(allowed_ids)
-    canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts)
+    canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts, backend)
 
     limit = _search_limit(config, filters.limit)
     page = canonical[:limit]
@@ -354,14 +355,15 @@ def run_new(
     rows = [
         row
         for row in rows
-        if _has_valid_date(row, now) and row["uid"] not in ring
+        if _has_valid_date(row, now)
+        and _prefixed_uid(backend, row["uid"]) not in ring
     ]
     candidates = len(rows)
 
     label_map = backend.membership([row["uid"] for row in rows])
     duplicate_counts = backend.duplicate_counts(allowed_ids)
-    canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts)
-    canonical.sort(key=lambda row: (_date_key(row), row["uid"]))
+    canonical = _dedupe(rows, mailbox_map, label_map, duplicate_counts, backend)
+    canonical = _ordered(canonical, backend, descending=False)
 
     warnings: list[str] = list(scope_warnings)
     truncated = len(canonical) > limit_value
@@ -392,7 +394,15 @@ def run_new(
     if peek or not page:
         current_payload = previous_payload
     else:
-        emitted = [(_date_key(row), row["uid"]) for row in page]
+        emitted = [
+            EmittedUid(
+                date_received=_date_key(row),
+                driver=_driver(backend),
+                native_order_key=_native_order_key(backend, row),
+                uid=_prefixed_uid(backend, row["uid"]),
+            )
+            for row in page
+        ]
         new_state = state_store.record_new(
             app_state, emitted, lookback_seconds, command="new"
         )
@@ -423,6 +433,7 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
     """
     accounts = _accounts_by_uuid(backend)
+    show_uid = _prefixed_uid(backend, uid)
 
     excluded: list[dict] = []
     resolved = _resolved_scope(config, backend, excluded)
@@ -431,19 +442,19 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     try:
         found = backend.find_message(uid)
     except ExcludedStoreError as exc:
-        raise _excluded_store_error(uid, exc.entry) from None
+        raise _excluded_store_error(show_uid, exc.entry) from None
     # A backend may word the not-found hint itself (Outlook points to excluded_stores).
     not_found_hint = getattr(backend, "not_found_hint", None)
     if found is None:
-        raise _message_not_found(uid, not_found_hint)
+        raise _message_not_found(show_uid, not_found_hint)
     row, mailbox = found
     account_uuid = mailbox["account_uuid"] if mailbox is not None else ""
     if not account_uuid:
-        raise _message_not_found(uid, not_found_hint)
+        raise _message_not_found(show_uid, not_found_hint)
     if account_uuid not in declared:
         raise MailqueryError(
             "E_ACCOUNT_NOT_IN_SCOPE",
-            f"message uid {uid} belongs to account {account_uuid!r}, "
+            f"message uid {show_uid} belongs to account {account_uuid!r}, "
             "which is not declared in config.toml",
             "only accounts declared with a [scope.<account>] block are read; "
             "declare the account in ~/.mailquery/config.toml",
@@ -496,7 +507,7 @@ def run_show(backend: "MailBackend", config: "Config", uid: Any) -> dict:
     headers = _show_headers(body["headers"], row, to_list, cc_list)
 
     message = {
-        "uid": row["uid"],
+        "uid": _prefixed_uid(backend, row["uid"]),
         "message_id": row.get("message_id") or "",
         "subject": row.get("subject") or "",
         "from": {
@@ -967,12 +978,14 @@ def _dedupe(
     mailbox_map: dict[Any, "MailboxRow"],
     label_map: dict[Any, set[Any]],
     duplicate_counts: dict[Any, int],
+    backend: "MailBackend",
 ) -> list[dict]:
     """Dedupe by the global message key (INBOX > normal folder > aggregate).
 
     The canonical copy is chosen with the PRD Anexo B ordering, and the result
-    is returned in the documented total order ``(date_received DESC, ROWID
-    DESC)``. Messages without a usable ``global_message_id`` are unique.
+    is returned in the documented total order ``(date_received DESC, driver
+    ASC, native_order_key DESC)`` (PRD-v2.1 §10.2.7). Messages without a usable
+    ``global_message_id`` are unique.
     """
     if not rows:
         return []
@@ -988,7 +1001,14 @@ def _dedupe(
 
     canonical: list[dict] = []
     for (kind, _identifier), group in groups.items():
-        chosen = dict(min(group, key=lambda row: _dedupe_sort_key(row, inbox_ids, aggregate_ids, label_map)))
+        chosen = dict(
+            min(
+                group,
+                key=lambda row: _dedupe_sort_key(
+                    row, inbox_ids, aggregate_ids, label_map, backend
+                ),
+            )
+        )
         if kind == "global":
             global_id = int(chosen.get("global_message_id") or 0)
             chosen["duplicate_count"] = int(
@@ -997,8 +1017,7 @@ def _dedupe(
         else:
             chosen["duplicate_count"] = 1
         canonical.append(chosen)
-    canonical.sort(key=lambda row: (_date_key(row), row["uid"]), reverse=True)
-    return canonical
+    return _ordered(canonical, backend, descending=True)
 
 
 def _dedupe_sort_key(
@@ -1006,11 +1025,12 @@ def _dedupe_sort_key(
     inbox_ids: set[Any],
     aggregate_ids: set[Any],
     label_map: dict[Any, set[Any]],
+    backend: "MailBackend",
 ) -> tuple[int, int, Any]:
     return (
         _mailbox_priority_for_row(row, inbox_ids, aggregate_ids, label_map),
         _date_key(row),
-        row["uid"],
+        _native_order_key(backend, row),
     )
 
 
@@ -1067,7 +1087,14 @@ def _build_messages(
                 messages_read += 1
         messages.append(
             _message_payload(
-                accounts, row, display_mailbox, to_list, cc_list, snippet, body_fields
+                accounts,
+                row,
+                display_mailbox,
+                to_list,
+                cc_list,
+                snippet,
+                body_fields,
+                _driver(backend),
             )
         )
     return messages, warnings, messages_read
@@ -1081,9 +1108,10 @@ def _message_payload(
     cc_list: list[dict],
     snippet: str,
     body_fields: dict,
+    driver: str,
 ) -> dict:
     return {
-        "uid": row["uid"],
+        "uid": uid_module.format_uid(driver, str(row["uid"])),
         "message_id": row.get("message_id") or "",
         "duplicate_count": int(row.get("duplicate_count", 1)),
         "subject": row.get("subject") or "",
@@ -1406,6 +1434,56 @@ def _recipient_haystacks(
 def _date_key(row: dict) -> int:
     value = row.get("date_received")
     return int(value) if value is not None else 0
+
+
+def _driver(backend: "MailBackend") -> str:
+    """Driver name of a backend (``driver`` in protocol v1)."""
+    return str(getattr(backend, "driver", "") or "")
+
+
+def _prefixed_uid(backend: "MailBackend", uid: Any) -> str:
+    """``"<driver>:<native_id>"`` of a native uid (PRD-v2.1 RF-40).
+
+    The core is the only place that builds the emitted uid; the adapters keep
+    exchanging their native uid (``int`` on Apple Mail, upper-case hex on Outlook).
+    """
+    try:
+        return uid_module.format_uid(_driver(backend), str(uid))
+    except MailqueryError:  # pragma: no cover - adapters always emit valid native ids
+        return str(uid)
+
+
+def _native_order_key(backend: "MailBackend", row: dict) -> int | str:
+    """Typed native order key of a row (contract C1; PRD-v2.1 §10.2.7).
+
+    The driver reports ``native_order_key`` as a string; the core compares it as
+    an integer when the capability ``native_order`` is ``numeric`` (Apple Mail)
+    and as text otherwise (Outlook and plugins). The uid is never compared as text.
+    """
+    raw = str(row.get("native_order_key", ""))
+    if str(getattr(backend, "native_order", "text")) == "numeric":
+        try:
+            return int(raw)
+        except (TypeError, ValueError):  # pragma: no cover - the contract fixes the shape
+            return 0
+    return raw
+
+
+def _ordered(
+    rows: Sequence[dict], backend: "MailBackend", *, descending: bool
+) -> list[dict]:
+    """Sort rows in the driver's total order (PRD-v2.1 §10.2.7).
+
+    ``descending`` is ``search``/``show`` (``date DESC, driver ASC, key DESC``);
+    ``ascending`` is ``new`` (``date ASC, driver ASC, key ASC``). Three stable
+    sorts keep the two directions without needing an invertible text key.
+    """
+    ordered = list(rows)
+    ordered.sort(key=lambda row: _native_order_key(backend, row), reverse=descending)
+    driver = _driver(backend)
+    ordered.sort(key=lambda _row: driver)
+    ordered.sort(key=_date_key, reverse=descending)
+    return ordered
 
 
 def _fold(text: str) -> str:

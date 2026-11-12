@@ -1,9 +1,13 @@
-"""Persistent cursor state and run lock (PRD 11.2, 18, 21.3).
+"""Persistent cursor state and run lock (PRD.md 11.2, 18, 21.3; PRD-v2.1 §10.2).
 
-State lives in ``~/.mailquery/state.json`` only: the ``new`` cursor
-``(last_date_received, last_uid)``, the ring of the last 1.000 emitted uids and
-the last run metadata. Writes are atomic (temporary + fsync + ``os.replace``)
-with mode 0600, and the file never contains subjects, bodies or addresses.
+State lives in ``~/.mailquery/state.json`` only, schema 2 (PRD-v2.1 §10.2.4): the
+``new`` cursor ``(last_date_received, last_uid)``, the ring of the last 1.000
+emitted uids and the last run metadata. Uids are opaque prefixed strings
+``"<driver>:<native_id>"``; a schema-1 file (integer Apple Mail uids or
+upper-case hexadecimal Outlook ``EntryID``) is migrated in memory by value type
+(PRD-v2.1 §10.2.5, D8) and persisted as schema 2 by the next non-``--peek``
+``new`` run. Writes are atomic (temporary + fsync + ``os.replace``) with mode
+0600, and the file never contains subjects, bodies or addresses.
 """
 
 from __future__ import annotations
@@ -11,13 +15,14 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
-from mailquery.backends.base import StateUidError, Uid
+from mailquery import uid as uid_module
 from mailquery.errors import MailqueryError
 from mailquery.output import now_iso
 
@@ -27,20 +32,40 @@ else:
     import fcntl
 
 MAX_EMITTED_UIDS = 1000
-STATE_SCHEMA = 1
+STATE_SCHEMA = 2
+"""Current ``state.json`` schema (PRD-v2.1 §10.2.4)."""
+
+SUPPORTED_SCHEMAS = (1, 2)
 
 STATE_FILENAME = "state.json"
 LOCK_DIRNAME = "locks"
 LOCK_FILENAME = "mailquery.lock"
 DEFAULT_LOOKBACK_SECONDS = 600
 
+#: Shape of a legacy Outlook ``EntryID`` (upper-case hexadecimal, PRD.md §12.4).
+_LEGACY_HEX_UID = re.compile(r"[0-9A-F]+")
+
+_RENAME_HINT = (
+    "rename ~/.mailquery/state.json (for example to state.json.bak): the "
+    "next 'mailquery new' is a first run that emits the messages of the "
+    "lookback window"
+)
+_MISSING_DRIVER_HINT = (
+    "reinstall the plugin that provides the driver, or rename "
+    "~/.mailquery/state.json (for example to state.json.bak): the next "
+    "'mailquery new' is a first run that emits the messages of the lookback window"
+)
+
+#: ``state.json`` uid validator: whether a driver name is installed (M01 registry).
+UidInstalled = Callable[[str], bool]
+
 
 @dataclass(frozen=True)
 class Cursor:
-    """Watermark for ``mailquery new``."""
+    """Watermark for ``mailquery new``; ``last_uid`` is a prefixed uid string."""
 
     last_date_received: int
-    last_uid: Uid
+    last_uid: str
     lookback_seconds: int = DEFAULT_LOOKBACK_SECONDS
 
 
@@ -52,17 +77,46 @@ class LastRun:
 
 @dataclass(frozen=True)
 class AppState:
+    """In-memory view of ``state.json`` (always schema 2 after :meth:`StateStore.load`)."""
+
     schema: int = STATE_SCHEMA
     updated_at: str = ""
     last_run: LastRun | None = None
     cursor: Cursor | None = None
-    emitted_uids: tuple[Uid, ...] = ()
+    emitted_uids: tuple[str, ...] = ()
 
 
-# A uid validator is the backend's ``check_state_uid`` (PRD 11.2, D-05): it returns
-# ``None`` for a valid ``state.json`` uid and raises ``StateUidError`` carrying
-# the backend's own ``E_STATE_CORRUPT`` details otherwise.
-UidValidator = Callable[[object], None]
+@dataclass(frozen=True)
+class EmittedUid:
+    """One uid a ``new`` run emits, with the keys of the total order (PRD-v2.1 §10.2.7).
+
+    ``native_order_key`` is the backend row's key already typed by the core: an
+    ``int`` for a ``numeric`` driver (Apple Mail) and a ``str`` for a ``text``
+    driver (Outlook and plugins). ``driver`` is part of the sort key so a future
+    multi-driver cursor advances with ``(date_received, driver, native_order_key)``
+    and never compares the uid as text.
+    """
+
+    date_received: int
+    driver: str
+    native_order_key: int | str
+    uid: str
+
+
+@dataclass(frozen=True)
+class StateLoadInfo:
+    """What :meth:`StateStore.load` found on disk (for the ``state`` check of ``doctor``)."""
+
+    exists: bool = False
+    persisted_schema: int | None = None
+    migrated: bool = False
+    pruned_emitted_uids: int = 0
+    pruned_drivers: tuple[str, ...] = field(default=())
+
+    @property
+    def migration_pending(self) -> bool:
+        """A schema-1 file was read and migrated in memory but not persisted yet."""
+        return self.exists and self.persisted_schema == 1
 
 
 class _MissingFile(Exception):
@@ -74,16 +128,24 @@ class StateStore:
 
     ``load`` is tolerant with missing keys (they take documented defaults) and
     with unknown keys (they are ignored), but it is strict about the file being
-    a JSON object with schema ``1`` and about the types of the known fields: a
-    damaged state must fail loudly with ``E_STATE_CORRUPT`` (PRD 11.2) instead
-    of silently re-baselining and re-emitting a window of mail. The uids
-    (``cursor.last_uid`` and ``emitted_uids``) are validated by ``validate_uid``,
-    the backend's rule (D-05); they are otherwise opaque (``int`` or ``str``).
+    a JSON object with a known ``schema`` and about the types of the known
+    fields: a damaged state must fail loudly with ``E_STATE_CORRUPT`` (PRD
+    11.2) instead of silently re-baselining and re-emitting a window of mail.
+
+    A ``schema: 1`` file is migrated **in memory** to schema 2: integer uids
+    ``>= 1`` become ``apple_mail:<n>`` and upper-case hexadecimal strings become
+    ``outlook:<HEX>`` (PRD-v2.1 §10.2.5, D8), independent of the platform. The
+    resulting uids are then validated like any schema-2 uid, with
+    ``is_installed`` (the registry) for the driver part: a ``cursor.last_uid``
+    whose driver is not installed is ``E_STATE_CORRUPT``, while ring items of
+    drivers that are not installed are pruned in silence and reported by
+    :attr:`load_info` (PRD-v2.1 §10.2.6).
     """
 
-    def __init__(self, home: Path, validate_uid: UidValidator) -> None:
+    def __init__(self, home: Path, is_installed: UidInstalled) -> None:
         self._home = Path(home)
-        self._validate_uid = validate_uid
+        self._is_installed = is_installed
+        self._load_info = StateLoadInfo()
 
     @property
     def home(self) -> Path:
@@ -93,12 +155,18 @@ class StateStore:
     def path(self) -> Path:
         return self._home / STATE_FILENAME
 
+    @property
+    def load_info(self) -> StateLoadInfo:
+        """Result metadata of the last :meth:`load` (``exists``/schema/pruning)."""
+        return self._load_info
+
     def load(self) -> AppState:
         """Load state; raises E_STATE_CORRUPT when the file is unreadable."""
         path = self.path
         try:
             raw = path.read_text(encoding="utf-8")
         except FileNotFoundError:
+            self._load_info = StateLoadInfo()
             return AppState()
         except (UnicodeDecodeError, UnicodeError) as exc:
             raise _corrupt(f"the file is not valid UTF-8 ({exc})") from exc
@@ -120,10 +188,12 @@ class StateStore:
 
         if not isinstance(payload, dict):
             raise _corrupt("the top-level value must be a JSON object")
-        return _state_from_payload(payload, self._validate_uid)
+        state, info = _state_from_payload(payload, self._is_installed)
+        self._load_info = info
+        return state
 
     def save(self, state: AppState) -> None:
-        """Atomically persist ``state`` as 0600 JSON."""
+        """Atomically persist ``state`` as schema-2 ``0600`` JSON."""
         path = self.path
         directory = path.parent
         try:
@@ -184,24 +254,25 @@ class StateStore:
     def record_new(
         self,
         state: AppState,
-        emitted: Sequence[tuple[int, Uid]],
+        emitted: Sequence[EmittedUid],
         lookback_seconds: int,
         command: str = "new",
     ) -> AppState:
         """Advance the cursor and the emitted-uid ring, returning the new state.
 
-        ``emitted`` holds ``(date_received, uid)`` pairs for the messages this
-        run emits. The cursor only ever moves forward (a Mail index rebuild may
-        change uids but never the dates, PRD 18); ``lookback_seconds`` is the
-        lookback of the current config (PRD 12.3) and is the one stored in the
-        cursor, and the emitted uids are appended to the ring in chronological
-        order (newest last) capped at 1.000 entries.
+        ``emitted`` holds the uids this run emits, each with its
+        ``(date_received, driver, native_order_key)`` total-order key
+        (PRD-v2.1 §10.2.7). The cursor only ever moves forward (a Mail index
+        rebuild may change uids but never the dates, PRD 18); ``lookback_seconds``
+        is the lookback of the current config (PRD 12.3) and is the one stored in
+        the cursor, and the emitted uids are appended to the ring in total order
+        (newest last) capped at 1.000 entries.
 
         This method does **not** persist the new state: the caller
         (``search.run_new``) saves it only when the run is not ``--peek``, so a
         peek can never advance the cursor (PRD 12.3, 18).
         """
-        pairs = [(int(date), uid) for date, uid in emitted]
+        entries = list(emitted)
         previous = state.cursor
         lookback = int(lookback_seconds)
 
@@ -212,16 +283,16 @@ class StateStore:
                 last_uid=previous.last_uid,
                 lookback_seconds=lookback,
             )
-        if pairs:
-            newest = max(pairs, key=lambda pair: (pair[0], pair[1]))
-            if previous is None or newest > (previous.last_date_received, previous.last_uid):
+        if entries:
+            newest = max(entries, key=_emitted_order_key)
+            if previous is None or _advances(newest, previous):
                 cursor = Cursor(
-                    last_date_received=newest[0],
-                    last_uid=newest[1],
+                    last_date_received=newest.date_received,
+                    last_uid=newest.uid,
                     lookback_seconds=lookback,
                 )
 
-        ring = _advance_ring(state.emitted_uids, pairs)
+        ring = _advance_ring(state.emitted_uids, entries)
         timestamp = now_iso()
         return AppState(
             schema=STATE_SCHEMA,
@@ -230,6 +301,17 @@ class StateStore:
             cursor=cursor,
             emitted_uids=ring,
         )
+
+
+def migrate_uid(value: object) -> str:
+    """Pure schema-1 -> schema-2 uid conversion (PRD-v2.1 §10.2.5, D8).
+
+    Deterministic by the value type and independent of the platform: an integer
+    ``>= 1`` becomes ``apple_mail:<n>`` and an upper-case hexadecimal string
+    becomes ``outlook:<HEX>``; anything else (``0``, negatives, ``bool``,
+    ``None``, lists, lower-case or non-hex formats) is ``E_STATE_CORRUPT``.
+    """
+    return _migrate_legacy_uid(value, "uid")
 
 
 def _write_error(exc: OSError, directory: Path) -> MailqueryError | None:
@@ -346,7 +428,7 @@ class RunLock:
 
 
 def _state_to_payload(state: AppState) -> dict:
-    """Render ``AppState`` as the stable ``state.json`` object (no PII)."""
+    """Render ``AppState`` as the stable schema-2 ``state.json`` object (no PII)."""
     return {
         "schema": STATE_SCHEMA,
         "updated_at": state.updated_at,
@@ -368,11 +450,12 @@ def _state_to_payload(state: AppState) -> dict:
     }
 
 
-def _state_from_payload(payload: dict, validate_uid: UidValidator) -> AppState:
-    """Build ``AppState`` from raw JSON, raising E_STATE_CORRUPT on bad types."""
-    schema = payload.get("schema", STATE_SCHEMA)
-    if schema != STATE_SCHEMA or isinstance(schema, bool):
-        raise _corrupt(f"unsupported schema {schema!r} (expected {STATE_SCHEMA})")
+def _state_from_payload(
+    payload: dict, is_installed: UidInstalled
+) -> tuple[AppState, StateLoadInfo]:
+    """Build ``(AppState, StateLoadInfo)`` from raw JSON, raising E_STATE_CORRUPT."""
+    schema = _schema_from_payload(payload)
+    legacy = schema == 1
 
     updated_at = payload.get("updated_at", "")
     if updated_at is None:
@@ -381,16 +464,36 @@ def _state_from_payload(payload: dict, validate_uid: UidValidator) -> AppState:
         raise _corrupt("'updated_at' must be a string")
 
     last_run = _last_run_from_payload(payload.get("last_run"))
-    cursor = _cursor_from_payload(payload.get("cursor"), validate_uid)
-    emitted_uids = _ring_from_payload(payload.get("emitted_uids", []), validate_uid)
+    cursor = _cursor_from_payload(payload.get("cursor"), legacy=legacy, is_installed=is_installed)
+    emitted_uids, pruned, pruned_drivers = _ring_from_payload(
+        payload.get("emitted_uids", []), legacy=legacy, is_installed=is_installed
+    )
 
-    return AppState(
+    state = AppState(
         schema=STATE_SCHEMA,
         updated_at=updated_at,
         last_run=last_run,
         cursor=cursor,
         emitted_uids=emitted_uids,
     )
+    info = StateLoadInfo(
+        exists=True,
+        persisted_schema=schema,
+        migrated=legacy,
+        pruned_emitted_uids=pruned,
+        pruned_drivers=pruned_drivers,
+    )
+    return state, info
+
+
+def _schema_from_payload(payload: dict) -> int:
+    """Required ``schema`` key: 1 (migrated in memory) or 2; anything else is corrupt."""
+    if "schema" not in payload:
+        raise _corrupt("'schema' is required (expected 1 or 2)")
+    schema = payload["schema"]
+    if isinstance(schema, bool) or not isinstance(schema, int) or schema not in SUPPORTED_SCHEMAS:
+        raise _corrupt(f"unsupported schema {schema!r} (expected 1 or 2)")
+    return schema
 
 
 def _last_run_from_payload(value: object) -> LastRun | None:
@@ -405,13 +508,14 @@ def _last_run_from_payload(value: object) -> LastRun | None:
     return LastRun(command=command, at=at)
 
 
-def _cursor_from_payload(value: object, validate_uid: UidValidator) -> Cursor | None:
+def _cursor_from_payload(
+    value: object, *, legacy: bool, is_installed: UidInstalled
+) -> Cursor | None:
     if value is None:
         return None
     if not isinstance(value, dict):
         raise _corrupt("'cursor' must be an object")
     date = value.get("last_date_received")
-    uid = value.get("last_uid")
     lookback = value.get("lookback_seconds", DEFAULT_LOOKBACK_SECONDS)
     if not _is_int(date) or not _is_int(lookback):
         raise _corrupt(
@@ -419,60 +523,122 @@ def _cursor_from_payload(value: object, validate_uid: UidValidator) -> Cursor | 
         )
     if date < 0:
         raise _corrupt("'cursor.last_date_received' must not be negative")
-    try:
-        validate_uid(uid)
-    except StateUidError as exc:
-        raise _corrupt(exc.cursor_detail) from exc
+    uid = _state_uid(value.get("last_uid"), "'cursor.last_uid'", legacy=legacy)
+    _require_installed(uid.driver, "'cursor.last_uid'", is_installed)
     if lookback < 1:
         raise _corrupt("'cursor.lookback_seconds' must be positive")
     return Cursor(
         last_date_received=date,
-        last_uid=uid,
+        last_uid=uid.uid,
         lookback_seconds=lookback,
     )
 
 
-def _ring_from_payload(value: object, validate_uid: UidValidator) -> tuple[Uid, ...]:
+def _ring_from_payload(
+    value: object, *, legacy: bool, is_installed: UidInstalled
+) -> tuple[tuple[str, ...], int, tuple[str, ...]]:
+    """Validate the ring and drop the uids of drivers that are not installed."""
     if value is None:
-        return ()
+        return (), 0, ()
     if not isinstance(value, list):
-        raise _corrupt("'emitted_uids' must be a list of integers")
-    uids: list[Uid] = []
-    for item in value:
-        try:
-            validate_uid(item)
-        except StateUidError as exc:
-            raise _corrupt(exc.ring_detail) from exc
-        uids.append(item)
-    return tuple(uids[-MAX_EMITTED_UIDS:])
+        raise _corrupt("'emitted_uids' must be a list of prefixed uids")
+    uids: list[str] = []
+    pruned = 0
+    pruned_drivers: set[str] = set()
+    for index, item in enumerate(value):
+        uid = _state_uid(item, f"'emitted_uids[{index}]'", legacy=legacy)
+        if not is_installed(uid.driver):
+            pruned += 1
+            pruned_drivers.add(uid.driver)
+            continue
+        uids.append(uid.uid)
+    return tuple(uids[-MAX_EMITTED_UIDS:]), pruned, tuple(sorted(pruned_drivers))
+
+
+def _state_uid(value: object, field: str, *, legacy: bool) -> uid_module.ParsedUid:
+    """Migrate (schema 1) or validate (schema 2) one ``state.json`` uid."""
+    if legacy:
+        prefixed = _migrate_legacy_uid(value, field)
+    else:
+        if not isinstance(value, str) or not value:
+            raise _corrupt(
+                f"{field} must be a prefixed uid string '<driver>:<native_id>'"
+            )
+        if ":" not in value:
+            raise _corrupt(
+                f"{field} is not a prefixed uid ('<driver>:<native_id>'): the "
+                "legacy unprefixed form is only accepted in command arguments"
+            )
+        prefixed = value
+    try:
+        return uid_module.parse_uid(prefixed)
+    except MailqueryError as exc:
+        raise _corrupt(f"{field} is not a valid prefixed uid ({exc.message})") from exc
+
+
+def _migrate_legacy_uid(value: object, field: str) -> str:
+    """Deterministic schema-1 uid conversion by value type (D8)."""
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+        return f"apple_mail:{value}"
+    if isinstance(value, str) and _LEGACY_HEX_UID.fullmatch(value) is not None:
+        return f"outlook:{value}"
+    raise _corrupt(
+        f"{field} is not a schema-1 uid: expected an integer >= 1 (Apple Mail) "
+        "or an upper-case hexadecimal EntryID string (Outlook)"
+    )
+
+
+def _require_installed(driver: str, field: str, is_installed: UidInstalled) -> None:
+    if not is_installed(driver):
+        raise _corrupt(
+            f"{field} uses driver {driver!r}, which is not installed",
+            hint=_MISSING_DRIVER_HINT,
+        )
 
 
 def _advance_ring(
-    current: Sequence[Uid],
-    pairs: Sequence[tuple[int, Uid]],
-) -> tuple[Uid, ...]:
-    """Append emitted uids in chronological order, caps the ring at 1.000."""
+    current: Sequence[str],
+    entries: Sequence[EmittedUid],
+) -> tuple[str, ...]:
+    """Append emitted uids in total order, caps the ring at 1.000."""
     ring = list(current)
-    for _, uid in sorted(pairs, key=lambda pair: (pair[0], pair[1])):
-        if uid in ring:
-            ring.remove(uid)
-        ring.append(uid)
+    for entry in sorted(entries, key=_emitted_order_key):
+        if entry.uid in ring:
+            ring.remove(entry.uid)
+        ring.append(entry.uid)
     if len(ring) > MAX_EMITTED_UIDS:
         ring = ring[-MAX_EMITTED_UIDS:]
     return tuple(ring)
+
+
+def _emitted_order_key(entry: EmittedUid) -> tuple[int, str, int | str]:
+    """Total order key of one emitted uid (PRD-v2.1 §10.2.7)."""
+    return (entry.date_received, entry.driver, entry.native_order_key)
+
+
+def _advances(newest: EmittedUid, previous: Cursor) -> bool:
+    """Whether the cursor may advance to ``newest`` (it only ever moves forward).
+
+    Dates are the watermark; at the same date the cursor advances when the uid
+    changes (the emitted uids of one run are already in total order, so the
+    candidate is the newest of that run). The uid is never compared as text.
+    """
+    if newest.date_received > previous.last_date_received:
+        return True
+    if newest.date_received < previous.last_date_received:
+        return False
+    return newest.uid != previous.last_uid
 
 
 def _is_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _corrupt(detail: str) -> MailqueryError:
+def _corrupt(detail: str, *, hint: str | None = None) -> MailqueryError:
     return MailqueryError(
         "E_STATE_CORRUPT",
         f"state.json is corrupt: {detail}",
-        "rename ~/.mailquery/state.json (for example to state.json.bak): the "
-        "next 'mailquery new' is a first run that emits the messages of the "
-        "lookback window",
+        hint or _RENAME_HINT,
         "state.json is corrupt",
     )
 

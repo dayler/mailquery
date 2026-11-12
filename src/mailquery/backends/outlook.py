@@ -1,7 +1,7 @@
 """Classic Outlook backend (Windows, annex B).
 
 Implemented so far: the connection (``describe``), ``name``,
-``labels_available``, ``parse_uid``, ``check_state_uid`` (``state.json`` uids,
+``labels_available``, ``parse_uid`` and ``parse_native_id`` (uid validation,
 D-05), ``close``, the D-03 ``bind_command`` hook
 the stores of the profile (``accounts``, ``excluded_stores``; annex B.3,
 B.4), their folders (``mailboxes``, ``resolve_mailbox``; annex B.3, B.4,
@@ -37,10 +37,10 @@ from mailquery.backends.base import (
     MailboxRow,
     MessageRow,
     AccountRow,
-    StateUidError,
     Uid,
 )
 from mailquery.errors import MailqueryError, error_detail, usage_error
+from mailquery.plugins import PLUGIN_API, Capabilities
 
 BACKEND_NAME = "outlook"
 STRATEGY = "com_readonly"
@@ -316,6 +316,16 @@ class OutlookBackend(MailBackend):
     process-wide D-03 watchdog.
     """
 
+    driver = BACKEND_NAME
+    plugin_api = PLUGIN_API
+    capabilities: Capabilities = {
+        "network": False,
+        "readonly": "structural",
+        "body_local": True,
+        "attachments": "local",
+        "native_order": "text",
+    }
+
     def __init__(
         self,
         *,
@@ -446,6 +456,7 @@ class OutlookBackend(MailBackend):
         message_id = _text(props.get(PR_INTERNET_MESSAGE_ID))
         return MessageRow(
             uid=uid,
+            native_order_key=uid,
             global_message_id=self._message_key(message_id),
             subject=_text(props.get(PR_SUBJECT)),
             sender_name=_text(props.get(PR_SENDER_NAME)),
@@ -532,10 +543,6 @@ class OutlookBackend(MailBackend):
         return None
 
     # -- PRD 9.3 ------------------------------------------------------------- #
-
-    @property
-    def name(self) -> str:
-        return BACKEND_NAME
 
     def describe(self) -> dict[str, Any]:
         """Version and strategy for the connection log line (connects to Outlook)."""
@@ -892,20 +899,20 @@ class OutlookBackend(MailBackend):
         return text
 
     @staticmethod
-    def check_state_uid(uid: Any) -> None:
-        """Validate a ``state.json`` uid (PRD 11.2): a non-empty uppercase hex string.
+    def parse_native_id(native_id: str) -> str:
+        """Validate the native part of a prefixed uid: an uppercase hex EntryID (C1, RF-40).
 
-        Integers (Apple Mail uids), lowercase and empty strings are invalid. Shares
-        only the hex expression with ``parse_uid``, not its text parsing or its
-        ``E_USAGE`` error (D-05). Raises ``StateUidError`` carrying the exact
-        ``E_STATE_CORRUPT`` details of Outlook.
+        Pure and offline. The core splits ``"<driver>:<native_id>"`` at the first
+        ``:`` and hands only ``native_id`` to the adapter.
         """
-        if isinstance(uid, str) and _UID_PATTERN.fullmatch(uid) is not None:
-            return
-        raise StateUidError(
-            "'cursor.last_uid' must be a uid (an uppercase hexadecimal EntryID)",
-            "'emitted_uids' must be a list of uids (uppercase hexadecimal EntryIDs)",
-        )
+        if not isinstance(native_id, str) or _UID_PATTERN.fullmatch(native_id) is None:
+            raise usage_error(
+                f"invalid uid part {native_id!r}: expected an uppercase hexadecimal EntryID",
+                "Outlook uids are uppercase hexadecimal EntryIDs; run `mailquery search` "
+                "to find the uid of a message",
+                "invalid uid part: expected an uppercase hexadecimal EntryID",
+            )
+        return native_id
 
     def doctor_checks(self) -> list[dict[str, Any]]:
         """``pywin32``, ``outlook``, ``stores``, ``readonly_strategy``, ``object_model_guard``.
