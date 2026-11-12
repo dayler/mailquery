@@ -13,7 +13,10 @@ only by ``mailboxes`` (core hook ``mailboxes_without_counters``; PRD 19). The
 ``search`` hooks ``recipients_open_items``, ``items_opened`` and
 ``load_snippet`` serve the bounded ``--text``/``--to``/``--cc`` scan (PRD RF-17,
 19). ``doctor_checks`` and the D-03 hook ``bind_doctor_timeout`` serve
-``doctor`` (PRD 12.8, annex B.6, B.8). Every COM access goes through
+``doctor`` (PRD 12.8, annex B.6, B.8). ``attachments``/``attachment_stream``
+implement the C1 attachment protocol (M10): ordered local metadata, availability
+reasons and the COM materialization exception (``Attachment.SaveAsFile`` into the
+core staging, always removed). Every COM access goes through
 :mod:`mailquery.backends.outlook_com` (the only module that imports pywin32),
 so this module imports on any OS.
 """
@@ -21,7 +24,10 @@ so this module imports on any OS.
 from __future__ import annotations
 
 import math
+import os
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +37,7 @@ from urllib.parse import quote, unquote
 from mailquery import output
 from mailquery.backends import outlook_com
 from mailquery.backends.base import (
+    AttachmentMetadataRow,
     BodyRow,
     ExcludedStoreError,
     MailBackend,
@@ -202,6 +209,25 @@ ITEM_NOT_FOUND_HRESULTS = frozenset(
     {outlook_com.MAPI_E_NOT_FOUND, outlook_com.MAPI_E_INVALID_ENTRYID}
 )
 ITEM_UNOPENABLE_HRESULTS = frozenset({outlook_com.E_FAIL})
+
+# OlDownloadState: only a full item keeps the attachment bytes in the local store.
+OL_HEADER_ONLY = 0
+OL_FULL_ITEM = 1
+# OlAttachmentType: a by-value attachment is a copy of the file stored in the item;
+# the other values are references, embedded messages or OLE objects (Microsoft docs).
+OL_BY_VALUE = 1
+OL_BY_REFERENCE = 4
+OL_EMBEDDED_ITEM = 5
+OL_OLE = 6
+#: Staging directory under ``<home>/tmp`` shared with the core (M07 §10.1, RNF-14).
+STAGING_DIR_NAME = "staging"
+#: Bytes per chunk yielded by ``attachment_stream``.
+_ATTACHMENT_CHUNK_BYTES = 64 * 1024
+#: Templates of the attachment protocol errors of this driver (§11.7, C8/C9).
+_ATTACHMENT_SMIME_HINT = "S/MIME attachments cannot be extracted"
+_DOWNLOAD_HINT = (
+    "open the message in Outlook so it downloads the attachment, then retry"
+)
 #: A store's identifier inside an EntryID: 16 bytes from offset 4 (annex B.4).
 ENTRYID_STORE_KEY = slice(4, 20)
 #: Margins of the DASL date pre-filter: Outlook ignores seconds (P-7), so it is
@@ -365,6 +391,10 @@ class OutlookBackend(MailBackend):
         #: ``doctor`` progress: finished checks by name and the running one (D-03).
         self._doctor_done: dict[str, dict[str, Any]] = {}
         self._doctor_running: str | None = None
+        #: Attachment staging sessions of this instance, removed on ``close`` too
+        #: (an aborted extraction may leave the generator suspended before its
+        #: ``finally`` runs; the next run sweeps them as well, RNF-14).
+        self._attachment_sessions: set[Path] = set()
 
     # -- connection ---------------------------------------------------------- #
 
@@ -746,6 +776,179 @@ class OutlookBackend(MailBackend):
             return []
         return _visible_attachment_names(item)
 
+    def attachments(self, uid: Uid) -> list[AttachmentMetadataRow]:
+        """Ordered attachment metadata of one message (C1, RF-43/RF-47; M10).
+
+        Only **local properties** of the item are read (``Attachments``,
+        ``FileName``/``DisplayName``, ``Size`` and ``Type``): nothing is downloaded
+        and no network is used. ``index`` is the 1-based order of the visible
+        attachments (hidden ones are never listed) and is shared by ``show`` and
+        ``attachment``; ``native_order_key`` is the index as upper-case hex text.
+
+        Availability, according to the attachment type (``OlAttachmentType``):
+        a by-value copy is local; a by-reference attachment is not stored in the
+        message and would have to be fetched from its origin ⇒ ``not_downloaded``;
+        a web reference/embedded message/OLE object is not a recoverable file ⇒
+        ``unsupported``. ``size_bytes`` is ``None`` when it is not local.
+
+        The message-level signal of the C8/C9 convention is raised as the
+        ``E_ATTACHMENT_UNREADABLE`` protocol error: S/MIME, an unopenable item, or
+        a not fully downloaded item that reports attachments (its names cannot be
+        read without downloading). ``show`` turns it into ``attachments: []``;
+        ``attachment`` propagates it before the “no attachments” check.
+        """
+        item = self._attachment_item(uid)
+        if is_smime_class(item.MessageClass):
+            raise _attachment_unreadable_error(
+                "the message is S/MIME protected and cannot be extracted",
+                _ATTACHMENT_SMIME_HINT,
+            )
+        if item.DownloadState != OL_FULL_ITEM:
+            if _attachment_signal(item):
+                raise _attachment_unreadable_error(
+                    "the attachments are not available in the local store and "
+                    "cannot be listed without downloading the message",
+                    _DOWNLOAD_HINT,
+                )
+            return []
+        rows: list[AttachmentMetadataRow] = []
+        for index, attachment in enumerate(_visible_attachments(item), start=1):
+            name = _text(attachment.FileName) or _text(attachment.DisplayName)
+            reason = _attachment_unavailable_reason(attachment)
+            rows.append(
+                AttachmentMetadataRow(
+                    index=index,
+                    name=name,
+                    size_bytes=None if reason is not None else _attachment_size(attachment),
+                    native_order_key=f"{index:04X}",
+                    unavailable_reason=reason,
+                )
+            )
+        return rows
+
+    def attachment_stream(self, uid: Uid, index: int) -> Iterator[bytes]:
+        """Decoded bytes of attachment ``index`` of one message (C1; M10).
+
+        Outlook has no local byte stream: the attachment is a COM object of an
+        already-downloaded item. The single writing operation of the read-only
+        proxy (``Attachment.SaveAsFile``, PRD-v2.1 §0.2/§15) copies it to an opaque
+        ``0600`` file inside a private ``0700`` session directory under
+        ``<home>/tmp/staging``; this method validates that the materialized path is
+        a regular file inside the session (a symlink or an unexpected directory is
+        ``E_ATTACHMENT_UNAVAILABLE``/``unsupported``, D12), yields the bytes in
+        chunks and always removes the file and the session (also on errors,
+        ``GeneratorExit`` and timeouts). It never resolves a reference and never
+        downloads: unavailable attachments are refused before touching COM.
+        """
+        item = self._attachment_item(uid)
+        if is_smime_class(item.MessageClass):
+            raise _attachment_unreadable_error(
+                "the message is S/MIME protected and cannot be extracted",
+                _ATTACHMENT_SMIME_HINT,
+            )
+        if item.DownloadState != OL_FULL_ITEM:
+            raise _attachment_unavailable_error(
+                "not_downloaded",
+                "the attachment is not available in the local store",
+                _DOWNLOAD_HINT,
+            )
+        visible = _visible_attachments(item)
+        position = int(index)
+        if not 1 <= position <= len(visible):
+            raise usage_error(
+                f"attachment index {position} is out of range",
+                "run `mailquery show` to list the attachment indexes",
+                "attachment index out of range",
+            )
+        attachment = visible[position - 1]
+        reason = _attachment_unavailable_reason(attachment)
+        if reason is not None:
+            raise _attachment_unavailable_error(
+                reason,
+                "the attachment is not available in the local store"
+                if reason == "not_downloaded"
+                else "the attachment cannot be recovered from the local store",
+                _DOWNLOAD_HINT
+                if reason == "not_downloaded"
+                else "the attachment type cannot be materialized from the local store",
+            )
+        session = self._attachment_staging()
+        path: Path | None = None
+        try:
+            path = _create_staging_file(session)
+            _materialize(attachment, path, session)
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(_ATTACHMENT_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            if path is not None:
+                _unlink_quietly(path)
+            shutil.rmtree(session, ignore_errors=True)
+            self._attachment_sessions.discard(session)
+
+    def _attachment_item(self, uid: Uid) -> Any:
+        """Opened item for the attachment operations; protocol errors when unusable."""
+        text = str(uid)
+        info = self._store_of(text, candidate=True)
+        if info is None:
+            excluded = self._store_of(text, candidate=False)
+            if excluded is not None:
+                raise ExcludedStoreError(excluded.excluded_entry())
+            raise usage_error(
+                "the message was not found", "run `mailquery search` to find the uid"
+            )
+        item = self._open_item(text, info)
+        if item is None:
+            raise usage_error(
+                "the message was not found", "run `mailquery search` to find the uid"
+            )
+        if item is _UNOPENABLE:
+            raise _attachment_unreadable_error(
+                "the message cannot be read",
+                "open the message in Outlook and retry; run `mailquery doctor` if it persists",
+            )
+        return item
+
+    def _attachment_staging(self) -> Path:
+        """Private ``0700`` session directory under ``<home>/tmp/staging`` (M07 layout)."""
+        tmp_root = self._tmp_root
+        if tmp_root is None:  # pragma: no cover - cli always passes <home>/tmp
+            raise MailqueryError(
+                "E_INTERNAL",
+                "the Outlook backend has no staging directory (tmp_root is not set)",
+                "run `mailquery doctor` and report this bug with the log file",
+            )
+        root = Path(tmp_root) / STAGING_DIR_NAME
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            if os.name != "nt":
+                os.chmod(root, 0o700)
+            # Remove only this driver's own sessions left by a crashed/hung run
+            # (RNF-14; the core sweeps its own session-* directories).
+            for leftover in root.glob("outlook-*"):
+                if leftover.is_dir() and not leftover.is_symlink():
+                    shutil.rmtree(leftover, ignore_errors=True)
+            session = Path(tempfile.mkdtemp(prefix="outlook-", dir=root))
+            self._attachment_sessions.add(session)
+            return session
+        except PermissionError as exc:
+            raise MailqueryError(
+                "E_PERMISSION",
+                "cannot create the attachment staging directory",
+                "check the permissions of ~/.mailquery/tmp",
+                "cannot create the attachment staging directory",
+            ) from exc
+        except OSError as exc:
+            raise MailqueryError(
+                "E_IO",
+                f"cannot create the attachment staging directory ({exc.strerror or exc})",
+                "check the free space and permissions of ~/.mailquery/tmp",
+                "cannot create the attachment staging directory",
+            ) from exc
+
     def find_message(self, uid: Uid) -> tuple[MessageRow, MailboxRow | None] | None:
         """Row and listed folder of a uid of a candidate store, or ``None`` (PRD 12.4).
 
@@ -1079,6 +1282,9 @@ class OutlookBackend(MailBackend):
         self._recipient_cache = {}
         self._stores = None
         self._application = None
+        for session in list(self._attachment_sessions):
+            shutil.rmtree(session, ignore_errors=True)
+        self._attachment_sessions.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -1435,6 +1641,159 @@ def _visible_attachment_names(item: outlook_com.ReadOnlyCom) -> list[str]:
         if name:
             names.append(name)
     return names
+
+
+def _attachment_unreadable_error(message: str, hint: str) -> MailqueryError:
+    """``E_ATTACHMENT_UNREADABLE`` of the C8/C9 message-level signal (§11.7)."""
+    return MailqueryError(
+        "E_ATTACHMENT_UNREADABLE", message, hint, "the attachment is S/MIME or unreadable"
+    )
+
+
+def _attachment_unavailable_error(
+    reason: str, message: str, hint: str
+) -> MailqueryError:
+    """``E_ATTACHMENT_UNAVAILABLE`` of one attachment reason (§11.7, AC-15)."""
+    return MailqueryError(
+        "E_ATTACHMENT_UNAVAILABLE",
+        message,
+        hint,
+        f"the attachment is unavailable: {reason}",
+    )
+
+
+def _attachment_signal(item: outlook_com.ReadOnlyCom) -> bool:
+    """Whether the item reports attachments (``PR_HASATTACH``; no content is read)."""
+    return _get_property(item.PropertyAccessor, PR_HASATTACH) is True
+
+
+def _visible_attachments(item: outlook_com.ReadOnlyCom) -> list[Any]:
+    """Attachment objects of the message in order, without the hidden ones.
+
+    The OOM index is only used to enumerate the collection: the reported
+    ``index`` is the 1-based position of the visible list (shared by ``show``
+    and ``attachment``), as the core contract requires (C1).
+    """
+    attachments = item.Attachments
+    visible: list[Any] = []
+    for position in range(1, int(attachments.Count) + 1):
+        attachment = attachments.Item(position)
+        if _get_property(attachment.PropertyAccessor, PR_ATTACHMENT_HIDDEN) is True:
+            continue
+        visible.append(attachment)
+    return visible
+
+
+def _attachment_unavailable_reason(attachment: Any) -> str | None:
+    """Local availability of one attachment from its ``OlAttachmentType`` (M10).
+
+    A by-value attachment is a copy of the file stored in the item (local). The
+    other types are not content of the message: a by-reference attachment points
+    to a file outside the store and would have to be fetched from its origin
+    (``not_downloaded``); an embedded message or an OLE object is not a
+    recoverable file (``unsupported``). When the type cannot be read without
+    downloading, the safest §11.7 reason is ``not_downloaded``.
+    """
+    try:
+        attachment_type = int(attachment.Type)
+    except outlook_com.ComCallError:
+        return "not_downloaded"
+    if attachment_type == OL_BY_VALUE:
+        return None
+    if attachment_type == OL_BY_REFERENCE:
+        return "not_downloaded"
+    return "unsupported"
+
+
+def _attachment_size(attachment: Any) -> int | None:
+    """Expected size of a local attachment from its ``Size`` property, or ``None``."""
+    try:
+        size = int(attachment.Size)
+    except (outlook_com.ComCallError, TypeError, ValueError):
+        return None
+    return size if size >= 0 else None
+
+
+def _create_staging_file(session: Path) -> Path:
+    """Opaque ``0600`` file inside the driver's private staging session."""
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix="attachment-", suffix=".bin", dir=session
+        )
+    except PermissionError as exc:
+        raise MailqueryError(
+            "E_PERMISSION",
+            "cannot create the attachment staging file",
+            "check the permissions of ~/.mailquery/tmp",
+            "cannot create the attachment staging file",
+        ) from exc
+    except OSError as exc:
+        raise MailqueryError(
+            "E_IO",
+            f"cannot create the attachment staging file ({exc.strerror or exc})",
+            "check the free space and permissions of ~/.mailquery/tmp",
+            "cannot create the attachment staging file",
+        ) from exc
+    os.close(descriptor)
+    path = Path(name)
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+        except OSError as exc:  # pragma: no cover - best effort on foreign filesystems
+            raise MailqueryError(
+                "E_PERMISSION",
+                "cannot protect the attachment staging file",
+                "check the permissions of ~/.mailquery/tmp",
+                "cannot protect the attachment staging file",
+            ) from exc
+    return path
+
+
+def _materialize(
+    attachment: Any, path: Path, session: Path
+) -> None:
+    """``Attachment.SaveAsFile`` into ``path`` and the D12 path validation.
+
+    The only writing operation of the read-only COM proxy (M10 COM exception,
+    PRD-v2.1 §0.2/§15). A COM failure that meant "not in the local store" is
+    ``E_ATTACHMENT_UNAVAILABLE``/``not_downloaded``; any other failure is
+    ``E_ATTACHMENT_UNREADABLE``/``corrupt``. The materialized path must be a
+    regular file inside the staging session: a symlink, a directory or a path
+    outside the session is ``E_ATTACHMENT_UNAVAILABLE``/``unsupported`` (D12),
+    before the bytes are read.
+    """
+    try:
+        attachment.SaveAsFile(str(path))
+    except outlook_com.ComCallError as exc:
+        if exc.hresult in ITEM_NOT_FOUND_HRESULTS or exc.hresult == outlook_com.MAPI_E_NOT_FOUND:
+            raise _attachment_unavailable_error(
+                "not_downloaded",
+                "the attachment is not available in the local store",
+                _DOWNLOAD_HINT,
+            ) from exc
+        raise _attachment_unreadable_error(
+            "the attachment is corrupt or unreadable",
+            "the attachment is corrupt and cannot be recovered",
+        ) from exc
+    try:
+        materialized = path.is_file() and not path.is_symlink()
+        inside = path.resolve().parent == session.resolve()
+    except OSError:  # pragma: no cover - defensive, the path was just created
+        materialized, inside = False, False
+    if not materialized or not inside:
+        raise _attachment_unavailable_error(
+            "unsupported",
+            "the attachment cannot be recovered from the local store",
+            "restart Outlook and retry; run `mailquery doctor` if it persists",
+        )
+
+
+def _unlink_quietly(path: Path) -> None:
+    """Remove the staging file; a failure to clean up never masks the result."""
+    try:
+        path.unlink()
+    except OSError:  # pragma: no cover - the file may already be gone
+        pass
 
 
 def _item_text(item: outlook_com.ReadOnlyCom) -> tuple[str, list[str]]:

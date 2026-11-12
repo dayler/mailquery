@@ -193,7 +193,16 @@ READONLY_MEMBERS: dict[str, dict[str, str | None]] = {
         "PropertyAccessor": "PropertyAccessor",
     },
     "Attachments": {"Count": None, "Item": "Attachment"},
-    "Attachment": {"FileName": None, "DisplayName": None, "PropertyAccessor": "PropertyAccessor"},
+    "Attachment": {
+        "FileName": None,
+        "DisplayName": None,
+        "PropertyAccessor": "PropertyAccessor",
+        # M10 COM exception (PRD-v2.1 §0.2, §15): the only writing operation the
+        # read-only proxy allows, used for an already-downloaded local attachment.
+        "Size": None,
+        "Type": None,
+        "SaveAsFile": None,
+    },
     "Recipients": {"Count": None, "Item": "Recipient"},
     "Recipient": {"Name": None, "Type": None, "PropertyAccessor": "PropertyAccessor"},
 }
@@ -212,6 +221,7 @@ READONLY_METHODS = frozenset(
         "Add",
         "GetValues",
         "GetProperty",
+        "SaveAsFile",
     }
 )
 
