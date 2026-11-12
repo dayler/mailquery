@@ -750,7 +750,10 @@ class ShowTest(IntegrationBase):
         self.assertIn("billing@fixture.example", message["headers"]["From"])
         self.assertEqual(message["body_text"], "Please find the invoice attached.")
         self.assertIs(message["body_truncated"], False)
-        self.assertEqual(message["attachments"], [{"name": "invoice-2026-10.pdf"}])
+        self.assertEqual(
+            message["attachments"],
+            [{"index": 1, "name": "invoice-2026-10.pdf", "cached_path": None}],
+        )
         self.assertIs(message["partial"], False)
         self.assertIs(message["readable"], True)
         self.assertIs(message["source"]["partial"], False)
@@ -1012,7 +1015,10 @@ class OutlookGoldenTest(unittest.TestCase):
         """TC-02.03: show of the normal message with an attachment (golden)."""
         payload = self.show("normal")
         message = payload["message"]
-        self.assertEqual(message["attachments"], [{"name": "factura-2026-10.pdf"}])
+        self.assertEqual(
+            message["attachments"],
+            [{"index": 1, "name": "factura-2026-10.pdf", "cached_path": None}],
+        )
         self.assertEqual(message["date_received"], "2026-11-02T09:54:09-04:00")
         self.assertIs(message["readable"], True)
         _assert_golden(self, "outlook/show.json", payload, self.root)

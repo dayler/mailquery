@@ -2295,7 +2295,10 @@ class OutlookBodyTests(_OutlookCommandCase):
         self.assertEqual(shown["uid"], _uid(spec.entry_id))
         self.assertEqual(shown["body_text"], "Estimado cliente, adjuntamos la factura de octubre.")
         self.assertFalse(shown["body_truncated"])
-        self.assertEqual(shown["attachments"], [{"name": "factura-2026-10.pdf"}])
+        self.assertEqual(
+            shown["attachments"],
+            [{"index": 1, "name": "factura-2026-10.pdf", "cached_path": None}],
+        )
         self.assertTrue(shown["has_attachments"])
         self.assertIs(shown["partial"], False)
         self.assertIs(shown["readable"], True)

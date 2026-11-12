@@ -25,9 +25,19 @@ from mailquery import errors
 from mailquery.backends import apple_mail as apple_mail_mod
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import BackendRegistry, package_version
+from mailquery.attachments import attachment_path, sanitize_name
+from mailquery.attachments.paths import message_dir
 from mailquery.errors import MailqueryError
+from mailquery.plugins import EXTRACTION_TIMEOUT_SECONDS, PluginError, Reason
 from mailquery.search import Filters
 
+from tests.fakes.attachment_backend import (
+    ACCOUNT_LABEL as ATTACHMENT_LABEL,
+    DEFAULT_ATTACHMENTS as ATTACHMENT_DEFAULT_ROWS,
+    NATIVE_UID as ATTACHMENT_NATIVE_UID,
+    PLUGIN_DRIVER as ATTACHMENT_PLUGIN_DRIVER,
+    FakeAttachmentBackend,
+)
 from tests.fakes.plugin import (
     DRIVER as PLUGIN_DRIVER,
     VERSION as PLUGIN_VERSION,
@@ -132,6 +142,7 @@ class _CliTestCase(unittest.TestCase):
         home=_DEFAULT,
         mail_root=_DEFAULT,
         accounts_db=_DEFAULT,
+        backend=None,
     ):
         if home is _DEFAULT:
             home = self.fx.home
@@ -146,6 +157,7 @@ class _CliTestCase(unittest.TestCase):
                 home=home,
                 mail_root=mail_root,
                 accounts_db=accounts_db,
+                backend=backend,
             )
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -199,6 +211,42 @@ class _CliTestCase(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 
+_ATTACHMENT_HELP_EXPECTED = "\n".join(
+    (
+        "usage: mailquery attachment [-h] (--index N | --all) [--force] <uid>",
+        "",
+        "Recover local attachments of one message into ~/.mailquery/attachments/.",
+        "",
+        "Positional arguments:",
+        "  <uid>          message uid (as returned by search, new or show, e.g. apple_mail:83143;",
+        "                 the legacy unprefixed uid is accepted for the native driver)",
+        "",
+        "Options:",
+        "  -h, --help     show this help message and exit",
+        "  --index N      1-based attachment index to recover (as shown by `mailquery show <uid>`)",
+        "  --all          recover all attachments of the message; if any is blocked the whole message fails",
+        "  --force        re-extract from the driver and overwrite existing cached files",
+        "",
+        "Examples:",
+        "  mailquery show apple_mail:83143",
+        "  mailquery attachment apple_mail:83143 --index 1",
+        "  mailquery attachment apple_mail:83143 --all",
+        "",
+        "Notes:",
+        "  - If any attachment of the message matches a dangerous filename pattern, a blocked",
+        "    extension or executable content, the whole message is blocked: the command fails",
+        "    with E_ATTACHMENT_BLOCKED (exit 4) and no file is written (both --index and --all).",
+        "  - Attachments that cannot be recovered fail with E_ATTACHMENT_UNAVAILABLE (exit 3);",
+        "    corrupt or S/MIME attachments fail with E_ATTACHMENT_UNREADABLE (exit 3).",
+        "  - Files are saved with mode 0600 under",
+        "    ~/.mailquery/attachments/<driver>/<native_id>/<index:02d>_<sanitized_name>.",
+    )
+) + "\n"
+
+#: Every subcommand of the six-command CLI (M08).
+ALL_COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
+
+
 class HelpContractTests(_CliTestCase):
     HELP_MAX_WIDTH = 100
 
@@ -210,8 +258,14 @@ class HelpContractTests(_CliTestCase):
                 len(line), self.HELP_MAX_WIDTH, f"help line is too long: {line!r}"
             )
 
-    def test_ut_cli_06_01_global_help_is_formatted_text_and_exits_zero(self) -> None:
-        """UT-CLI-06.01: root --help has the PRD 12.7 sections, both clients, <= 100 columns, no ANSI."""
+    def help_text(self, command: str | None) -> str:
+        argv = ["--help"] if command is None else [command, "--help"]
+        code, stdout, stderr = self.run_cli(argv)
+        self.assertEqual((code, stderr), (0, ""))
+        return stdout
+
+    def test_ut_atc_09_01_root_help_lists_six_commands_and_exit_line(self) -> None:
+        """UT-ATC-09.01: root --help lists the six commands and the §11.1 exit line."""
         unused_home = self.fx.root / "unused-home"
         code, stdout, stderr = self.run_cli(["--help"], home=unused_home)
         self.assertEqual(code, 0)
@@ -227,17 +281,35 @@ class HelpContractTests(_CliTestCase):
             "Exit codes:",
         ):
             self.assertIn(section, stdout)
-        for command in ("doctor", "mailboxes", "search", "new", "show"):
+        for command in ALL_COMMANDS:
             self.assertIn(command, stdout)
         self.assertIn("--log-level LEVEL", stdout)
         self.assertIn("mailquery search --since 1w", stdout)
         self.assertIn("mailquery show 83143", stdout)
+        self.assertIn("mailquery attachment", stdout)
+        flat = " ".join(stdout.split())
+        self.assertIn(
+            "Exit codes: 0 ok | 2 usage or config error | 3 environment error "
+            "| 4 rejected query or blocked attachments | 5 busy or transient error "
+            "| 6 mail client not running",
+            flat,
+        )
+        self.assertIn("UTF-8", stdout)
         self.assert_human_readable(stdout)
         self.assertEqual(stderr, "")
         self.assertFalse(unused_home.exists(), "--help must not touch the filesystem")
 
-    def test_ut_cli_06_02_subcommand_help_is_formatted_for_every_command(self) -> None:
-        """UT-CLI-06.02: <command> --help for the 5 commands has Options, Examples and Notes."""
+    def test_ut_atc_09_02_attachment_help_matches_the_prd(self) -> None:
+        """UT-ATC-09.02: ``attachment --help`` is the literal text of PRD-v2.1 §11.4."""
+        stdout = self.help_text("attachment")
+        self.assertEqual(stdout, _ATTACHMENT_HELP_EXPECTED)
+        self.assert_human_readable(stdout)
+
+    def test_ut_atc_09_03_every_help_and_example_parses(self) -> None:
+        """UT-ATC-09.03: the 7 help invocations parse; every example of every help parses."""
+        import re
+        import shlex
+
         expected_flags = {
             "doctor": ("--json",),
             "mailboxes": (),
@@ -257,46 +329,51 @@ class HelpContractTests(_CliTestCase):
             ),
             "new": ("--peek", "--limit"),
             "show": ("uid",),
+            "attachment": ("--index", "--all", "--force", "<uid>"),
         }
-        for command, flags in expected_flags.items():
+        parser = cli_mod.build_parser()
+        seen = 0
+        for command in (None, *ALL_COMMANDS):
             with self.subTest(command=command):
-                code, stdout, stderr = self.run_cli([command, "--help"])
-                self.assertEqual(code, 0)
-                self.assertIn(f"usage: mailquery {command}", stdout)
-                self.assertIn("Options:", stdout)
-                self.assertIn("Examples:", stdout)
-                self.assertIn("Notes:", stdout)
-                for flag in flags:
-                    self.assertIn(flag, stdout)
-                self.assert_human_readable(stdout)
-                self.assertEqual(stderr, "")
+                argv = ["--help"] if command is None else [command, "--help"]
+                stdout = io.StringIO()
+                with (
+                    redirect_stdout(stdout),
+                    redirect_stderr(io.StringIO()),
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    parser.parse_args(argv)
+                self.assertEqual(raised.exception.code, 0)
+                text = stdout.getvalue()
+                self.assertIn("Examples:", text)
+                if command is None:
+                    self.assertIn("Global options:", text)
+                else:
+                    self.assertIn(f"usage: mailquery {command}", text)
+                    self.assertIn("Options:", text)
+                    self.assertIn("Notes:", text)
+                    for flag in expected_flags[command]:
+                        self.assertIn(flag, text)
+                self.assert_human_readable(text)
+                in_examples = False
+                for line in text.splitlines():
+                    if line.rstrip() == "Examples:":
+                        in_examples = True
+                        continue
+                    if not in_examples:
+                        continue
+                    if not line.strip():
+                        in_examples = False
+                        continue
+                    example = re.split(r"\s{2,}", line.strip())[0]
+                    parsed = parser.parse_args(shlex.split(example)[1:])
+                    self.assertIn(parsed.command, ALL_COMMANDS)
+                    seen += 1
+        self.assertGreaterEqual(seen, 15)
 
-    def help_text(self, command: str | None) -> str:
-        argv = ["--help"] if command is None else [command, "--help"]
-        code, stdout, stderr = self.run_cli(argv)
-        self.assertEqual((code, stderr), (0, ""))
-        return stdout
-
-    def test_ut_cli_06_03_root_help_lists_the_exit_codes_including_6(self) -> None:
-        """UT-CLI-06.03: the root help lists exit codes 0, 2, 3, 4, 5 and 6."""
-        stdout = self.help_text(None)
-        exit_codes = stdout[stdout.index("Exit codes:") :]
-        for fragment in (
-            "0 ok",
-            "2 usage or config error",
-            "3 environment error",
-            "4 rejected query",
-            "5 busy or transient error",
-            "6 mail client not running",
-        ):
-            self.assertIn(fragment, exit_codes)
-        self.assertIn("this help,", stdout)
-        self.assertIn("UTF-8", stdout)
-
-    def test_ut_cli_06_04_new_help_describes_the_first_run(self) -> None:
-        """UT-CLI-06.04: the help of ``new`` describes the first run of PRD 12.3 (no "baseline")."""
-        stdout = self.help_text("new")
-        flat = " ".join(stdout.split())
+    def test_ut_atc_09_04_help_has_no_retired_wording(self) -> None:
+        """UT-ATC-09.04: help has no retired wording, integer-uid promise or external writes."""
+        new_help = " ".join(self.help_text("new").split())
         for fragment in (
             "first run",
             "W_FIRST_RUN",
@@ -306,15 +383,8 @@ class HelpContractTests(_CliTestCase):
             "--limit",
             "--peek",
         ):
-            self.assertIn(fragment, flat)
-        for command in (None, "doctor", "mailboxes", "search", "new", "show"):
-            with self.subTest(command=command):
-                self.assertNotIn("baseline", self.help_text(command).lower())
-
-    def test_ut_cli_06_05_search_help_describes_terms_and_text_narrowing(self) -> None:
-        """UT-CLI-06.05: the help of ``search`` describes PRD 12.2 terms and the RF-17 narrowing."""
-        stdout = self.help_text("search")
-        flat = " ".join(stdout.split())
+            self.assertIn(fragment, new_help)
+        search_help = " ".join(self.help_text("search").split())
         for fragment in (
             "--subject: words separated by spaces are AND",
             "--text, --from, --to and --cc: the whole value is one pattern",
@@ -325,48 +395,41 @@ class HelpContractTests(_CliTestCase):
             "does not narrow",
             "--to and --cc narrow on macOS but not on Windows",
         ):
-            self.assertIn(fragment, flat)
-        self.assertNotIn("split on spaces into AND terms", flat)
-
-    def test_ut_cli_06_06_every_help_example_parses(self) -> None:
-        """UT-CLI-06.06: each example of the 6 helps passes ``parse_args``."""
-        import re
-        import shlex
-
-        parser = cli_mod.build_parser()
-        seen = 0
-        for command in (None, "doctor", "mailboxes", "search", "new", "show"):
-            stdout = self.help_text(command)
-            in_examples = False
-            for line in stdout.splitlines():
-                if line.rstrip() == "Examples:":
-                    in_examples = True
-                    continue
-                if not in_examples:
-                    continue
-                if not line.strip():
-                    in_examples = False
-                    continue
-                example = re.split(r"\s{2,}", line.strip())[0]
-                with self.subTest(command=command, example=example):
-                    argv = shlex.split(example)
-                    self.assertEqual(argv[0], "mailquery")
-                    parser.parse_args(argv[1:])
-                    seen += 1
-        self.assertGreaterEqual(seen, 15)
-
-    def test_subcommand_help_has_specific_examples(self) -> None:
+            self.assertIn(fragment, search_help)
+        for command in (None, *ALL_COMMANDS):
+            with self.subTest(command=command):
+                text = self.help_text(command)
+                flat = " ".join(text.split())
+                for retired in (
+                    "five commands",
+                    "cinco comandos",
+                    "5 commands",
+                    "integer uid",
+                    "uid (integer)",
+                    "baseline",
+                ):
+                    self.assertNotIn(retired, flat.lower())
+                self.assertNotIn("--out", text)
+                if "attachments/" in text:
+                    self.assertIn("~/.mailquery/attachments/", text)
         examples = {
             "doctor": "mailquery doctor --json",
             "mailboxes": "mailquery mailboxes",
             "search": 'mailquery search --text "*invoice*" --since 1mo',
             "new": "mailquery new --peek",
             "show": "mailquery show 83143",
+            "attachment": "mailquery attachment apple_mail:83143 --index 1",
         }
         for command, example in examples.items():
             with self.subTest(command=command):
-                _, stdout, _ = self.run_cli([command, "--help"])
-                self.assertIn(example, stdout)
+                self.assertIn(example, self.help_text(command))
+
+    def test_ut_atc_09_05_attachment_without_uid_is_usage(self) -> None:
+        """UT-ATC-09.05: ``attachment`` without ``<uid>`` is E_USAGE, exit 2."""
+        payload = self.assert_error(
+            2, self.run_cli(["attachment", "--index", "1"]), "E_USAGE", "attachment"
+        )
+        self.assertIn("uid", payload["error"]["message"].lower())
 
     def test_help_has_no_undeclared_flags(self) -> None:
         _, stdout, _ = self.run_cli(["--help"])
@@ -402,51 +465,6 @@ class HelpContractTests(_CliTestCase):
                 payload = self.json_object(stdout)
                 self.assertEqual(payload["error"]["code"], "E_USAGE")
                 self.assertIn("E_USAGE", stderr)
-
-    def test_ut_cli_07_01_show_requires_an_integer_uid(self) -> None:
-        """UT-CLI-07.01: ``show abc`` is E_USAGE "invalid uid ...: expected an integer"."""
-        self.assert_error(2, self.run_cli(["show"]), "E_USAGE")
-        payload = self.assert_error(
-            2, self.run_cli(["show", "abc"]), "E_USAGE", "show"
-        )
-        self.assertIn("invalid uid", payload["error"]["message"])
-        self.assertIn("expected an integer", payload["error"]["message"])
-        self.assertIn("'abc'", payload["error"]["message"])
-
-    def test_ut_cli_07_02_invalid_uid_is_rejected_before_home_config_and_store(self) -> None:
-        """UT-CLI-07.02: a bad uid creates no home, reads no config and opens no store."""
-        with tempfile.TemporaryDirectory(prefix="mailquery-uid-") as tmp:
-            missing_home = Path(tmp) / "home"
-            missing_root = Path(tmp) / "Mail"
-            self.assert_error(
-                2,
-                self.run_cli(
-                    ["show", "abc"], home=missing_home, mail_root=missing_root
-                ),
-                "E_USAGE",
-                "show",
-            )
-            self.assertFalse(missing_home.exists())
-
-            # An existing home with a broken config: still E_USAGE, nothing created.
-            broken_home = Path(tmp) / "broken-home"
-            write_config(broken_home, "[search]\nnot_a_key = 1\n")
-            self.assert_error(
-                2,
-                self.run_cli(["show", "abc"], home=broken_home, mail_root=missing_root),
-                "E_USAGE",
-                "show",
-            )
-            self.assertEqual(
-                sorted(path.name for path in broken_home.iterdir()), ["config.toml"]
-            )
-
-    def test_ut_cli_07_03_uid_zero_is_an_integer_that_is_not_found(self) -> None:
-        """UT-CLI-07.03: ``show 0`` is an integer: E_USAGE "was not found"."""
-        write_config(self.fx.home, DEFAULT_CONFIG)
-        payload = self.assert_error(2, self.run_cli(["show", "0"]), "E_USAGE", "show")
-        self.assertIn("was not found", payload["error"]["message"])
-        self.assertNotIn("invalid uid", payload["error"]["message"])
 
     def test_invalid_log_level_returns_usage_json(self) -> None:
         payload = self.assert_error(
@@ -1852,3 +1870,1093 @@ class PipeEncodingTests(unittest.TestCase):
                 self.assertTrue(result.stdout, result.stderr)
                 self.assertNotIn(b"\r", result.stdout)
                 self.assertNotIn(b"\r", result.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# M08 — ``attachment`` command and ``show.attachments`` (UT-ATC-01..10)
+# --------------------------------------------------------------------------- #
+
+from mailquery import search as search_module  # noqa: E402  (M08 test section)
+
+_ATTACHMENT_PLUGIN_LABEL = "Fake attachments"
+_ATTACHMENT_CAPABILITIES: dict = {
+    "network": True,
+    "readonly": "promise",
+    "body_local": False,
+    "attachments": "local",
+    "native_order": "text",
+}
+_ATTACHMENT_PLUGIN_UID = "abc123"
+
+
+def _attachment_scope(
+    *,
+    driver: str = "apple_mail",
+    account: str = ATTACHMENT_LABEL,
+    extra: str = "",
+) -> str:
+    """A config with the ``[scope]`` block the attachment double resolves against."""
+    return f"{extra}[scope.\"{driver}:{account}\"]\n"
+
+
+_ATTACHMENT_CONFIG = _attachment_scope()
+_DISABLED_CONFIG = _attachment_scope(extra="[attachments]\nenabled = false\n")
+
+
+class AttachmentTestBase(_CliTestCase):
+    """Shared helpers for the attachment command and ``show.attachments`` cases."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.addCleanup(cli_mod._close_logging_handlers)
+
+    def attachment_backend(self, **kwargs):
+        return FakeAttachmentBackend(**kwargs)
+
+    def run_attachment(self, argv, backend=None, *, config=_ATTACHMENT_CONFIG):
+        if config is not None:
+            write_config(self.fx.home, config)
+        backend = backend if backend is not None else self.attachment_backend()
+        return self.run_cli(argv, backend=backend)
+
+    def show_payload(self, backend=None, *, config_text=None, native_uid=None):
+        write_config(self.fx.home, config_text or _ATTACHMENT_CONFIG)
+        config = cli_mod.load_config(self.fx.home, registry=BackendRegistry())
+        backend = backend if backend is not None else self.attachment_backend()
+        uid = backend.native_uid if native_uid is None else native_uid
+        return search_module.run_show(backend, config, uid, driver=backend.driver)
+
+    def cache_file(self, name, index, *, uid=None):
+        uid = uid or f"apple_mail:{ATTACHMENT_NATIVE_UID}"
+        path = attachment_path(self.fx.home, uid, sanitize_name(name, index))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"cached bytes")
+        return path
+
+    def plugin_backend(self, **kwargs):
+        kwargs.setdefault("driver", ATTACHMENT_PLUGIN_DRIVER)
+        kwargs.setdefault("native_uid", _ATTACHMENT_PLUGIN_UID)
+        kwargs.setdefault("account_label", _ATTACHMENT_PLUGIN_LABEL)
+        kwargs.setdefault("capabilities", _ATTACHMENT_CAPABILITIES)
+        return FakeAttachmentBackend(**kwargs)
+
+    def plugin_registry(self, backend):
+        entry = FakeEntryPoint(ATTACHMENT_PLUGIN_DRIVER, plugin=backend)
+        registry = BackendRegistry(
+            platform=sys.platform,
+            entry_points=[*internal_entry_points(), entry],
+        )
+        return entry, registry
+
+    def run_plugin(self, argv, backend, *, config=None):
+        entry, registry = self.plugin_registry(backend)
+        if config is not None:
+            write_config(self.fx.home, config)
+        with mock.patch.object(cli_mod, "BackendRegistry", lambda *a, **k: registry):
+            result = self.run_cli(argv)
+        return entry, result
+
+    def log_text(self) -> str:
+        return (self.fx.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
+
+
+class AttachmentShowTests(AttachmentTestBase):
+    """UT-ATC-01 — ``show.attachments`` (AC-07)."""
+
+    SHOW_UID = "apple_mail:83143"
+
+    def test_ut_atc_01_01_three_attachments_have_stable_indexes(self) -> None:
+        """UT-ATC-01.01: three attachments ⇒ index 1..N and original names, cached_path null."""
+        backend = self.attachment_backend()
+        result = self.show_payload(backend)
+        self.assertEqual(
+            result["message"]["attachments"],
+            [
+                {"index": 1, "name": "factura.pdf", "cached_path": None},
+                {"index": 2, "name": "Factura Octubre 2026.pdf", "cached_path": None},
+                {"index": 3, "name": "recibo.pdf", "cached_path": None},
+            ],
+        )
+
+    def test_ut_atc_01_02_cached_path_of_a_regular_cached_file(self) -> None:
+        """UT-ATC-01.02: an existing regular cache file ⇒ absolute cached_path; otherwise null."""
+        backend = self.attachment_backend()
+        cached = self.cache_file("Factura Octubre 2026.pdf", 2)
+        attachments = self.show_payload(backend)["message"]["attachments"]
+        self.assertEqual(attachments[1]["cached_path"], str(cached))
+        self.assertTrue(os.path.isabs(attachments[1]["cached_path"]))
+        self.assertIsNone(attachments[0]["cached_path"])
+        self.assertIsNone(attachments[2]["cached_path"])
+
+    def test_ut_atc_01_03_unsafe_name_never_exposes_cached_path(self) -> None:
+        """UT-ATC-01.03: a blocked (unsafe) name ⇒ cached_path null even if a file exists."""
+        backend = self.attachment_backend(
+            attachments=[
+                {
+                    "index": 1,
+                    "name": "../invoice.pdf",
+                    "size_bytes": 4,
+                    "native_order_key": "1",
+                    "unavailable_reason": None,
+                }
+            ]
+        )
+        # A file exists at the deterministic cache path of the unsafe name.
+        path = self.cache_file("../invoice.pdf", 1)
+        self.assertTrue(path.is_file())
+        attachments = self.show_payload(backend)["message"]["attachments"]
+        self.assertEqual(
+            attachments,
+            [{"index": 1, "name": "../invoice.pdf", "cached_path": None}],
+        )
+
+    def test_ut_atc_01_04_show_never_writes(self) -> None:
+        """UT-ATC-01.04: show creates no cache, staging or state.json (2.0.1 side effects only)."""
+        before = set(self.fx.home.rglob("*")) if self.fx.home.exists() else set()
+        self.show_payload(self.attachment_backend())
+        after = set(self.fx.home.rglob("*")) if self.fx.home.exists() else set()
+        created = {path.relative_to(self.fx.home).as_posix() for path in after - before}
+        for relative in created:
+            self.assertTrue(
+                relative == "config.toml"
+                or relative.startswith("logs/")
+                or relative.startswith("locks/"),
+                f"show wrote an unexpected path: {relative}",
+            )
+        self.assertFalse((self.fx.home / "attachments").exists())
+        self.assertFalse((self.fx.home / "state.json").exists())
+        self.assertFalse((self.fx.home / "tmp").exists())
+
+    def test_ut_atc_01_05_driver_with_attachments_none_returns_empty(self) -> None:
+        """UT-ATC-01.05: a driver with ``attachments: "none"`` ⇒ ``[]``."""
+        capabilities = {"network": False, "readonly": "structural", "body_local": True,
+                        "attachments": "none", "native_order": "numeric"}
+        backend = self.attachment_backend(capabilities=capabilities)
+        self.assertEqual(self.show_payload(backend)["message"]["attachments"], [])
+
+    def test_ut_atc_01_06_smime_returns_empty_and_keeps_the_body_warning(self) -> None:
+        """UT-ATC-01.06: S/MIME ⇒ [] without W_ATTACHMENTS_UNAVAILABLE, keeping W_BODY_*."""
+        backend = self.attachment_backend(
+            attachments_error=MailqueryError(
+                "E_ATTACHMENT_UNREADABLE",
+                "attachments of message apple_mail:83143 are S/MIME protected",
+            ),
+            body_readable=False,
+            body_warnings=[
+                "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
+            ],
+        )
+        result = self.show_payload(backend)
+        self.assertEqual(result["message"]["attachments"], [])
+        self.assertEqual(
+            result["warnings"],
+            ["W_BODY_UNREADABLE: S/MIME encrypted content is not supported"],
+        )
+
+    def test_ut_atc_01_07_show_and_attachment_share_indexes(self) -> None:
+        """UT-ATC-01.07: the ``index`` of show matches attachment for the same message."""
+        backend = self.attachment_backend()
+        shown = self.show_payload(backend)["message"]["attachments"]
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.SHOW_UID, "--all"], backend
+        )
+        self.assertEqual(code, 0)
+        saved = self.json_object(stdout)["attachments"]
+        self.assertEqual(
+            [entry["index"] for entry in shown],
+            [entry["index"] for entry in saved],
+        )
+        self.assertEqual(
+            [entry["name"] for entry in shown],
+            [entry["original_name"] for entry in saved],
+        )
+
+    def test_ut_atc_01_08_attachments_enabled_false_does_not_affect_show(self) -> None:
+        """UT-ATC-01.08: ``[attachments].enabled = false`` does not affect show."""
+        backend = self.attachment_backend()
+        result = self.show_payload(backend, config_text=_DISABLED_CONFIG)
+        self.assertEqual(len(result["message"]["attachments"]), 3)
+
+    def test_ut_atc_01_09_non_regular_cache_files_are_not_cache(self) -> None:
+        """UT-ATC-01.09: symlink/directory in the cache ⇒ cached_path null (regular files only)."""
+        backend = self.attachment_backend()
+        directory = attachment_path(
+            self.fx.home,
+            self.SHOW_UID,
+            sanitize_name("factura.pdf", 1),
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        attachments = self.show_payload(backend)["message"]["attachments"]
+        self.assertIsNone(attachments[0]["cached_path"])
+        if os.name != "nt":
+            target = self.cache_file("cache-target.bin", 9)
+            symlink = attachment_path(
+                self.fx.home,
+                self.SHOW_UID,
+                sanitize_name("Factura Octubre 2026.pdf", 2),
+            )
+            symlink.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(target, symlink)
+            attachments = self.show_payload(backend)["message"]["attachments"]
+            self.assertIsNone(attachments[1]["cached_path"])
+
+    def test_ut_atc_01_10_show_does_not_inspect_content(self) -> None:
+        """UT-ATC-01.10: an MZ attachment with a regular cache file still exposes cached_path."""
+        backend = self.attachment_backend(
+            attachments=[
+                {
+                    "index": 1,
+                    "name": "presupuesto.pdf",
+                    "size_bytes": 2,
+                    "native_order_key": "1",
+                    "unavailable_reason": None,
+                }
+            ]
+        )
+        path = attachment_path(
+            self.fx.home, self.SHOW_UID, sanitize_name("presupuesto.pdf", 1)
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"MZ")
+        attachments = self.show_payload(backend)["message"]["attachments"]
+        self.assertEqual(attachments[0]["cached_path"], str(path))
+
+
+class AttachmentArgumentTests(AttachmentTestBase):
+    """UT-ATC-02 — arguments, uid and early precedence (AC-08)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_02_01_exactly_one_mode_is_required(self) -> None:
+        """UT-ATC-02.01: no mode or both ⇒ E_USAGE with the §11.3 literal text."""
+        for argv in (
+            ["attachment", self.UID],
+            ["attachment", self.UID, "--index", "1", "--all"],
+        ):
+            with self.subTest(argv=argv):
+                payload = self.assert_error(
+                    2, self.run_attachment(argv), "E_USAGE", "attachment"
+                )
+                self.assertEqual(
+                    payload["error"]["message"],
+                    "attachment requires exactly one of --index or --all",
+                )
+
+    def test_ut_atc_02_02_invalid_index_values(self) -> None:
+        """UT-ATC-02.02: ``--index`` 0/-1/abc/1.5 ⇒ the §11.3 literal error."""
+        for value in ("0", "-1", "abc", "1.5"):
+            with self.subTest(value=value):
+                payload = self.assert_error(
+                    2,
+                    self.run_attachment(
+                        ["attachment", self.UID, "--index", value]
+                    ),
+                    "E_USAGE",
+                    "attachment",
+                )
+                self.assertEqual(
+                    payload["error"]["message"],
+                    f"invalid --index {value}: expected a positive integer (1 or greater)",
+                )
+
+    def test_ut_atc_02_03_uid_syntax_and_driver_are_validated_before_home(self) -> None:
+        """UT-ATC-02.03: malformed uid/driver are rejected before the home, config or store."""
+        with tempfile.TemporaryDirectory(prefix="mailquery-att-") as tmp:
+            missing_home = Path(tmp) / "home"
+            for argv, expected in (
+                (["attachment", "abc", "--index", "1"], "E_USAGE"),
+                (["attachment", "nope:x", "--index", "1"], "E_DRIVER_UNKNOWN"),
+                (["show", "abc"], "E_USAGE"),
+                (["show", "nope:x"], "E_DRIVER_UNKNOWN"),
+            ):
+                with self.subTest(argv=argv):
+                    backend = self.attachment_backend()
+                    payload = self.assert_error(
+                        2,
+                        self.run_cli(argv, home=missing_home, backend=backend),
+                        expected,
+                        argv[0],
+                    )
+                    self.assertFalse(missing_home.exists(), "the home must not be created")
+                    self.assertEqual(backend.calls, [])
+                    self.assertFalse((missing_home / "attachments").exists())
+
+    def test_ut_atc_02_04_config_errors(self) -> None:
+        """UT-ATC-02.04: invalid config ⇒ E_CONFIG_INVALID; unknown ``[scope]`` driver ⇒ E_DRIVER_UNKNOWN."""
+        backend = self.attachment_backend()
+        payload = self.assert_error(
+            2,
+            self.run_attachment(
+                ["attachment", self.UID, "--index", "1"],
+                backend,
+                config="[search]\nnot_a_key = 1\n",
+            ),
+            "E_CONFIG_INVALID",
+            "attachment",
+        )
+        self.assertTrue(payload["error"]["hint"])
+        payload = self.assert_error(
+            2,
+            self.run_attachment(
+                ["attachment", self.UID, "--index", "1"],
+                backend,
+                config='[scope."nope:someone@example.com"]\n',
+            ),
+            "E_DRIVER_UNKNOWN",
+            "attachment",
+        )
+        self.assertIn("nope", payload["error"]["message"])
+
+    def test_ut_atc_02_05_enabled_false_is_rejected_before_the_store(self) -> None:
+        """UT-ATC-02.05: ``enabled = false`` ⇒ E_ATTACHMENTS_DISABLED (exit 2) before the store."""
+        backend = self.attachment_backend()
+        payload = self.assert_error(
+            2,
+            self.run_attachment(
+                ["attachment", self.UID, "--index", "1"], backend, config=_DISABLED_CONFIG
+            ),
+            "E_ATTACHMENTS_DISABLED",
+            "attachment",
+        )
+        self.assertIn("[attachments].enabled", payload["error"]["hint"])
+        self.assertNotIn("find_message", backend.calls)
+        # show is not affected.
+        with mock.patch.object(
+            cli_mod, "run_show", return_value={"message": {}, "warnings": []}
+        ) as show_mock:
+            code, stdout, _ = self.run_attachment(
+                ["show", "83143"], backend, config=_DISABLED_CONFIG
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(self.json_object(stdout)["ok"])
+        show_mock.assert_called_once()
+
+    def test_ut_atc_02_06_installed_driver_not_declared(self) -> None:
+        """UT-ATC-02.06: an installed driver not declared ⇒ E_ACCOUNT_NOT_IN_SCOPE without loading it."""
+        backend = self.plugin_backend()
+        entry, _registry = self.plugin_registry(backend)
+        config = _ATTACHMENT_CONFIG  # declares apple_mail only; graph stays out of scope
+        payload = self.assert_error(
+            2,
+            self.run_plugin(
+                ["attachment", f"{ATTACHMENT_PLUGIN_DRIVER}:{_ATTACHMENT_PLUGIN_UID}",
+                 "--index", "1"],
+                backend,
+                config=config,
+            )[1],
+            "E_ACCOUNT_NOT_IN_SCOPE",
+            "attachment",
+        )
+        self.assertIn("config.toml", payload["error"]["hint"])
+        self.assertEqual(entry.load_calls, 0, "the undeclared driver must not be loaded")
+        self.assertEqual(backend.calls, [])
+
+    def test_ut_atc_02_07_attachments_none_is_rejected_before_the_store(self) -> None:
+        """UT-ATC-02.07: ``attachments: "none"`` ⇒ E_ATTACHMENT_UNAVAILABLE (unsupported) pre-store."""
+        capabilities = {"network": False, "readonly": "structural", "body_local": True,
+                        "attachments": "none", "native_order": "numeric"}
+        backend = self.attachment_backend(capabilities=capabilities)
+        payload = self.assert_error(
+            3,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_ATTACHMENT_UNAVAILABLE",
+            "attachment",
+        )
+        self.assertIn("unsupported", payload["error"]["hint"].lower() + payload["error"]["message"].lower())
+        self.assertNotIn("find_message", backend.calls)
+        self.assertNotIn("attachments", backend.calls)
+
+    def test_ut_atc_02_08_legacy_unprefixed_uid_is_accepted(self) -> None:
+        """UT-ATC-02.08: a legacy unprefixed uid resolves with the native driver and is emitted prefixed."""
+        backend = self.attachment_backend()
+        code, stdout, _ = self.run_attachment(
+            ["attachment", str(ATTACHMENT_NATIVE_UID), "--index", "1"], backend
+        )
+        self.assertEqual(code, 0)
+        payload = self.json_object(stdout)
+        self.assertEqual(payload["uid"], f"apple_mail:{ATTACHMENT_NATIVE_UID}")
+        # The Windows form: an uppercase hexadecimal EntryID with the outlook driver.
+        outlook_caps = {"network": False, "readonly": "structural", "body_local": True,
+                        "attachments": "local", "native_order": "text"}
+        outlook_backend = self.attachment_backend(
+            driver="outlook",
+            capabilities=outlook_caps,
+            native_uid="ABCDEF1234",
+            account_label="PST (Fake)",
+        )
+        code, stdout, _ = self.run_attachment(
+            ["attachment", "ABCDEF1234", "--index", "1"],
+            outlook_backend,
+            config=_attachment_scope(driver="outlook", account="PST (Fake)"),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            self.json_object(stdout)["uid"], "outlook:ABCDEF1234"
+        )
+
+    def test_ut_atc_02_09_adjacent_row_precedence(self) -> None:
+        """UT-ATC-02.09: §11.3 row order is respected on its adjacent-row boundaries."""
+        # Row 10 (index range) before row 11 (name blocking).
+        backend = self.attachment_backend(
+            attachments=[
+                {"index": 1, "name": "CON.fdp.exe", "size_bytes": 2,
+                 "native_order_key": "1", "unavailable_reason": None},
+            ]
+        )
+        payload = self.assert_error(
+            2,
+            self.run_attachment(["attachment", self.UID, "--index", "9"], backend),
+            "E_USAGE",
+            "attachment",
+        )
+        self.assertIn("out of range", payload["error"]["message"])
+        # Row 4 (enabled) before row 5 (capabilities).
+        capabilities = {"network": False, "readonly": "structural", "body_local": True,
+                        "attachments": "none", "native_order": "numeric"}
+        backend = self.attachment_backend(capabilities=capabilities)
+        self.assert_error(
+            2,
+            self.run_attachment(
+                ["attachment", self.UID, "--index", "1"], backend, config=_DISABLED_CONFIG
+            ),
+            "E_ATTACHMENTS_DISABLED",
+            "attachment",
+        )
+        # Row 8 (S/MIME) before row 10 (index range).
+        backend = self.attachment_backend(
+            attachments_error=MailqueryError(
+                "E_ATTACHMENT_UNREADABLE", "message is S/MIME protected"
+            )
+        )
+        self.assert_error(
+            3,
+            self.run_attachment(["attachment", self.UID, "--index", "9"], backend),
+            "E_ATTACHMENT_UNREADABLE",
+            "attachment",
+        )
+        # Row 2 (installed driver) before row 4 (enabled).
+        self.assert_error(
+            2,
+            self.run_attachment(
+                ["attachment", "nope:x", "--index", "1"],
+                self.attachment_backend(),
+                config=_DISABLED_CONFIG,
+            ),
+            "E_DRIVER_UNKNOWN",
+            "attachment",
+        )
+
+
+class AttachmentValidationTests(AttachmentTestBase):
+    """UT-ATC-03 — validations with the store open (AC-08)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_03_01_missing_message_is_usage(self) -> None:
+        """UT-ATC-03.01: a missing/deleted/hidden message ⇒ E_USAGE "was not found"."""
+        backend = self.attachment_backend(missing=True)
+        payload = self.assert_error(
+            2,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_USAGE",
+            "attachment",
+        )
+        self.assertEqual(
+            payload["error"]["message"], f"message uid {self.UID} was not found"
+        )
+        self.assertIn("mailquery search", payload["error"]["hint"])
+        self.assertIn("find_message", backend.calls)
+        # show keeps its own message for the same condition.
+        payload = self.assert_error(
+            2,
+            self.run_attachment(["show", str(ATTACHMENT_NATIVE_UID)], backend),
+            "E_USAGE",
+            "show",
+        )
+        self.assertIn("was not found", payload["error"]["message"])
+        # A legacy integer uid (UT-CLI-07.03, absorbed): 0 is an integer that is
+        # simply not found; it is not an invalid uid.
+        payload = self.assert_error(
+            2, self.run_attachment(["show", "0"], backend), "E_USAGE", "show"
+        )
+        self.assertIn("was not found", payload["error"]["message"])
+        self.assertNotIn("invalid uid", payload["error"]["message"])
+
+    def test_ut_atc_03_02_message_without_attachments_is_usage(self) -> None:
+        """UT-ATC-03.02: no attachments (no S/MIME signal) ⇒ E_USAGE "has no attachments"."""
+        backend = self.attachment_backend(attachments=[])
+        payload = self.assert_error(
+            2,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_USAGE",
+            "attachment",
+        )
+        self.assertEqual(
+            payload["error"]["message"], f"message {self.UID} has no attachments"
+        )
+
+    def test_ut_atc_03_03_smime_before_the_empty_list_check(self) -> None:
+        """UT-ATC-03.03: an S/MIME/unreadable signal wins over "0 attachments" (exit 3)."""
+        for error in (
+            MailqueryError("E_ATTACHMENT_UNREADABLE", "message is S/MIME protected"),
+        ):
+            with self.subTest(error=error.message):
+                backend = self.attachment_backend(
+                    attachments=[], attachments_error=error
+                )
+                payload = self.assert_error(
+                    3,
+                    self.run_attachment(
+                        ["attachment", self.UID, "--index", "1"], backend
+                    ),
+                    "E_ATTACHMENT_UNREADABLE",
+                    "attachment",
+                )
+                self.assertNotIn("has no attachments", payload["error"]["message"])
+
+    def test_ut_atc_03_04_index_out_of_range_text(self) -> None:
+        """UT-ATC-03.04: ``--index N > M`` ⇒ the §11.5 example G message and hint."""
+        backend = self.attachment_backend()
+        payload = self.assert_error(
+            2,
+            self.run_attachment(["attachment", self.UID, "--index", "9"], backend),
+            "E_USAGE",
+            "attachment",
+        )
+        self.assertEqual(
+            payload["error"]["message"],
+            f"attachment index 9 is out of range: message {self.UID} has "
+            "3 attachment(s) (valid: 1..3)",
+        )
+        self.assertEqual(
+            payload["error"]["hint"],
+            f"run `mailquery show {self.UID}` to list the attachment indexes",
+        )
+
+    def test_ut_atc_03_05_valid_index_and_all_recover_the_attachments(self) -> None:
+        """UT-ATC-03.05: a valid ``--index`` and ``--all`` recover the requested attachments."""
+        backend = self.attachment_backend()
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.UID, "--index", "2"], backend
+        )
+        self.assertEqual(code, 0)
+        payload = self.json_object(stdout)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["attachments"][0]["index"], 2)
+        self.assertTrue(os.path.isfile(payload["attachments"][0]["path"]))
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.UID, "--all"], backend
+        )
+        self.assertEqual(code, 0)
+        payload = self.json_object(stdout)
+        self.assertEqual([entry["index"] for entry in payload["attachments"]], [1, 2, 3])
+        for entry in payload["attachments"]:
+            self.assertTrue(os.path.isfile(entry["path"]))
+
+    def test_ut_atc_03_06_all_reports_the_first_failure_in_index_order(self) -> None:
+        """UT-ATC-03.06: ``--all`` reports the first failure by index and returns no partials."""
+        backend = self.attachment_backend(
+            stream_errors={
+                1: PluginError(Reason.NOT_LOCAL, "not local"),
+                2: PluginError(Reason.CORRUPT, "corrupt"),
+            }
+        )
+        payload = self.assert_error(
+            3,
+            self.run_attachment(["attachment", self.UID, "--all"], backend),
+            "E_ATTACHMENT_UNAVAILABLE",
+            "attachment",
+        )
+        self.assertIn("attachment 1", payload["error"]["message"])
+        self.assertNotIn("attachment 2", payload["error"]["message"])
+        self.assertFalse((self.fx.home / "attachments").exists())
+
+    def test_ut_atc_03_07_unrequested_attachments_are_not_evaluated(self) -> None:
+        """UT-ATC-03.07: ``--index`` does not inspect unrequested attachments."""
+        backend = self.attachment_backend(
+            stream_errors={1: PluginError(Reason.NOT_LOCAL, "not local")}
+        )
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.UID, "--index", "2"], backend
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(self.json_object(stdout)["ok"])
+        self.assertEqual(set(backend.stream_calls), {2})
+
+
+class AttachmentJsonCacheTests(AttachmentTestBase):
+    """UT-ATC-04 — JSON, cache and ``--force`` through the CLI (AC-12)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_04_01_exact_json_contract(self) -> None:
+        """UT-ATC-04.01: the §11.2 JSON shape with an absolute output_dir and eight fields."""
+        backend = self.attachment_backend()
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.UID, "--index", "2"], backend
+        )
+        self.assertEqual(code, 0)
+        payload = self.json_object(stdout)
+        self.assertEqual(
+            list(payload),
+            ["ok", "command", "generated_at", "uid", "output_dir", "count",
+             "attachments", "warnings"],
+        )
+        self.assertEqual(payload["command"], "attachment")
+        self.assertEqual(payload["uid"], self.UID)
+        self.assertTrue(os.path.isabs(payload["output_dir"]))
+        self.assertEqual(
+            payload["output_dir"],
+            str(message_dir(self.fx.home, self.UID)),
+        )
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["warnings"], [])
+        (entry,) = payload["attachments"]
+        self.assertEqual(
+            list(entry),
+            ["index", "original_name", "sanitized_name", "saved", "cached",
+             "path", "size_bytes", "sha256"],
+        )
+        self.assertEqual(entry["index"], 2)
+        self.assertEqual(entry["original_name"], "Factura Octubre 2026.pdf")
+        self.assertEqual(entry["sanitized_name"], "02_Factura_Octubre_2026.pdf")
+        self.assertIs(entry["saved"], True)
+        self.assertIs(entry["cached"], False)
+        self.assertEqual(
+            entry["path"],
+            str(message_dir(self.fx.home, self.UID) / "02_Factura_Octubre_2026.pdf"),
+        )
+        self.assertEqual(entry["size_bytes"], len(b"fake attachment 2"))
+        self.assertEqual(len(entry["sha256"]), 64)
+
+    def test_ut_atc_04_02_cache_hit_and_force(self) -> None:
+        """UT-ATC-04.02: first run cached:false; second cached:true; ``--force`` cached:false."""
+        backend = self.attachment_backend()
+        argv = ["attachment", self.UID, "--index", "1"]
+        first = self.json_object(self.run_attachment(argv, backend)[1])
+        self.assertIs(first["attachments"][0]["cached"], False)
+        second = self.json_object(self.run_attachment(argv, backend)[1])
+        self.assertIs(second["attachments"][0]["cached"], True)
+        self.assertEqual(
+            second["attachments"][0]["size_bytes"],
+            first["attachments"][0]["size_bytes"],
+        )
+        self.assertEqual(
+            second["attachments"][0]["sha256"], first["attachments"][0]["sha256"]
+        )
+        forced = self.json_object(
+            self.run_attachment([*argv, "--force"], backend)[1]
+        )
+        self.assertIs(forced["attachments"][0]["cached"], False)
+        self.assertEqual(
+            forced["attachments"][0]["sha256"], first["attachments"][0]["sha256"]
+        )
+
+    def test_ut_atc_04_03_blocked_message_text_and_no_files(self) -> None:
+        """UT-ATC-04.03: a blocked message ⇒ E_ATTACHMENT_BLOCKED (exit 4) with §11.5 C/D text."""
+        backend = self.attachment_backend(
+            attachments=[
+                {"index": 1, "name": "factura.pdf", "size_bytes": 8,
+                 "native_order_key": "1", "unavailable_reason": None},
+                {"index": 2, "name": "factura.pdf.exe", "size_bytes": 8,
+                 "native_order_key": "2", "unavailable_reason": None},
+            ]
+        )
+        payload = self.assert_error(
+            4,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_ATTACHMENT_BLOCKED",
+            "attachment",
+        )
+        self.assertEqual(
+            payload["error"]["message"],
+            f"message {self.UID} was blocked: attachment 2 ('factura.pdf.exe') "
+            "has a dangerous filename pattern",
+        )
+        self.assertEqual(
+            payload["error"]["hint"],
+            "notify the user to inspect the message and its attachments in the "
+            "email client at their own risk; do not retry the same request",
+        )
+        self.assertFalse((self.fx.home / "attachments").exists())
+
+    def test_ut_atc_04_04_failures_return_no_partial_results(self) -> None:
+        """UT-ATC-04.04: a limit/availability failure returns no partial records."""
+        backend = self.attachment_backend(
+            stream_errors={2: PluginError(Reason.CORRUPT, "corrupt")}
+        )
+        self.assert_error(
+            3,
+            self.run_attachment(["attachment", self.UID, "--all"], backend),
+            "E_ATTACHMENT_UNREADABLE",
+            "attachment",
+        )
+        self.assertFalse((self.fx.home / "attachments").exists())
+
+    def test_ut_atc_04_05_all_count_matches_the_returned_attachments(self) -> None:
+        """UT-ATC-04.05: ``--all`` returns ``count`` = number of attachments returned."""
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.UID, "--all"], self.attachment_backend()
+        )
+        self.assertEqual(code, 0)
+        payload = self.json_object(stdout)
+        self.assertEqual(payload["count"], len(payload["attachments"]))
+
+    def test_ut_atc_04_06_engine_io_and_permission_errors_keep_their_code(self) -> None:
+        """UT-ATC-04.06: E_IO/E_PERMISSION from the engine exit 3 and never become E_INTERNAL."""
+        for code_name, exit_code in (("E_IO", 3), ("E_PERMISSION", 3)):
+            with self.subTest(code=code_name):
+                error = MailqueryError(code_name, "engine failure", "fix it")
+                with mock.patch.object(
+                    cli_mod, "AttachmentsEngine"
+                ) as engine_cls:
+                    engine_cls.return_value.recover.side_effect = error
+                    payload = self.assert_error(
+                        exit_code,
+                        self.run_attachment(
+                            ["attachment", self.UID, "--index", "1"],
+                            self.attachment_backend(),
+                        ),
+                        code_name,
+                        "attachment",
+                    )
+                self.assertTrue(payload["error"]["hint"])
+                self.assertFalse((self.fx.home / "attachments").exists())
+
+
+class AttachmentConfigTests(AttachmentTestBase):
+    """UT-ATC-05 — ``[attachments]`` and config (AC-14)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_05_01_enabled_false_and_show_unaffected(self) -> None:
+        """UT-ATC-05.01: ``enabled=false`` ⇒ E_ATTACHMENTS_DISABLED before the store; show intact."""
+        backend = self.attachment_backend()
+        self.assert_error(
+            2,
+            self.run_attachment(
+                ["attachment", self.UID, "--index", "1"], backend, config=_DISABLED_CONFIG
+            ),
+            "E_ATTACHMENTS_DISABLED",
+            "attachment",
+        )
+        self.assertNotIn("find_message", backend.calls)
+        code, stdout, _ = self.run_attachment(
+            ["show", str(ATTACHMENT_NATIVE_UID)], backend, config=_DISABLED_CONFIG
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(self.json_object(stdout)["ok"])
+
+    def test_ut_atc_05_02_invalid_attachment_limits_are_config_errors(self) -> None:
+        """UT-ATC-05.02: invalid ranges and max_total < max_file ⇒ E_CONFIG_INVALID."""
+        for extra in (
+            "[attachments]\nmax_file_size_mb = 0\n",
+            "[attachments]\nmax_file_size_mb = 600\n",
+            "[attachments]\nmax_total_size_mb = 5\nmax_file_size_mb = 10\n",
+        ):
+            with self.subTest(extra=extra):
+                self.assert_error(
+                    2,
+                    self.run_attachment(
+                        ["attachment", self.UID, "--index", "1"],
+                        config=extra + _ATTACHMENT_CONFIG,
+                    ),
+                    "E_CONFIG_INVALID",
+                    "attachment",
+                )
+
+    def test_ut_atc_05_03_custom_limits_are_applied(self) -> None:
+        """UT-ATC-05.03: custom valid values are applied by the command."""
+        python_mib = 1_048_576
+        backend = self.attachment_backend(
+            attachments=[
+                {"index": 1, "name": "big.pdf", "size_bytes": 2 * python_mib,
+                 "native_order_key": "1", "unavailable_reason": None},
+            ]
+        )
+        payload = self.assert_error(
+            4,
+            self.run_attachment(
+                ["attachment", self.UID, "--index", "1"],
+                backend,
+                config=_attachment_scope(extra="[attachments]\nmax_file_size_mb = 1\nmax_total_size_mb = 10\n"),
+            ),
+            "E_ATTACHMENT_TOO_LARGE",
+            "attachment",
+        )
+        self.assertIn("max_file_size_mb=1", payload["error"]["message"])
+        self.assertFalse((self.fx.home / "attachments").exists())
+
+
+class AttachmentReasonTests(AttachmentTestBase):
+    """UT-ATC-06 — availability, reasons and S/MIME (AC-15)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_06_01_unavailable_reasons(self) -> None:
+        """UT-ATC-06.01: not_local/not_downloaded/unsupported/network ⇒ the §11.7 message/hint."""
+        cases = {
+            "not_local": "is not available in the local store",
+            "not_downloaded": "is not available in the local store",
+            "unsupported": "cannot be recovered by driver 'apple_mail'",
+            "network": "could not be retrieved from its origin",
+        }
+        for reason, fragment in cases.items():
+            with self.subTest(reason=reason):
+                backend = self.attachment_backend(
+                    attachments=[
+                        {"index": 1, "name": "factura.pdf", "size_bytes": 8,
+                         "native_order_key": "1", "unavailable_reason": reason},
+                    ]
+                )
+                payload = self.assert_error(
+                    3,
+                    self.run_attachment(
+                        ["attachment", self.UID, "--index", "1"], backend
+                    ),
+                    "E_ATTACHMENT_UNAVAILABLE",
+                    "attachment",
+                )
+                self.assertIn(fragment, payload["error"]["message"])
+                self.assertTrue(payload["error"]["hint"])
+                self.assertFalse((self.fx.home / "attachments").exists())
+
+    def test_ut_atc_06_02_unreadable_never_becomes_no_attachments(self) -> None:
+        """UT-ATC-06.02: S/MIME/corrupt/unreadable ⇒ E_ATTACHMENT_UNREADABLE, never E_USAGE."""
+        # Message-level signal (convention C8): attachments() raises the protocol error.
+        backend = self.attachment_backend(
+            attachments=[],
+            attachments_error=MailqueryError(
+                "E_ATTACHMENT_UNREADABLE", "message is S/MIME protected"
+            ),
+        )
+        self.assert_error(
+            3,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_ATTACHMENT_UNREADABLE",
+            "attachment",
+        )
+        for reason in ("corrupt", "unreadable"):
+            with self.subTest(reason=reason):
+                backend = self.attachment_backend(
+                    stream_errors={1: PluginError(reason, "bad bytes")}
+                )
+                self.assert_error(
+                    3,
+                    self.run_attachment(
+                        ["attachment", self.UID, "--index", "1"], backend
+                    ),
+                    "E_ATTACHMENT_UNREADABLE",
+                    "attachment",
+                )
+
+    def test_ut_atc_06_03_attachments_none_is_rejected_before_the_store(self) -> None:
+        """UT-ATC-06.03: ``attachments: "none"`` ⇒ E_ATTACHMENT_UNAVAILABLE before the store."""
+        capabilities = {"network": False, "readonly": "structural", "body_local": True,
+                        "attachments": "none", "native_order": "numeric"}
+        backend = self.attachment_backend(capabilities=capabilities)
+        self.assert_error(
+            3,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_ATTACHMENT_UNAVAILABLE",
+            "attachment",
+        )
+        self.assertNotIn("find_message", backend.calls)
+
+    def test_ut_atc_06_04_empty_attachment_is_saved(self) -> None:
+        """UT-ATC-06.04: a 0-byte attachment is saved with size 0 and the empty SHA-256."""
+        backend = self.attachment_backend(
+            attachments=[
+                {"index": 1, "name": "empty.txt", "size_bytes": 0,
+                 "native_order_key": "1", "unavailable_reason": None},
+            ],
+            stream_chunks={1: [b""]},
+        )
+        code, stdout, _ = self.run_attachment(
+            ["attachment", self.UID, "--index", "1"], backend
+        )
+        self.assertEqual(code, 0)
+        (entry,) = self.json_object(stdout)["attachments"]
+        self.assertEqual(entry["size_bytes"], 0)
+        self.assertEqual(
+            entry["sha256"],
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
+        self.assertEqual(os.path.getsize(entry["path"]), 0)
+
+
+class AttachmentTimeoutTests(AttachmentTestBase):
+    """UT-ATC-07 — extraction timeout (AC-17)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_07_01_extraction_deadline_is_enforced(self) -> None:
+        """UT-ATC-07.01: an expired 120 s deadline ⇒ E_CLIENT_TIMEOUT (3), no retry, clean staging."""
+        self.assertEqual(EXTRACTION_TIMEOUT_SECONDS, 120.0)
+        backend = self.attachment_backend()
+        with mock.patch.object(cli_mod, "EXTRACTION_TIMEOUT_SECONDS", 0.0):
+            self.assert_error(
+                3,
+                self.run_attachment(
+                    ["attachment", self.UID, "--index", "1"], backend
+                ),
+                "E_CLIENT_TIMEOUT",
+                "attachment",
+            )
+        self.assertFalse((self.fx.home / "attachments").exists())
+        staging = self.fx.home / "tmp" / "staging"
+        self.assertFalse(staging.exists() and any(staging.iterdir()))
+
+    def test_ut_atc_07_02_timeout_writes_no_state_or_cache(self) -> None:
+        """UT-ATC-07.02: the timeout writes no state.json and no partial cache file."""
+        backend = self.attachment_backend(attachments=ATTACHMENT_DEFAULT_ROWS)
+        with mock.patch.object(cli_mod, "EXTRACTION_TIMEOUT_SECONDS", 0.0):
+            self.assert_error(
+                3,
+                self.run_attachment(["attachment", self.UID, "--all"], backend),
+                "E_CLIENT_TIMEOUT",
+                "attachment",
+            )
+        self.assertFalse((self.fx.home / "state.json").exists())
+        self.assertFalse((self.fx.home / "attachments").exists())
+
+
+class AttachmentLogTests(AttachmentTestBase):
+    """UT-ATC-08 — log of the attachment command (AC-19)."""
+
+    UID = "apple_mail:83143"
+
+    def test_ut_atc_08_01_event_end_has_the_attachment_counts(self) -> None:
+        """UT-ATC-08.01: ``event=end`` of attachment with exit_code, count, cached, bytes, duration_ms."""
+        import re
+
+        backend = self.attachment_backend()
+        self.run_attachment(["attachment", self.UID, "--index", "1"], backend)
+        self.run_attachment(["attachment", self.UID, "--index", "1"], backend)
+        log = self.log_text()
+        cached = re.findall(
+            r"event=end command=attachment exit_code=0 count=1 cached=1 "
+            r"bytes=\d+ duration_ms=\d+",
+            log,
+        )
+        miss = re.findall(
+            r"event=end command=attachment exit_code=0 count=1 cached=0 "
+            r"bytes=\d+ duration_ms=\d+",
+            log,
+        )
+        self.assertEqual((len(miss), len(cached)), (1, 1), log)
+        self.assertNotIn("truncated=", log)
+
+    def test_ut_atc_08_02_log_has_no_pii(self) -> None:
+        """UT-ATC-08.02: the log records no uid, native_id, names, paths, accounts or terms."""
+        backend = self.attachment_backend()
+        self.run_attachment(["attachment", self.UID, "--all"], backend)
+        log = self.log_text()
+        for forbidden in (
+            "83143",
+            self.UID,
+            "factura",
+            "Factura",
+            "/attachments/",
+            "attachment@fixture.example",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, log)
+
+    def test_ut_atc_08_03_event_start_is_preserved(self) -> None:
+        """UT-ATC-08.03: ``event=start`` keeps command, backend and drivers."""
+        self.run_attachment(
+            ["attachment", self.UID, "--index", "1"], self.attachment_backend()
+        )
+        log = self.log_text()
+        self.assertIn(
+            "event=start command=attachment backend=apple_mail drivers=apple_mail",
+            log,
+        )
+
+    def test_ut_atc_08_04_failure_logs_error_without_end(self) -> None:
+        """UT-ATC-08.04: a failed attachment logs ``event=error`` and no ``event=end`` (D7)."""
+        backend = self.attachment_backend(
+            attachments=[
+                {"index": 1, "name": "install.sh", "size_bytes": 4,
+                 "native_order_key": "1", "unavailable_reason": None},
+            ]
+        )
+        self.assert_error(
+            4,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_ATTACHMENT_BLOCKED",
+            "attachment",
+        )
+        log = self.log_text()
+        self.assertIn("event=error command=attachment code=E_ATTACHMENT_BLOCKED", log)
+        self.assertNotIn("event=end command=attachment", log)
+
+
+class AttachmentPluginTests(AttachmentTestBase):
+    """UT-ATC-10 — attachment with a declared external driver (AC-07/AC-15)."""
+
+    PLUGIN_UID = f"{ATTACHMENT_PLUGIN_DRIVER}:{_ATTACHMENT_PLUGIN_UID}"
+    CONFIG = _attachment_scope(
+        driver=ATTACHMENT_PLUGIN_DRIVER, account=_ATTACHMENT_PLUGIN_LABEL
+    )
+
+    def test_ut_atc_10_01_local_plugin_recovers_one_attachment(self) -> None:
+        """UT-ATC-10.01: a declared ``attachments: "local"`` plugin returns the full contract."""
+        backend = self.plugin_backend()
+        entry, result = self.run_plugin(
+            ["attachment", self.PLUGIN_UID, "--index", "1"], backend, config=self.CONFIG
+        )
+        code, stdout, stderr = result
+        self.assertEqual((code, stderr), (0, ""))
+        payload = self.json_object(stdout)
+        self.assertEqual(payload["uid"], self.PLUGIN_UID)
+        self.assertEqual(payload["count"], 1)
+        (attachment,) = payload["attachments"]
+        self.assertEqual(attachment["index"], 1)
+        self.assertEqual(
+            attachment["path"],
+            str(message_dir(self.fx.home, self.PLUGIN_UID) / "01_factura.pdf"),
+        )
+        self.assertTrue(os.path.isfile(attachment["path"]))
+        self.assertGreaterEqual(entry.load_calls, 1)
+
+    def test_ut_atc_10_02_local_plugin_all(self) -> None:
+        """UT-ATC-10.02: ``--all`` with the plugin returns every local attachment and the count."""
+        backend = self.plugin_backend()
+        code, stdout, _ = self.run_plugin(
+            ["attachment", self.PLUGIN_UID, "--all"], backend, config=self.CONFIG
+        )[1]
+        self.assertEqual(code, 0)
+        payload = self.json_object(stdout)
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual([entry["index"] for entry in payload["attachments"]], [1, 2, 3])
+
+    def test_ut_atc_10_03_remote_plugin_cannot_materialize(self) -> None:
+        """UT-ATC-10.03: ``attachments: "remote"`` ⇒ E_ATTACHMENT_UNAVAILABLE (unsupported), no store."""
+        capabilities = {"network": True, "readonly": "promise", "body_local": True,
+                        "attachments": "remote", "native_order": "text"}
+        backend = self.plugin_backend(capabilities=capabilities)
+        _entry, result = self.run_plugin(
+            ["attachment", self.PLUGIN_UID, "--index", "1"], backend, config=self.CONFIG
+        )
+        code, stdout, _ = result
+        payload = self.json_object(stdout)
+        self.assertEqual(code, 3)
+        self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_UNAVAILABLE")
+        self.assertIn("unsupported", payload["error"]["message"].lower())
+        self.assertNotIn("find_message", backend.calls)
+
+    def test_ut_atc_10_04_none_plugin_is_rejected_before_the_store(self) -> None:
+        """UT-ATC-10.04: a plugin declaring ``attachments: "none"`` fails pre-store."""
+        capabilities = {"network": False, "readonly": "promise", "body_local": True,
+                        "attachments": "none", "native_order": "text"}
+        backend = self.plugin_backend(capabilities=capabilities)
+        _entry, result = self.run_plugin(
+            ["attachment", self.PLUGIN_UID, "--index", "1"], backend, config=self.CONFIG
+        )
+        code, stdout, _ = result
+        payload = self.json_object(stdout)
+        self.assertEqual(code, 3)
+        self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_UNAVAILABLE")
+        self.assertNotIn("find_message", backend.calls)
