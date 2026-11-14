@@ -286,11 +286,44 @@ class RemoteExtractionTests(_RemoteCase):
                 4,
                 "E_ATTACHMENT_TOO_LARGE",
             ),
+            "total-limit": (
+                dict(
+                    attachments=[
+                        {
+                            "index": 1,
+                            "name": "primera.pdf",
+                            "size_bytes": 2 * MIB,
+                            "native_order_key": "1",
+                            "unavailable_reason": None,
+                        },
+                        {
+                            "index": 2,
+                            "name": "segunda.pdf",
+                            "size_bytes": 2 * MIB,
+                            "native_order_key": "2",
+                            "unavailable_reason": None,
+                        },
+                    ]
+                ),
+                ["attachment", _UID, "--all"],
+                4,
+                "E_ATTACHMENT_TOO_LARGE",
+            ),
         }
-        limits = (
-            "[attachments]\nmax_file_size_mb = 1\nmax_total_size_mb = 2\n"
-            "max_count = 1\n"
-        )
+        limits = {
+            "size-limit": (
+                "[attachments]\nmax_file_size_mb = 1\nmax_total_size_mb = 2\n"
+                "max_count = 3\n"
+            ),
+            "count-limit": (
+                "[attachments]\nmax_file_size_mb = 1\nmax_total_size_mb = 2\n"
+                "max_count = 1\n"
+            ),
+            "total-limit": (
+                "[attachments]\nmax_file_size_mb = 2\nmax_total_size_mb = 3\n"
+                "max_count = 3\n"
+            ),
+        }
         for label, (kwargs, argv, exit_code, error) in scenarios.items():
             with self.subTest(label=label):
                 for driver, capabilities in (
@@ -299,8 +332,8 @@ class RemoteExtractionTests(_RemoteCase):
                 ):
                     self.clear_cache()
                     config = f'[scope."{driver}:{_LABEL}"]\n'
-                    if label in ("size-limit", "count-limit"):
-                        config += limits
+                    if label in limits:
+                        config += limits[label]
                     backend = self.backend(
                         driver=driver, capabilities=dict(capabilities), **kwargs
                     )
