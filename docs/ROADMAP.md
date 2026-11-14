@@ -130,12 +130,12 @@ un adaptador y por backends instalables.
 | Mantener | Solo lectura estructural, un JSON por ejecución, códigos de salida, `doctor`, cursor de `new`, sin red ni daemon | Es lo que diferencia el producto |
 | Agregar | Adaptador MCP por stdio sobre el mismo núcleo, ~5 herramientas | Entrar en Claude Desktop y Cursor sin perder la CLI |
 | Agregar | Backend Thunderbird (mbox/maildir) | Linux pasa de "solo CI" a soportado sin tocar la invariante |
-| Agregar | `--fields` para elegir campos del JSON | Reduce tokens de salida, que es donde realmente se gasta |
+| ~~Agregar~~ | ~~`--fields` para elegir campos del JSON~~ | ~~Reduce tokens de salida, que es donde realmente se gasta~~ |
 | ~~Agregar~~ | ~~Descarga de adjuntos (ver §6)~~ | ~~Carencia más citada frente a los MCP servers~~ |
 | Cambiar | Publicar en PyPI (`pipx install mailquery`) | Hoy exige clonar; el nombre está libre |
 | ~~Cambiar~~ | ~~`search --text` sobre un índice local opcional (SQLite FTS)~~ | ~~Evita `E_UNBOUNDED_SCAN` en la mayoría de casos~~ |
 | Quitar | `scripts/install.sh` e `install.ps1` | Con PyPI sobran; la siembra del config pasa a `doctor --init` |
-| Quitar | `README.es.md` como copia paralela | Dos READMEs se desincronizan; inglés canónico y enlace a docs en español |
+| ~~Quitar~~ | ~~`README.es.md` como copia paralela~~ | ~~Dos READMEs se desincronizan; inglés canónico y enlace a docs en español~~ |
 
 ## 5. Plugins de backend
 
@@ -274,7 +274,7 @@ requiere la app en Entra ID.
 1. ~~Formalizar la interfaz de backend y el descubrimiento por entry points
    (§5, puntos 1 a 3).~~
 2. Publicar en PyPI; retirar los instaladores.
-3. `--fields` y ~~descarga de adjuntos~~.
+3. ~~`--fields`~~ y ~~descarga de adjuntos~~.
 4. Adaptador MCP por stdio.
 5. Backend Thunderbird.
 6. `mailquery-graph` con cuenta personal; solicitud de consentimiento a IT
@@ -295,6 +295,6 @@ merge a `main`. Falta:
    SMOKE-ATT-AM en macOS; SMOKE-INSTALL, SMOKE-NEW y SMOKE-ATT-OL en Windows con
    Outlook clásico. La materialización COM de adjuntos nunca se ha verificado en
    un Windows real.
-4. Decidir si [BUG-01](KNOWN-DEFECTS.md) se corrige antes del release.
+4. ~~Decidir si [BUG-01](KNOWN-DEFECTS.md) se corrige antes del release.~~
 5. CI verde en el pull request a `main` (3 SO × Python 3.11–3.14), tag `v3.0.0` y
    su corrida de CI como evidencia del release.
