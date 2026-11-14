@@ -1,11 +1,11 @@
 # PRD (Incremental) v2.2 — Features adicionales de 3.0.0
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes.
-**Versión del documento:** 2.2 (borrador) — **delta** sobre [`PRD.md`](PRD.md) v2.1.
+**Versión del documento:** 2.2 — **delta** sobre [`PRD.md`](PRD.md) v2.1.
 **Versión del paquete que introduce:** `3.0.0` (en desarrollo `3.0.0a0`). Las features se acumulan en `develop` y no tienen release propio: se publican con el `3.0.0` (`PRD.md` §22.3).
 **Fecha:** 2026-11-13.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** borrador para aprobación. No implementado.
+**Estado:** **aprobado** por el dueño del producto el 2026-11-13. No implementado.
 **Ámbito:** las features de §0.3. Cada feature declara qué cambia en la tabla §0.2; el resto del producto no cambia.
 
 | Borrador        | Cambios                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -31,6 +31,7 @@
 | 19 (2026-11-13) | Decisión del dueño, dentro de F3: `doctor` añade la sección `plugins` con los chequeos de `doctor_checks()` de cada plugin declarado y la resolución de sus cuentas, y `--failures` filtra cada sección (RF-81, RF-76, ADR-49, O28, AC-O16 y AC-O17). |
 | 20 (2026-11-13) | Tercera revisión independiente, con la solución más simple en cada punto: AC-O01, AC-O03 y AC-O11 admiten los cambios de F1, RF-77, RF-78 y RF-81; RF-81 reserva los nombres `config` y `plugin`, rechaza un `detail` de varias líneas, fija el detalle del `config` de primer nivel cuando todos los bloques son de plugins y deja fuera del p95 de `doctor` las llamadas a plugins; A6 no lee cabeceras de un item S/MIME de Outlook; orden de un grupo sin fechas; §0.2 y CL-05 declaran RF-05, CU-07, la tabla de comandos de §12 y el p95 de `doctor`; §11 sin filas de `attachment` ni de plugins; destinos de los flujos y de los ejemplos de `doctor`; AC sin entradas concretas. |
 | 21 (2026-11-13) | Decisión del dueño, dentro de F1: el default de `[content].url_display` pasa de `keep` a `neutralize` (RF-54, RF-63, ADR-31); `keep` conserva el texto exacto de 2.0.x; sin opción `--keep-links` (ADR-31); la skill explica las URLs neutralizadas (RF-66); la URL neutralizada es un cambio visible de `3.0.0` (§11). |
+| 22 (2026-11-13) | Aprobado por el dueño del producto; el documento deja de ser borrador. |
 
 ---
 
