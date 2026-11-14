@@ -61,15 +61,16 @@ Mail/Outlook. The client's own store is the only source of truth.
 | --- | --- |
 | `mailquery doctor [--json]` | environment, drivers and read-only preflight (always exits 0) |
 | `mailquery mailboxes` | accounts, folders, counters, included folders, excluded stores |
-| `mailquery search [filters] [--fields LIST] [--strip-links]` | search metadata and body |
+| `mailquery search [filters] [--fields LIST] [--group-by KEYS] [--count] [--strip-links]` | search metadata and body |
 | `mailquery new [--peek] [--limit N] [--fields LIST] [--strip-links]` | messages since the last run (persistent cursor) |
 | `mailquery show UID [--fields LIST] [--strip-links]` | one message (body truncated to 20,000 chars) + `attachments` |
 | `mailquery attachment UID (--index N \| --all) [--force]` | recover the attachments of one message |
 
 Search filters (`search -h`): `--subject`, `--text`, `--from`, `--to`, `--cc`,
 `--since`, `--until`, `--unread`, `--flagged`, `--has-attachments`,
-`--include-mailbox`, `--limit N`. Patterns are case-insensitive; `*` and `?` are
-wildcards, otherwise substring; repeatable flags are AND.
+`--include-mailbox`, `--limit N`, `--group-by KEYS` and `--count`. Patterns are
+case-insensitive; `*` and `?` are wildcards, otherwise substring; repeatable
+flags are AND.
 
 **Default row and `--fields`.** Without `--fields`, every row of `search` and
 `new` has exactly `uid`, `subject`, `from`, `date_received`, `is_read` and
@@ -91,6 +92,20 @@ with `[link omitted]` and wins over `[content].url_display`. Without it the URLs
 are neutralized by default (`hxxps://`, `[:]`, `www[.]`, `[\\]`, punycode and
 shortened), and `[content].url_display = "keep"` keeps the exact text. No other
 command accepts `--strip-links`.
+
+**Grouping and counting.** Use `--group-by` when the user wants the latest
+messages per group, for example the latest invoices per supplier: one or two
+keys (`from`, `domain`, `mailbox`, `account`, `day`, `week`, `month`), and the
+response replaces `messages[]` with `groups[]` (each group with its keys, its
+`count` and its newest messages; `--limit` is then the messages per group, 5 by
+default and at most 50 groups). Use `--count` when the user only asks how many
+messages match, for example "how many unread invoices are there?": the response
+carries `count`, `hint`, `warnings` and `scan`, with no messages and no 200
+limit. `--count` cannot be combined with `--fields`, `--group-by` or `--limit`;
+`new` does not accept either option. A `search` with `count: 0` returns a
+`hint` with the number of folders and accounts searched (no names): report it
+and offer `--include-mailbox` or `mailquery mailboxes` instead of guessing a
+folder.
 
 ## `show` and `attachment`
 
@@ -127,6 +142,8 @@ mailquery new --peek                   # look without advancing the cursor
 mailquery search --since 1w --unread
 mailquery search --from "*@bank.com*" --since 2mo --has-attachments
 mailquery search --text "*invoice*" --since 1mo
+mailquery search --subject invoice --since 6mo --group-by domain,month --limit 1
+mailquery search --unread --count
 mailquery show apple_mail:2714         # uid exactly as returned by search/new
 mailquery attachment apple_mail:2714 --index 1
 mailquery attachment apple_mail:2714 --all

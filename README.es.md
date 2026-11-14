@@ -444,9 +444,10 @@ Cuentas, carpetas, contadores y si están incluidas en el alcance (`included`).
 Filtros: `--subject`, `--text`, `--from`, `--to`, `--cc`, `--since`, `--until`,
 `--unread`, `--flagged`, `--has-attachments`, `--include-mailbox` y `--limit`
 (default 20, máx. 200). `--fields` añade campos a la fila por defecto (ver
-abajo). `--strip-links` sustituye cada URL del asunto, los
-nombres, las cabeceras y el cuerpo devueltos por `[link omitted]`, por encima de
-`[content].url_display`. Los patrones son subcadenas con comodines `*` y `?`, sin
+abajo). `--group-by` agrupa los resultados y `--count` devuelve solo cuántos
+mensajes cumplen los filtros (ver abajo). `--strip-links` sustituye cada URL
+del asunto, los nombres, las cabeceras y el cuerpo devueltos por
+`[link omitted]`, por encima de `[content].url_display`. Los patrones son subcadenas con comodines `*` y `?`, sin
 distinguir mayúsculas ni acentos; en `--subject`, los términos separados por
 espacios son AND. Fechas: ISO 8601 o relativas (`30min`, `24h`, `7d`, `1w`,
 `1mo`, `1y`, `today`, `yesterday`); `--since` incluye y `--until` excluye.
@@ -493,6 +494,54 @@ Salida de `mailquery search --since 1w` (fila por defecto; `uid` recortado):
 Con `--fields snippet`, la fila añade `snippet` al final; con `--fields all`,
 la fila es la completa de arriba. Un nombre desconocido o vacío falla con
 `E_USAGE` (exit 2) antes de abrir el store.
+
+**Agrupación y recuento.** `--group-by` agrupa los mensajes que cumplen los
+filtros por una o dos claves, separadas por comas o con la opción repetida:
+`from` (dirección del remitente en minúsculas), `domain` (la parte tras el
+último `@`), `mailbox` (`{"account": <etiqueta>, "path": <ruta>}` de la carpeta
+del mensaje), `account` (etiqueta de la cuenta), `day` (`AAAA-MM-DD`), `week`
+(semana ISO 8601, `AAAA-Www`) y `month` (`AAAA-MM`); las tres últimas usan la
+zona horaria local de `date_received`. La respuesta sustituye `messages[]` por
+`groups[]`: cada grupo lleva sus claves en el orden pedido, su `count` y sus
+mensajes más recientes, de más reciente a más antiguo. Con `--group-by`,
+`--limit` es el número de mensajes por grupo (0 a 50, 5 por defecto;
+`[search].default_limit` no aplica) y el `from`/`mailbox` de la agrupación no se
+repite en las filas. Los grupos con el mensaje más reciente van primero; un
+grupo sin fechas y un grupo con alguna clave `null` van después. Como máximo se
+devuelven 50 grupos: si hay más, `truncated` es `true`, se emite
+`W_RESULTS_TRUNCATED` y `hint` dice cuántos grupos quedaron fuera. `--count`
+devuelve solo `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`,
+`warnings` y `scan`: el total tras deduplicar y sin el límite de 200, con solo
+los warnings de alcance. No se admite con `--fields`, `--group-by` ni `--limit`,
+y `new` tampoco lo acepta.
+
+```bash
+mailquery search --subject factura --since 6mo --group-by domain,month --limit 1
+mailquery search --from proveedor --group-by from
+mailquery search --unread --count
+```
+
+```json
+{
+  "count": 2,
+  "truncated": false,
+  "hint": null,
+  "groups": [
+    {"domain": "banco.example", "month": "2026-11", "count": 1, "messages": [ … ]},
+    {"domain": "luz.example", "month": "2026-11", "count": 1, "messages": [ … ]}
+  ],
+  "scan": {"mode": "metadata", "candidates": 2, "messages_read": 0, "duration_ms": 12},
+  "warnings": []
+}
+```
+
+Cuando `search` no encuentra nada (`count: 0`), `hint` dice cuántas carpetas y
+cuentas se buscaron y cómo ampliar el alcance, sin nombres de carpetas ni de
+cuentas: `no messages matched in 2 folder(s) of 2 account(s); run "mailquery
+mailboxes" to see other folders, or add --include-mailbox`. Un store excluido
+no cuenta; si no se lee ninguna cuenta (ninguna declarada o todas excluidas),
+`hint` sigue en `null` y aparece `W_NO_ACCOUNTS`. `new` sin correo nuevo
+mantiene `hint: null`.
 
 `--text` lee el cuerpo de cada candidato, así que **exige acotar** con
 `--since`/`--until`, `--from`, `--subject` o una carpeta extra
@@ -846,7 +895,7 @@ abren ni ejecutan los archivos recuperados.
 | `mailquery: command not found` / `pipx: command not found` | El directorio de `pipx` no está en el `PATH` de la sesión | `pipx ensurepath` y abre una terminal nueva |
 | El comando usa otro Python o falla con `ModuleNotFoundError` | `pipx` instaló la app con otro intérprete | `pipx list`; `pipx reinstall --python <python> mailquery` |
 | `count: 0` y `W_NO_ACCOUNTS` | No hay cuentas declaradas | Declara una cuenta en `config.toml` (ver `mailquery mailboxes`) |
-| `count: 0` sin warnings | Rango de fechas, patrón o carpeta | Revisa `--since`/`--until`, prueba un patrón más corto y mira `included` en `mailboxes`; `new` no emite histórico: usa `search` |
+| `count: 0` sin warnings | Rango de fechas, patrón o carpeta | Revisa `--since`/`--until`, prueba un patrón más corto y mira `included` en `mailboxes`; el `hint` dice cuántas carpetas y cuentas se buscaron, y `mailquery mailboxes` o `--include-mailbox` amplían el alcance; `new` no emite histórico: usa `search` |
 | `W_STORE_EXCLUDED` (Windows) | La cuenta declarada es un store excluido (compartido, online, ruta de red…) | Mira el motivo en `mailboxes` → `excluded_stores` |
 | `E_PERMISSION` (3, macOS) | Falta FDA | Ver [Permisos](#permisos) |
 | `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | Falta `pywin32` / no hay Outlook clásico 16.0 | `pipx reinstall mailquery` / instala Outlook clásico |
