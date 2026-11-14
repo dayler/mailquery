@@ -2224,7 +2224,9 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
   report` que falla por debajo del 85 % de cobertura total combinada de
   líneas y ramas. La suite completa debe pasar en los 3
   SO. La matriz **no** instala el paquete: los casos de entry points usan
-  metadata inyectada o se saltan con motivo (PKG-01/02).
+  metadata inyectada o se saltan con motivo (PKG-01/02). Después del paso de
+  cobertura, un paso `integration-tests` re-ejecuta los TCs (`-k test_tc_`)
+  como paso propio visible en la UI; no añade jobs.
 - Job `install-scripts` (3 OS): valida y ejecuta en seco los instaladores
   (`scripts/install.sh` y `skills/install.sh` en ubuntu/macOS, los `.ps1` en
   Windows). En Ubuntu, un paso previo comprueba con `pip download
