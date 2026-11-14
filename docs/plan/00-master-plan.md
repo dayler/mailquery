@@ -67,7 +67,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | 🟢 |
 | M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | 🟢 |
 | M12 | `mailboxes` agrupado por cuenta y `--fields` | I4 | W7 | M10 (lote I3 mergeado) | AC-O14, AC-O15 | [M12](M12-mailboxes-grouped.md) | 🟢 |
-| M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | ⚪ |
+| M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | 🟡 |
 | M14 | SMOKE en equipos reales, auditoría documental y cierre | I4 | W9 | M01–M13 | AC-H15, AC-O15 (p95) y verificación final de todos | [M14](M14-smoke-closure.md) | ⚪ |
 
 "Orden de archivos" significa que la dependencia no es funcional sino de propiedad de archivos (`cli.py`, `search.py`, README, skill): los dos milestones no pueden correr a la vez.
