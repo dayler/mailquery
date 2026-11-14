@@ -273,7 +273,10 @@ Sin cuentas declaradas, `search` y `new` devuelven `count: 0` con
 
 Es **opcional** y su formato es idéntico en ambas plataformas. Solo se leen las
 cuentas declaradas; dentro de cada una, `INBOX` se incluye siempre y
-`mailbox_list` añade carpetas extra. Una clave desconocida da `E_CONFIG_INVALID`
+`mailbox_list` añade carpetas extra. Un elemento de `mailbox_list` es el `path`
+de la carpeta que muestra `mailquery mailboxes`; el `name` o la `url` que
+muestra `mailquery mailboxes --fields name,url` también sirven. Una clave
+desconocida da `E_CONFIG_INVALID`
 (exit 2). La clave de cuenta puede llevar el prefijo del driver:
 `[scope."<driver>:<cuenta>"]`; sin prefijo se usa el driver nativo de la
 plataforma (`apple_mail` en macOS, `outlook` en Windows).
@@ -418,26 +421,40 @@ con exit 0.
 
 ### `mailquery mailboxes`
 
-Cuentas, carpetas, contadores y si están incluidas en el alcance (`included`).
-`excluded_stores` lista, solo en Windows, los stores que no se leen y el motivo
-(`shared_mailbox`, `public_folders`, `online_mode`, `network_path`,
-`unsupported_account_type`, `unavailable`); en macOS es `[]`.
+Cuentas y sus carpetas, con si cada carpeta está incluida en el alcance
+(`included`). Cada cuenta lista sus carpetas una vez; sin `--fields`, una
+carpeta solo tiene su `path` e `included`. `--fields name,url` añade el nombre y
+la URL de la carpeta, y `--fields total,unread` añade los contadores: sin
+`total` ni `unread` no se cuenta ningún mensaje, así que el comando sigue
+siendo barato. `excluded_stores` lista, solo en Windows, los stores que no se
+leen y el motivo (`shared_mailbox`, `public_folders`, `online_mode`,
+`network_path`, `unsupported_account_type`, `unavailable`); en macOS es `[]`.
 
 ```json
 {
   "ok": true,
   "command": "mailboxes",
-  "accounts": [{"uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10", "label": "Exchange (ana.perez@example.com)",
-                "email": "ana.perez@example.com", "declared": true}],
-  "mailboxes": [
-    {"account": {…}, "name": "INBOX", "path": "INBOX",
-     "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX", "total": 3, "unread": 2, "included": true},
-    …
+  "accounts": [
+    {"uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10", "label": "Exchange (ana.perez@example.com)",
+     "email": "ana.perez@example.com", "declared": true,
+     "mailboxes": [
+       {"path": "Deleted Items", "included": false},
+       {"path": "INBOX", "included": true},
+       {"path": "Conversation History/Team Chat", "included": false}
+     ]}
   ],
   "excluded_stores": [{"label": "Exchange shared (Soporte)", "path": null, "reason": "shared_mailbox"}],
   "warnings": []
 }
 ```
+
+Con `--fields total,unread`, cada carpeta añade sus contadores
+(`{"path": "INBOX", "total": 579, "unread": 0, "included": true}`); con
+`--fields name,url`,
+`{"name": "Team Chat", "path": "Conversation History/Team Chat", "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/Conversation%20History/Team%20Chat", "included": false}`.
+Los campos salen siempre en el orden `name`, `path`, `url`, `total`, `unread`,
+`included`, y `--fields all` no se acepta: cada campo de carpeta se pide por su
+nombre.
 
 ### `mailquery search`
 

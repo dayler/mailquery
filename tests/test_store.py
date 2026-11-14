@@ -606,9 +606,22 @@ class MailboxCounterTests(StoreTestCase, unittest.TestCase):
         self.opened = self.open_store()
         self.addCleanup(self.opened.close)
 
+    def counted(self, rowid: int):
+        return next(
+            mailbox
+            for mailbox in self.opened.mailboxes_with_counters()
+            if mailbox.rowid == rowid
+        )
+
+    def test_the_catalog_alone_has_no_counters(self) -> None:
+        for rowid in self.EXPECTED:
+            mailbox = self.opened.mailbox(rowid)
+            self.assertIsNone(mailbox.message_count)
+            self.assertIsNone(mailbox.unread_count)
+
     def test_counters_are_recalculated(self) -> None:
         for rowid, expected in self.EXPECTED.items():
-            mailbox = self.opened.mailbox(rowid)
+            mailbox = self.counted(rowid)
             self.assertEqual(
                 (mailbox.message_count, mailbox.unread_count),
                 expected,
@@ -619,24 +632,24 @@ class MailboxCounterTests(StoreTestCase, unittest.TestCase):
         # The fixture stores deliberately wrong values for these mailboxes.
         self.assertEqual(fixtures.FAKE_COUNTERS[fixtures.MAILBOX_GMAIL_INBOX], (36, 0))
         self.assertEqual(
-            self.opened.mailbox(fixtures.MAILBOX_GMAIL_INBOX).message_count, 2
+            self.counted(fixtures.MAILBOX_GMAIL_INBOX).message_count, 2
         )
         self.assertEqual(fixtures.FAKE_COUNTERS[fixtures.MAILBOX_ICLOUD_INBOX], (9999, 9999))
         self.assertEqual(
-            self.opened.mailbox(fixtures.MAILBOX_ICLOUD_INBOX).message_count, 8
+            self.counted(fixtures.MAILBOX_ICLOUD_INBOX).message_count, 8
         )
 
     def test_label_membership_counts_for_gmail_inbox(self) -> None:
         # 83160 and 83210 live in [Gmail]/All Mail and are INBOX members only
         # through the labels table.
-        gmail_inbox = self.opened.mailbox(fixtures.MAILBOX_GMAIL_INBOX)
+        gmail_inbox = self.counted(fixtures.MAILBOX_GMAIL_INBOX)
         self.assertEqual((gmail_inbox.message_count, gmail_inbox.unread_count), (2, 1))
-        all_mail = self.opened.mailbox(fixtures.MAILBOX_GMAIL_ALL_MAIL)
+        all_mail = self.counted(fixtures.MAILBOX_GMAIL_ALL_MAIL)
         self.assertEqual((all_mail.message_count, all_mail.unread_count), (3, 1))
 
     def test_aggregate_and_empty_mailboxes(self) -> None:
-        self.assertTrue(self.opened.mailbox(fixtures.MAILBOX_GMAIL_ALL_MAIL).is_aggregate)
-        important = self.opened.mailbox(fixtures.MAILBOX_GMAIL_IMPORTANT)
+        self.assertTrue(self.counted(fixtures.MAILBOX_GMAIL_ALL_MAIL).is_aggregate)
+        important = self.counted(fixtures.MAILBOX_GMAIL_IMPORTANT)
         self.assertEqual((important.message_count, important.unread_count), (0, 0))
 
 

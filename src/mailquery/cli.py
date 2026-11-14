@@ -62,6 +62,7 @@ from mailquery.search import (
     GROUP_KEYS,
     GROUP_MAX_KEYS,
     GROUP_MAX_LIMIT,
+    MAILBOX_FIELDS,
     SEARCH_ROW_FIELDS,
     SHOW_FIELDS,
     Filters,
@@ -94,6 +95,9 @@ _SEARCH_FIELDS = (*SEARCH_ROW_FIELDS, "all")
 _SHOW_FIELDS = (*SHOW_FIELDS, "all")
 _SEARCH_FIELDS_TEXT = ", ".join(_SEARCH_FIELDS)
 _SHOW_FIELDS_TEXT = ", ".join(_SHOW_FIELDS)
+#: Field names accepted by ``--fields`` in ``mailboxes`` (no ``all``).
+_MAILBOX_FIELDS = MAILBOX_FIELDS
+_MAILBOX_FIELDS_TEXT = ", ".join(_MAILBOX_FIELDS)
 _SEARCH_FIELDS_BLOCK = textwrap.fill(
     "Valid fields: " + _SEARCH_FIELDS_TEXT,
     width=92,
@@ -161,11 +165,16 @@ Notes:
 _MAILBOXES_EPILOG = """\
 Examples:
   mailquery mailboxes
+  mailquery mailboxes --fields name,url
+  mailquery mailboxes --fields total,unread
 
 Notes:
-  A folder is included when its account is declared in ~/.mailquery/config.toml
-  and the folder is INBOX or listed in mailbox_list. Counters are recalculated
-  from the mail store because the mail client's own counters are not reliable.
+  Each account lists its folders once, and a folder is included when its account
+  is declared in ~/.mailquery/config.toml and the folder is INBOX or listed in
+  mailbox_list. Every folder shows its path and whether it is included; name, url,
+  total and unread are added only when requested with --fields. Counters are
+  calculated from the mail store only with --fields total or unread, because the
+  mail client's own counters are not reliable.
 """
 
 _SEARCH_EPILOG = """\
@@ -406,14 +415,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     mailboxes_parser = subparsers.add_parser(
         "mailboxes",
-        help="list accounts, folders, counters and included folders",
-        description="List accounts, folders, counters and whether they are included "
-        "in the configured scope.",
+        help="list accounts and their folders (counters with --fields)",
+        description="List accounts and their folders, and whether they are included\n"
+        "in the configured scope. Counters are calculated only with --fields total\n"
+        "or unread.",
         epilog=_MAILBOXES_EPILOG,
         formatter_class=_HelpFormatter,
     )
     mailboxes_parser.set_defaults(command="mailboxes")
     _style_parser(mailboxes_parser, root=False)
+    mailboxes_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="adds name, url, total and unread to every folder; comma-separated "
+        f"or repeatable: {_MAILBOX_FIELDS_TEXT}",
+    )
 
     search_parser = subparsers.add_parser(
         "search",
@@ -668,7 +685,7 @@ def _main(
         return _report_error(exc, _guess_command(raw_argv))
 
     command = str(args.command)
-    if command in ("search", "new", "show"):
+    if command in ("search", "new", "show", "mailboxes"):
         # Before the home exists, the config is read or the store is opened.
         try:
             args.fields_selection = _fields_selection(args, command)
@@ -1111,7 +1128,7 @@ def _execute(
             args, config, home_path, backend, mapping, native
         )
     elif command == "mailboxes":
-        payload = run_mailboxes(backend, config, **extra)
+        payload = run_mailboxes(backend, config, fields=fields, **extra)
     elif command == "search":
         payload = run_search(
             backend,
@@ -1188,7 +1205,10 @@ def _fields_selection(
     raw = getattr(args, "fields", None)
     if raw is None:
         return None
-    valid = _SEARCH_FIELDS if command in ("search", "new") else _SHOW_FIELDS
+    if command == "mailboxes":
+        valid = _MAILBOX_FIELDS
+    else:
+        valid = _SEARCH_FIELDS if command in ("search", "new") else _SHOW_FIELDS
     selected: list[str] = []
     for value in raw:
         for item in str(value).split(","):

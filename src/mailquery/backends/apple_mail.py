@@ -210,7 +210,35 @@ class AppleMailBackend(MailBackend):
             return False
 
     def mailboxes(self) -> list[MailboxRow]:
-        return [_mailbox_row(mailbox) for mailbox in self.store.mailboxes]
+        """Every folder with its counters recalculated from the store.
+
+        The counters are computed on the first call and reused by every later
+        call of the same backend, so a command that lists the folders once
+        counts them once.
+        """
+        return [
+            _mailbox_row(mailbox) for mailbox in self.store.mailboxes_with_counters()
+        ]
+
+    def mailboxes_without_counters(
+        self, account_uuids: Sequence[str] | None = None
+    ) -> list[MailboxRow]:
+        """Every folder with ``total``/``unread`` as ``None``.
+
+        ``config.listed_mailboxes`` uses it for everything but the counters, so
+        the folder catalog is listed without counting any message. With
+        ``account_uuids`` only the folders of those accounts are returned;
+        the catalog is cheap to read and shared by every caller.
+        """
+        mailboxes = self.store.mailboxes
+        if account_uuids is not None:
+            wanted = {str(uuid).casefold() for uuid in account_uuids if uuid}
+            mailboxes = tuple(
+                mailbox
+                for mailbox in mailboxes
+                if mailbox.account_uuid.casefold() in wanted
+            )
+        return [_mailbox_row(mailbox) for mailbox in mailboxes]
 
     def excluded_stores(self) -> list[dict[str, Any]]:
         return []
@@ -531,6 +559,8 @@ class AppleMailBackend(MailBackend):
 
 
 def _mailbox_row(mailbox: "Mailbox") -> MailboxRow:
+    total = mailbox.message_count
+    unread = mailbox.unread_count
     return {
         "id": mailbox.rowid,
         "account_uuid": mailbox.account_uuid,
@@ -539,8 +569,8 @@ def _mailbox_row(mailbox: "Mailbox") -> MailboxRow:
         "url": mailbox.url,
         "is_inbox": bool(mailbox.is_inbox),
         "is_aggregate": bool(mailbox.is_aggregate),
-        "total": int(mailbox.message_count),
-        "unread": int(mailbox.unread_count),
+        "total": int(total) if total is not None else None,
+        "unread": int(unread) if unread is not None else None,
     }
 
 

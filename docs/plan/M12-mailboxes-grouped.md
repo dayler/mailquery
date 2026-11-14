@@ -2,7 +2,7 @@
 
 **Lote:** I4 · rama del lote `integration/i4-mailboxes-doctor-close` · **Oleada:** W7 (sola)
 **Rama:** `feature/m12-mailboxes-grouped`, creada desde la punta de `integration/i4-mailboxes-doctor-close` (abierta desde `develop` con el lote I3 mergeado) · **Worktree:** `../mailquery-wt/m12`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -49,12 +49,12 @@ La separación del catálogo y los contadores en `store.py` (sección 2, punto 3
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Sin recuento | Catálogo sin contadores en `store.py`; `mailboxes_without_counters` en Apple Mail; UT-MBX-04 | ⚪ |
-| F2 — Forma | `run_mailboxes` agrupado; goldens; UT-MBX-01, UT-MBX-02 | ⚪ |
-| F3 — `--fields` | Opción, validación, ayudas; UT-MBX-03, UT-MBX-05 | ⚪ |
-| F4 — Tests existentes | Ajuste de expectativas | ⚪ |
-| F5 — Documentación | Sección 9; DOC-13 | ⚪ |
-| F6 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Sin recuento | Catálogo sin contadores en `store.py`; `mailboxes_without_counters` en Apple Mail; UT-MBX-04 | 🟢 |
+| F2 — Forma | `run_mailboxes` agrupado; goldens; UT-MBX-01, UT-MBX-02 | 🟢 |
+| F3 — `--fields` | Opción, validación, ayudas; UT-MBX-03, UT-MBX-05 | 🟢 |
+| F4 — Tests existentes | Ajuste de expectativas | 🟢 |
+| F5 — Documentación | Sección 9; DOC-13 | 🟢 |
+| F6 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -175,4 +175,9 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 — Sin recuento | `EnvelopeStore` carga el catálogo sin contadores y `mailboxes_with_counters()` los calcula y cachea una sola vez; `AppleMailBackend.mailboxes_without_counters()` y `_mailbox_row` con `total`/`unread` nulos; `search`, `new` y `show` dejan de recontar. |
+| 2026-11-14 | F2 — Forma | `run_mailboxes` agrupa las carpetas en `accounts[].mailboxes[]`, con `path` e `included` por defecto, cuentas con `mailboxes: []` y carpetas sin cuenta en la cuenta vacía; goldens de Apple Mail y Outlook regenerados a la forma agrupada sin contadores. |
+| 2026-11-14 | F3 — `--fields` | `mailboxes --fields` con `name`, `path`, `url`, `total`, `unread`, `included`, orden canónico, sin `all`, validación temprana con el mensaje y el hint literales; ayudas, descripción y epílogo actualizados. |
+| 2026-11-14 | F4 — Tests existentes | Expectativas de TC-01.02/TC-02.01, UT-SR de `mailboxes`, UT-MD-03, contadores de `store.py`, UT-CW-01.05, TC-03.01 y OL-30 ajustadas pidiendo los campos con `--fields` y el barrido con `mailboxes --fields total,unread` y `name,url`. |
+| 2026-11-14 | F5 — Documentación | READMEs con la salida agrupada y el coste de los contadores, skill, `config.example.toml` y `PERFORMANCE-BACKLOG.md`. |
+| 2026-11-14 | F6 — Cierre | Suite completa `Ran 1395`, `OK (skipped=7)`; UT-MBX-01–05 y DOC-13 verdes solos; cobertura total 91,0 % y módulos tocados ≥ 85 %; evidencia y bloques en el informe. |
