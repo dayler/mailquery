@@ -447,6 +447,15 @@ class AppleMailSenderHeaderTests(_AppleMailBodyCase):
         self.assertEqual(header_block.headers["Subject"], whole_message.headers["Subject"])
         self.assertEqual(header_block.headers["From"], whole_message.headers["From"])
 
+        with mock.patch.object(
+            emlx, "message_from_bytes", side_effect=RuntimeError("boom")
+        ):
+            unparseable = emlx.parse_emlx_headers(encoded)
+        self.assertFalse(unparseable.read)
+        self.assertEqual(
+            unparseable.headers, {header: "" for header in emlx.HEADER_NAMES}
+        )
+
     def test_ut_bod_03_07_unresolved_and_partial_headers(self) -> None:
         """UT-BOD-03.07: an unresolved .emlx gives empty headers; a partial one is read."""
         inbox_id = self.fx.message(830).mailbox

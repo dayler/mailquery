@@ -400,8 +400,6 @@ def _header_block(payload: bytes) -> bytes:
 
 def _header_text(value: object) -> str:
     """One header value: decoded and unfolded, with no surrounding whitespace."""
-    if value is None:
-        return ""
     return _unfold(_clean_text(str(value))).strip()
 
 
