@@ -469,6 +469,13 @@ class AppleMailSenderHeaderTests(_AppleMailBodyCase):
         self.assertTrue(partial["read"])
         self.assertEqual(partial["headers"]["Subject"], "Factura septiembre")
 
+        unknown_mailbox = self.backend.load_headers({"uid": 830, "mailbox_id": 0})
+        self.assertFalse(unknown_mailbox["read"])
+        with mock.patch.object(emlx, "resolve_path", side_effect=RuntimeError("boom")):
+            failing_path = self.headers(830)
+        self.assertFalse(failing_path["read"])
+        self.assertEqual(failing_path["headers"]["Subject"], "")
+
 
 # --------------------------------------------------------------------------- #
 # Outlook: body source
@@ -590,6 +597,17 @@ class OutlookBodySourceTests(_OutlookBodyCase):
             body_format=None,
         )
         body = self.backend.load_snippet(self.row("none_format"))
+        self.assertEqual(body["body_text"], "Texto plano de reserva.")
+        self.assertEqual(body["warnings"], [])
+
+        self.add(
+            "failing_format",
+            body="Texto plano de reserva.",
+            html="<p>Texto HTML.</p>",
+        )
+        row = self.row("failing_format")
+        self.fake.fail_next(fk.E_FAIL, kind="Item", member="BodyFormat")
+        body = self.backend.load_snippet(row)
         self.assertEqual(body["body_text"], "Texto plano de reserva.")
         self.assertEqual(body["warnings"], [])
 
