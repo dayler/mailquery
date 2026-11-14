@@ -228,17 +228,20 @@ def matches(pattern: str, text: str) -> bool:
     """Case-insensitive wildcard/substring match against untrusted text.
 
     ``*`` matches any sequence and ``?`` any single character; a pattern
-    without wildcards is a plain substring. Both sides are Unicode-normalized
-    (NFKD, combining marks removed, casefolded) so accented and unaccented
-    spellings of the same word match each other.
+    without wildcards is a plain substring. Both sides lose terminal escapes and
+    invisible characters before matching and are Unicode-normalized (NFKD,
+    combining marks removed, casefolded), so accented and unaccented spellings
+    of the same word match each other and an invisible character no longer
+    hides a match.
     """
     if pattern is None:
         return True
-    raw_pattern = str(pattern)
+    raw_pattern = output.sanitize_text(str(pattern))
     if not raw_pattern:
         return True
     expression = wildcard_to_regex(_fold(raw_pattern))
-    return re.search(expression, _fold(text or ""), re.IGNORECASE) is not None
+    haystack = output.sanitize_text("" if text is None else str(text))
+    return re.search(expression, _fold(haystack), re.IGNORECASE) is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -1296,10 +1299,26 @@ def _scan_too_large(
 def _recipient_lists(
     recipients: dict[Any, dict[str, list[dict]]], uid: Any
 ) -> tuple[list[dict], list[dict]]:
+    """To and Cc rows of one message with their display names sanitized.
+
+    The addresses are identifiers and are copied unchanged.
+    """
     bucket = recipients.get(uid, {})
-    to_list = [dict(entry) for entry in bucket.get("to", [])]
-    cc_list = [dict(entry) for entry in bucket.get("cc", [])]
-    return to_list, cc_list
+    return _sanitized_recipients(bucket.get("to", [])), _sanitized_recipients(
+        bucket.get("cc", [])
+    )
+
+
+def _sanitized_recipients(entries: Iterable[dict]) -> list[dict]:
+    """Copies of recipient rows with ``name`` stripped of terminal and invisible text."""
+    cleaned: list[dict] = []
+    for entry in entries:
+        item = dict(entry)
+        name = item.get("name")
+        if name is not None:
+            item["name"] = output.sanitize_text(str(name))
+        cleaned.append(item)
+    return cleaned
 
 
 # --------------------------------------------------------------------------- #
@@ -1567,10 +1586,12 @@ def _show_attachments(
     """``show.attachments``: one entry per attachment of the message.
 
     ``{"index", "name", "cached_path"}`` with the original name and the stable
-    1..N index of the driver. ``cached_path`` is computed with the cache helper
-    from the sanitized name and is ``null`` when the name is not safe or the
-    cached entry is not a regular file; ``show`` never creates, opens or reads
-    a cache entry. A driver with ``attachments: "none"`` returns ``[]``.
+    1..N index of the driver. ``name`` loses terminal escapes and invisible
+    characters; ``cached_path`` is computed with the cache helper from the
+    original name, so the file the engine writes is the one ``show`` reports, and
+    is ``null`` when the name is not safe or the cached entry is not a regular
+    file; ``show`` never creates, opens or reads a cache entry. A driver with
+    ``attachments: "none"`` returns ``[]``.
 
     The API 1 ``attachments(uid)`` operation is the source of truth for every
     driver that implements it. Until then a built-in driver falls back
@@ -1600,7 +1621,7 @@ def _show_attachments(
     return [
         {
             "index": index,
-            "name": name,
+            "name": output.sanitize_text(name),
             "cached_path": _show_cached_path(config.home, show_uid, index, name),
         }
         for index, name in names
@@ -1723,13 +1744,18 @@ def _message_metadata(
     cc_list: list[dict],
     driver: str,
 ) -> dict:
-    """Metadata fields shared by the ``search``/``new`` row and the ``show`` message."""
+    """Metadata fields shared by the ``search``/``new`` row and the ``show`` message.
+
+    The subject, the sender name and the recipient names lose terminal escapes
+    and invisible characters; ``uid``, ``message_id``, the addresses and the
+    mailbox identifiers are copied unchanged.
+    """
     return {
         "uid": uid_module.format_uid(driver, str(row["uid"])),
         "message_id": row.get("message_id") or "",
-        "subject": row.get("subject") or "",
+        "subject": output.sanitize_text(str(row.get("subject") or "")),
         "from": {
-            "name": row.get("sender_name") or "",
+            "name": output.sanitize_text(str(row.get("sender_name") or "")),
             "address": row.get("sender_address") or "",
         },
         "to": to_list,
@@ -1934,6 +1960,11 @@ def _snippet_truncated(body_text: str) -> bool:
 def _show_headers(
     raw_headers: dict, row: dict, to_list: list[dict], cc_list: list[dict]
 ) -> dict[str, str]:
+    """The six ``show.headers`` values, each stripped of terminal and invisible text.
+
+    A header value repeats the message text (a subject, a name or a
+    ``Message-ID``) and is untrusted like it.
+    """
     sender = _format_address(row.get("sender_name"), row.get("sender_address"))
     to_value = ", ".join(
         _format_address(entry.get("name"), entry.get("address")) for entry in to_list
@@ -1944,7 +1975,7 @@ def _show_headers(
     date_value = output.iso_timestamp(
         row.get("date_sent") or row.get("date_received")
     ) or ""
-    return {
+    headers = {
         "From": _header_lookup(raw_headers, "From") or sender,
         "To": _header_lookup(raw_headers, "To") or to_value,
         "Cc": _header_lookup(raw_headers, "Cc") or cc_value,
@@ -1952,6 +1983,9 @@ def _show_headers(
         "Date": _header_lookup(raw_headers, "Date") or date_value,
         "Message-ID": _header_lookup(raw_headers, "Message-ID")
         or str(row.get("message_id") or ""),
+    }
+    return {
+        name: output.sanitize_text(value) for name, value in headers.items()
     }
 
 
@@ -2046,13 +2080,15 @@ def _filter_terms(values: Iterable[str], *, split: bool = False) -> tuple[str, .
     word is an AND term, with or without wildcards. Without it (``--text``,
     ``--from``, ``--to``, ``--cc``) the whole value is one pattern. Repeated
     CLI flags are ANDed too because every value contributes terms; an empty
-    value contributes none.
+    value contributes none. Every value loses terminal escapes and invisible
+    characters before it is used as a pattern, so a value copied from the
+    output matches the message whose raw text carries those characters.
     """
     terms: list[str] = []
     for value in values or ():
         if value is None:
             continue
-        text = str(value).strip()
+        text = output.sanitize_text(str(value)).strip()
         if not text:
             continue
         if split:
