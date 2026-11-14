@@ -411,7 +411,7 @@ _SCHEME_STARTS_BY_FIRST = _starts_by_first(_SCHEME_STARTS)
 #: Schemes whose URLs run code or embed data.
 _SCRIPT_SCHEMES = frozenset({"javascript", "vbscript", "data"})
 
-#: Schemes neutralized by rewriting the scheme to its inerte ``hxxp`` form.
+#: Schemes neutralized by rewriting the scheme to its inert ``hxxp`` form.
 _HTTP_SCHEMES = frozenset({"http", "https"})
 
 #: Starts of the remaining kinds of URL.
@@ -656,7 +656,7 @@ def address_domain(address: str | None) -> str | None:
     """Return the domain of an email address, or ``None`` when it has none."""
     if not address:
         return None
-    local, separator, domain = address.rpartition("@")
+    _, separator, domain = address.rpartition("@")
     if not separator or not domain:
         return None
     return domain
@@ -681,7 +681,7 @@ def _ace_domain(domain: str) -> str:
 
 
 def _neutralize_start(match: UrlMatch, text: str) -> str:
-    """Return a URL with its start made inerte, leaving the rest unchanged."""
+    """Return a URL with its start made inert, leaving the rest unchanged."""
     if match.kind in ("neutralized", "bracket_domain"):
         return text
     if match.kind == "unc":
@@ -713,7 +713,7 @@ def render_urls(text: str, mode: str) -> str:
     """Return ``text`` with its URLs rendered according to ``mode``.
 
     ``keep`` returns the text unchanged, ``strip`` replaces every URL with
-    ``[link omitted]`` and ``neutralize`` makes each URL readable but inerte:
+    ``[link omitted]`` and ``neutralize`` makes each URL readable but inert:
     ``http``/``https`` become ``hxxp``/``hxxps``, other schemes keep their
     letters with the colon as ``[:]``, ``www.`` becomes ``www[.]``, a UNC path
     starts with ``[\\\\]``, non-ASCII domain labels take their ACE form and a
