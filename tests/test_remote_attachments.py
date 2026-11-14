@@ -772,7 +772,9 @@ class RemoteBudgetScopeTests(_RemoteCase):
         self.assertEqual(outlook_com.CALL_TIMEOUT_SECONDS, 30.0)
         for value in (10, 600):
             with self.subTest(timeout_seconds=value):
-                backend = FakePluginBackend(delays={"find_message": 0.1})
+                release = threading.Event()
+                self.addCleanup(release.set)
+                backend = FakePluginBackend(events={"find_message": release})
                 entry = FakeEntryPoint(_DRIVER, plugin=backend)
                 registry = BackendRegistry(
                     entry_points=[*internal_entry_points(), entry]

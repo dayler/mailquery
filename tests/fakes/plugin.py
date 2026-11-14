@@ -18,6 +18,7 @@ network, no filesystem writes.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Iterator, Mapping, Sequence
 
@@ -128,6 +129,7 @@ class FakePluginBackend:
         capabilities: Mapping[str, Any] | None = None,
         failures: dict[str, BaseException] | None = None,
         delays: Mapping[str, float] | None = None,
+        events: Mapping[str, threading.Event] | None = None,
         results: Mapping[str, Any] | None = None,
         stream_chunks: Sequence[bytes] | None = None,
     ) -> None:
@@ -147,6 +149,8 @@ class FakePluginBackend:
         self.failures = dict(failures or {})
         #: Per-operation delay in seconds (timeout tests; the call blocks).
         self.delays = dict(delays or {})
+        #: Per-operation event that blocks the call until the test releases it.
+        self.events = dict(events or {})
         #: Per-operation return value override (invalid-return tests).
         self.results = dict(results or {})
         self.stream_chunks = list(stream_chunks or [b"plugin-bytes"])
@@ -324,6 +328,11 @@ class FakePluginBackend:
         delay = self.delays.get(operation)
         if delay:
             time.sleep(float(delay))
+        event = self.events.get(operation)
+        if event is not None:
+            # Block until the test releases the call; the deadline under test
+            # expires in the caller while this worker is still waiting.
+            event.wait(30.0)
         failure = self.failures.get(operation)
         if failure is not None:
             raise failure
