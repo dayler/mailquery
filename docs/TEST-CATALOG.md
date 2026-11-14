@@ -24,6 +24,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` |
 | UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` |
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
+| UT-FLD | Fila por defecto de `search`/`new` y `--fields` en `search`, `new` y `show` | `tests/test_fields.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -66,8 +67,13 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 
 Los goldens de éxito de `search`, `new`, `show` y `attachment` llevan
 `content_notice` justo después de `generated_at`; los de error, `doctor` y
-`mailboxes` no lo llevan. La actualización de cada golden es una única línea
-añadida y el resto de sus valores no cambia.
+`mailboxes` no lo llevan. Los goldens de fila de `search`/`new` (`search_default`,
+`search_all_mail`, `search_multidriver`, `new_first_run`, `new_seeded`,
+`new_multidriver`, `outlook/search` y `outlook/new_first_run`) comparan la fila por
+defecto de seis campos (`uid`, `subject`, `from`, `date_received`, `is_read` y
+`has_attachments`); la fila completa se valida en una segunda corrida con
+`--fields all` dentro de los casos TC-01.03–.06, TC-02.02 y TC-10.01–.02. En el
+resto de goldens, una actualización conserva los valores ya fijados.
 
 ## 4. Dobles y fixtures
 
@@ -134,7 +140,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
 | AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear, también en `attachment` y desde la caché | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04, UT-ACT-05 | — |
-| AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios | UT-CW-06 (parcial; completa con UT-FLD-07) | — |
+| AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios (con `--fields all` en `search`/`new` y sin `--fields` en `show`) | UT-CW-06, UT-FLD-07 | — |
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 | AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
@@ -142,7 +148,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H03 (delta `PRD-v2.2.md`) | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
 | AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea y por hoja; `W_HIDDEN_CONTENT`; cuerpo todo oculto con `W_HTML_NO_TEXT` y `--text` sin el oculto | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | — |
 | AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` en los comandos | UT-CNT-03, UT-CW-07 | — |
-| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice`; reglas de seguridad en la skill y los README | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | — |
+| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice`; reglas de seguridad en la skill y los README, incluida la regla de triaje sin contenido (punto 16) | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | — |
 | AC-H06 (delta `PRD-v2.2.md`) | Detección y modos de URL en todos los campos; truncado sobre el texto transformado; filtros iguales en los tres modos | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | — |
 | AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08, UT-CW-10 | — |
 | AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08, UT-CW-10 | — |
@@ -157,6 +163,12 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-D04 (delta `PRD-v2.2.md`) | `[attachments].timeout_seconds`: 60 por defecto, 10–600, inválido ⇒ `E_CONFIG_INVALID` antes del store; documentado | UT-CFG-04, UT-RMT-05, DOC-06.05 | — |
 | AC-D05 (delta `PRD-v2.2.md`) | Corte duro de un plugin externo bloqueado antes del primer bloque o entre bloques, con `--all` informando el primero | UT-RMT-04 | — |
 | AC-D06 (delta `PRD-v2.2.md`) | Topes de 30 s intactos; nativos entre bloques y al terminar la llamada; A7 y aciertos de caché fuera del tope | UT-RMT-05, UT-OL-ATT-03.04 | — |
+| AC-O01 (delta `PRD-v2.2.md`) | En macOS y en Windows, sin `--fields`, cada fila de `search` y `new` tiene exactamente `uid`, `subject`, `from`, `date_received`, `is_read` y `has_attachments`, en ese orden y con los valores de `PRD.md` §12.5; los campos fuera de `messages[]` son los de hoy más `content_notice`, y el `hint` sigue RF-78; sin `--text` no se lee ningún cuerpo, solo las cabeceras de A6 de los mensajes devueltos; sin `--text` (ni `--to`/`--cc` en Windows, `PRD.md` RF-17), `--group-by` no lee cuerpos y `--count` no lee cuerpos ni cabeceras (`scan.messages_read: 0`) | UT-FLD-01, UT-FLD-02 (parcial; completa con UT-GRP-07 y SMOKE-NEW.08) | `search_default`, `search_all_mail`, `search_multidriver`, `new_first_run`, `new_seeded`, `new_multidriver`, `outlook/search`, `outlook/new_first_run` |
+| AC-O02 (delta `PRD-v2.2.md`) | `--fields snippet` añade `snippet` a la fila por defecto; `--fields all` da la fila completa de `PRD.md` §12.5; `--fields to,uid` y `--fields uid --fields to` dan lo mismo, en el orden de `PRD.md` §12.5; un campo desconocido o vacío ⇒ `E_USAGE` (exit 2) antes de abrir el store, con el mensaje y el hint de RF-70 | UT-FLD-03 | — |
+| AC-O03 (delta `PRD-v2.2.md`) | `show <uid> --fields attachments` devuelve solo `uid` y `attachments`, sin entregar el cuerpo ni emitir warnings del cuerpo; `show <uid> --fields body_text` no consulta los adjuntos; sin `--fields`, `show` devuelve los mismos campos que hoy más `content_notice`, con los valores y los warnings de F1 | UT-FLD-04 | — |
+| AC-O08 (delta `PRD-v2.2.md`) | `new --fields snippet` añade `snippet` y el cursor avanza igual que sin `--fields`; `new --group-by from` y `new --count` ⇒ `E_USAGE` (exit 2) sin tocar el cursor | UT-FLD-06 (parcial; completa con UT-GRP-06) | — |
+| AC-O09 (delta `PRD-v2.2.md`) | Un mensaje con texto oculto y URLs en el cuerpo da `W_HIDDEN_CONTENT` y cuenta esas URLs solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con los campos de cuerpo de RF-74 (regla 2) en `show`; `W_SENDER_AUTH_FAILED` aparece con y sin `--fields`; con `--count` solo hay warnings de alcance. Los criterios de F1 sobre el cuerpo y los destinatarios (AC-H01–AC-H18) aplican en `search` y `new` cuando esos campos se entregan (RF-74) | UT-FLD-05 (parcial; completa con UT-GRP-09) | — |
+| AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10 (parcial; completa con DOC-11 y DOC-12) | — |
 
 ## 8. Casos
 
@@ -631,6 +643,94 @@ Requisitos: RNF-19 · Archivo: `tests/test_content_wiring.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | B | La misma consulta dos veces, con cada modo, da el mismo JSON salvo `generated_at` y `scan.duration_ms`. |
+
+#### UT-FLD-01 — Fila por defecto
+
+Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin `--fields`, cada fila de `search` y `new` tiene exactamente `uid`, `subject`, `from`, `date_received`, `is_read` y `has_attachments`, en ese orden, con los mismos valores que la fila completa; se comprueba sobre el store sintético y sobre el doble de Outlook. |
+| .02 | P | Los campos fuera de `messages[]` son los de antes más `content_notice`; `hint`, `scan` y, en `new`, `cursor` no cambian. |
+
+#### UT-FLD-02 — Sin lectura de cuerpos
+
+Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Apple Mail: sin `--text`, `search` y `new` no llaman a la extracción del cuerpo (espía sobre `emlx._extract_body_text`) y leen las cabeceras de cada mensaje devuelto; `scan.messages_read` = número de mensajes devueltos. |
+| .02 | P | Outlook (doble): sin `--text`, el `CallLog` no tiene accesos a `Body`, `HTMLBody` ni `BodyFormat`; `items_opened` cuenta los items abiertos para las cabeceras de A6; un item S/MIME no se abre. |
+| .03 | P | Con `--text`, el cuerpo se lee para filtrar como hoy, pero sin `--fields snippet` la fila no lleva `snippet` ni `body`. |
+| .04 | P | Plugin falso con espías: con la fila por defecto, `search` y `new` no llaman a `load_snippet` ni a `load_body`; el plugin no tiene `load_headers` y no se calculan las señales del remitente. |
+| .05 | B | Apple Mail, mensaje cuyo `.emlx` no existe: `load_headers` no lee (`read=False`), el mensaje no cuenta en `scan.messages_read` y su fila sale sin warnings del remitente ni del cuerpo. |
+| .06 | P | `--to` como filtro sin `--fields to`: filtra por destinatarios (los lee) y la fila no lleva `to` ni `cc`; las URLs de los nombres de destinatarios no se cuentan. |
+
+#### UT-FLD-03 — `--fields` en `search` y `new`
+
+Requisitos: AC-O02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--fields snippet` añade `snippet` al final de la fila por defecto. |
+| .02 | P | `--fields all` da la fila completa de `PRD.md` sección 12.5 (`SEARCH_ROW_FIELDS`). |
+| .03 | P | `--fields to,uid` y `--fields uid --fields to` dan la fila por defecto más `to`, en el orden canónico. |
+| .04 | N | `--fields remitente` ⇒ `E_USAGE`, exit 2, mensaje y hint literales de PRD-v2.2 sección 8; `--fields ""` y `--fields uid,,to` ⇒ ídem con `''`. |
+| .05 | B | El error ocurre antes de crear el home (el `HOME` temporal no tiene `.mailquery`) y sin abrir el store. |
+| .06 | B | D-24: `--fields "to, uid"` equivale a `--fields to,uid`; `--fields ALL` y `--fields Snippet` ⇒ `E_USAGE` con `unknown field 'ALL'` / `unknown field 'Snippet'`; `--fields " "` ⇒ ídem con `''`. |
+
+#### UT-FLD-04 — `show --fields`
+
+Requisitos: AC-O03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--fields attachments` → `message` con solo `uid` y `attachments`; ningún warning de cuerpo; en un mensaje S/MIME, `attachments: []` (se lee el cuerpo para aplicar la regla, sin entregarlo). |
+| .02 | P | `--fields body_text` → no consulta los adjuntos (`attachments()` y `attachment_names()` del backend no se llaman). |
+| .03 | P | `--fields headers` → `uid` y `headers` sin leer el cuerpo (Apple Mail con `load_headers`; Outlook sin `Body`/`HTMLBody`). |
+| .04 | P | Sin `--fields` → los mismos campos y valores que antes más `content_notice`. |
+| .05 | N | Campo desconocido ⇒ `E_USAGE` con la lista de `show`. |
+| .06 | P | `--fields source` y `--fields partial`, cada uno solo: leen el cuerpo, entregan `uid` y ese campo, y emiten los warnings del cuerpo (cuerpo entregado según RF-74). |
+
+#### UT-FLD-05 — Warnings según lo entregado
+
+Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Mensaje con texto oculto y URLs en el cuerpo: `W_HIDDEN_CONTENT` y el conteo de las URLs del cuerpo solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con `body_text` (o `body_truncated`, `partial`, `readable`, `source`) en `show`. |
+| .02 | P | URL en el asunto: contada con la fila por defecto; URL en el nombre de un destinatario: contada solo con `--fields to`. |
+| .03 | P | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` aparecen con y sin `--fields`, también con `show --fields attachments`. |
+| .04 | N | `W_BODY_UNREADABLE`, `W_EMLX_MISSING` (Apple Mail) y `W_BODY_NOT_LOCAL` (Outlook) solo con cuerpo entregado; con `--text` sin `snippet` no aparecen. |
+| .05 | N | `W_ATTACHMENTS_UNAVAILABLE` solo si `show` entrega `attachments`. |
+
+#### UT-FLD-06 — `new --fields`
+
+Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `new --fields snippet` añade `snippet`. |
+| .02 | B | El `state.json` tras `new --fields snippet` es igual al de `new` sin `--fields` sobre el mismo store (cursor y anillo). |
+
+#### UT-FLD-07 — Compatibilidad final de F1
+
+Requisitos: AC-H14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `--fields all` en `search`/`new` y sin `--fields` en `show`, están todos los campos existentes y la única clave nueva respecto de 2.0.x es `content_notice`. |
+
+#### DOC-10 — Documentación de la fila y de `--fields`
+
+Requisitos: AC-O10, AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --help`, `new --help` y `show --help` describen `--fields` con la lista de su comando. |
+| .02 | P | Los dos README documentan la fila por defecto y `--fields` con ejemplos (`--fields snippet`, `--fields all`, `show apple_mail:2714 --fields attachments`). |
+| .03 | P | La skill explica la fila por defecto, `new --fields snippet` para resumir el correo nuevo, cuándo usar `new` y cuándo `search --unread`, y la regla de triaje sin contenido (punto 16). |
+| .04 | P | `docs/recipes/01-new-mail-digest.md` usa `mailquery new --fields snippet`; todas las líneas `mailquery search` de `02-search-invoices.md` piden con `--fields` los campos que consumen. |
 
 ### Estado, búsqueda y store
 
@@ -2155,10 +2255,10 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 |---|---|---|
 | .01 | P | `doctor` informa todos los chequeos documentados ⇒ golden `doctor`. |
 | .02 | P | `mailboxes`: cuentas, contadores e `included` ⇒ golden `mailboxes`. |
-| .03 | P | `search` por defecto devuelve todos los mensajes distintos ⇒ golden `search_default`. |
-| .04 | P | `search` con All Mail deduplica al canónico de INBOX ⇒ golden `search_all_mail`. |
-| .05 | P | Primera corrida de `new` emite la ventana `[D - lookback, D]` ⇒ golden `new_first_run`. |
-| .06 | P | Corrida con estado sembrado emite los mensajes nuevos y avanza el cursor ⇒ golden `new_seeded`. |
+| .03 | P | `search` por defecto devuelve todos los mensajes distintos con la fila de seis campos ⇒ golden `search_default`; una segunda corrida con `--fields all` valida los campos fuera de la fila y los warnings de cuerpo. |
+| .04 | P | `search` con All Mail deduplica al canónico de INBOX con la fila de seis campos ⇒ golden `search_all_mail`; `duplicate_count`, `snippet` y `mailbox` se comprueban con `--fields all`. |
+| .05 | P | Primera corrida de `new` emite la ventana `[D - lookback, D]` con la fila de seis campos ⇒ golden `new_first_run`. |
+| .06 | P | Corrida con estado sembrado emite los mensajes nuevos con la fila de seis campos y avanza el cursor ⇒ golden `new_seeded`. |
 | .07 | P | `show` de un mensaje de texto con adjunto ⇒ golden `show_2714`. |
 | .08 | N | `show` con el `.emlx` ausente ⇒ golden `show_83170`. |
 | .09 | N | `show` con el `.emlx` corrupto ⇒ golden `show_83180`. |
@@ -2174,11 +2274,11 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `mailboxes` |
-| .02 | P | `search` |
+| .02 | P | `search` con la fila de seis campos ⇒ golden `outlook/search`; `date_sent` y las señales de contenido se comprueban con `--fields all`. |
 | .03 | P | `show` |
 | .04 | N | `show_header_only` |
 | .05 | N | `show_smime` |
-| .06 | P | `new_first_run` |
+| .06 | P | `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
 | .07 | P | `doctor` |
 
 #### TC-03 — Gate de solo lectura de Apple Mail
@@ -2187,7 +2287,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, y con `--strip-links` en cada `search`, `new` y `show`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `new --fields all` y `show <uid> --fields attachments`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
@@ -2262,8 +2362,8 @@ Requisitos: AC-04 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `search` con `apple_mail` y el plugin de prueba declarados ⇒ golden `search_multidriver`: resultados fusionados en orden total. |
-| .02 | P | `new` sobre la ventana de primera corrida fusionada de los dos drivers ⇒ golden `new_multidriver`. |
+| .01 | P | `search` con `apple_mail` y el plugin de prueba declarados ⇒ golden `search_multidriver`: resultados fusionados en orden total con la fila de seis campos. |
+| .02 | P | `new` sobre la ventana de primera corrida fusionada de los dos drivers ⇒ golden `new_multidriver` con la fila de seis campos. |
 
 ### Empaquetado y documentación
 
@@ -2449,9 +2549,9 @@ Con la instalación y la config de SMOKE-INSTALL.
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `mailboxes` ⇒ exit 0 y JSON del contrato de salida (§12.5). |
-| .02 | P | `new` ⇒ ídem. |
-| .03 | P | `search --since 1w` ⇒ ídem. |
-| .04 | P | `search --text "*e*" --since 1d` ⇒ ídem. |
+| .02 | P | `new --peek --fields all` valida la fila completa; `new` valida la fila por defecto de seis campos y el contrato de salida; `cursor` no cambia con `--fields`. |
+| .03 | P | `search --since 1w` valida la fila por defecto; la misma consulta con `--fields all` valida la fila completa. |
+| .04 | P | `search --text "*e*" --since 1d` valida la fila por defecto y `scan.mode: text`; con `--fields all`, la fila completa. |
 | .05 | P | `show <messages[0].uid del search>` ⇒ ídem. |
 | .06 | N | `unread` de cada carpeta incluida, antes y después ⇒ sin cambios. |
 | .07 | P | `doctor` y cada comando anterior dentro del presupuesto de §19 de su plataforma (`search --text` solo si `scan.candidates ≤ 500`). |

@@ -1083,11 +1083,11 @@ timeout_seconds)`,
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
 `wildcard_to_regex(pattern)`, `matches(pattern, text)`,
 `run_search(backend, config, filters, *, drivers=None, native=None,
-url_mode="neutralize")`,
+url_mode="neutralize", fields=None)`,
 `run_new(backend, config, state_store, *, peek=False, limit=None, clock=None,
-drivers=None, native=None, url_mode="neutralize")`,
+drivers=None, native=None, url_mode="neutralize", fields=None)`,
 `run_show(backend, config, uid, *, driver=None, drivers=None, native=None,
-url_mode="neutralize")`,
+url_mode="neutralize", fields=None)`,
 `run_mailboxes(backend, config, *, drivers=None, native=None)`.
 Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
 `None` cuando la config no lo declara); `drivers` es el mapping
@@ -1102,30 +1102,28 @@ antes de abrir el store, PRD §12.11); los mensajes de error de `run_show`
 (`E_USAGE`, `E_ACCOUNT_NOT_IN_SCOPE`) muestran el uid prefijado.
 `state_store` es un `StateStore` creado con `is_installed` del registro.
 
-**Orden canónico de campos.** `SEARCH_ROW_FIELDS` y `SHOW_FIELDS` son tuplas públicas con el orden
-exacto de las claves de cada fila de `messages[]` de `search`/`new` y de `message` de `show`.
-`search`/`new` usan el mismo constructor de metadatos que `show` y añaden `duplicate_count`, `snippet`
-y `body`; `show` añade `headers`, `body_text`, `body_truncated`, `attachments`, `partial`, `readable` y
-`source`. El cuerpo se lee con un único cargador que devuelve el texto, las banderas
-`available`/`readable`/`partial`, las cabeceras, los adjuntos del cuerpo y los warnings de ese mensaje;
-`search`/`new` los aplanan en el orden de `messages[]` y `show` hace lo mismo con su único mensaje.
+**Orden canónico de campos.** `SEARCH_ROW_FIELDS`, `DEFAULT_ROW_FIELDS` y `SHOW_FIELDS` son tuplas
+públicas con el orden exacto de las claves de la fila de `messages[]` y de `message` de `show`. Sin
+`--fields`, cada fila de `search`/`new` es `DEFAULT_ROW_FIELDS` (`uid`, `subject`, `from`,
+`date_received`, `is_read`, `has_attachments`); `search_row_fields(requested)` la amplía con los campos
+pedidos y `all` devuelve `SEARCH_ROW_FIELDS`. `show_message_fields(requested)` devuelve `uid` más los
+campos pedidos, y sin selección o con `all`, `SHOW_FIELDS`. Los campos salen siempre en el orden
+canónico, sea cual sea el orden de la lista. El cuerpo solo se lee si se entrega `snippet`/`body` en
+`search`/`new`, si `--text` lo necesita para filtrar, o si `show` entrega un campo de cuerpo o
+`attachments`; los destinatarios solo si se entregan `to`/`cc` (o `headers` en `show`); los adjuntos
+solo si `show` entrega `attachments`. `mailbox` y `duplicate_count` se siguen calculando para la
+deduplicación aunque no se entreguen. Las cabeceras de A6 salen del `BodyRow` cuando el cuerpo se leyó y,
+si no, del gancho `load_headers(row)` de los backends nativos (un plugin no lo tiene); solo cuentan en
+`scan.messages_read` las lecturas efectivas.
 
-**Procesamiento del contenido (F1, PRD-v2.2 §10).** Por mensaje, `_content_fields`
-sanea (`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y
-el cuerpo completo, y cuenta las señales sobre esos textos y las direcciones
-(`from`, `to`, `cc`), nunca sobre `headers`; un cuerpo ilegible no aporta texto.
-Después, el modo de URL (`url_mode`) se aplica con `output.render_urls` a esos
-campos y a los seis valores de `headers` de `show`, y el `snippet` (`search`/`new`)
-o el truncado a 20.000 caracteres (`show`, con `body_truncated` y
-`W_BODY_TRUNCATED`) se calculan sobre el texto ya transformado. Los filtros
-comparan el texto saneado (A2), nunca el transformado por A4, así que los
-resultados no dependen del modo. Los warnings por mensaje son los del estado del
-cuerpo seguidos de `output.content_warnings(...)`:
-`W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`,
-`W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH`. El
-`hidden_chars`, la primera `Authentication-Results` y `Reply-To` vienen del
-`BodyRow` (0/`None` si el driver no los entrega); las filas del escaneo `--text`
-los conservan. `body.truncated` se calcula sobre el texto transformado.
+**Procesamiento del contenido (F1, PRD-v2.2 §10).** Por mensaje, `_content_fields` sanea
+(`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y el cuerpo completo, y
+cuenta las señales solo sobre los campos que esa respuesta entrega (y sobre las direcciones de `from`,
+`to` y `cc` entregados), nunca sobre `headers`; un cuerpo ilegible no aporta texto. Los warnings del
+estado del cuerpo y `W_HIDDEN_CONTENT` solo se emiten si se entrega cuerpo; `--text` sin
+`snippet`/`body` filtra con el texto pero no entrega sus warnings. `W_SENDER_AUTH_FAILED` y
+`W_REPLY_TO_MISMATCH` se emiten siempre que el mensaje los justifica. El resto del procesamiento (A4,
+`--strip-links`, truncado, orden de los warnings) no cambia.
 
 **Motor multi-driver (PRD RF-37, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
@@ -1223,7 +1221,14 @@ ayuda `replace every URL with [link omitted] (overrides [content].url_display)`;
 ningún otro comando la acepta (argparse ⇒ `E_USAGE`, exit 2). `_url_mode(config,
 args)` calcula el modo efectivo (`--strip-links` > `[content].url_display` >
 `neutralize`) y `_execute` lo pasa como `url_mode=` a `run_search`, `run_new` y
-`run_show`.
+`run_show`. `--fields` es una opción de `search`, `new` y `show` (`action="append"`, `metavar="LIST"`): cada valor
+se parte por comas, se recortan los espacios de cada nombre y los nombres distinguen mayúsculas.
+`search`/`new` la usan para **añadir** campos a la fila por defecto y `show` para **elegir** los campos
+de `message` (`uid` siempre). Un nombre desconocido o vacío ⇒ `E_USAGE` (exit 2) con
+`unknown field '<nombre>' in --fields` y `valid fields: <lista del comando>`; se valida en `_main`
+antes de crear `~/.mailquery`, de leer la config y de abrir el store. `_execute` pasa la selección como
+`fields=` a `run_search`, `run_new` y `run_show`. Las ayudas de los tres comandos listan sus campos en
+el epílogo.
 
 **Ciclo de vida
 multi-driver:** el comando crea **un** `BackendRegistry` y
@@ -1962,17 +1967,30 @@ plantilla de §12.6 (con el `detail` saneado tras `": "`) y `hint` es el del
 plugin saneado o el defecto del motivo/código.
 
 ### Mensaje (`search`/`new`)
+
+Sin `--fields`, cada elemento de `messages[]` tiene exactamente estas claves, en este orden:
+
+```json
+{"uid": "apple_mail:83143", "subject": "...",
+ "from": {"name": "", "address": ""},
+ "date_received": "<ISO>|null", "is_read": false, "has_attachments": false}
+```
+
+`--fields` añade campos a esa fila y `--fields all` devuelve la fila completa de 2.0.x:
+
 ```json
 {"uid": "apple_mail:83143", "message_id": "<...>", "duplicate_count": 1, "subject": "...",
  "from": {"name": "", "address": ""}, "to": [{"name": "", "address": ""}], "cc": [],
  "date_sent": "<ISO>|null", "date_received": "<ISO>|null",
  "mailbox": {"account": {"uuid": "", "label": "", "email": ""}, "name": "INBOX", "path": "INBOX", "url": "imap://..."},
  "is_read": false, "is_flagged": false, "has_attachments": false, "size_bytes": 0,
- "snippet": "", "body": {"available": true, "partial": false, "truncated": false}}
+ "snippet": "", "body": {"available": true, "readable": true, "partial": false, "truncated": false}}
 ```
-`message_id` = `message_global_data.message_id_header` (vacío `""` si falta).
-`body.available` = existe y se pudo abrir el `.emlx`; `body.partial` = es
-`.partial.emlx`; `body.truncated` = el snippet se recortó a 200.
+
+`message_id` = `message_global_data.message_id_header` (vacío `""` si falta). `body.available` = existe
+y se pudo abrir el `.emlx`; `body.partial` = es `.partial.emlx`; `body.truncated` = el snippet se
+recortó a 200. En `show`, `--fields` elige el subconjunto de `SHOW_FIELDS` (`uid` siempre incluido);
+sin `--fields` o con `all` se devuelve el mensaje completo.
 
 ### Warnings de contenido (`search`, `new`, `show`)
 
