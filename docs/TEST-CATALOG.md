@@ -527,6 +527,15 @@ Archivo: `tests/test_search.py`
 | .03 | P | Path o URL exactos que coinciden con el nombre de otra carpeta ⇒ gana el path o la URL, cada uno. |
 | .04 | P | Dos carpetas con el mismo nombre en paths distintos ⇒ la primera de `mailboxes`. |
 
+#### UT-SR-17 — Orden canónico de campos
+
+Archivo: `tests/test_search.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Las claves de cada fila de `search` sobre el store sintético son exactamente `SEARCH_ROW_FIELDS`, en ese orden. |
+| .02 | P | Las claves de `message` de `show` son exactamente `SHOW_FIELDS`, en ese orden, sobre el store sintético y sobre el doble de Outlook. |
+
 #### UT-ST-01 — Lock
 
 Requisitos: RF-22 · Archivo: `tests/test_state.py`

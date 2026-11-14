@@ -157,7 +157,7 @@ Estado de la implementación de cada contrato de la sección 0.2, desviaciones a
 | Contrato de plugins: cuerpo | F1 | Pendiente | — | — | — |
 | Configuración | F1, F2 | Pendiente | — | — | — |
 | Dependencias y actualización | F1 | Pendiente | — | — | — |
-| Responsabilidades de módulos | F1, F2, F3 | Pendiente | — | — | — |
+| Responsabilidades de módulos | F1, F2, F3 | Pendiente | `f8806dc` | `INTERFACES.md` | `search.py` arma `search`, `new` y `show` con el mismo constructor de metadatos y de cuerpo; dos tuplas públicas (`SEARCH_ROW_FIELDS`, `SHOW_FIELDS`) fijan el orden de las claves de la fila y de `message`. |
 | Prompt injection | F1 | Pendiente | — | — | — |
 | Cambios visibles en 3.0.0 | F1, F3 | Pendiente | — | — | — |
 | Recuperación de adjuntos de drivers `"remote"` | F2 | Pendiente | — | — | — |

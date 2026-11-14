@@ -887,6 +887,14 @@ antes de abrir el store, PRD §12.11); los mensajes de error de `run_show`
 (`E_USAGE`, `E_ACCOUNT_NOT_IN_SCOPE`) muestran el uid prefijado.
 `state_store` es un `StateStore` creado con `is_installed` del registro.
 
+**Orden canónico de campos.** `SEARCH_ROW_FIELDS` y `SHOW_FIELDS` son tuplas públicas con el orden
+exacto de las claves de cada fila de `messages[]` de `search`/`new` y de `message` de `show`.
+`search`/`new` usan el mismo constructor de metadatos que `show` y añaden `duplicate_count`, `snippet`
+y `body`; `show` añade `headers`, `body_text`, `body_truncated`, `attachments`, `partial`, `readable` y
+`source`. El cuerpo se lee con un único cargador que devuelve el texto, las banderas
+`available`/`readable`/`partial`, las cabeceras, los adjuntos del cuerpo y los warnings de ese mensaje;
+`search`/`new` los aplanan en el orden de `messages[]` y `show` hace lo mismo con su único mensaje.
+
 **Motor multi-driver (PRD RF-37, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
 native=)` y se consulta con los mismos filtros; la deduplicación por
