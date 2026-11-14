@@ -16,7 +16,8 @@ para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
 - **Sin red, sin demonio y sin scheduler** desde el núcleo: quien decide cuándo
   ejecutarla es el harness. Los plugins de backend externos declaran sus propias
   capacidades (`network`, `readonly`, `body_local`, `attachments`,
-  `native_order`) y `doctor` las muestra.
+  `native_order`) y `doctor` las muestra; un plugin declarado tiene además su
+  propia sección `plugins`.
 - **Mismos comandos y mismo JSON en ambas plataformas.** En macOS la solo
   lectura es estructural (SQLite y `.emlx` abiertos en solo lectura); en Windows
   la impone un proxy de lista blanca sobre el modelo de objetos de Outlook.
@@ -82,7 +83,7 @@ entorno de `pipx` (instalar el plugin es el consentimiento):
 
 ```bash
 pipx inject mailquery <paquete-del-plugin>
-mailquery doctor        # muestra el driver y sus capacidades declaradas
+mailquery doctor        # muestra el driver y los chequeos de cada plugin declarado
 mailquery -v            # lista los drivers instalados
 ```
 
@@ -258,16 +259,17 @@ Convenciones (nombres por ID de caso, goldens, Outlook falso, CI): ver
 ## Primeros pasos
 
 ```bash
-mailquery doctor        # 1. preflight: entorno, drivers, solo lectura, config, estado, lock
-mailquery mailboxes     # 2. cuentas y carpetas, con la etiqueta que usará la config
-# 3. declara al menos una cuenta en ~/.mailquery/config.toml
-mailquery doctor        # 4. vuelve a validar
-mailquery search --since 1w
+# 1. declara al menos una cuenta en ~/.mailquery/config.toml
+mailquery search --since 1w            # 2. la petición habitual
 mailquery attachment apple_mail:83143 --index 1   # recupera un adjunto local
+# Diagnóstico solo tras un fallo: mailquery doctor --json --failures
+# Etiquetas para editar la config: mailquery mailboxes
 ```
 
 Sin cuentas declaradas, `search` y `new` devuelven `count: 0` con
 `W_NO_ACCOUNTS`: no es un error, solo no hay nada que observar.
+`mailquery doctor` es la verificación tras instalar o actualizar y el
+diagnóstico tras un fallo; no hace falta antes de cada comando.
 
 ## Configuración (`~/.mailquery/config.toml`)
 
@@ -382,19 +384,21 @@ Windows); los plugins externos se listan siempre. `--version` solo lee metadata
 de distribución: no lee `config.toml`, no importa plugins y no crea
 `~/.mailquery`.
 
-### `mailquery doctor [--json]`
+### `mailquery doctor [--json] [--failures]`
 
-Informe de texto (con `--json`, el payload máquina con `checks[]`). Sale con
-exit 0 si puede diagnosticar; un chequeo fallido se marca `[FAIL]` y nunca
-aborta. Los chequeos comunes son `python`, `home`, `driver`, `config`, `state` y
-`lock`. El chequeo `driver` valida cada driver declarado y muestra sus
-capacidades, la versión del paquete y la versión de API. En macOS los chequeos
-son `python`, `home`, `driver`, `store`, `envelope_index`, `schema`,
-`readonly_strategy`, `accounts_db`, `config`, `state` y `lock`. Ejemplo:
+Úsalo como verificación tras instalar o actualizar y como diagnóstico tras un
+fallo; no hace falta antes de cada comando. Informe de texto (con `--json`, el
+payload máquina con `checks[]` y `plugins[]`). Sale con exit 0 si puede
+diagnosticar; un chequeo fallido se marca `[FAIL]` y nunca aborta. Los chequeos
+comunes son `python`, `home`, `driver`, `config`, `state` y `lock`. El chequeo
+`driver` valida cada driver declarado y muestra sus capacidades, la versión del
+paquete y la versión de API. En macOS los chequeos son `python`, `home`,
+`driver`, `store`, `envelope_index`, `schema`, `readonly_strategy`,
+`accounts_db`, `config`, `state` y `lock`. Ejemplo:
 
 ```text
 $ mailquery doctor
-mailquery doctor - environment and read-only preflight
+mailquery doctor - environment and read-only diagnosis
 
 Checks:
   [ok]   python             3.14.7
@@ -418,6 +422,36 @@ Result: 11/11 checks passed
 Cuando un driver declarado es incompatible, `driver` queda `ok=false` y sus
 dependientes informan `not evaluated: driver failed`; `doctor` sigue saliendo
 con exit 0.
+
+Con `--failures`, `doctor` muestra solo los chequeos que fallan y los que no se
+evaluaron, en el informe de texto y en el payload JSON: `checks` conserva los
+chequeos que fallan, `not_evaluated` lista los que se omitieron porque falló una
+dependencia y las secciones sin fallos no se muestran. Si no falla nada, el
+texto dice `all checks passed` y el JSON es
+`{"checks": [], "not_evaluated": [], "plugins": []}`. Es la forma más rápida de
+diagnosticar un comando que falló, por ejemplo
+`mailquery doctor --json --failures` tras un exit 3 o 6.
+
+Cada plugin externo declarado en `[scope."<driver>:<cuenta>"]` añade un elemento
+a `plugins[]`, en el orden de su primer bloque, con su `driver` y sus `checks`:
+los que devuelve `doctor_checks()` del plugin y, después, un chequeo `config`
+que resuelve los bloques `[scope]` del propio plugin con sus cuentas y carpetas.
+Un plugin que no pasa el chequeo `driver` no se llama (`config` es
+`not evaluated: driver failed`); un `doctor_checks()` que falla o se cuelga
+(corte de 30 s) da un chequeo `plugin` con `ok=false`. El informe de texto los
+muestra bajo `Plugins:`:
+
+```text
+Plugins:
+  thunderbird
+    [FAIL] profile  profile 'abcd.default-release' not found in ~/Library/Thunderbird/Profiles
+    [FAIL] config   thunderbird:work@example.com: E_CONFIG_ACCOUNT_UNKNOWN: …
+```
+
+`Result:` cuenta todos los chequeos, también los de los plugins. El chequeo
+`config` de primer nivel ya no lista los bloques de los plugins; cuando todos
+los bloques son de plugins, informa `0 account block(s) declared for driver
+<nativo>` con `ok=true`.
 
 ### `mailquery mailboxes`
 

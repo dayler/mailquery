@@ -297,7 +297,7 @@ else
 fi
 
 if [ "$OS" = "Darwin" ]; then
-    log "running 'mailquery doctor' (preflight)..."
+    log "running 'mailquery doctor' (post-install check)..."
     if ! mailquery doctor >/dev/null 2>&1; then
         log "warning: 'mailquery doctor' reported problems; run it without redirection to see the details"
     fi
