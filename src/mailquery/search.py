@@ -18,7 +18,7 @@ import time
 import unicodedata
 import dataclasses
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import cmp_to_key
 from typing import TYPE_CHECKING, Any, Callable, Collection, Iterable, Mapping, NamedTuple, Sequence
 
@@ -47,6 +47,17 @@ _INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
 SEARCH_MAX_LIMIT = 200
 NEW_MAX_LIMIT = 500
 MAX_SCAN_HARD_LIMIT = 50_000
+
+#: Keys ``search --group-by`` accepts, in the order its help lists them.
+GROUP_KEYS = ("from", "domain", "mailbox", "account", "day", "week", "month")
+#: Grouping keys of one run, at most.
+GROUP_MAX_KEYS = 2
+#: Groups one response delivers, at most.
+GROUP_MAX_GROUPS = 50
+#: Messages per group without ``--limit``.
+GROUP_DEFAULT_LIMIT = 5
+#: Messages per group with ``--limit``, at most.
+GROUP_MAX_LIMIT = 50
 
 #: Canonical key order of every ``search``/``new`` row of ``messages[]``.
 SEARCH_ROW_FIELDS = (
@@ -509,24 +520,39 @@ def run_search(
     native: str | None = None,
     url_mode: str = "neutralize",
     fields: Sequence[str] | None = None,
+    group_by: Sequence[str] | None = None,
+    count: bool = False,
 ) -> dict:
-    """Return ``{"count", "messages", "truncated", "scan", "warnings"}``.
+    """Return the ``search`` payload.
+
+    Without grouping or counting:
+    ``{"count", "truncated", "hint", "messages", "scan", "warnings"}``. With
+    ``group_by`` the messages are grouped by one or two of :data:`GROUP_KEYS`
+    and ``groups`` replaces ``messages``: every group carries its keys in the
+    requested order, its ``count`` and its newest messages (at most
+    ``filters.limit``, five by default), and the response carries at most
+    :data:`GROUP_MAX_GROUPS` groups. With ``count`` only
+    ``{"count", "hint", "warnings", "scan"}`` is returned.
 
     The scope is the set of accounts declared in ``config.toml`` (INBOX always
     included) plus their ``mailbox_list`` folders and the ``--include-mailbox``
     folders of this run. Every declared driver is queried with the same filters;
     the per-driver results are deduplicated inside their driver,
     merged with the total order ``(date_received DESC, driver ASC,
-    native_order_key DESC)`` and paginated after the merge.
+    native_order_key DESC)`` and paginated after the merge. Grouping and
+    counting happen after the filters and the deduplication.
 
     ``fields`` extends the default row with the requested fields (``all``
     delivers the full row); the body is read only when the row delivers
     ``snippet`` or ``body`` or when ``--text`` filters on it. ``url_mode``
     renders the URLs of the content fields (``neutralize``, ``keep`` or
-    ``strip``); the link and sender signals do not depend on it.
+    ``strip``); the link and sender signals do not depend on it. A
+    ``search`` without results of a read account carries the scope hint of
+    :func:`_no_results_hint`; ``count`` returns only scope warnings.
     """
     started = time.perf_counter()
     delivered = search_row_fields(fields)
+    group_keys = tuple(group_by or ())
     loads_body = bool(_SEARCH_BODY_FIELDS & set(delivered))
     native_name, pool = _driver_pool(backend, drivers, native)
 
@@ -549,13 +575,19 @@ def run_search(
     includes = _include_entries(
         backend, resolved, filters.include_mailboxes, drivers=drivers, native=native_name
     )
+    scope_size = _scope_size(resolved, includes)
     if not resolved and not includes:
         return _empty_search_result(
-            mode, started, [NO_ACCOUNTS_WARNING, *scope_warnings]
+            mode,
+            started,
+            [NO_ACCOUNTS_WARNING, *scope_warnings],
+            _no_results_hint(*scope_size),
         )
     _apply_include_mailboxes(runs, includes)
     if not any(run.allowed_ids for run in runs.values()):
-        return _empty_search_result(mode, started, scope_warnings)
+        return _empty_search_result(
+            mode, started, scope_warnings, _no_results_hint(*scope_size)
+        )
 
     if content_flags:
         _require_bounded_scan(
@@ -622,6 +654,36 @@ def run_search(
         )
 
     merged = _merge_ordered(canonical, _run_backends(runs), descending=True)
+    if count:
+        return {
+            "count": len(merged),
+            "hint": _no_results_hint(*scope_size) if not merged else None,
+            "warnings": list(scope_warnings),
+            "scan": _scan_dict(
+                mode,
+                candidates,
+                _counted_reads(runs, opened_before, scan_reads, {}),
+                started,
+            ),
+        }
+    if group_keys:
+        return _grouped_search(
+            merged,
+            runs,
+            group_keys,
+            fields=delivered,
+            limit=filters.limit,
+            loads_body=loads_body,
+            cached_bodies=bool(text_terms),
+            url_mode=url_mode,
+            mode=mode,
+            candidates=candidates,
+            started=started,
+            warnings=warnings,
+            scope_size=scope_size,
+            opened_before=opened_before,
+            scan_reads=scan_reads,
+        )
     limit = _search_limit(config, filters.limit)
     page = merged[:limit]
     truncated = len(merged) > limit
@@ -643,18 +705,12 @@ def run_search(
         url_mode=url_mode,
     )
     warnings.extend(body_warnings)
-    messages_read = 0
-    for driver, run in runs.items():
-        before = opened_before[driver]
-        if before is not None:
-            messages_read += _items_opened(run.backend) - before
-        else:
-            messages_read += scan_reads.get(driver, 0) + reads.get(driver, 0)
+    messages_read = _counted_reads(runs, opened_before, scan_reads, reads)
 
     return {
         "count": len(messages),
         "truncated": truncated,
-        "hint": _search_hint(truncated),
+        "hint": _search_hint(truncated) if merged else _no_results_hint(*scope_size),
         "messages": messages,
         "scan": _scan_dict(mode, candidates, messages_read, started),
         "warnings": warnings,
@@ -1143,6 +1199,28 @@ def _scope_mailboxes(
     for mailbox in extra:
         unique.setdefault(mailbox["id"], mailbox)
     return tuple(unique.values())
+
+
+def _scope_size(
+    resolved: Sequence[Any], includes: "Sequence[tuple[str, MailboxRow]]"
+) -> tuple[int, int]:
+    """Read accounts and searched folders of the resolved scope.
+
+    Every account of ``resolved`` is read (an excluded store never resolves).
+    Its folders are counted once whatever listed them (INBOX, ``mailbox_list``
+    or ``--include-mailbox``). No driver is called.
+    """
+    folders: dict[tuple[str, str], set[Any]] = {}
+    for scope in resolved:
+        key = (str(getattr(scope, "driver", "") or ""), _scope_account_uuid(scope))
+        bucket = folders.setdefault(key, set())
+        for mailbox in getattr(scope, "mailboxes", ()) or ():
+            bucket.add(mailbox["id"])
+    for driver, mailbox in includes:
+        folders.setdefault(
+            (driver, str(mailbox["account_uuid"] or "")), set()
+        ).add(mailbox["id"])
+    return len(folders), sum(len(bucket) for bucket in folders.values())
 
 
 def _include_entries(
@@ -1805,6 +1883,250 @@ def _build_messages(
 def _flatten_warnings(groups: Iterable[Sequence[str]]) -> list[str]:
     """Warnings of every message, flattened in message order."""
     return [warning for group in groups for warning in group]
+
+
+# --------------------------------------------------------------------------- #
+# Grouping (``--group-by``)
+# --------------------------------------------------------------------------- #
+
+
+def _grouped_search(
+    rows: Sequence[dict],
+    runs: "Mapping[str, _DriverRun]",
+    keys: Sequence[str],
+    *,
+    fields: Sequence[str],
+    limit: int | None,
+    loads_body: bool,
+    cached_bodies: bool,
+    url_mode: str,
+    mode: str,
+    candidates: int,
+    started: float,
+    warnings: list[str],
+    scope_size: tuple[int, int],
+    opened_before: "Mapping[str, int | None]",
+    scan_reads: "Mapping[str, int]",
+) -> dict:
+    """Build the grouped response of ``search``.
+
+    ``rows`` are the deduplicated messages in the total order. Every group
+    carries its keys in the order requested, its total ``count`` and at most
+    ``limit`` messages (five without ``--limit``); the grouping ``from`` and
+    ``mailbox`` keys are not repeated in the rows. A row of a group is built
+    like a row of ``search``, so its warnings follow the delivered fields. Only
+    the emitted rows are read. More than :data:`GROUP_MAX_GROUPS` groups
+    truncate the response and add the group warning and hint.
+    """
+    groups = _build_groups(rows, runs, keys)
+    truncated = len(groups) > GROUP_MAX_GROUPS
+    remaining = len(groups) - GROUP_MAX_GROUPS if truncated else 0
+    row_fields = _group_row_fields(fields, keys)
+    per_group = _group_limit(limit)
+    payload_groups: list[dict] = []
+    body_warnings: list[str] = []
+    reads: dict[str, int] = {driver: 0 for driver in runs}
+    for group in groups[:GROUP_MAX_GROUPS]:
+        page = group["rows"][:per_group] if per_group else []
+        recipients = (
+            _page_recipients(page, runs)
+            if "to" in row_fields or "cc" in row_fields
+            else {}
+        )
+        messages, group_warnings, group_reads = _build_messages(
+            page,
+            runs,
+            recipients,
+            fields=row_fields,
+            loads_body=loads_body,
+            cached_bodies=cached_bodies,
+            url_mode=url_mode,
+        )
+        body_warnings.extend(group_warnings)
+        for driver, reads_count in group_reads.items():
+            reads[driver] += reads_count
+        entry = {
+            key: group["values"][position]
+            for position, key in enumerate(keys)
+        }
+        entry["count"] = len(group["rows"])
+        entry["messages"] = messages
+        payload_groups.append(entry)
+    if truncated:
+        warnings.append(_group_truncated_warning(remaining))
+    warnings.extend(body_warnings)
+    no_results_hint = None if rows else _no_results_hint(*scope_size)
+    return {
+        "count": len(rows),
+        "truncated": truncated,
+        "hint": _group_hint(remaining) if truncated else no_results_hint,
+        "groups": payload_groups,
+        "scan": _scan_dict(
+            mode,
+            candidates,
+            _counted_reads(runs, opened_before, scan_reads, reads),
+            started,
+        ),
+        "warnings": warnings,
+    }
+
+
+def _build_groups(
+    rows: Sequence[dict], runs: "Mapping[str, _DriverRun]", keys: Sequence[str]
+) -> list[dict]:
+    """Group the deduplicated rows in the group order.
+
+    Returns one ``{"values": tuple, "rows": [...]}`` per combination with
+    messages; the rows keep the total order (newest first). Groups without a
+    ``null`` key come first, by their newest message (descending), and a group
+    whose messages have no date comes after the dated ones; ties and the groups
+    with a ``null`` key are ordered by their keys ascending, ``null`` last.
+    """
+    buckets: dict[tuple[Any, ...], dict] = {}
+    for row in rows:
+        run = runs[str(row["_mq_driver"])]
+        values = tuple(_group_value(key, row, run) for key in keys)
+        identity = tuple(
+            _group_identity(key, value) for key, value in zip(keys, values)
+        )
+        buckets.setdefault(identity, {"values": values, "rows": []})["rows"].append(
+            row
+        )
+    groups = list(buckets.values())
+    groups.sort(key=lambda group: _group_order(group, keys))
+    return groups
+
+
+def _group_value(key: str, row: dict, run: "_DriverRun") -> Any:
+    """Value of one grouping key for one message.
+
+    ``from`` is the sender address in lowercase (``null`` without an address),
+    ``domain`` its part after the last ``@`` (``null`` without an address or an
+    ``@``), ``day``/``week``/``month`` come from ``date_received`` in the local
+    zone (``null`` without a valid date) and ``mailbox``/``account`` use the
+    label of the account of the reported mailbox (or its uuid).
+    """
+    if key in ("from", "domain"):
+        address = str(row.get("sender_address") or "")
+        if key == "from":
+            return address.lower() or None
+        if "@" not in address:
+            return None
+        return address.rsplit("@", 1)[1].lower() or None
+    if key in ("day", "week", "month"):
+        moment = _group_date(row.get("date_received"))
+        return _group_date_value(key, moment)
+    mailbox = _display_mailbox(row, run.mailbox_map, run.allowed_ids, run.label_map)
+    payload = _mailbox_payload(run.accounts, mailbox)
+    if key == "account":
+        return payload["account"]["label"]
+    return {"account": payload["account"]["label"], "path": payload["path"]}
+
+
+def _group_identity(key: str, value: Any) -> Any:
+    """Hashable identity of one grouping value (a mailbox is its account and path)."""
+    if key == "mailbox" and value is not None:
+        return ("mailbox", str(value["account"]), str(value["path"]))
+    return (key, value)
+
+
+def _group_date_value(key: str, moment: "date | None") -> str | None:
+    """Calendar value of a ``day``, ``week`` or ``month`` grouping key."""
+    if moment is None:
+        return None
+    if key == "day":
+        return moment.isoformat()
+    if key == "month":
+        return f"{moment.year:04d}-{moment.month:02d}"
+    calendar = moment.isocalendar()
+    return f"{calendar.year}-W{calendar.week:02d}"
+
+
+def _group_date(value: Any) -> "date | None":
+    """Local calendar date of a received timestamp (``null`` without a valid date)."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        moment = datetime.fromtimestamp(seconds, tz=timezone.utc).astimezone(
+            output.LOCAL_ZONE
+        )
+    except (OverflowError, OSError, ValueError):
+        return None
+    return moment.date()
+
+
+def _group_order(group: dict, keys: Sequence[str]) -> tuple:
+    """Sort key of one group: dated groups by their newest message, then keys."""
+    values = group["values"]
+    sort_values = tuple(
+        _group_sort_value(key, value) for key, value in zip(keys, values)
+    )
+    if any(value is None for value in values):
+        return (2, 0, sort_values)
+    newest = max((_date_key(row) for row in group["rows"]), default=0)
+    if newest <= 0:
+        return (1, 0, sort_values)
+    return (0, -newest, sort_values)
+
+
+def _group_sort_value(key: str, value: Any) -> tuple[int, Any]:
+    """Ascending sort value of one key, with ``null`` last."""
+    if value is None:
+        return (1, "")
+    if key == "mailbox":
+        return (0, (str(value["account"]), str(value["path"])))
+    return (0, str(value))
+
+
+def _group_row_fields(
+    delivered: Sequence[str], keys: Sequence[str]
+) -> tuple[str, ...]:
+    """Row fields of the group messages: the grouping ``from``/``mailbox`` repeat the keys."""
+    hidden = set(keys) & {"from", "mailbox"}
+    return tuple(name for name in delivered if name not in hidden)
+
+
+def _group_limit(limit: int | None) -> int:
+    """Messages per group: ``--limit`` (0 to 50) or five by default."""
+    if limit is None:
+        return GROUP_DEFAULT_LIMIT
+    return max(0, min(int(limit), GROUP_MAX_LIMIT))
+
+
+def _group_hint(remaining: int) -> str:
+    """Hint of a response truncated to :data:`GROUP_MAX_GROUPS` groups."""
+    return f"{remaining} more group(s); refine the filters"
+
+
+def _group_truncated_warning(remaining: int) -> str:
+    """``W_RESULTS_TRUNCATED`` of a response with more than the maximum groups."""
+    return f"W_RESULTS_TRUNCATED: {_group_hint(remaining)}"
+
+
+def _counted_reads(
+    runs: "Mapping[str, _DriverRun]",
+    opened_before: "Mapping[str, int | None]",
+    scanned: "Mapping[str, int]",
+    built: "Mapping[str, int]",
+) -> int:
+    """Messages read by the run.
+
+    A driver that opens items instead of bodies reports the opened items;
+    otherwise the bodies read by the ``--text`` scan and by the delivered rows
+    are added per driver.
+    """
+    total = 0
+    for driver, run in runs.items():
+        before = opened_before[driver]
+        if before is not None:
+            total += _items_opened(run.backend) - before
+        else:
+            total += scanned.get(driver, 0) + built.get(driver, 0)
+    return total
 
 
 def _config_for_driver(config: "Config", driver: str, native: str) -> "Config":
@@ -2528,15 +2850,32 @@ def _scan_dict(
     }
 
 
-def _empty_search_result(mode: str, started: float, warnings: Sequence[str]) -> dict:
+def _empty_search_result(
+    mode: str, started: float, warnings: Sequence[str], hint: str | None
+) -> dict:
     return {
         "count": 0,
         "truncated": False,
-        "hint": None,
+        "hint": hint,
         "messages": [],
         "scan": _scan_dict(mode, 0, 0, started),
         "warnings": list(warnings),
     }
+
+
+def _no_results_hint(accounts: int, folders: int) -> str | None:
+    """``hint`` of a ``search`` without results (``null`` when no account is read).
+
+    Names the folders and accounts searched, without folder or account names,
+    and points to the commands that widen the scope. It is built from the
+    already resolved scope, so it never calls a driver.
+    """
+    if not accounts:
+        return None
+    return (
+        f"no messages matched in {folders} folder(s) of {accounts} account(s); "
+        'run "mailquery mailboxes" to see other folders, or add --include-mailbox'
+    )
 
 
 def _truncated_warning(remaining: int) -> str:

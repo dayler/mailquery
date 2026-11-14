@@ -438,8 +438,9 @@ read and the reason (`shared_mailbox`, `public_folders`, `online_mode`,
 Filters: `--subject`, `--text`, `--from`, `--to`, `--cc`, `--since`, `--until`,
 `--unread`, `--flagged`, `--has-attachments`, `--include-mailbox` and `--limit`
 (default 20, max 200). `--fields` adds fields to the default row (see below).
-`--strip-links` replaces every URL of the returned subject, names, headers and
-body with `[link omitted]`, over `[content].url_display`.
+`--group-by` groups the results and `--count` returns only how many messages
+match (see below). `--strip-links` replaces every URL of the returned subject,
+names, headers and body with `[link omitted]`, over `[content].url_display`.
 Patterns are substrings with the wildcards `*` and `?`,
 case- and accent-insensitive; in `--subject`, space-separated terms are AND.
 Dates: ISO 8601 or relative (`30min`, `24h`, `7d`, `1w`, `1mo`, `1y`, `today`,
@@ -487,6 +488,53 @@ Output of `mailquery search --since 1w` (default row; `uid` trimmed):
 With `--fields snippet`, the row adds `snippet` at the end; with
 `--fields all`, the row is the full one above. An unknown or empty field name
 fails with `E_USAGE` (exit 2) before the store is opened.
+
+**Grouping and counting.** `--group-by` groups the messages that match the
+filters by one or two keys, comma-separated or with the option repeated:
+`from` (sender address in lowercase), `domain` (the part after the last `@`),
+`mailbox` (`{"account": <label>, "path": <path>}` of the message folder),
+`account` (the account label), `day` (`YYYY-MM-DD`), `week` (ISO 8601,
+`YYYY-Www`) and `month` (`YYYY-MM`); the last three use the local time zone of
+`date_received`. The response replaces `messages[]` with `groups[]`: each group
+carries its keys in the requested order, its `count` and its newest messages, of
+newest to oldest. With `--group-by`, `--limit` is the messages per group (0 to
+50, 5 by default; `[search].default_limit` does not apply) and the grouping
+`from`/`mailbox` is not repeated in the rows. Groups with the newest message
+come first; a group without dates and a group with a `null` key go after them.
+At most 50 groups are returned: beyond that `truncated` is `true`,
+`W_RESULTS_TRUNCATED` is emitted and `hint` says how many groups were left out.
+`--count` returns only `ok`, `command`, `generated_at`, `content_notice`,
+`count`, `hint`, `warnings` and `scan`: the total after deduplication and
+without the 200 limit, with only scope warnings. It cannot be combined with
+`--fields`, `--group-by` or `--limit`, and `new` does not accept it either.
+
+```bash
+mailquery search --subject factura --since 6mo --group-by domain,month --limit 1
+mailquery search --from proveedor --group-by from
+mailquery search --unread --count
+```
+
+```json
+{
+  "count": 2,
+  "truncated": false,
+  "hint": null,
+  "groups": [
+    {"domain": "banco.example", "month": "2026-11", "count": 1, "messages": [ … ]},
+    {"domain": "luz.example", "month": "2026-11", "count": 1, "messages": [ … ]}
+  ],
+  "scan": {"mode": "metadata", "candidates": 2, "messages_read": 0, "duration_ms": 12},
+  "warnings": []
+}
+```
+
+When `search` finds nothing (`count: 0`), `hint` says how many folders and
+accounts were searched and how to widen the scope, without folder or account
+names: `no messages matched in 2 folder(s) of 2 account(s); run "mailquery
+mailboxes" to see other folders, or add --include-mailbox`. Excluded stores do
+not count; when no account is read (none declared, or all of them excluded),
+`hint` stays `null` and `W_NO_ACCOUNTS` appears. `new` without new mail keeps
+`hint: null`.
 
 `--text` reads the body of every candidate, so it **requires narrowing** with
 `--since`/`--until`, `--from`, `--subject` or an extra folder
@@ -836,7 +884,7 @@ recovered files.
 | `mailquery: command not found` / `pipx: command not found` | The `pipx` directory is not on the session `PATH` | `pipx ensurepath` and open a new terminal |
 | The command uses another Python or fails with `ModuleNotFoundError` | `pipx` installed the app with another interpreter | `pipx list`; `pipx reinstall --python <python> mailquery` |
 | `count: 0` and `W_NO_ACCOUNTS` | No declared accounts | Declare an account in `config.toml` (see `mailquery mailboxes`) |
-| `count: 0` with no warnings | Date range, pattern or folder | Check `--since`/`--until`, try a shorter pattern and check `included` in `mailboxes`; `new` does not emit history: use `search` |
+| `count: 0` with no warnings | Date range, pattern or folder | Check `--since`/`--until`, try a shorter pattern and check `included` in `mailboxes`; the `hint` says how many folders and accounts were searched, and `mailquery mailboxes` or `--include-mailbox` widen the scope; `new` does not emit history: use `search` |
 | `W_STORE_EXCLUDED` (Windows) | The declared account is an excluded store (shared, online, network path…) | See the reason in `mailboxes` → `excluded_stores` |
 | `E_PERMISSION` (3, macOS) | FDA missing | See [Permissions](#permissions) |
 | `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | `pywin32` missing / not classic Outlook 16.0 | `pipx reinstall mailquery` / install classic Outlook |

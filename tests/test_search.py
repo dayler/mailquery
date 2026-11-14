@@ -961,7 +961,11 @@ class SearchTextTest(SearchFixtureTest):
         self.assertEqual(result["count"], 0)
         self.assertEqual(result["messages"], [])
         self.assertFalse(result["truncated"])
-        self.assertIsNone(result["hint"])
+        self.assertEqual(
+            result["hint"],
+            'no messages matched in 4 folder(s) of 3 account(s); run "mailquery '
+            'mailboxes" to see other folders, or add --include-mailbox',
+        )
         self.assertEqual(result["scan"]["mode"], "text")
 
     def test_text_narrowed_by_extra_folder(self) -> None:

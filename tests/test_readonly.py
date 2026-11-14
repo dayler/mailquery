@@ -187,6 +187,8 @@ class ReadOnlyStoreTest(unittest.TestCase):
             (("search", "--unread", "--limit", "1", "--strip-links"), "search"),
             (("search", "--since", "7d", "--flagged", "--strip-links"), "search"),
             (("search", "--fields", "all"), "search"),
+            (("search", "--group-by", "from,month"), "search"),
+            (("search", "--count"), "search"),
             (("new", "--fields", "all"), "new"),
             (("new", "--strip-links"), "new"),
             (("new", "--strip-links"), "new"),

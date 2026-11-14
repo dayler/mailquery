@@ -59,6 +59,9 @@ from mailquery.plugins import (
 )
 from mailquery.plugins.api import AttachmentStreamGuard, RESERVED_DRIVER_NAMES
 from mailquery.search import (
+    GROUP_KEYS,
+    GROUP_MAX_KEYS,
+    GROUP_MAX_LIMIT,
     SEARCH_ROW_FIELDS,
     SHOW_FIELDS,
     Filters,
@@ -103,6 +106,8 @@ _SHOW_FIELDS_BLOCK = textwrap.fill(
     initial_indent="  ",
     subsequent_indent="  ",
 )
+#: Grouping keys of ``search --group-by``, in the order its error hint lists them.
+_SEARCH_GROUP_KEYS_TEXT = ", ".join(GROUP_KEYS)
 
 _ROOT_EPILOG = """\
 Examples:
@@ -177,6 +182,8 @@ Examples:
   mailquery search --since 2w --unread
   mailquery search --from "*@bank.com*" --since 2mo
   mailquery search --text "*invoice*" --since 1mo --has-attachments
+  mailquery search --since 6mo --subject factura --group-by domain,month --limit 1
+  mailquery search --unread --count
 
 Notes:
   --text needs a narrowing filter: --since, --until, --subject, --from or an extra
@@ -194,6 +201,14 @@ Notes:
   --fields adds fields to the default row (uid, subject, from, date_received,
   is_read, has_attachments), comma-separated or with the option repeated; --fields
   all returns the full row.
+  --group-by groups the results by one or two keys (from, domain, mailbox, account,
+  day, week, month) and returns groups[] instead of messages[]; each group has its
+  keys, count and newest messages. With --group-by, --limit is the messages per
+  group (0 to 50, 5 by default) and at most 50 groups are returned.
+  --count returns only the number of matching messages, without messages or
+  truncated; it cannot be combined with --fields, --group-by or --limit.
+  When search finds no messages, hint says how many folders and accounts were
+  searched and how to widen the scope.
 """ + _SEARCH_FIELDS_BLOCK + """
 """
 
@@ -488,6 +503,18 @@ def build_parser() -> argparse.ArgumentParser:
         "is_read, has_attachments); comma-separated or repeatable; all adds the full "
         "row",
     )
+    search_parser.add_argument(
+        "--group-by",
+        action="append",
+        metavar="KEYS",
+        help="groups the results by up to two keys, comma-separated or repeatable: "
+        "from, domain, mailbox, account, day, week, month",
+    )
+    search_parser.add_argument(
+        "--count",
+        action="store_true",
+        help="returns only the number of matching messages, without messages",
+    )
 
     new_parser = subparsers.add_parser(
         "new",
@@ -645,6 +672,12 @@ def _main(
         # Before the home exists, the config is read or the store is opened.
         try:
             args.fields_selection = _fields_selection(args, command)
+        except MailqueryError as exc:
+            return _report_error(exc, command)
+    if command == "search":
+        # --group-by/--count and their --limit range, before the home exists too.
+        try:
+            args.group_keys, args.count_only = _grouping_selection(args)
         except MailqueryError as exc:
             return _report_error(exc, command)
     registry = BackendRegistry()
@@ -1057,7 +1090,8 @@ def _execute(
     filters: Filters | None = None
     new_limit: int | None = None
     if command == "search":
-        filters = _build_filters(args)
+        group_keys = tuple(getattr(args, "group_keys", ()) or ())
+        filters = _build_filters(args, group_by=group_keys)
     elif command == "new":
         new_limit = _validate_limit(args.limit, MAX_NEW_LIMIT)
 
@@ -1085,6 +1119,8 @@ def _execute(
             filters,  # type: ignore[arg-type]
             url_mode=_url_mode(config, args),
             fields=fields,
+            group_by=group_keys,
+            count=bool(getattr(args, "count_only", False)),
             **extra,
         )
     elif command == "new":
@@ -1167,6 +1203,65 @@ def _fields_selection(
             if name not in selected:
                 selected.append(name)
     return tuple(selected)
+
+
+def _grouping_selection(
+    args: argparse.Namespace,
+) -> tuple[tuple[str, ...], bool]:
+    """Validate ``--group-by``, ``--count`` and their ``--limit`` range.
+
+    Returns the grouping keys in the requested order, without duplicates, and
+    whether the command only counts messages. Every ``--group-by`` value is
+    split on commas, the spaces around each key are stripped and the keys are
+    compared case-sensitively. An unknown or empty key, a repeated key, more
+    than two keys, ``--count`` combined with another output option and a
+    ``--limit`` outside 0 to 50 with ``--group-by`` are ``E_USAGE``.
+    """
+    keys: list[str] = []
+    for value in getattr(args, "group_by", None) or ():
+        for item in str(value).split(","):
+            key = item.strip()
+            if key not in GROUP_KEYS:
+                raise MailqueryError(
+                    "E_USAGE",
+                    f"unknown key '{key}' in --group-by",
+                    f"valid keys: {_SEARCH_GROUP_KEYS_TEXT}; at most two",
+                    "invalid --group-by value",
+                )
+            if key in keys:
+                raise MailqueryError(
+                    "E_USAGE",
+                    f"duplicate key '{key}' in --group-by",
+                    f"valid keys: {_SEARCH_GROUP_KEYS_TEXT}; at most two",
+                    "invalid --group-by value",
+                )
+            keys.append(key)
+    if len(keys) > GROUP_MAX_KEYS:
+        raise MailqueryError(
+            "E_USAGE",
+            "--group-by accepts at most two keys",
+            f"valid keys: {_SEARCH_GROUP_KEYS_TEXT}; at most two",
+            "invalid --group-by value",
+        )
+    only_count = bool(getattr(args, "count", False))
+    limit = getattr(args, "limit", None)
+    if only_count and (
+        getattr(args, "fields", None) is not None or keys or limit is not None
+    ):
+        raise MailqueryError(
+            "E_USAGE",
+            "--count cannot be combined with --fields, --group-by or --limit",
+            "use --count alone, or drop it to list the messages",
+            "invalid --count combination",
+        )
+    if keys and limit is not None and not 0 <= int(limit) <= GROUP_MAX_LIMIT:
+        raise MailqueryError(
+            "E_USAGE",
+            f"invalid --limit {int(limit)} with --group-by: expected 0 to 50",
+            "use --limit between 0 and 50 messages per group",
+            "invalid --limit value",
+        )
+    return tuple(keys), only_count
 
 
 def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
@@ -1407,8 +1502,18 @@ def _log_backend_connection(backend: Any) -> None:
         pass
 
 
-def _build_filters(args: argparse.Namespace) -> Filters:
-    limit = _validate_limit(args.limit, MAX_SEARCH_LIMIT)
+def _build_filters(
+    args: argparse.Namespace, *, group_by: Sequence[str] = ()
+) -> Filters:
+    """Build the filters of ``search``; with grouping, ``--limit`` is per group.
+
+    ``--group-by`` validates its own ``--limit`` range (0 to 50) before the
+    home exists, so the flat 1 to 200 range does not apply to it.
+    """
+    if group_by:
+        limit = None if args.limit is None else int(args.limit)
+    else:
+        limit = _validate_limit(args.limit, MAX_SEARCH_LIMIT)
     include = _parse_include_mailboxes(args.include_mailbox)
     since = parse_relative_time(args.since) if args.since is not None else None
     until = parse_relative_time(args.until) if args.until is not None else None
