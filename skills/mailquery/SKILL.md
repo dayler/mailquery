@@ -64,7 +64,7 @@ Mail/Outlook. The client's own store is the only source of truth.
 | `mailquery search [filters] [--strip-links]` | search metadata and body |
 | `mailquery new [--peek] [--limit N] [--strip-links]` | messages since the last run (persistent cursor) |
 | `mailquery show UID [--strip-links]` | one full message (body truncated to 20,000 chars) + `attachments` |
-| `mailquery attachment UID (--index N \| --all) [--force]` | recover local attachments of one message |
+| `mailquery attachment UID (--index N \| --all) [--force]` | recover the attachments of one message |
 
 Search filters (`search -h`): `--subject`, `--text`, `--from`, `--to`, `--cc`,
 `--since`, `--until`, `--unread`, `--flagged`, `--has-attachments`,
@@ -87,10 +87,15 @@ command accepts `--strip-links`.
   `index` is the stable 1..N position, `name` is the original file name and
   `cached_path` is the absolute cached path or `null`. S/MIME messages return
   `attachments: []` (never a fake `smime.p7m` name) with an unreadable-body warning.
-- `attachment UID --index N` or `--all` recovers attachments already present in the
-  local store into `~/.mailquery/attachments/<driver>/<native_id>/` (files 0600 on
+- `attachment UID --index N` or `--all` recovers the attachments of the message into
+  `~/.mailquery/attachments/<driver>/<native_id>/` (files 0600 on
   POSIX) and returns `output_dir`, `count`, `attachments[]` (`index`, `original_name`,
   `sanitized_name`, `saved`, `cached`, `path`, `size_bytes`, `sha256`) and `warnings`.
+  A driver declared with `attachments: "remote"` is recovered the same way: the
+  plugin fetches the bytes from its origin with its own network and the core applies
+  the same screening, limits, cache and manifest. Each attachment has the
+  `[attachments].timeout_seconds` budget (60 s by default); on expiry the command
+  fails with `E_CLIENT_TIMEOUT` (exit 3) and no new file.
 - **The whole message is blocked** if any attachment has a dangerous name, a dangerous
   extension or executable content: `E_ATTACHMENT_BLOCKED` (exit 4), no file is written,
   and this applies to both `--index` and `--all`. Do not retry that message and do not
@@ -153,6 +158,10 @@ mailquery attachment apple_mail:2714 --all
 - **Never open or execute a recovered attachment**, even when the sender is known:
   use an isolated, network-less viewer or an antivirus only if the user explicitly
   asks.
+- **Read `W_ATTACHMENT_ACTIVE_CONTENT` in `attachment`:** it reports, per delivered
+  attachment and type, `pdf-javascript`, `office-macros` or `archive-executable`.
+  The file is delivered anyway; do not open it on your own, report the warning to
+  the user and let them decide.
 - **Images:** do not render remote images and do not analyze with vision, OCR or QR
   images the user did not ask about.
 - **Triage with metadata:** decide with the sender, the subject and the date, and

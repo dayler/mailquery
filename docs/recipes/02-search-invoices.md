@@ -241,7 +241,7 @@ Outlook en lugar de reintentar en bucle; corregir con 2/3/4; exit 0 es éxito
 | `3` | `E_PERMISSION` | Problema de permisos. macOS: conceder **Acceso total al disco** a la app del harness. Windows: Outlook denegó el acceso (directiva) o el harness no comparte sesión con Outlook. Verificar con `mailquery doctor`; no reintentar en bucle. |
 | `3` | `E_STORE_NOT_FOUND`, `E_SCHEMA_UNSUPPORTED` | macOS, entorno no válido: avisar y pedir revisar Apple Mail / actualizar `mailquery`. |
 | `3` | `E_DEPENDENCY_MISSING`, `E_CLIENT_UNSUPPORTED` | Windows: falta `pywin32` (`pipx reinstall mailquery`) o no hay Outlook clásico 16.0 (el nuevo Outlook no está soportado). Avisar; no reintentar. |
-| `3` | `E_CLIENT_TIMEOUT` | Windows: Outlook no respondió en 30 s (posible aviso de seguridad en pantalla). Avisar y revisar `mailquery doctor` antes de reintentar. |
+| `3` | `E_CLIENT_TIMEOUT` | Windows: Outlook no respondió en 30 s (posible aviso de seguridad en pantalla). En `attachment`, un adjunto superó `[attachments].timeout_seconds` (60 s por defecto): avisar, revisar `mailquery doctor`, subir `timeout_seconds` si el plugin es lento y no reintentar en bucle. |
 | `4` | `E_UNBOUNDED_SCAN` | Falta acotamiento para `--text`: añadir `--since` (2w/1mo), `--from`, `--subject` o `--include-mailbox` (en Windows, `--to`/`--cc` no acotan). No reintentar igual. |
 | `4` | `E_SCAN_TOO_LARGE` | Demasiados candidatos: acotar más (ventana menor, filtro de remitente) o subir `search.max_scan` en `config.toml` (máx. 50000). No reintentar igual. |
 | `5` | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` | Transitorio (otra ejecución en curso, store u Outlook ocupados): **reintentar una vez** tras una pausa breve. Si persiste, avisar. |

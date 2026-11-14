@@ -30,9 +30,10 @@ expected to arrive already mapped by the driver wrapper: this module only maps t
 
 Stable interface:
 
-* ``AttachmentsEngine(home, config, driver, clock=None)`` where ``config`` is a
-  duck-typed ``AttachmentsConfig``, ``driver`` a ``MailBackend`` and
-  ``clock`` an injectable monotonic clock (tests only).
+* ``AttachmentsEngine(home, config, driver, clock=None, stream_guard=None)``
+  where ``config`` is a duck-typed ``AttachmentsConfig``, ``driver`` a
+  ``MailBackend``, ``clock`` an injectable monotonic clock (tests only) and
+  ``stream_guard`` the optional bound of an external driver's attachment stream.
 * ``recover(uid, indices=None, *, force=False, deadline=None, entries=None)``
   returning the ``attachment`` records; ``indices=None`` means ``--all``; ``entries``
   are the driver metadata rows already fetched/validated by the command (the
@@ -41,8 +42,10 @@ Stable interface:
   ``clock`` units) at which the extraction of **one** attachment expires, or
   ``None`` for no policy; it is invoked once per attachment, before its first
   block is screened, and the same instant bounds screening and extraction.
-  The ``attachment`` command passes ``lambda: time.monotonic() + 120``; a
-  ``None`` deadline means the engine imposes no time policy.
+  The ``attachment`` command passes ``lambda: time.monotonic() + timeout`` with
+  the configured per-attachment budget; a ``None`` deadline means the engine
+  imposes no time policy. A driver stream opened for an external driver goes
+  through ``stream_guard`` with that same instant.
 * ``attachments.cache.cached_path(...)`` is the stable helper for
   ``show.attachments[].cached_path`` (regular files only).
 """
@@ -89,7 +92,8 @@ _INDEX_HINT: Final[str] = (
 )
 #: Hint of ``E_CLIENT_TIMEOUT``.
 _TIMEOUT_HINT: Final[str] = (
-    'run "mailquery doctor" and do not retry in a loop'
+    "raise [attachments].timeout_seconds in ~/.mailquery/config.toml if the "
+    'driver is slow; run "mailquery doctor" and do not retry in a loop'
 )
 #: Generic, PII-free log line for an attachment that could not be recovered.
 _ATTACHMENT_ERROR_LOG: Final[str] = "attachment could not be recovered"
@@ -208,6 +212,14 @@ class AttachmentDriver(Protocol):
 #: Zero-argument factory returning the deadline of one attachment (clock units).
 DeadlineFactory = Callable[[], float | None]
 
+#: Guard of an external driver's attachment stream. It receives the factory that
+#: creates the stream and the absolute deadline of the attachment (clock units,
+#: ``None`` for no policy) and returns the bounded stream. ``None`` keeps the
+#: driver stream inline, as the built-in drivers require.
+StreamGuard = Callable[
+    [Callable[[], Iterable[bytes]], float | None], Iterable[bytes]
+]
+
 
 class _DeadlineExpired(Exception):
     """Internal marker raised when an injected extraction deadline has expired."""
@@ -231,6 +243,10 @@ class _Deadlines:
         if self._factory is None or index in self._instants:
             return
         self._instants[index] = self._factory()
+
+    def instant(self, index: int) -> float | None:
+        """The absolute deadline of ``index`` (``None`` when there is no policy)."""
+        return self._instants.get(index)
 
     def check(self, index: int) -> None:
         """Raise :class:`_DeadlineExpired` when the attachment budget is spent."""
@@ -290,11 +306,13 @@ class AttachmentsEngine:
         config: AttachmentLimits,
         driver: AttachmentDriver,
         clock: Callable[[], float] | None = None,
+        stream_guard: StreamGuard | None = None,
     ) -> None:
         self._home = Path(home)
         self._config = config
         self._driver = driver
         self._clock = time.monotonic if clock is None else clock
+        self._stream_guard = stream_guard
         self._driver_name = str(getattr(driver, "driver", "") or "unknown")
 
     @property
@@ -487,10 +505,17 @@ class AttachmentsEngine:
                     total += known
             return total
 
+        def driver_stream(index: int) -> Iterable[bytes]:
+            """Fresh driver stream of ``index``, bounded by the external guard."""
+            factory = lambda: self._driver.attachment_stream(legacy_uid, index)
+            if self._stream_guard is None:
+                return factory()
+            return self._stream_guard(factory, tracker.instant(index))
+
         def open_stream(index: int) -> Iterator[bytes]:
             tracker.start(index)
             try:
-                stream = self._driver.attachment_stream(legacy_uid, index)
+                stream = driver_stream(index)
             except Exception as exc:
                 tracker.note(index, exc)
                 raise
@@ -512,9 +537,7 @@ class AttachmentsEngine:
             try:
                 tracker.start(index)
                 tracker.check(index)
-                wrapped = tracker.wrap(
-                    index, self._driver.attachment_stream(legacy_uid, index)
-                )
+                wrapped = tracker.wrap(index, driver_stream(index))
                 try:
                     for chunk in wrapped:
                         if not chunk:
@@ -948,4 +971,5 @@ __all__ = [
     "AttachmentsEngine",
     "DeadlineFactory",
     "MIB",
+    "StreamGuard",
 ]

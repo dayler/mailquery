@@ -7,6 +7,7 @@ resulting paths. They never open a real attachment and never decompress one.
 
 from __future__ import annotations
 
+import io
 import struct
 import tempfile
 import unittest
@@ -21,6 +22,13 @@ from mailquery.attachments.active_content import (
 )
 
 from tests.fixtures import active_content_samples as samples
+from tests.test_cli import (
+    _ATTACHMENT_PLUGIN_LABEL,
+    _ATTACHMENT_PLUGIN_UID,
+    ATTACHMENT_PLUGIN_DRIVER,
+    AttachmentTestBase,
+    _attachment_scope,
+)
 
 _PDF_ONLY = ("pdf-javascript",)
 _MACROS_ONLY = ("office-macros",)
@@ -380,3 +388,177 @@ class DetectorPropertiesTests(ActiveContentTestCase):
         second = active_content_types(path)
         self.assertEqual(first, second)
         self.assertEqual(first, ("office-macros", "archive-executable"))
+
+
+def _zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
+    """Build a ZIP archive in memory."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in entries:
+            archive.writestr(name, payload)
+    return buffer.getvalue()
+
+
+_PDF_WITH_JAVASCRIPT = samples.pdf_bytes(b"/JavaScript ")
+_ZIP_WITH_EXECUTABLE = _zip_bytes([("factura.pdf.exe", b"")])
+
+
+def _rows(*names: str, payloads: dict[int, bytes]) -> list[dict[str, object]]:
+    """Metadata rows with the byte length of each payload."""
+    return [
+        {
+            "index": index,
+            "name": name,
+            "size_bytes": len(payloads[index]),
+            "native_order_key": str(index),
+            "unavailable_reason": None,
+        }
+        for index, name in enumerate(names, start=1)
+    ]
+
+
+class AttachmentActiveContentWarningTests(AttachmentTestBase):
+    """UT-ACT-05: ``W_ATTACHMENT_ACTIVE_CONTENT`` in the ``attachment`` response."""
+
+    UID = "apple_mail:83143"
+
+    def _active_backend(self, **kwargs):
+        rows = kwargs.pop(
+            "attachments",
+            _rows(
+                "factura.pdf",
+                "docs.zip",
+                payloads={1: _PDF_WITH_JAVASCRIPT, 2: _ZIP_WITH_EXECUTABLE},
+            ),
+        )
+        return self.attachment_backend(
+            attachments=rows,
+            stream_chunks={
+                1: [_PDF_WITH_JAVASCRIPT],
+                2: [_ZIP_WITH_EXECUTABLE],
+            },
+            **kwargs,
+        )
+
+    def test_ut_act_05_01_one_warning_per_attachment_and_type_in_order(self) -> None:
+        """UT-ACT-05.01: a PDF with JavaScript and a ZIP with an executable warn in order."""
+        backend = self._active_backend()
+        code, stdout, stderr = self.run_attachment(
+            ["attachment", self.UID, "--all"], backend
+        )
+        self.assertEqual((code, stderr), (0, ""))
+        payload = self.json_object(stdout)
+        self.assertEqual(
+            payload["warnings"],
+            [
+                "W_ATTACHMENT_ACTIVE_CONTENT: attachment 1 contains pdf-javascript "
+                f"in {self.UID}",
+                "W_ATTACHMENT_ACTIVE_CONTENT: attachment 2 contains archive-executable "
+                f"in {self.UID}",
+            ],
+        )
+        self.assertEqual(payload["count"], 2)
+        for entry in payload["attachments"]:
+            self.assertTrue(Path(entry["path"]).is_file())
+
+    def test_ut_act_05_02_warnings_repeat_when_served_from_the_cache(self) -> None:
+        """UT-ACT-05.02: the second run serves the cache and emits the same warnings."""
+        backend = self._active_backend()
+        self.run_attachment(["attachment", self.UID, "--all"], backend)
+        code, stdout, stderr = self.run_attachment(
+            ["attachment", self.UID, "--all"], backend
+        )
+        self.assertEqual((code, stderr), (0, ""))
+        payload = self.json_object(stdout)
+        self.assertEqual(
+            [entry["cached"] for entry in payload["attachments"]], [True, True]
+        )
+        self.assertEqual(
+            [warning.split(": ", 1)[1] for warning in payload["warnings"]],
+            [
+                f"attachment 1 contains pdf-javascript in {self.UID}",
+                f"attachment 2 contains archive-executable in {self.UID}",
+            ],
+        )
+
+    def test_ut_act_05_03_no_file_names_and_no_warning_without_markers(self) -> None:
+        """UT-ACT-05.03: the detail carries no file names; a clean attachment warns nothing."""
+        backend = self._active_backend()
+        _code, stdout, _stderr = self.run_attachment(
+            ["attachment", self.UID, "--all"], backend
+        )
+        warnings = self.json_object(stdout)["warnings"]
+        for forbidden in ("factura.pdf", "docs.zip", "factura", "docs"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, "\n".join(warnings))
+
+        clean = b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n"
+        clean_backend = self.attachment_backend(
+            attachments=[
+                {
+                    "index": 1,
+                    "name": "notes.pdf",
+                    "size_bytes": len(clean),
+                    "native_order_key": "1",
+                    "unavailable_reason": None,
+                }
+            ],
+            stream_chunks={1: [clean]},
+        )
+        code, stdout, _stderr = self.run_attachment(
+            ["attachment", self.UID, "--index", "1"], clean_backend
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(self.json_object(stdout)["warnings"], [])
+
+    def test_ut_act_05_04_blocked_attachment_never_reaches_the_warning(self) -> None:
+        """UT-ACT-05.04: a catalog-blocked attachment keeps E_ATTACHMENT_BLOCKED (exit 4)."""
+        backend = self.attachment_backend(
+            attachments=[
+                {
+                    "index": 1,
+                    "name": "install.sh",
+                    "size_bytes": 17,
+                    "native_order_key": "1",
+                    "unavailable_reason": None,
+                }
+            ]
+        )
+        self.assert_error(
+            4,
+            self.run_attachment(["attachment", self.UID, "--index", "1"], backend),
+            "E_ATTACHMENT_BLOCKED",
+            "attachment",
+        )
+
+    def test_ut_act_05_05_remote_driver_warns_like_a_local_one(self) -> None:
+        """UT-ACT-05.05: a ``"remote"`` plugin emits the same warning as a local driver."""
+        capabilities = {
+            "network": True,
+            "readonly": "promise",
+            "body_local": False,
+            "attachments": "remote",
+            "native_order": "text",
+        }
+        backend = self.plugin_backend(
+            native_uid=_ATTACHMENT_PLUGIN_UID,
+            capabilities=capabilities,
+            attachments=_rows(
+                "factura.pdf", payloads={1: _PDF_WITH_JAVASCRIPT}
+            ),
+            stream_chunks={1: [_PDF_WITH_JAVASCRIPT]},
+        )
+        uid = f"{ATTACHMENT_PLUGIN_DRIVER}:{_ATTACHMENT_PLUGIN_UID}"
+        _entry, result = self.run_plugin(
+            ["attachment", uid, "--index", "1"],
+            backend,
+            config=_attachment_scope(
+                driver=ATTACHMENT_PLUGIN_DRIVER, account=_ATTACHMENT_PLUGIN_LABEL
+            ),
+        )
+        code, stdout, stderr = result
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(
+            self.json_object(stdout)["warnings"],
+            [f"W_ATTACHMENT_ACTIVE_CONTENT: attachment 1 contains pdf-javascript in {uid}"],
+        )

@@ -7,18 +7,26 @@ the attachment surface with controllable data:
 
 * capabilities (``attachments`` ``local``/``remote``/``none``),
 * ordered attachment metadata (index, name, size, ``unavailable_reason``),
-* decoded attachment streams (bytes per index, delays, injected errors),
+* decoded attachment streams (bytes per index, delays, injected errors, per-block
+  failures, gates that block a block until the test releases an event, and a
+  counter of the blocks the plugin was asked for),
 * message existence, body readability and body warnings,
 * the message-level S/MIME/unreadable signal: ``attachments()`` raises the
   protocol error (``PluginError(reason=smime|unreadable)`` or, for a built-in
   driver, ``MailqueryError E_ATTACHMENT_UNREADABLE``) exactly as the convention
   documented in ``docs/INTERFACES.md`` requires.
 
+The gates and the block counter let a test prove the hard cut of an external
+plugin stream without waiting the real timeout: the plugin blocks on a
+``threading.Event`` until the test releases it, and ``block_requests`` records
+how many blocks it was asked for.
+
 Pure Python: no filesystem writes, no network, no mail client access.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
@@ -103,6 +111,8 @@ class FakeAttachmentBackend:
         missing: bool = False,
         attachments_error: BaseException | None = None,
         stream_errors: Mapping[int, BaseException] | None = None,
+        stream_errors_at: Mapping[int, tuple[int, BaseException]] | None = None,
+        stream_gates: Mapping[int, tuple[int, threading.Event]] | None = None,
         stream_chunks: Mapping[int, Sequence[bytes]] | None = None,
         stream_delay: float = 0.0,
         body_readable: bool = True,
@@ -131,6 +141,16 @@ class FakeAttachmentBackend:
         self.missing = bool(missing)
         self.attachments_error = attachments_error
         self.stream_errors = dict(stream_errors or {})
+        #: ``index -> (chunk number, error)``: raise when that block is requested.
+        self.stream_errors_at = {
+            int(index): (int(position), error)
+            for index, (position, error) in (stream_errors_at or {}).items()
+        }
+        #: ``index -> (chunk number, event)``: block that block until the event is set.
+        self.stream_gates = {
+            int(index): (int(position), event)
+            for index, (position, event) in (stream_gates or {}).items()
+        }
         self.stream_chunks = {
             int(index): list(chunks)
             for index, chunks in (stream_chunks or DEFAULT_CHUNKS).items()
@@ -147,6 +167,8 @@ class FakeAttachmentBackend:
         self.closed = False
         self.calls: list[str] = []
         self.stream_calls: list[int] = []
+        #: ``index -> number of blocks requested`` from the plugin's iterator.
+        self.block_requests: dict[int, int] = {}
         self.opened_native_ids: list[Any] = []
 
     # -- metadata --------------------------------------------------------- #
@@ -314,11 +336,20 @@ class FakeAttachmentBackend:
         if error is not None:
             raise error
         chunks = self.stream_chunks.get(int(index), [b"fake attachment %d" % index])
+        block_error = self.stream_errors_at.get(int(index))
+        gate = self.stream_gates.get(int(index))
 
         def generate() -> Iterator[bytes]:
             if self.stream_delay:
                 time.sleep(self.stream_delay)
-            for chunk in chunks:
+            for number, chunk in enumerate(chunks):
+                self.block_requests[int(index)] = (
+                    self.block_requests.get(int(index), 0) + 1
+                )
+                if gate is not None and gate[0] == number:
+                    gate[1].wait(10.0)
+                if block_error is not None and block_error[0] == number:
+                    raise block_error[1]
                 yield chunk
 
         return generate()
