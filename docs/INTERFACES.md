@@ -1083,7 +1083,7 @@ timeout_seconds)`,
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
 `wildcard_to_regex(pattern)`, `matches(pattern, text)`,
 `run_search(backend, config, filters, *, drivers=None, native=None,
-url_mode="neutralize", fields=None)`,
+url_mode="neutralize", fields=None, group_by=None, count=False)`,
 `run_new(backend, config, state_store, *, peek=False, limit=None, clock=None,
 drivers=None, native=None, url_mode="neutralize", fields=None)`,
 `run_show(backend, config, uid, *, driver=None, drivers=None, native=None,
@@ -1124,6 +1124,31 @@ estado del cuerpo y `W_HIDDEN_CONTENT` solo se emiten si se entrega cuerpo; `--t
 `snippet`/`body` filtra con el texto pero no entrega sus warnings. `W_SENDER_AUTH_FAILED` y
 `W_REPLY_TO_MISMATCH` se emiten siempre que el mensaje los justifica. El resto del procesamiento (A4,
 `--strip-links`, truncado, orden de los warnings) no cambia.
+
+**Agrupación y recuento (F3, RF-72/RF-73/RF-78).** `GROUP_KEYS` (`from`, `domain`,
+`mailbox`, `account`, `day`, `week`, `month`), `GROUP_MAX_KEYS` (2), `GROUP_MAX_GROUPS` (50),
+`GROUP_DEFAULT_LIMIT` (5) y `GROUP_MAX_LIMIT` (50) son constantes públicas. Con `group_by`,
+`run_search` agrupa los mensajes **después** de los filtros y de la deduplicación y devuelve
+`{count, truncated, hint, groups, scan, warnings}`: cada grupo lleva sus claves en el orden
+pedido, su `count` total y sus mensajes más recientes (como mucho `filters.limit`, 5 sin
+`--limit`), con la fila de M10 menos `from`/`mailbox` si esa es la clave. `from` es la
+dirección en minúsculas (`null` sin dirección), `domain` la parte tras el último `@` (`null`
+sin dirección o sin `@`), `day`/`week`/`month` salen de `date_received` en
+`output.LOCAL_ZONE` (`null` sin fecha válida: nula, ≤ 0 o no representable) y
+`mailbox`/`account` usan la etiqueta de la cuenta de la carpeta reportada (o su `uuid`).
+Orden: grupos sin claves `null` por su mensaje más reciente descendente, los grupos sin
+fechas después y, al final, los grupos con alguna clave `null`; a igualdad, claves
+ascendentes con `null` al final (`mailbox` por cuenta y ruta). Más de 50 grupos ⇒
+`truncated: true`, `W_RESULTS_TRUNCATED: <n> more group(s); refine the filters` y hint
+`<n> more group(s); refine the filters`; `count` sigue siendo el total de mensajes. Con
+`count`, `run_search` devuelve `{count, hint, warnings, scan}` sin `messages` ni
+`truncated`, con solo warnings de alcance y sin leer cuerpos ni cabeceras. El `hint` de un
+`search` con `count: 0` es `no messages matched in <n> folder(s) of <m> account(s); run
+"mailquery mailboxes" to see other folders, or add --include-mailbox`: `<m>` son las cuentas
+de `resolved` (nunca las excluidas) y `<n>` sus carpetas únicas (INBOX, `mailbox_list` y
+`--include-mailbox`); sin cuentas leídas es `null`. Se calcula del alcance ya resuelto, sin
+llamadas nuevas al driver. Las filas emitidas son las únicas que se leen (cabeceras de A6 o
+cuerpo si la fila lo entrega).
 
 **Motor multi-driver (PRD RF-37, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
@@ -1228,7 +1253,20 @@ de `message` (`uid` siempre). Un nombre desconocido o vacío ⇒ `E_USAGE` (exit
 `unknown field '<nombre>' in --fields` y `valid fields: <lista del comando>`; se valida en `_main`
 antes de crear `~/.mailquery`, de leer la config y de abrir el store. `_execute` pasa la selección como
 `fields=` a `run_search`, `run_new` y `run_show`. Las ayudas de los tres comandos listan sus campos en
-el epílogo.
+el epílogo. `--group-by` (`action="append"`, `metavar="KEYS"`) y `--count` (`store_true`) son opciones
+**solo de `search`**: `new` no las define y argparse responde `E_USAGE` (exit 2) sin tocar
+`state.json`. `_grouping_selection(args)` se ejecuta en `_main` antes de crear
+`~/.mailquery`, de leer la config y de abrir el store: parte cada valor de `--group-by` por
+comas, recorta los espacios y compara las claves distinguiendo mayúsculas; una clave
+desconocida o vacía ⇒ `unknown key '<clave>' in --group-by`, una repetida ⇒ `duplicate key
+'<clave>' in --group-by` y más de dos ⇒ `--group-by accepts at most two keys`, todas con el
+hint `valid keys: from, domain, mailbox, account, day, week, month; at most two`.
+`--count` combinado con `--fields`, `--group-by` o `--limit` ⇒ `--count cannot be combined
+with --fields, --group-by or --limit` con el hint `use --count alone, or drop it to list the
+messages`. Con `--group-by`, `--limit` se valida en 0–50 ⇒ `invalid --limit <v> with
+--group-by: expected 0 to 50` y hint `use --limit between 0 and 50 messages per group`
+(por eso `_build_filters(args, group_by=...)` no aplica el rango plano 1–200). `_execute`
+pasa las claves como `group_by=` y `--count` como `count=` a `run_search`.
 
 **Ciclo de vida
 multi-driver:** el comando crea **un** `BackendRegistry` y
@@ -1839,11 +1877,39 @@ transforman.
  "scan": {"mode": "metadata", "candidates": 1, "messages_read": 1, "duration_ms": 211}}
 ```
 Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<EntryID>"`
-(Windows).
-`hint` (RF-15) es `null`/ausente cuando `truncated=false`; cuando
+(Windows). `hint` (RF-15) es `null` cuando hay resultados y `truncated=false`; cuando
 `truncated=true` es un string accionable, p. ej. `"refina los filtros o sube
 --limit (máx. 200)"`, y además se emite
-`W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`.
+`W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`. Con
+`count: 0` y al menos una cuenta leída, `hint` es
+`no messages matched in <n> folder(s) of <m> account(s); run "mailquery mailboxes" to see
+other folders, or add --include-mailbox` (sin nombres y sin llamadas nuevas al driver); sin
+cuentas leídas es `null` y aparece `W_NO_ACCOUNTS`.
+
+Con `--group-by`, `messages[]` se sustituye por `groups[]` (RF-72):
+```json
+{"count": 2, "truncated": false, "hint": null,
+ "groups": [
+   {"domain": "banco.example", "month": "2026-11", "count": 1,
+    "messages": [<message sin from/mailbox si son la clave>]},
+   {"domain": "luz.example", "month": "2026-11", "count": 1, "messages": [<message>]}
+ ],
+ "scan": {"mode": "metadata", "candidates": 2, "messages_read": 0, "duration_ms": 12}}
+```
+Cada grupo lleva sus claves en el orden pedido, su `count` y sus mensajes más recientes (como
+mucho `--limit`, 5 por defecto y 0–50); `count` de la respuesta es el total de mensajes que
+cumplen los filtros. Con más de 50 grupos, `truncated: true`, hint `<n> more group(s);
+refine the filters` y `W_RESULTS_TRUNCATED: <n> more group(s); refine the filters`.
+
+Con `--count` (RF-73), la respuesta es exactamente:
+```json
+{"ok": true, "command": "search", "generated_at": "<ISO local>",
+ "content_notice": "<texto fijo>", "count": 143, "hint": null, "warnings": [],
+ "scan": {"mode": "metadata", "candidates": 143, "messages_read": 0, "duration_ms": 41}}
+```
+`count` es el total tras deduplicar y sin el límite de 200 ni `--limit`; no hay `messages`
+ni `truncated`; `hint` es el de RF-78 solo cuando `count: 0`; los warnings son solo de
+alcance. `--count` no se admite con `--fields`, `--group-by` ni `--limit`.
 
 ### `new`
 Igual que `search` más:

@@ -65,7 +65,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | 🟢 |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | 🟢 |
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | 🟢 |
-| M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | 🟡 |
+| M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | 🟢 |
 | M12 | `mailboxes` agrupado por cuenta y `--fields` | I4 | W7 | M10 (lote I3 mergeado) | AC-O14, AC-O15 | [M12](M12-mailboxes-grouped.md) | ⚪ |
 | M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | ⚪ |
 | M14 | SMOKE en equipos reales, auditoría documental y cierre | I4 | W9 | M01–M13 | AC-H15, AC-O15 (p95) y verificación final de todos | [M14](M14-smoke-closure.md) | ⚪ |
@@ -228,8 +228,8 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-O05 | Dos claves, fechas, errores | M11 | UT-GRP-02, UT-GRP-03 | ⚪ |
 | AC-O06 | Más de 50 grupos | M11 | UT-GRP-04 | ⚪ |
 | AC-O07 | `--count` | M11 | UT-GRP-05 | ⚪ |
-| AC-O08 | `new --fields`; `new --group-by`/`--count` rechazados | M10, M11 | UT-FLD-06, UT-GRP-06 | 🟡 |
-| AC-O09 | Warnings según lo entregado | M10, M11 | UT-FLD-05, UT-GRP-09 | 🟡 |
+| AC-O08 | `new --fields`; `new --group-by`/`--count` rechazados | M10, M11 | UT-FLD-06, UT-GRP-06 | 🟢 |
+| AC-O09 | Warnings según lo entregado | M10, M11 | UT-FLD-05, UT-GRP-09 | 🟢 |
 | AC-O10 | Ayudas, skill, README y recetas (RF-75); `doctor --help` | M10, M11, M13 | DOC-10, DOC-11, DOC-12 | 🟡 |
 | AC-O11 | `doctor --failures` (también tras un timeout COM, D-25) | M13, M14 | UT-DR-01–UT-DR-04, UT-DR-10, SMOKE-NEW.10 | ⚪ |
 | AC-O12 | Sin *preflight* en skill, ayuda y README | M13 | DOC-12 | ⚪ |
@@ -564,3 +564,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-14 | CI (visibilidad de TCs) | — | — | — | Job `unittest` renombrado a `test suite (os, Python X)` y paso "Run UTs and automated TCs under coverage"; nuevo paso `integration-tests` que re-ejecuta los 46 TCs (`-k test_tc_`) como paso propio, sin añadir jobs (siguen 15 por corrida). Sincronizados este plan, `docs/INTERFACES.md` §8.6 y `docs/TEST-CATALOG.md` §5. Runs de `develop` verdes: https://github.com/dayler/mailquery/actions/runs/43561808490 (nombres) y https://github.com/dayler/mailquery/actions/runs/43562284156 (paso `integration-tests`, `Ran 46 tests`) |
 | 2026-11-14 | M09 | 🟡 → 🟢 | `fb24b4a` (merge en `integration/i3-attachments-rows`): `Ran 1291` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +33 tests, −1 retirado UT-ATC-10.03) | `docs/plan/evidence/M09.md` | Drivers `remote`, `[attachments].timeout_seconds` con corte duro (`AttachmentStreamGuard`) y `W_ATTACHMENT_ACTIVE_CONTENT`; BUG-01 cerrado; cobertura 90,6 % |
 | 2026-11-14 | M10 | 🟡 → 🟢 | `ccc78f0` (merge en `integration/i3-attachments-rows`): `Ran 1323` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +32 tests) | `docs/plan/evidence/M10.md` | Fila mínima de seis campos y `--fields` en `search`/`new`/`show`; sin cuerpos innecesarios; 8 goldens de fila actualizados con `--fields all` en los casos; cobertura 90,7 % |
+| 2026-11-14 | M11 | 🟡 → 🟢 | `615147e` (merge en `integration/i3-attachments-rows`): `Ran 1373` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +50 tests) | `docs/plan/evidence/M11.md` | `--group-by`, `--count` y `hint` sin resultados; 47 UT-GRP + 3 DOC-11; TC-03 y OL-30 barren con las opciones nuevas; cobertura 91,0 % |

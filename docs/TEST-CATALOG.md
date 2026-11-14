@@ -25,6 +25,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` |
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
 | UT-FLD | Fila por defecto de `search`/`new` y `--fields` en `search`, `new` y `show` | `tests/test_fields.py` |
+| UT-GRP | `--group-by`, `--count` y `hint` de `search` sin resultados | `tests/test_group_count.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -166,9 +167,14 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-O01 (delta `PRD-v2.2.md`) | En macOS y en Windows, sin `--fields`, cada fila de `search` y `new` tiene exactamente `uid`, `subject`, `from`, `date_received`, `is_read` y `has_attachments`, en ese orden y con los valores de `PRD.md` §12.5; los campos fuera de `messages[]` son los de hoy más `content_notice`, y el `hint` sigue RF-78; sin `--text` no se lee ningún cuerpo, solo las cabeceras de A6 de los mensajes devueltos; sin `--text` (ni `--to`/`--cc` en Windows, `PRD.md` RF-17), `--group-by` no lee cuerpos y `--count` no lee cuerpos ni cabeceras (`scan.messages_read: 0`) | UT-FLD-01, UT-FLD-02 (parcial; completa con UT-GRP-07 y SMOKE-NEW.08) | `search_default`, `search_all_mail`, `search_multidriver`, `new_first_run`, `new_seeded`, `new_multidriver`, `outlook/search`, `outlook/new_first_run` |
 | AC-O02 (delta `PRD-v2.2.md`) | `--fields snippet` añade `snippet` a la fila por defecto; `--fields all` da la fila completa de `PRD.md` §12.5; `--fields to,uid` y `--fields uid --fields to` dan lo mismo, en el orden de `PRD.md` §12.5; un campo desconocido o vacío ⇒ `E_USAGE` (exit 2) antes de abrir el store, con el mensaje y el hint de RF-70 | UT-FLD-03 | — |
 | AC-O03 (delta `PRD-v2.2.md`) | `show <uid> --fields attachments` devuelve solo `uid` y `attachments`, sin entregar el cuerpo ni emitir warnings del cuerpo; `show <uid> --fields body_text` no consulta los adjuntos; sin `--fields`, `show` devuelve los mismos campos que hoy más `content_notice`, con los valores y los warnings de F1 | UT-FLD-04 | — |
+| AC-O04 (delta `PRD-v2.2.md`) | `search --group-by from` devuelve un grupo por remitente con su `count` y sus 5 mensajes más recientes, de más reciente a más antiguo y sin `from` en las filas; los grupos van ordenados por su mensaje más reciente; `--limit 0` da `messages: []`; `--fields snippet` añade `snippet` a las filas; la deduplicación se aplica antes de agrupar | UT-GRP-01 | — |
+| AC-O05 (delta `PRD-v2.2.md`) | `--group-by domain,month` y `--group-by domain --group-by month` dan un grupo plano por cada combinación con mensajes, con las dos claves en ese orden; `day`, `week` y `month` usan la zona horaria local y la semana ISO 8601 también en el cambio de año, y los mensajes sin fecha forman el grupo `null`, al final; tres claves, una repetida, una desconocida o `--limit` fuera de 0–50 ⇒ `E_USAGE` (exit 2) antes de abrir el store, con los mensajes y hints de RF-72 | UT-GRP-02, UT-GRP-03 | — |
+| AC-O06 (delta `PRD-v2.2.md`) | Con más de 50 grupos, la respuesta trae 50, `truncated: true`, el hint de RF-72 y `W_RESULTS_TRUNCATED`; `count` es el total de mensajes de todos los grupos | UT-GRP-04 | — |
+| AC-O07 (delta `PRD-v2.2.md`) | `search --count` devuelve solo `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`, `warnings` y `scan`, con el total después de deduplicar y sin el límite de 200 y `hint: null`; cero resultados ⇒ `count: 0`, el hint de RF-78 y exit 0; con `--fields`, `--group-by` o `--limit` ⇒ `E_USAGE`; con `--text` aplica `PRD.md` RF-17 | UT-GRP-05 | — |
 | AC-O08 (delta `PRD-v2.2.md`) | `new --fields snippet` añade `snippet` y el cursor avanza igual que sin `--fields`; `new --group-by from` y `new --count` ⇒ `E_USAGE` (exit 2) sin tocar el cursor | UT-FLD-06 (parcial; completa con UT-GRP-06) | — |
 | AC-O09 (delta `PRD-v2.2.md`) | Un mensaje con texto oculto y URLs en el cuerpo da `W_HIDDEN_CONTENT` y cuenta esas URLs solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con los campos de cuerpo de RF-74 (regla 2) en `show`; `W_SENDER_AUTH_FAILED` aparece con y sin `--fields`; con `--count` solo hay warnings de alcance. Los criterios de F1 sobre el cuerpo y los destinatarios (AC-H01–AC-H18) aplican en `search` y `new` cuando esos campos se entregan (RF-74) | UT-FLD-05 (parcial; completa con UT-GRP-09) | — |
 | AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10 (parcial; completa con DOC-11 y DOC-12) | — |
+| AC-O13 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, un `search` sin resultados devuelve `count: 0`, exit 0 y el hint de RF-78 con el número correcto de carpetas y cuentas (INBOX, `mailbox_list` y `--include-mailbox`), también con `--group-by` y con `--count`; una cuenta excluida no cuenta en el número de cuentas; sin cuentas leídas (ninguna declarada o todas excluidas), `hint` es `null` y aparece `W_NO_ACCOUNTS`; con resultados, `hint` no cambia; `new` sin correo nuevo da `hint: null`; el hint no contiene nombres de carpetas ni de cuentas, y calcularlo no añade llamadas al driver | UT-GRP-08 | — |
 
 ## 8. Casos
 
@@ -731,6 +737,127 @@ Requisitos: AC-O10, AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.
 | .02 | P | Los dos README documentan la fila por defecto y `--fields` con ejemplos (`--fields snippet`, `--fields all`, `show apple_mail:2714 --fields attachments`). |
 | .03 | P | La skill explica la fila por defecto, `new --fields snippet` para resumir el correo nuevo, cuándo usar `new` y cuándo `search --unread`, y la regla de triaje sin contenido (punto 16). |
 | .04 | P | `docs/recipes/01-new-mail-digest.md` usa `mailquery new --fields snippet`; todas las líneas `mailquery search` de `02-search-invoices.md` piden con `--fields` los campos que consumen. |
+
+#### UT-GRP-01 — `--group-by from`
+
+Requisitos: AC-O01, AC-O04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un grupo por remitente (dirección en minúsculas) con su `count` y sus 5 mensajes más recientes, de más reciente a más antiguo, sin `from` en las filas. |
+| .02 | P | Los grupos van ordenados por su mensaje más reciente. |
+| .03 | B | `--limit 0` → `messages: []` en cada grupo y `count` correcto. |
+| .04 | P | `--fields snippet` añade `snippet` a las filas de los grupos. |
+| .05 | P | La deduplicación se aplica antes de agrupar (el duplicado Gmail/INBOX del store sintético cuenta una vez). |
+| .06 | P | Con `[search].default_limit = 20` en la configuración, `--group-by from` sin `--limit` da 5 mensajes por grupo (RF-72: `default_limit` no aplica). |
+
+#### UT-GRP-02 — Dos claves y fechas
+
+Requisitos: AC-O01, AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--group-by domain,month` y `--group-by domain --group-by month` dan el mismo resultado: un grupo plano por combinación con mensajes, con `domain` y `month` en ese orden (ejemplo de PRD-v2.2 sección 8). |
+| .02 | P | `day`, `week`, `month` usan la zona local (`output.LOCAL_ZONE` inyectada): un mensaje a las 02:00 UTC cae en el día anterior con UTC−4. |
+| .03 | B | Semana ISO en el cambio de año: 2026-12-31 y 2027-01-01 → `2026-W53`; 2027-01-04 → `2027-W01`. |
+| .04 | B | Mensajes sin fecha (nula, 0 o no representable) forman el grupo `null` de `day`/`week`/`month` y van al final; mensajes sin dirección del remitente, el grupo `null` de `from`/`domain`. |
+| .05 | P | `mailbox` da `{"account": <etiqueta>, "path": <ruta>}` sin `mailbox` en las filas; `account` da la etiqueta (o el `uuid` sin etiqueta). |
+| .06 | B | A igualdad de mensaje más reciente, los grupos se ordenan por sus claves ascendentes; un grupo sin fechas va después de los que tienen. |
+| .07 | B | Remitente con una dirección sin `@`: `from` = la dirección en minúsculas y `domain` = `null`. |
+| .08 | B | `--group-by domain,month` con dos grupos del mismo dominio, uno con `month: null`: el grupo con `null` va después de los grupos sin claves `null`, ordenado por claves ascendentes con `null` al final. |
+
+#### UT-GRP-03 — Errores de `--group-by` y `--limit`
+
+Requisitos: AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | Tres claves, una repetida, una desconocida: `E_USAGE`, exit 2, con los mensajes y el hint literales. |
+| .02 | N | `--limit 51` y `--limit -1` con `--group-by`: `E_USAGE` con el mensaje y el hint literales. |
+| .03 | B | Los errores ocurren antes de crear el home y sin abrir el store. |
+| .04 | B | `--limit 50` con `--group-by` es válido (hasta 50 mensajes por grupo). |
+| .05 | N | D-24: `--group-by ""` y `--group-by from,` ⇒ `unknown key '' in --group-by`; `--group-by FROM` ⇒ `unknown key 'FROM' in --group-by`; `--group-by "from, month"` equivale a `--group-by from,month`. |
+
+#### UT-GRP-04 — Más de 50 grupos
+
+Requisitos: AC-O06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con 53 remitentes: 50 grupos, `truncated: true`, hint `3 more group(s); refine the filters`, warning `W_RESULTS_TRUNCATED: 3 more group(s); refine the filters`; `count` es el total de mensajes de los 53 grupos. |
+| .02 | B | Exactamente 50 remitentes: 50 grupos, `truncated: false`, sin `W_RESULTS_TRUNCATED`. |
+| .03 | B | 51 remitentes: 50 grupos, `truncated: true`, `1 more group(s); refine the filters`. |
+
+#### UT-GRP-05 — `--count`
+
+Requisitos: AC-O07, AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Respuesta con exactamente `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`, `warnings`, `scan`, en ese orden; `hint: null` con resultados. |
+| .02 | P | Con 250 mensajes (plugin falso) el `count` es 250, sin el límite de 200 ni de `--limit`, y después de deduplicar. |
+| .03 | P | Cero resultados → `count: 0`, hint de RF-78, exit 0. |
+| .04 | N | `--count` con `--fields`, con `--group-by` y con `--limit` ⇒ `E_USAGE` con el mensaje y el hint literales. |
+| .05 | N | `--count --text x` sin filtro de acotamiento ⇒ `E_UNBOUNDED_SCAN`; con más candidatos que `[search].max_scan` ⇒ `E_SCAN_TOO_LARGE`. |
+
+#### UT-GRP-06 — `new` sin agrupación ni recuento
+
+Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | `new --group-by from` y `new --count` ⇒ `E_USAGE`, exit 2, y `state.json` no cambia (ni se crea si no existía). |
+
+#### UT-GRP-07 — Lecturas
+
+Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--group-by` sin `--text`: ninguna extracción de cuerpo; cabeceras leídas solo de los mensajes emitidos (con `--limit 1`, una por grupo; con `--limit 0`, ninguna). |
+| .02 | P | `--count` sin `--text`: ni cuerpos ni cabeceras; `scan.messages_read: 0` (Apple Mail y doble de Outlook, sin `--to`/`--cc`; el doble no abre ningún item). |
+| .03 | P | `--group-by from --text <patrón>`: los cuerpos se leen para filtrar, los grupos solo contienen mensajes que cumplen el patrón y las filas no llevan `snippet` sin `--fields snippet`. |
+
+#### UT-GRP-08 — `hint` de `search` sin resultados
+
+Requisitos: AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | macOS, Windows y plugin: dos cuentas declaradas con solo INBOX → `no messages matched in 2 folder(s) of 2 account(s); run "mailquery mailboxes" to see other folders, or add --include-mailbox`. |
+| .02 | P | `<n>` cuenta INBOX, `mailbox_list` y `--include-mailbox`; también con `--group-by` y con `--count`; una cuenta declarada sin ninguna carpeta cuenta como leída con 0 carpetas. |
+| .03 | B | Una cuenta declarada cuyo store está excluido (`W_STORE_EXCLUDED`) no cuenta en `<m>` ni sus carpetas en `<n>`. |
+| .04 | N | Sin cuentas leídas (ninguna declarada o todas excluidas) → `hint: null` y `W_NO_ACCOUNTS`. |
+| .05 | N | Con resultados, `hint` como antes; `new` sin correo nuevo → `hint: null`. |
+| .06 | B | El hint no contiene nombres de carpetas ni de cuentas, y la secuencia de llamadas al driver es la misma que la de la misma búsqueda sin calcular el hint (comparación del `CallLog` del doble y de las llamadas del plugin falso). |
+| .07 | B | D-23: una cuenta con INBOX también en `mailbox_list` y una carpeta en `mailbox_list` y en `--include-mailbox` cuenta cada carpeta una vez (`<n>` = carpetas únicas por cuenta). |
+
+#### UT-GRP-09 — Warnings con `--count` y `--group-by`
+
+Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `--count`, solo warnings de alcance (`W_NO_ACCOUNTS`, `W_STORE_EXCLUDED`, `W_ACCOUNT_LABELS_UNAVAILABLE`), aunque los mensajes tengan URLs o fallos de autenticación (Apple Mail y plugin falso). |
+| .02 | P | Con `--group-by`, `W_SENDER_AUTH_FAILED` de un mensaje emitido aparece; el conteo de URLs del cuerpo solo con `--fields snippet`. |
+
+#### UT-GRP-10 — `content_notice` con cualquier opción
+
+Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --count` y `search --group-by from` de éxito llevan `content_notice` tras `generated_at`. |
+
+#### DOC-11 — Documentación de `--group-by` y `--count`
+
+Requisitos: AC-O10 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --help` describe `--group-by` con sus siete claves y `--count`. |
+| .02 | P | Los dos README documentan `--group-by` y `--count` con ejemplos (`domain,month`) y el `hint` de cero resultados. |
+| .03 | P | La skill explica `--group-by` y `--count` y que `new` no los admite. |
 
 ### Estado, búsqueda y store
 
@@ -2170,7 +2297,7 @@ Requisitos: RNF-07 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
-Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`— sobre el fake de Outlook; bloqueante.
+Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, y `search --group-by from,month` y `search --count`— sobre el fake de Outlook; bloqueante.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -2287,7 +2414,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `new --fields all` y `show <uid> --fields attachments`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `search --group-by from,month`, `search --count`, `new --fields all` y `show <uid> --fields attachments`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
