@@ -114,9 +114,9 @@ Fuera de esos saltos, el número de tests es el mismo en los tres sistemas opera
 
 Son las únicas pruebas que leen el Apple Mail o el Outlook instalado; el resto usa dobles. Son de solo lectura, usan `HOME`/`USERPROFILE` temporales y no tocan el `~/.mailquery` real. Detectan el entorno y se saltan, sin fallar, donde no aplican: en Linux, en Windows sin Outlook clásico abierto, en macOS sin `~/Library/Mail` y en los runners de CI.
 
-- SMOKE-INSTALL y SMOKE-NEW: instalación con `pipx` y comandos de lectura contra el cliente real.
+- SMOKE-INSTALL y SMOKE-NEW: instalación con `pipx` y comandos de lectura contra el cliente real. SMOKE-NEW.08–.10 cubren `content_notice` y las opciones de salida, el cuerpo desde el HTML y `doctor --failures` sin plugins.
 - SMOKE-ATT-AM (macOS) y SMOKE-ATT-OL (Windows): recuperación real de un adjunto local. No imponen umbrales de tiempo.
-- Los presupuestos de rendimiento de §19 se miden en los equipos del dueño (SMOKE-NEW.07); los resultados y la deuda abierta están en [`PERFORMANCE-BACKLOG.md`](PERFORMANCE-BACKLOG.md).
+- Los presupuestos de rendimiento de §19 se miden en los equipos del dueño (SMOKE-NEW.07): `doctor`, `mailboxes` sin contadores, `search` con la fila mínima, `search --fields snippet`, `new`, `show` y `search --text`; `mailboxes --fields total,unread` se mide de forma informativa, sin aserción. Los resultados y la deuda abierta están en [`PERFORMANCE-BACKLOG.md`](PERFORMANCE-BACKLOG.md).
 - La materialización COM de Outlook (`Attachment.SaveAsFile`) solo se verifica en un equipo Windows real; en CI se usa el doble.
 
 ## 7. Matriz de criterios de aceptación
@@ -182,7 +182,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-O08 (delta `PRD-v2.2.md`) | `new --fields snippet` añade `snippet` y el cursor avanza igual que sin `--fields`; `new --group-by from` y `new --count` ⇒ `E_USAGE` (exit 2) sin tocar el cursor | UT-FLD-06 (parcial; completa con UT-GRP-06) | — |
 | AC-O09 (delta `PRD-v2.2.md`) | Un mensaje con texto oculto y URLs en el cuerpo da `W_HIDDEN_CONTENT` y cuenta esas URLs solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con los campos de cuerpo de RF-74 (regla 2) en `show`; `W_SENDER_AUTH_FAILED` aparece con y sin `--fields`; con `--count` solo hay warnings de alcance. Los criterios de F1 sobre el cuerpo y los destinatarios (AC-H01–AC-H18) aplican en `search` y `new` cuando esos campos se entregan (RF-74) | UT-FLD-05 (parcial; completa con UT-GRP-09) | — |
 | AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10, DOC-11, DOC-12 | — |
-| AC-O11 (delta `PRD-v2.2.md`) | `doctor --json --failures` con todo correcto devuelve `ok: true`, `checks: []`, `not_evaluated: []` y `plugins: []`, con `not_evaluated` justo después de `checks`; con un chequeo que falla devuelve solo los evaluados que fallan, con su `detail`, y en `not_evaluated` los que dependían de ellos; un `not evaluated: <causa concreta>` que no es `<chequeo> failed` se lista en `checks`; en texto, `all checks passed` o una fila por fallo más la línea `not evaluated: <nombres>`, sin secciones sin fallos; el exit es 0 y `ok` no cambia en todos los casos; sin `--failures`, `doctor` es igual que hoy salvo el título de RF-77 y la sección de plugins de RF-81; tras un timeout COM el informe aplica el mismo filtrado e incluye `plugins`. | UT-DR-01, UT-DR-02, UT-DR-03, UT-DR-04, UT-DR-10 | — |
+| AC-O11 (delta `PRD-v2.2.md`) | `doctor --json --failures` con todo correcto devuelve `ok: true`, `checks: []`, `not_evaluated: []` y `plugins: []`, con `not_evaluated` justo después de `checks`; con un chequeo que falla devuelve solo los evaluados que fallan, con su `detail`, y en `not_evaluated` los que dependían de ellos; un `not evaluated: <causa concreta>` que no es `<chequeo> failed` se lista en `checks`; en texto, `all checks passed` o una fila por fallo más la línea `not evaluated: <nombres>`, sin secciones sin fallos; el exit es 0 y `ok` no cambia en todos los casos; sin `--failures`, `doctor` es igual que hoy salvo el título de RF-77 y la sección de plugins de RF-81; tras un timeout COM el informe aplica el mismo filtrado e incluye `plugins`. | UT-DR-01, UT-DR-02, UT-DR-03, UT-DR-04, UT-DR-10, SMOKE-NEW.10 | — |
 | AC-O12 (delta `PRD-v2.2.md`) | La skill no contiene la regla de *preflight*: los comandos se ejecutan directamente y `doctor --json --failures` se indica solo tras un exit 3 o 6, tras instalar o actualizar o cuando un resultado no cuadra; `mailboxes` solo para editar `config.toml` o tras un `search` sin resultados; sus ejemplos empiezan por `search`; la ayuda general y el título del informe de texto dicen `environment and read-only diagnosis`; `README.md` y `README.es.md` describen `doctor` como verificación tras instalar o actualizar y como diagnóstico de un fallo. | DOC-12 | — |
 | AC-O13 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, un `search` sin resultados devuelve `count: 0`, exit 0 y el hint de RF-78 con el número correcto de carpetas y cuentas (INBOX, `mailbox_list` y `--include-mailbox`), también con `--group-by` y con `--count`; una cuenta excluida no cuenta en el número de cuentas; sin cuentas leídas (ninguna declarada o todas excluidas), `hint` es `null` y aparece `W_NO_ACCOUNTS`; con resultados, `hint` no cambia; `new` sin correo nuevo da `hint: null`; el hint no contiene nombres de carpetas ni de cuentas, y calcularlo no añade llamadas al driver | UT-GRP-08 | — |
 | AC-O14 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, `mailboxes` sin `--fields` devuelve solo `ok`, `command`, `generated_at`, `accounts`, `excluded_stores` y `warnings`; cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes[]` con sus carpetas, cada una solo con `path` e `included`, y con los mismos valores e igual orden que la lista plana anterior; ninguna carpeta lleva `account`; una cuenta sin carpetas tiene `mailboxes: []`; con varios drivers se respeta el orden de `PRD.md` §11.3; un `path` copiado resuelve en `mailbox_list` y en `--include-mailbox`, y el nombre y la URL de `--fields name,url` siguen resolviendo. | UT-MBX-01, UT-MBX-02, DOC-13 | `mailboxes`, `outlook/mailboxes` |
@@ -1452,7 +1452,7 @@ Requisitos: AC-16 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.p
 
 #### UT-ERR-04 — Timeout de metadatos
 
-Requisitos: AC-17, RNF-16 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.py`
+Requisitos: AC-17, RNF-22 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -2642,7 +2642,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 |---|---|---|
 | .01 | P | Recorre la ayuda raíz + 6 subcomandos (7 invocaciones) y todas parsean. |
 | .02 | P | `attachment --help` coincide con §12.7. |
-| .03 | N | Ninguna ayuda/documento dice `cinco comandos`/`five commands`, muestra uid entero o promete escritura fuera de `~/.mailquery`. |
+| .03 | N | Ninguna ayuda o documento contiene las marcas retiradas de la guardia (cinco comandos, uid entero, `preflight`, `list accounts, folders, counters`, `standard library only`/`solo biblioteca estándar`, `--out`, entre otras) ni promete escritura fuera de `~/.mailquery`; las recetas cubren los exits 3, 5 y 6. |
 | .04 | N | Ninguna ayuda ni documento muestra un uid entero ni promete escrituras fuera de `~/.mailquery`. |
 
 #### TC-08 — Goldens de adjuntos Apple Mail
@@ -2690,7 +2690,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .01 | P | Contiene los seis comandos y ningún texto con “cinco comandos”/“five commands”. |
 | .02 | P | Describe el `uid` como string prefijado y la aceptación del uid legado; no hay ejemplos con uid entero. |
 | .03 | P | Documenta `[scope."<driver>:<cuenta>"]`, `[attachments]`, `attachment`, `show.attachments`, `doctor driver`, `--version drivers` y los exit codes/errores nuevos. |
-| .04 | N | No contiene marcas obsoletas: `five commands`, `baseline` como concepto vigente, `retention_days`, uid entero en JSON, `attachments` solo con `name`, ni presenta `3.0.0` como versión publicada. |
+| .04 | N | No contiene marcas obsoletas: `five commands`, `baseline` como concepto vigente, `retention_days`, uid entero en JSON, `attachments` solo con `name`, `preflight`, `list accounts, folders, counters`, `standard library only`, ni presenta `3.0.0` como versión publicada. |
 | .05 | P | Los bloques de ejemplo de JSON y comandos coinciden con el contrato implementado (uid string, `cached_path`, `drivers:`). |
 
 #### DOC-02 — `README.es.md`
@@ -2700,7 +2700,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Misma estructura y mismo conjunto de comandos, flags, rutas y exit codes que `README.md`. |
-| .02 | N | No contiene las mismas marcas obsoletas que DOC-01.04. |
+| .02 | N | No contiene las mismas marcas obsoletas que DOC-01.04, incluidas `solo biblioteca estándar` y `list accounts, folders, counters`. |
 | .03 | P | Los ejemplos de uid y de `attachment` usan el formato prefijado. |
 
 #### DOC-03 — Coherencia entre documentos
@@ -2732,7 +2732,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .01 | P | La ayuda raíz lista los seis comandos, la línea de exits de §12.7 y la línea `environment and read-only diagnosis` de `doctor`. |
 | .02 | P | `attachment --help` coincide con §12.7 (usage, positional, options, examples, notes). |
 | .03 | P | La ayuda raíz y las seis ayudas de subcomando (7 invocaciones) pasan `parse_args` (sin invocar el store). |
-| .04 | N | Ninguna ayuda menciona cinco comandos ni un formato de uid entero. |
+| .04 | N | Ninguna ayuda menciona cinco comandos, un formato de uid entero, `preflight`, `list accounts, folders, counters` ni `standard library only`. |
 
 #### DOC-06 — `config.example.toml`
 
@@ -2866,9 +2866,12 @@ Con la instalación y la config de SMOKE-INSTALL.
 | .02 | P | `new --peek --fields all` valida la fila completa; `new` valida la fila por defecto de seis campos y el contrato de salida; `cursor` no cambia con `--fields`. |
 | .03 | P | `search --since 1w` valida la fila por defecto; la misma consulta con `--fields all` valida la fila completa. |
 | .04 | P | `search --text "*e*" --since 1d` valida la fila por defecto y `scan.mode: text`; con `--fields all`, la fila completa. |
-| .05 | P | `show <messages[0].uid del search>` ⇒ ídem. |
+| .05 | P | `show <messages[0].uid del search>` ⇒ exit 0 y el contrato de salida del mensaje. |
 | .06 | N | `unread` de cada carpeta incluida (`mailboxes --fields url,total,unread`, sobre `accounts[].mailboxes[]`), antes y después ⇒ sin cambios. |
-| .07 | P | `doctor` y cada comando anterior dentro del presupuesto de §19 de su plataforma (`search --text` solo si `scan.candidates ≤ 500`). |
+| .07 | B | `doctor`, `mailboxes` sin contadores, `search` con la fila mínima, `search --fields snippet`, `new`, `show` y `search --text` (si `scan.candidates ≤ 500`) dentro del presupuesto de §19 de su plataforma; `mailboxes --fields total,unread` se mide sin aserción; se informa del tamaño del store (mensajes y carpetas, solo recuentos). |
+| .08 | P | `search`, `new`, `show` y, si hay un adjunto local recuperable, `attachment` llevan `content_notice` justo después de `generated_at`; las filas de `search`/`new` tienen los seis campos; `search --count` y `search --group-by from --limit 1` salen con exit 0; los contadores de no leídos no cambian. |
+| .09 | P | `show` de un mensaje con una parte HTML en el `.emlx` devuelve `body_text` no vacío y `readable: true` sin error; repetir la lectura no cambia los contadores de no leídos. |
+| .10 | P | `doctor --json --failures` con todo correcto ⇒ exit 0, `checks: []`, `not_evaluated: []` y `plugins: []`; el informe de texto dice `all checks passed`; no lleva `content_notice`. |
 
 ## 9. IDs retirados
 

@@ -491,7 +491,7 @@ eliminan ANSI, controles C0/C1 (incluidos `\r`/`\n`/`\t`), formatos y bidi
 (`\u202e`); un valor no string se ignora. `sanitize_text` de `output.py` se
 reutiliza como primer paso.
 
-Timeout: `METADATA_TIMEOUT_SECONDS = 30.0` (y `EXTRACTION_TIMEOUT_SECONDS = 120.0`
+Timeout: `METADATA_TIMEOUT_SECONDS = 30.0` (y `EXTRACTION_TIMEOUT_SECONDS = 60.0`
 para la extracción de adjuntos), leídos en cada llamada para que un test inyecte un plazo corto con
 `mock.patch`/`timeout=` (nunca se duermen 30 s). Un driver **externo** corre en
 un hilo daemon con `Event.wait(deadline)`; al vencer ⇒ `E_CLIENT_TIMEOUT` (3),
@@ -780,8 +780,8 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
   barrido de sesiones huérfanas propias en la llamada siguiente). Un
   `E_ACCESSDENIED` es `E_PERMISSION`, un rechazo transitorio persistente
   `E_CLIENT_BUSY` y un cuelgue el watchdog de 30 s por llamada COM (RF-33,
-  `E_CLIENT_TIMEOUT` por el vigilante COM); el tope de 120 s de la extracción
-  lo aplica el motor de adjuntos mientras consume el stream. No resuelve referencias,
+  `E_CLIENT_TIMEOUT` por el vigilante COM); el tope de `[attachments].timeout_seconds`
+  (60 s por defecto, 10–600) lo aplica el motor de adjuntos mientras consume el stream. No resuelve referencias,
   no descarga y no abre red; `size_bytes` desconocido ⇒ `None`.
 - `load_headers(row) -> HeaderRow` (gancho interno, fuera del protocolo v1): un
   item S/MIME no se abre y devuelve cabeceras vacías con `read=False`; en los
@@ -1233,7 +1233,7 @@ pasa el catálogo ya envuelto). Un fallo de plugin sale con el código/exit de
 §12.6 y nunca `E_INTERNAL`; un fallo inesperado de un driver nativo se propaga
 intacto (el CLI lo convierte en `E_INTERNAL`). El plazo se comprueba tras la
 llamada en los drivers nativos y con un hilo daemon en los externos (límite
-conocido de RNF-16: ver la sección de `plugins/api.py`).
+conocido de RNF-22: ver la sección de `plugins/api.py`).
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
 añade `cli`); `run_mailboxes` devuelve `accounts`, `excluded_stores` y
 `warnings`. Semántica de fechas: `--since` incluye,
