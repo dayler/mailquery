@@ -1,6 +1,6 @@
 # Verificación en Windows con Outlook clásico (runbook)
 
-**Estado:** pendiente de ejecución en un equipo Windows real.
+**Estado:** ejecutado el 2026-11-14 en Windows 11 con Outlook clásico 16.0 (resultado en [`evidence/M14.md`](evidence/M14.md), sección 4.4).
 **Motivo:** la fase P4 se cerró con el SMOKE de Windows/Outlook saltado con motivo (RK-10) porque el host del plan era macOS. Este documento describe exactamente qué falta verificar, cómo hacerlo y qué evidencia devolver.
 **Al terminar:** ver §9 (qué se actualiza) y §11 (contingencias). No se toca `docs/plan/` para borrarlo: eso solo ocurre tras la revisión humana y la conciliación del PRD (ver `CLAUDE.md`).
 

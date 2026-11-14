@@ -57,7 +57,7 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | F1 — SMOKE | SMOKE-NEW.07 ampliado, SMOKE-NEW.08–10 | 🟢 |
-| F2 — Windows | Corrida en este equipo | 🟢 (saltada con motivo: host macOS sin Outlook clásico; verificación pendiente en un equipo Windows: ver [`WINDOWS-VERIFICATION.md`](WINDOWS-VERIFICATION.md)) |
+| F2 — Windows | Corrida en este equipo | 🟢 (ejecutada en Windows con Outlook clásico el 2026-11-14 según [`WINDOWS-VERIFICATION.md`](WINDOWS-VERIFICATION.md); ver [`evidence/M14.md`](evidence/M14.md), sección 4.4) |
 | F3 — macOS | Corrida en el Mac del dueño (HITL-03) | 🟢 |
 | F4 — Rendimiento | `PERFORMANCE-BACKLOG.md` | 🟢 |
 | F5 — Auditoría | CL-05 en documentos consumidores; guardia `_STALE_TEXT_PATTERNS`; listas para `INTERFACES.md` y `TEST-CATALOG.md` | 🟢 |
@@ -118,8 +118,8 @@ python -B -m coverage report
 ## 12. Definition of Done
 
 - [x] SMOKE-NEW.07 ampliado y SMOKE-NEW.08–10 escritos.
-- [x] SMOKE verde en el Mac del dueño (19/19); Windows/Outlook saltado con motivo registrado (host macOS sin Outlook clásico, RK-10).
-- [x] `PERFORMANCE-BACKLOG.md` con la medición de 3.0.0 en macOS; la medición en Windows queda pendiente de un equipo real.
+- [x] SMOKE verde en el Mac del dueño (19/19) y en Windows con Outlook clásico (SMOKE-ATT-OL repetido con datos de prueba válidos).
+- [x] `PERFORMANCE-BACKLOG.md` con la medición de 3.0.0 en macOS y en Windows; el acierto de caché de `attachment` en Outlook queda como deuda abierta.
 - [x] Ningún texto obsoleto de CL-05 en los documentos consumidores (salvo `PRD.md`).
 - [x] Todos los AC con evidencia (o la lista de faltantes devuelta al orquestador).
 - [x] TC-03.01 y OL-30 recorren todas las opciones nuevas.
@@ -137,4 +137,5 @@ python -B -m coverage report
 | 2026-11-14 | F3 — macOS | `tests.test_smoke` completa verde en el Mac: 19 casos (INSTALL, NEW y ATT-AM), 0 fallos; p95 de `mailboxes` 0,096–0,130 s y de `show` 0,045–0,053 s, dentro de presupuesto. |
 | 2026-11-14 | F4 — Rendimiento | `PERFORMANCE-BACKLOG.md` con la medición de 3.0.0 (44 carpetas y 148.678 mensajes), la variante con contadores como deuda informativa y Windows pendiente de equipo. |
 | 2026-11-14 | F5 — Auditoría | Textos de CL-05 revisados en los documentos consumidores; corregidos `docs/ROADMAP.md` y `docs/PERFORMANCE-BACKLOG.md`; guardia con cuatro patrones nuevos y DOC-01.04, DOC-02.02, DOC-05.04 y TC-07.03 verdes. |
+| 2026-11-14 | F2 — Windows (ejecución) | Runbook ejecutado en Windows 11 con Outlook clásico 16.0: SMOKE verde (SMOKE-ATT-OL repetido con un mensaje con adjunto local), p95 dentro de presupuesto salvo el acierto de caché de `attachment` (126 ms frente a < 50 ms, deuda abierta), revisión manual OK, suite `Ran 1427` con cobertura 90,9 %; UT-ATT-04.04 (test inestable) corregido. |
 | 2026-11-14 | F6 — Cierre | Suite completa `Ran 1428`, `OK (skipped=7)`; cobertura total 91,3 %; TC-03.01 y OL-30 verdes; informe con evidencia, auditoría, trazabilidad y bloques. |

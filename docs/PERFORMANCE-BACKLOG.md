@@ -5,8 +5,10 @@ PRD: el presupuesto p95 de macOS (§19 de [`PRD.md`](PRD.md)) sigue vigente. La
 medición del 2026-11-14 con la salida por defecto de `3.0.0` cumple los
 presupuestos de `search`, `new`, `show` y `mailboxes` sin contadores. El
 pendiente abierto queda limitado a `mailboxes --fields total` o `unread` (sin
-aserción de presupuesto), a la medición en Windows y al coste real de extracción
-de adjuntos en Outlook, que necesitan un equipo con Outlook clásico.
+aserción de presupuesto) y al acierto de caché de `attachment` en Outlook (126 ms
+frente a < 50 ms, «Medición del 2026-11-14 en Windows»). La medición en Windows
+con Outlook clásico cumple el resto de presupuestos, incluida la extracción real
+de adjuntos.
 
 `mailboxes` ya solo cuenta mensajes cuando se piden los contadores con
 `--fields total` o `unread`; sin ellos el comando lista el catálogo de carpetas sin
@@ -96,7 +98,7 @@ arm64, Python 3.12.13, versión `__version__` = 2.0.1, store real con 1 cuenta i
 | `search` | < 500 ms | 312 ms | cumple |
 | `new` | < 500 ms | 266 ms | cumple |
 | `doctor` | < 2 s (pared) | 443 ms (pared) | cumple |
-| `attachment` caché / extracción | §19 | sin medir: no hubo equipo Windows con Outlook clásico; cubierto por el doble y por `SMOKE-ATT-AM`/`SMOKE-ATT-OL` (se saltan donde no aplica) | pendiente de equipo |
+| `attachment` caché / extracción | §19 | sin medir: no hubo equipo Windows con Outlook clásico; cubierto por el doble y por `SMOKE-ATT-AM`/`SMOKE-ATT-OL` (se saltan donde no aplica) | medido el 2026-11-14 en Windows (ver «Medición del 2026-11-14 en Windows») |
 
 Los dos fallos de `SMOKE-NEW.07` (`mailboxes`, `show`) son la misma deuda de la
 medición anterior; los adjuntos no la introdujeron. La extracción real de Outlook
@@ -136,6 +138,41 @@ reales. El tamaño del store es comparable al de la medición histórica (148.05
 mensajes y 44 carpetas), así que la medición de macOS se considera
 representativa.
 
+## Medición del 2026-11-14 en Windows (3.0.0a1)
+
+Windows 11 Enterprise (build 26200) x64, Outlook clásico 16.0.20527 abierto,
+Python 3.14.7 (`.venv`), paquete instalado con `pipx` desde el commit `fd62c8a`,
+`mailquery 3.0.0a1` (`backend outlook`). Store real: 38 carpetas y 134.165
+mensajes (solo recuentos); alcance de la prueba: 1 cuenta con 1 carpeta incluida
+de 1.211 mensajes. `SMOKE-NEW.07`, 20 corridas por comando (10 en `mailboxes`),
+p95 por rango más cercano del `duration_ms` y `doctor` en tiempo de pared, sin
+otras corridas en marcha; `attachment` medido a mano con el mismo método (20
+extracciones con `--force` y 20 aciertos de caché):
+
+| Comando | Presupuesto p95 (Windows) | p95 medido | Estado |
+|---------|---------------------------|------------|--------|
+| `doctor` | < 3 s (pared) | 0,459 s (pared) | cumple |
+| `mailboxes` sin contadores | < 1 s | 0,204 s | cumple |
+| `search` (fila mínima) | < 1 s | 0,234 s | cumple |
+| `search --fields snippet` | < 1 s | 0,258 s | cumple |
+| `new` (fila mínima) | < 1 s | 0,202 s | cumple |
+| `show` | < 0,5 s | 0,185 s | cumple |
+| `search --text` | < 10 s | 0,238 s | cumple |
+| `attachment` 1 adjunto ≤ 5 MB (19.205 bytes) | < 600 ms | 144 ms | cumple |
+| `attachment` acierto de caché | < 50 ms | 120 ms y 126 ms (dos series de 20) | **no cumple** (deuda abierta) |
+
+Medición informativa, sin aserción: `mailboxes --fields total,unread` da un p95 de
+505 ms (n = 5) en este store.
+
+**Deuda abierta: acierto de caché de `attachment` en Outlook.** Cada acierto
+tarda entre 106 y 126 ms, de forma estable en dos series de 20. Antes de servir
+la caché, el comando se conecta a Outlook por COM y lista los adjuntos del
+mensaje para aplicar la regla de bloqueo de nombres (`PRD.md` §10.3.1), así que
+el acierto de caché no evita el coste de COM y no baja de 50 ms en este equipo.
+No hay fallo funcional: el archivo servido coincide con su SHA-256 del manifiesto
+y los contadores de Outlook no cambian. El coste de las cabeceras de A6 en
+`search`/`new` queda dentro del presupuesto (`search` 0,234 s).
+
 ## Impacto
 
 `SMOKE-NEW.07` cumple en macOS con Mail real y este store en la medición del
@@ -144,7 +181,9 @@ La variante `mailboxes --fields total` o `unread` (229 ms) sigue por encima del
 presupuesto de 150 ms y no tiene aserción. La CI no lo detecta: SMOKE se salta en
 los runners alojados (Linux; macOS sin store `V9`/`V10`/`V11`; Windows sin Outlook
 clásico). No hay fallo funcional: datos, garantía de solo lectura y contadores
-intactos.
+intactos. En Windows, el acierto de caché de `attachment` (126 ms) supera el
+presupuesto de 50 ms; la CI tampoco lo detecta, porque SMOKE-ATT-OL comprueba el
+contrato y no la latencia.
 
 ## Cómo se cierra (futuras versiones)
 
@@ -155,9 +194,13 @@ intactos.
    consulta) y/o `show`; validar que no cambia la salida ni el gate de solo lectura.
 3. Si el presupuesto no es realista para stores grandes, revisar §19 del PRD con
    aprobación del dueño (decisión de producto).
-4. Cerrar este documento cuando `mailboxes --fields total` o `unread` cumpla en un
-   Mac con un store comparable o cuando §19 se actualice, dejando aquí la nueva
-   medición.
+4. Acierto de caché de `attachment` en Outlook: decidir (decisión de producto)
+   entre optimizar el camino de caché (p. ej. evitar la conexión COM cuando el
+   manifiesto ya permite aplicar la regla de bloqueo) o revisar el presupuesto de
+   §19 para Outlook, y medir de nuevo en un equipo Windows con Outlook clásico.
+5. Cerrar este documento cuando `mailboxes --fields total` o `unread` cumpla en un
+   Mac con un store comparable y el acierto de caché de `attachment` cumpla en
+   Outlook, o cuando §19 se actualice, dejando aquí la nueva medición.
 
 ## Referencias
 
