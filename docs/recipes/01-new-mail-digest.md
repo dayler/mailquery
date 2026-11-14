@@ -154,9 +154,11 @@ Flujo recomendado:
 - No responder, reenviar, archivar, marcar como leído, etiquetar, mover ni
   borrar: `mailquery` no tiene esas operaciones y el harness tampoco debe
   intentarlas por su cuenta.
-- No descargar ni abrir adjuntos: la CLI nunca descarga del servidor y
-  `mailquery attachment` solo copia adjuntos que ya están en el store local; no
-  los abre ni los ejecuta. El harness tampoco debe abrirlos.
+- No descargar ni abrir adjuntos: con un driver local la CLI nunca descarga del
+  servidor; con un plugin `attachments: "remote"` los bytes los obtiene el
+  plugin desde su origen, y `mailquery attachment` los copia con el mismo
+  bloqueo, límites y caché. En ambos casos no los abre ni los ejecuta, y el
+  harness tampoco debe abrirlos.
 - No inventar contenido: si `snippet` está vacío o truncado
   (`body.truncated`) o `body.readable` es `false`, decirlo en lugar de
   completarlo.
@@ -190,7 +192,7 @@ Outlook en lugar de reintentar en bucle; corregir con 2/3/4; exit 0 es éxito
 | `3` | `E_STATE_CORRUPT` | El cursor está corrupto: renombrar/eliminar `~/.mailquery/state.json`; el siguiente `new` será una primera corrida (emitirá `W_FIRST_RUN` y la ventana de `lookback`, que puede repetir mensajes ya vistos una vez; deduplicar por `message_id` si importa). |
 | `3` | `E_STORE_NOT_FOUND`, `E_SCHEMA_UNSUPPORTED` | macOS, entorno no válido: avisar y pedir revisar Apple Mail / actualizar `mailquery`; no reintentar. |
 | `3` | `E_DEPENDENCY_MISSING`, `E_CLIENT_UNSUPPORTED` | Windows: falta `pywin32` (`pipx reinstall mailquery`) o no hay Outlook clásico 16.0 (el nuevo Outlook no está soportado). Avisar; no reintentar. |
-| `3` | `E_CLIENT_TIMEOUT` | Windows: Outlook no respondió en 30 s (posible aviso de seguridad en pantalla). Avisar y revisar `mailquery doctor` antes de reintentar. |
+| `3` | `E_CLIENT_TIMEOUT` | Windows: Outlook no respondió en 30 s (posible aviso de seguridad en pantalla). En `attachment`, un adjunto superó `[attachments].timeout_seconds` (60 s por defecto): avisar, revisar `mailquery doctor`, subir `timeout_seconds` si el plugin es lento y no reintentar en bucle. |
 | `4` | `E_UNBOUNDED_SCAN`, `E_SCAN_TOO_LARGE` | No aplican a `new` (no tiene filtros); si aparecen, es un fallo interno: no reintentar. |
 | `5` | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` | Transitorio (otra ejecución en curso, store u Outlook ocupados): **reintentar una vez** tras una pausa breve. Si persiste, avisar. |
 | `6` | `E_OUTLOOK_NOT_RUNNING` | Windows: Outlook clásico no está abierto (o corre con otro usuario o nivel de integridad). Avisar al usuario de que abra Outlook con el mismo usuario y sin elevar, y reintentar más tarde; **no reintentar en bucle**. |

@@ -302,7 +302,18 @@ enabled = true                 # true | false (default true)
 max_file_size_mb = 100         # 1..500, per attachment
 max_total_size_mb = 200        # 1..1024 (>= max_file_size_mb), per run
 max_count = 50                 # 1..500, only for --all (includes cache hits)
+timeout_seconds = 60           # 10..600, seconds per attachment in `attachment`
 ```
+
+`timeout_seconds` (10–600, default 60) is the budget of each attachment that
+`mailquery attachment` reads from any driver. It starts when the bytes are
+requested and includes the *magic bytes* check and the staging write; it does
+not include the active-content warning (A7) or a cache hit, which reads no
+driver. On expiry the command fails with `E_CLIENT_TIMEOUT` (exit 3), without
+retry, with clean staging and no new file. For an external plugin the wait is a
+hard cut, also between blocks; Apple Mail and Outlook are checked between
+blocks and after each call. The 30 s metadata deadline and the 30 s per-call
+Outlook COM deadline do not change.
 
 `enabled = false` makes `mailquery attachment` fail with
 `E_ATTACHMENTS_DISABLED` (exit 2) before opening the store; `show` is not
@@ -545,11 +556,15 @@ or the name is unsafe). A driver with `attachments: "none"` returns
 
 ### `mailquery attachment <uid> (--index N | --all) [--force]`
 
-Recovers attachments of one message from the **local** store into
+Recovers attachments of one message from the store of its driver into
 `~/.mailquery/attachments/<driver>/<native_id>/<index:02d>_<sanitized_name>`
 (directories 0700, files 0600 on POSIX) and returns the saved paths, names,
-sizes and SHA-256. It never downloads from the server and never opens or
-executes a file: it only copies decoded bytes.
+sizes and SHA-256. It never opens or executes a file: it only copies decoded
+bytes. A driver declared with `attachments: "remote"` is supported: the plugin
+fetches the bytes from its origin with its own network (the core never opens a
+connection) and the core applies the same screening, limits, SHA-256, cache,
+manifest and `--force` re-fetch as for a local driver; a cache hit asks no bytes
+to the plugin.
 
 ```bash
 mailquery attachment apple_mail:83301 --index 2
@@ -600,6 +615,15 @@ mailquery attachment apple_mail:83301 --index 2 --force
   `E_ATTACHMENT_UNAVAILABLE` (exit 3); corrupt or S/MIME content fails with
   `E_ATTACHMENT_UNREADABLE` (exit 3). An S/MIME message is never reported as
   “no attachments”.
+- **Timeout:** each attachment has the `[attachments].timeout_seconds` budget
+  (60 s by default). When it expires the command fails with `E_CLIENT_TIMEOUT`
+  (exit 3) and no new file, also when an external plugin stops delivering bytes.
+- **Active content:** `W_ATTACHMENT_ACTIVE_CONTENT` warns, one per delivered
+  attachment and type, when its bytes contain a PDF JavaScript or `/Launch`
+  action (`pdf-javascript`), an Office macro (`office-macros`) or a ZIP with an
+  executable entry (`archive-executable`). The file is still delivered and the
+  exit code stays 0; the warning carries only the index and the type. It is a
+  signal, not a block, and it does not replace the name and content blocking.
 - **Cleanup:** the cache is best-effort and not application state. There is no
   purge on start: use an external cron/cleanup if needed. The app tolerates
   concurrent deletions.
@@ -644,8 +668,10 @@ this order and after the body warnings of the same message:
 
 The details never contain the URL, the domain, the address or message text; the
 counts do not depend on the URL display mode, and the sender signals appear even
-when `from` is not delivered. `attachment`, `mailboxes` and `doctor` never emit
-these warnings. URLs are shown as in `[content]` (neutralized by default):
+when `from` is not delivered. `mailboxes` and `doctor` never emit these
+warnings; `attachment` only emits `W_ATTACHMENT_ACTIVE_CONTENT`, one per
+delivered attachment and detected type, in `attachments[]` order. URLs are
+shown as in `[content]` (neutralized by default):
 
 | Text | `neutralize` (default) | `strip` |
 |---|---|---|
@@ -733,7 +759,7 @@ with `E_PLUGIN_FAILED` (exit 3), never `E_INTERNAL`.
 | `network` | `true`/`false` | the plugin uses the network (the core never does) |
 | `readonly` | `structural`/`promise` | enforced by architecture or promised by the plugin |
 | `body_local` | `true`/`false` | bodies are local (otherwise `network` must be `true`) |
-| `attachments` | `local`/`remote`/`none` | `remote` requires `network: true` |
+| `attachments` | `local`/`remote`/`none` | `remote` requires `network: true`; `attachment` recovers `local` and `remote`, and rejects only `none` |
 | `native_order` | `numeric`/`text` | how the driver's native order key is compared |
 
 Installing a plugin is explicit consent: the core does not sandbox it. The
@@ -787,7 +813,7 @@ recovered files.
 | `E_PERMISSION` (3, macOS) | FDA missing | See [Permissions](#permissions) |
 | `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | `pywin32` missing / not classic Outlook 16.0 | `pipx reinstall mailquery` / install classic Outlook |
 | `E_OUTLOOK_NOT_RUNNING` (6) | Outlook closed, or different session or integrity level | Open classic Outlook with the same user and without elevation; retry |
-| `E_CLIENT_TIMEOUT` (3) | Outlook did not respond within 30 s (possible security prompt) | Check `mailquery doctor` before retrying |
+| `E_CLIENT_TIMEOUT` (3) | Outlook did not respond within 30 s (possible security prompt), or an attachment exceeded `[attachments].timeout_seconds` (60 s by default) | Check `mailquery doctor`; for a slow remote plugin raise `timeout_seconds` (10–600); do not retry in a loop |
 | `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store, lock or Outlook busy | Retry once after a pause; do not run concurrent invocations |
 | `E_STATE_CORRUPT` (3) | Damaged `state.json` (only affects `new`) | Rename it; the next `new` run is a first run and emits the `lookback` window again |
 | `E_DRIVER_UNKNOWN` (2) | The driver prefix of a `[scope]` block or of the uid is not installed | `mailquery -v` lists installed drivers; `pipx inject mailquery <plugin-package>`; check the spelling `[a-z0-9_]{1,64}` |
@@ -795,7 +821,7 @@ recovered files.
 | `E_ATTACHMENTS_DISABLED` (2) | `[attachments].enabled = false` | Set `enabled = true` in `config.toml` |
 | `E_ATTACHMENT_BLOCKED` (4) | A dangerous name, extension or executable content in **any** attachment of the message | Do not retry; the whole message is blocked. Inspect it in the mail client at your own risk |
 | `E_ATTACHMENT_TOO_LARGE` (4) | An `[attachments]` limit was exceeded | Raise the limit or recover only one attachment with `--index` |
-| `E_ATTACHMENT_UNAVAILABLE` (3) | The attachment is not local (`not_local`, `not_downloaded`, `unsupported`, `network`) | Open the message in the mail client so it downloads, or recover another message |
+| `E_ATTACHMENT_UNAVAILABLE` (3) | The attachment is not available (`not_local`, `not_downloaded`, `unsupported`, `network`); a `"remote"` plugin gets its bytes from its origin, so `network` means that origin failed | Open the message in the mail client for a local driver; for a `"remote"` plugin check its network and configuration, then retry |
 | `E_ATTACHMENT_UNREADABLE` (3) | The attachment is corrupt or S/MIME-protected | Inspect it in the mail client; S/MIME attachments cannot be extracted |
 | `E_IO` (3) | I/O failure writing the cache or staging (space, quota, file system) | Check free space and permissions of `~/.mailquery`, then retry |
 | `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` without narrowing / too many candidates | Add `--since` or another filter, or raise `search.max_scan` (max 50000) |
