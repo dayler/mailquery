@@ -313,7 +313,7 @@ class HelpContractTests(_CliTestCase):
 
         expected_flags = {
             "doctor": ("--json",),
-            "mailboxes": (),
+            "mailboxes": ("--fields",),
             "search": (
                 "--subject",
                 "--text",

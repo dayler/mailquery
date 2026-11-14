@@ -192,7 +192,11 @@ class SmokeTest(unittest.TestCase):
             rc, out, _, _ = cls._run(["mailboxes"])
             if rc != 0:
                 return  # a scope that errors must surface, not be skipped
-            if any(m["included"] for m in json.loads(out)["mailboxes"]):
+            if any(
+                m["included"]
+                for account in json.loads(out)["accounts"]
+                for m in account["mailboxes"]
+            ):
                 cls.first_account = account["label"]
                 break
         else:
@@ -249,8 +253,15 @@ class SmokeTest(unittest.TestCase):
             )
 
     def _counters(self):
-        data = self._json(["mailboxes"], "mailboxes")
-        return {m["url"]: (m["total"], m["unread"]) for m in data["mailboxes"] if m["included"]}
+        data = self._json(
+            ["mailboxes", "--fields", "url,total,unread"], "mailboxes"
+        )
+        return {
+            m["url"]: (m["total"], m["unread"])
+            for account in data["accounts"]
+            for m in account["mailboxes"]
+            if m["included"]
+        }
 
     def _search(self, *args):
         return self._json(["search", *args], "search")
@@ -309,10 +320,18 @@ class SmokeTest(unittest.TestCase):
     def test_smoke_new_01_mailboxes_json(self):
         """SMOKE-NEW.01: mailboxes => exit 0 and PRD 12.5 JSON."""
         data = self._json(["mailboxes"], "mailboxes", record="mailboxes")
-        for key in ("accounts", "mailboxes", "excluded_stores", "warnings"):
+        for key in ("ok", "command", "generated_at", "accounts", "excluded_stores", "warnings"):
             self.assertIn(key, data)
-        self.assertTrue(any(m["included"] for m in data["mailboxes"]))
+        self.assertNotIn("mailboxes", data)
+        self.assertTrue(
+            any(
+                m["included"]
+                for account in data["accounts"]
+                for m in account["mailboxes"]
+            )
+        )
         self.assertTrue(any(a["declared"] for a in data["accounts"]))
+        self.assertTrue(all("mailboxes" in account for account in data["accounts"]))
 
     def test_smoke_new_02_new_json(self):
         """SMOKE-NEW.02: new => exit 0 and PRD 12.5 JSON."""
@@ -533,7 +552,11 @@ class SmokeAttOutlook(unittest.TestCase):
             result = cls._run(["mailboxes"])
             if result.returncode != 0:
                 return None
-            if any(m["included"] for m in json.loads(result.stdout)["mailboxes"]):
+            if any(
+                m["included"]
+                for account in json.loads(result.stdout)["accounts"]
+                for m in account["mailboxes"]
+            ):
                 return account["label"]
         return None
 
@@ -551,6 +574,18 @@ class SmokeAttOutlook(unittest.TestCase):
         messages = self._json(["search", "--has-attachments", "--limit", "5"], "search")["messages"]
         self.assertTrue(messages, "no message with attachments in the declared scope")
         return messages[0]["uid"]
+
+    def _included_counters(self) -> dict:
+        """``{url: (total, unread)}`` of the included folders of the declared scope."""
+        payload = self._json(
+            ["mailboxes", "--fields", "url,total,unread"], "mailboxes"
+        )
+        return {
+            entry["url"]: (entry["total"], entry["unread"])
+            for account in payload["accounts"]
+            for entry in account["mailboxes"]
+            if entry["included"]
+        }
 
     def test_smoke_att_ol_01_recovers_a_local_attachment(self) -> None:
         """SMOKE-ATT-OL.01: attachment --index 1 => exit 0, JSON contract, file written."""
@@ -578,17 +613,9 @@ class SmokeAttOutlook(unittest.TestCase):
     def test_smoke_att_ol_03_store_counters_are_unchanged(self) -> None:
         """SMOKE-ATT-OL.03: recovering attachments leaves the included folders untouched."""
         uid = self._attachment_uid()
-        before = {
-            m["url"]: (m["total"], m["unread"])
-            for m in self._json(["mailboxes"], "mailboxes")["mailboxes"]
-            if m["included"]
-        }
+        before = self._included_counters()
         self._json(["attachment", uid, "--index", "1"], "attachment")
-        after = {
-            m["url"]: (m["total"], m["unread"])
-            for m in self._json(["mailboxes"], "mailboxes")["mailboxes"]
-            if m["included"]
-        }
+        after = self._included_counters()
         self.assertEqual(after, before)
         self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
 
@@ -684,7 +711,11 @@ class SmokeAttAppleMail(unittest.TestCase):
             rc, out, _err = cls._run(["mailboxes"])
             if rc != 0:
                 raise unittest.SkipTest("a declared account failed on the real store")
-            if any(mailbox["included"] for mailbox in json.loads(out)["mailboxes"]):
+            if any(
+                mailbox["included"]
+                for account in json.loads(out)["accounts"]
+                for mailbox in account["mailboxes"]
+            ):
                 account = candidate["label"]
                 break
         if account is None:

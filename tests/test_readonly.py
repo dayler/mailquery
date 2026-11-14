@@ -180,6 +180,8 @@ class ReadOnlyStoreTest(unittest.TestCase):
         scenarios = [
             (("doctor", "--json"), "doctor"),
             (("mailboxes",), "mailboxes"),
+            (("mailboxes", "--fields", "total,unread"), "mailboxes"),
+            (("mailboxes", "--fields", "name,url"), "mailboxes"),
             (("search", "--strip-links"), "search"),
             (("search", "--subject", "Invoice", "--strip-links"), "search"),
             (("search", "--text", "factura", "--strip-links"), "search"),
@@ -211,7 +213,13 @@ class ReadOnlyStoreTest(unittest.TestCase):
 
         self.assertGreaterEqual(payloads["search"][0]["count"], 12)
         self.assertIn("checks", payloads["doctor"][0])
-        self.assertIn("mailboxes", payloads["mailboxes"][0])
+        self.assertTrue(payloads["mailboxes"][0]["accounts"])
+        self.assertTrue(
+            all(
+                "mailboxes" in account
+                for account in payloads["mailboxes"][0]["accounts"]
+            )
+        )
         self.assertEqual(payloads["show"][0]["message"]["uid"], prefixed_uid(2714))
         self.assertEqual(payloads["show"][3]["message"]["uid"], prefixed_uid(83170))
         # First run: emits the window and writes only the state; then nothing new.

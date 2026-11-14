@@ -2883,7 +2883,13 @@ class OutlookStoreExcludedWarningTests(_CommandScenarioCase):
         self.assertEqual(payload["warnings"], expected)
         mailboxes = self.run_json("mailboxes")
         self.assertEqual(mailboxes["warnings"], expected)
-        self.assertFalse(any(mailbox["included"] for mailbox in mailboxes["mailboxes"]))
+        self.assertFalse(
+            any(
+                mailbox["included"]
+                for account in mailboxes["accounts"]
+                for mailbox in account["mailboxes"]
+            )
+        )
         self.assertEqual(fake.call_log.count(kind="NameSpace", member="GetItemFromID"), 0)
 
 
@@ -2963,7 +2969,7 @@ class OutlookCounterTests(_CommandScenarioCase):
     _COUNTER_COLUMNS = [fk.PR_MESSAGE_FLAGS, fk.PR_MSG_STATUS]
 
     def test_search_and_show_read_no_folder_counters(self) -> None:
-        """Only `mailboxes` scans folder tables for `total`/`unread` (PRD 19)."""
+        """Only `mailboxes --fields total`/`unread` scans folder tables (PRD 19)."""
         fake = self.use(fk.FakeOutlook.default(), _scope_toml("ana.perez@example.com"))
         self.run_json("search", "--since", "2026-01-01")
         tables = _tables(fake)
@@ -2975,11 +2981,23 @@ class OutlookCounterTests(_CommandScenarioCase):
         self.assertEqual(_tables(fake), [])
         fake.call_log.clear()
         payload = self.run_json("mailboxes")
+        # Without counters the folder catalog is listed without any table read.
+        folders = [
+            entry for account in payload["accounts"] for entry in account["mailboxes"]
+        ]
+        self.assertEqual(len(folders), 3)
+        self.assertEqual(_tables(fake), [])
+        fake.call_log.clear()
+        full = self.run_json("mailboxes", "--fields", "total,unread")
         # Only INBOX has items: the empty folders are counted from their own counters.
         # INBOX: the searchable-class row count, then the rows that may be IMAP-deleted.
-        self.assertEqual(len(payload["mailboxes"]), 3)
         self.assertEqual(_tables(fake), [[], self._COUNTER_COLUMNS])
-        inbox = next(row for row in payload["mailboxes"] if row["path"] == "INBOX")
+        inbox = next(
+            row
+            for account in full["accounts"]
+            for row in account["mailboxes"]
+            if row["path"] == "INBOX"
+        )
         self.assertEqual((inbox["total"], inbox["unread"]), (3, 2))
 
     def test_mailboxes_counts_each_folder_once_per_backend(self) -> None:
@@ -3391,7 +3409,11 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
         for name, scope in self._SCOPES.items():
             fake = self.use(fk.SCENARIOS[name](), scope)
             (self.home / "state.json").unlink(missing_ok=True)  # each scenario starts afresh
-            runs: list[tuple[str, ...]] = [("mailboxes",)]
+            runs: list[tuple[str, ...]] = [
+                ("mailboxes",),
+                ("mailboxes", "--fields", "total,unread"),
+                ("mailboxes", "--fields", "name,url"),
+            ]
             runs += [("search", *flags, "--strip-links") for flags in self._SEARCHES]
             runs += [
                 ("search", "--group-by", "from,month"),

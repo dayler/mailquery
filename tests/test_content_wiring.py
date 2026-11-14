@@ -622,13 +622,16 @@ class ContentFieldsTests(_CliCase):
             accounts=accounts,
             mailboxes=mailboxes,
         )
-        listed = self.run_ok(["mailboxes"], plugin=plugin)
+        listed = self.run_ok(["mailboxes", "--fields", "name,url"], plugin=plugin)
         copied_label = listed["accounts"][0]["label"]
-        copied_path = next(
-            entry["path"] for entry in listed["mailboxes"] if entry["path"] != "INBOX"
-        )
+        folders = listed["accounts"][0]["mailboxes"]
+        copied_path = next(entry["path"] for entry in folders if entry["path"] != "INBOX")
+        copied_name = next(entry["name"] for entry in folders if entry["path"] != "INBOX")
+        copied_url = next(entry["url"] for entry in folders if entry["path"] != "INBOX")
         self.assertEqual(copied_label, label)
         self.assertEqual(copied_path, folder)
+        self.assertEqual(copied_name, folder)
+        self.assertTrue(copied_url.endswith(f"/{folder}"))
 
         _write_scope(self.home, copied_label, mailbox_list=(copied_path,))
         declared = self.run_ok(["search", "--since", "2020-01-01"], plugin=plugin)

@@ -1575,7 +1575,7 @@ class ShowExtendedTest(ExtendedSearchFixtureTest):
 
 
 class MailboxesTest(SearchFixtureTest):
-    """Mailbox catalog with recalculated counters and included flags."""
+    """Mailbox catalog grouped by account, with counters and included flags on request."""
 
     EXPECTED_MAILBOXES = {
         (ACCOUNT_ICLOUD, "INBOX"): (8, 3, True),
@@ -1587,69 +1587,63 @@ class MailboxesTest(SearchFixtureTest):
         (ACCOUNT_LOCAL, "Recovered Messages"): (0, 0, False),
     }
 
-    def mailboxes(self) -> dict:
-        return search.run_mailboxes(self.backend, self.config)
+    def mailboxes(self, fields=None) -> dict:
+        return search.run_mailboxes(self.backend, self.config, fields=fields)
+
+    def folders(self, payload: dict) -> dict:
+        return {
+            (account["uuid"], entry["path"]): entry
+            for account in payload["accounts"]
+            for entry in account["mailboxes"]
+        }
 
     def test_result_shape(self) -> None:
         result = self.mailboxes()
         self.assertEqual(
-            set(result), {"accounts", "mailboxes", "excluded_stores", "warnings"}
+            set(result), {"accounts", "excluded_stores", "warnings"}
         )
         self.assertEqual(result["excluded_stores"], [])
         self.assertEqual(len(result["accounts"]), 3)
-        self.assertEqual(len(result["mailboxes"]), 7)
         for account in result["accounts"]:
             self.assertEqual(
-                set(account), {"uuid", "label", "email", "declared"}
+                list(account), ["uuid", "label", "email", "declared", "mailboxes"]
             )
             self.assertTrue(account["declared"])
-        for mailbox in result["mailboxes"]:
-            self.assertEqual(
-                set(mailbox),
-                {
-                    "account",
-                    "name",
-                    "path",
-                    "url",
-                    "total",
-                    "unread",
-                    "included",
-                },
-            )
+            for mailbox in account["mailboxes"]:
+                self.assertEqual(list(mailbox), ["path", "included"])
+        self.assertEqual(len(self.folders(result)), 7)
         self.assertEqual(result["warnings"], [])
 
     def test_declared_accounts_and_recalculated_counters(self) -> None:
-        result = self.mailboxes()
+        result = self.mailboxes(fields=("name", "url", "total", "unread"))
         self.assertEqual(
             [account["uuid"] for account in result["accounts"]],
             [ACCOUNT_ICLOUD, ACCOUNT_GMAIL, ACCOUNT_LOCAL],
         )
         actual = {
-            (mailbox["account"]["uuid"], mailbox["path"]): (
-                mailbox["total"],
-                mailbox["unread"],
-                mailbox["included"],
+            (account["uuid"], entry["path"]): (
+                entry["total"],
+                entry["unread"],
+                entry["included"],
             )
-            for mailbox in result["mailboxes"]
+            for account in result["accounts"]
+            for entry in account["mailboxes"]
         }
         self.assertEqual(actual, self.EXPECTED_MAILBOXES)
         # The fake counters stored in the fixture must be ignored.
-        gmail_inbox = next(
-            mailbox
-            for mailbox in result["mailboxes"]
-            if mailbox["account"]["uuid"] == ACCOUNT_GMAIL
-            and mailbox["path"] == "INBOX"
-        )
+        gmail_inbox = self.folders(result)[(ACCOUNT_GMAIL, "INBOX")]
         self.assertEqual(gmail_inbox["total"], 2)
         self.assertEqual(gmail_inbox["unread"], 1)
-        self.assertIn("Gmail", gmail_inbox["account"]["label"])
+        self.assertEqual(gmail_inbox["name"], "INBOX")
+        self.assertTrue(gmail_inbox["url"].startswith("imap://"))
 
     def test_included_flags_follow_config_scope(self) -> None:
         self.use_config(ICLOUD_WITH_FACTURAS)
         result = self.mailboxes()
         included = {
-            (mailbox["account"]["uuid"], mailbox["path"]): mailbox["included"]
-            for mailbox in result["mailboxes"]
+            (account["uuid"], mailbox["path"]): mailbox["included"]
+            for account in result["accounts"]
+            for mailbox in account["mailboxes"]
         }
         self.assertTrue(included[(ACCOUNT_ICLOUD, "INBOX")])
         self.assertTrue(included[(ACCOUNT_ICLOUD, "Facturas")])
@@ -1671,7 +1665,11 @@ class MailboxesTest(SearchFixtureTest):
             all(account["declared"] is False for account in result["accounts"])
         )
         self.assertTrue(
-            all(mailbox["included"] is False for mailbox in result["mailboxes"])
+            all(
+                mailbox["included"] is False
+                for account in result["accounts"]
+                for mailbox in account["mailboxes"]
+            )
         )
 
     def test_account_labels_unavailable(self) -> None:
