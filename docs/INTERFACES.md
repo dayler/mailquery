@@ -2007,9 +2007,10 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
 
 `.github/workflows/tests.yml`:
 
-- Disparo **solo por PR** (`pull_request` a `develop`/`main`); no hay
-  `push` ni tag. `concurrency` con `cancel-in-progress` (un push
-  nuevo al PR cancela el run anterior) y `timeout-minutes: 20` en
+- Disparo en `pull_request` a `develop` y en `push` a `develop` (en alpha
+  no hay PRs a `main` ni tags): la matriz valida el resultado mergeado de
+  cada lote. `concurrency` con `cancel-in-progress` (un push nuevo a la
+  misma ref cancela el run anterior) y `timeout-minutes: 20` en
   `unittest` y 15 en `install-scripts`.
 - Job `unittest`: `ubuntu-latest`, `macos-latest` y `windows-latest` ×
   Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`) = 12 jobs. Instala
