@@ -136,6 +136,55 @@ Este delta es temporal. Antes de publicar `3.0.0` se concilia en `PRD.md`; hasta
 | CL-07 | El anexo de seguridad cita `PRD.md` en lugar de `PRD-v2.2.md` | Búsqueda de `PRD-v2.2` sin resultados |
 | CL-08 | `PRD-v2.2.md` eliminado | El archivo ya no existe |
 
+### 0.5 Registro de conciliación
+
+Estado de la implementación de cada contrato de la sección 0.2, desviaciones aprobadas durante la implementación y hallazgos para conciliar `PRD.md`. La conciliación aplica las notas de este registro y la tabla de hallazgos antes de CL-01.
+
+| Contrato (sección 0.2) | Feature | Estado | Commit | Documentos consumidores actualizados | Nota para la conciliación |
+|---|---|---|---|---|---|
+| Valores de texto del JSON y de los errores | F1 | Pendiente | — | — | — |
+| Selección del cuerpo y conversión HTML → texto | F1 | Pendiente | — | — | — |
+| Semántica de búsqueda | F1 | Pendiente | — | — | — |
+| Cuerpo, `snippet`, asunto, nombres y `headers` | F1 | Pendiente | — | — | — |
+| Opciones de `search`, `new` y `show` y su ayuda | F1 | Pendiente | — | — | — |
+| Catálogo de warnings | F1 | Pendiente | — | — | — |
+| Respuesta de `attachment` | F1 | Pendiente | — | — | — |
+| Inspección de adjuntos | F1 | Pendiente | — | — | — |
+| Contrato JSON único | F1, F3 | Pendiente | — | — | — |
+| Campos de la respuesta de `search`, `new`, `show` y `attachment` | F1 | Pendiente | — | — | — |
+| Skill y README | F1 | Pendiente | — | — | — |
+| Cabeceras leídas | F1 | Pendiente | — | — | — |
+| Contrato de plugins: cuerpo | F1 | Pendiente | — | — | — |
+| Configuración | F1, F2 | Pendiente | — | — | — |
+| Dependencias y actualización | F1 | Pendiente | — | — | — |
+| Responsabilidades de módulos | F1, F2, F3 | Pendiente | — | — | — |
+| Prompt injection | F1 | Pendiente | — | — | — |
+| Cambios visibles en 3.0.0 | F1, F3 | Pendiente | — | — | — |
+| Recuperación de adjuntos de drivers `"remote"` | F2 | Pendiente | — | — | — |
+| Tiempo de extracción de adjuntos | F2 | Pendiente | — | — | — |
+| Fila de `search` y `new` | F3 | Pendiente | — | — | — |
+| Opciones de `search`, `new` y `show` y su ayuda | F3 | Pendiente | — | — | — |
+| `--limit` de `search` | F3 | Pendiente | — | — | — |
+| Respuesta de `search` con `--group-by` o `--count` | F3 | Pendiente | — | — | — |
+| Warnings de `search`, `new` y `show` | F3 | Pendiente | — | — | — |
+| Valores fijos | F3 | Pendiente | — | — | — |
+| Rendimiento | F3 | Pendiente | — | — | — |
+| Prompt injection | F3 | Pendiente | — | — | — |
+| Recetas, skill y README | F3 | Pendiente | — | — | — |
+| `doctor` | F3 | Pendiente | — | — | — |
+| `hint` de `search` sin resultados | F3 | Pendiente | — | — | — |
+| Salida de `mailboxes` | F3 | Pendiente | — | — | — |
+
+| Hallazgo para la conciliación | Sección de `PRD.md` afectada | Nota |
+|---|---|---|
+| — | — | — |
+
+| Ítem | Estado | Evidencia |
+|---|---|---|
+| CL-04 | Pendiente | — |
+| CL-05 (documentos consumidores) | Pendiente | — |
+| CL-06 | Pendiente | — |
+
 ---
 
 ## 1. Resumen ejecutivo
