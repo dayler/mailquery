@@ -873,6 +873,13 @@ Los dos métodos estáticos de parseo:
   `Authentication-Results` y `Reply-To` desplegadas y `read=False` cuando el
   archivo no se resuelve o no se puede leer. `load_body` propaga además
   `hidden_chars`, `authentication_results` y `reply_to` desde `parse_emlx`.
+- `mailboxes_without_counters(account_uuids=None) -> list[MailboxRow]` (gancho
+  interno, fuera de la interfaz v1): las mismas filas que `mailboxes()` con
+  `total`/`unread` a `None` y sin contar ningún mensaje; con `account_uuids`
+  solo las carpetas de esas cuentas. `config.listed_mailboxes` lo usa para todo
+  lo que no sean los contadores, así que `search`, `new` y `show` no recontar.
+  `mailboxes()` sigue devolviendo los contadores recalculados y cacheados por
+  instancia.
 - La validación de los uids del estado vive en `state.py`, no en el
   backend.
 
@@ -920,8 +927,11 @@ UUID con warning. Feature-detección de columnas; nunca lee credenciales.
 ### `store.py` (Apple Mail)
 `StoreVersion(mail_root, version, version_uuid, data_dir, envelope_index)`.
 `Mailbox(rowid, url, name, path, account_uuid, account_kind, is_inbox,
-is_aggregate, message_count, unread_count)`.
-`EnvelopeStore(version, connection, strategy, tmp_dir=None)` con `.mailboxes`,
+is_aggregate, message_count, unread_count)`: `message_count` y `unread_count`
+son `None` mientras no se hayan pedido los contadores.
+`EnvelopeStore(version, connection, strategy, tmp_dir=None)` con `.mailboxes`
+(catálogo de carpetas **sin** contadores), `.mailboxes_with_counters()` (los
+recalcula una vez y los cachea para el resto de la vida del store),
 `.mailbox(rowid)`, `.mailbox_dir(mailbox)`, `.resolve_mailbox(account_uuid,
 ref)`, `.fingerprint()`, `.close()`; `open_store(mail_root=None,
 tmp_root=None)`; `detect_version(mail_root=None)`; `probe_envelope_index(...)`
@@ -932,8 +942,10 @@ Estrategias: `live_ro` (existe `-shm`) o `copy_ro` (se copia `Envelope Index` +
 `mailbox.path` = path completo decodificado (`[Gmail]/All Mail`); INBOX de
 Gmail se marca `is_inbox=True`; `is_aggregate` = path que contiene `all mail`.
 Contadores **recalculados** desde `messages` + `labels` (los de `mailboxes` no
-son fiables). `mailbox_dir` = `mail_root/version/account_uuid/` + segmentos
-`.mbox` (los `[` y `]` son literales, sin `glob`); NFC/NFD como fallback.
+son fiables) solo en `mailboxes_with_counters()`; `.mailboxes`, `.mailbox()`,
+`.resolve_mailbox()` y `.mailbox_dir()` no leen mensajes.
+`mailbox_dir` = `mail_root/version/account_uuid/` + segmentos `.mbox` (los `[`
+y `]` son literales, sin `glob`); NFC/NFD como fallback.
 
 ### `emlx.py` (Apple Mail)
 `EmlxMessage(path, partial, headers, body_text, attachments, available,
@@ -1088,7 +1100,7 @@ url_mode="neutralize", fields=None, group_by=None, count=False)`,
 drivers=None, native=None, url_mode="neutralize", fields=None)`,
 `run_show(backend, config, uid, *, driver=None, drivers=None, native=None,
 url_mode="neutralize", fields=None)`,
-`run_mailboxes(backend, config, *, drivers=None, native=None)`.
+`run_mailboxes(backend, config, *, drivers=None, native=None, fields=None)`.
 Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
 `None` cuando la config no lo declara); `drivers` es el mapping
 `{driver: instancia}` de los demás drivers declarados que el CLI abrió y
@@ -1163,9 +1175,17 @@ tras el merge, `truncated`/`hint` se calculan sobre el total fusionado,
 `scan.candidates` y `scan.messages_read` suman por driver y el presupuesto de
 `[search].max_scan` compara la **suma** de candidatos de todos los drivers.
 `run_mailboxes` concatena los drivers en el orden de aparición de sus bloques
-`[scope]` (`accounts[]`/`mailboxes[]`/`excluded_stores[]` por driver; un plugin
-devuelve `excluded_stores: []`); el driver nativo sin bloques no aporta nada y,
-sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con `W_NO_ACCOUNTS`.
+`[scope]`: cada cuenta de `accounts[]` lleva sus carpetas en `mailboxes[]`
+(`path` e `included` siempre; `name`, `url`, `total` y `unread` solo si se piden
+con `fields`, en el orden `name`, `path`, `url`, `total`, `unread`, `included`).
+Una cuenta sin carpetas lleva `mailboxes: []`; una carpeta sin cuenta se agrupa
+en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`.
+Sin `total` ni `unread` no se cuenta ningún mensaje: se usa
+`config.listed_mailboxes` (el gancho sin contadores del driver si existe) y, con
+contadores, `driver.mailboxes()`. Un plugin entrega sus filas como hoy y el
+núcleo omite los contadores no pedidos. El driver nativo sin bloques no aporta
+nada y, sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con
+`W_NO_ACCOUNTS`.
 `run_show` despacha por el driver del prefijo: resuelve solo los bloques de ese
 driver, llama a su `find_message`/`load_body` y a su operación `attachments()`
 (API 1) para componer `message.attachments[]` (RF-43/AC-07):
@@ -1198,8 +1218,8 @@ intacto (el CLI lo convierte en `E_INTERNAL`). El plazo se comprueba tras la
 llamada en los drivers nativos y con un hilo daemon en los externos (límite
 conocido de RNF-16: ver la sección de `plugins/api.py`).
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
-añade `cli`); `run_mailboxes` devuelve `accounts`, `mailboxes`,
-`excluded_stores` y `warnings`. Semántica de fechas: `--since` incluye,
+añade `cli`); `run_mailboxes` devuelve `accounts`, `excluded_stores` y
+`warnings`. Semántica de fechas: `--since` incluye,
 `--until` excluye. Orden total de un driver (PRD §11.3): `search`/`show`
 = `(date_received DESC, driver ASC, native_order_key DESC)`; `new` =
 ASCENDENTE `(date_received ASC, driver ASC, native_order_key ASC)`; el key se
@@ -1246,14 +1266,19 @@ ayuda `replace every URL with [link omitted] (overrides [content].url_display)`;
 ningún otro comando la acepta (argparse ⇒ `E_USAGE`, exit 2). `_url_mode(config,
 args)` calcula el modo efectivo (`--strip-links` > `[content].url_display` >
 `neutralize`) y `_execute` lo pasa como `url_mode=` a `run_search`, `run_new` y
-`run_show`. `--fields` es una opción de `search`, `new` y `show` (`action="append"`, `metavar="LIST"`): cada valor
-se parte por comas, se recortan los espacios de cada nombre y los nombres distinguen mayúsculas.
-`search`/`new` la usan para **añadir** campos a la fila por defecto y `show` para **elegir** los campos
-de `message` (`uid` siempre). Un nombre desconocido o vacío ⇒ `E_USAGE` (exit 2) con
-`unknown field '<nombre>' in --fields` y `valid fields: <lista del comando>`; se valida en `_main`
-antes de crear `~/.mailquery`, de leer la config y de abrir el store. `_execute` pasa la selección como
-`fields=` a `run_search`, `run_new` y `run_show`. Las ayudas de los tres comandos listan sus campos en
-el epílogo. `--group-by` (`action="append"`, `metavar="KEYS"`) y `--count` (`store_true`) son opciones
+`run_show`. `--fields` es una opción de `search`, `new`, `show` y `mailboxes`
+(`action="append"`, `metavar="LIST"`): cada valor se parte por comas, se
+recortan los espacios de cada nombre y los nombres distinguen mayúsculas.
+`search`/`new` la usan para **añadir** campos a la fila por defecto, `show` para
+**elegir** los campos de `message` (`uid` siempre) y `mailboxes` para **añadir**
+`name`, `url`, `total` y `unread` a cada carpeta (`path` e `included` siempre
+están; no hay `all`). Un nombre desconocido o vacío ⇒ `E_USAGE` (exit 2) con
+`unknown field '<nombre>' in --fields` y `valid fields: <lista del comando>`
+(en `mailboxes`, `valid fields: name, path, url, total, unread, included`); se
+valida en `_main` antes de crear `~/.mailquery`, de leer la config y de abrir el
+store. `_execute` pasa la selección como `fields=` a `run_search`, `run_new`,
+`run_show` y `run_mailboxes`. Las ayudas de los cuatro comandos listan sus
+campos. `--group-by` (`action="append"`, `metavar="KEYS"`) y `--count` (`store_true`) son opciones
 **solo de `search`**: `new` no las define y argparse responde `E_USAGE` (exit 2) sin tocar
 `state.json`. `_grouping_selection(args)` se ejecuta en `_main` antes de crear
 `~/.mailquery`, de leer la config y de abrir el store: parte cada valor de `--group-by` por
@@ -1961,17 +1986,20 @@ el contrato `{ok:false, command, error:{code,message,hint}}` de §12.5 C/D/G/H/E
 
 ### `mailboxes`
 ```json
-{"accounts": [{"uuid": "...", "label": "iCloud (x@y)", "email": "x@y", "declared": true}],
- "mailboxes": [{"account": {"uuid": "...", "label": "...", "email": "..."},
-                "name": "INBOX", "path": "INBOX", "url": "imap://...",
-                "total": 9734, "unread": 2, "included": true}],
+{"accounts": [{"uuid": "...", "label": "iCloud (x@y)", "email": "x@y", "declared": true,
+               "mailboxes": [{"path": "INBOX", "included": true},
+                             {"path": "Facturas", "included": true}]}],
  "excluded_stores": []}
 ```
-`excluded_stores` (`[{label, path, reason}]`) existe en ambas plataformas y es
-siempre `[]` en Apple Mail. En Outlook lista los stores excluidos en el orden
-del perfil (p. ej. `{"label": "Exchange shared (Soporte)", "path": null,
-"reason": "shared_mailbox"}`); `accounts[]` y `mailboxes[]` solo traen
-candidatos.
+Cada cuenta lista sus carpetas una vez en `mailboxes[]`; sin `--fields` cada
+carpeta tiene solo `path` e `included`. `--fields name,url,total,unread` añade
+esos campos, siempre en el orden `name`, `path`, `url`, `total`, `unread`,
+`included`; `--fields path,included` no cambia nada y no hay `all`. Sin `total`
+ni `unread` no se cuenta ningún mensaje. `excluded_stores`
+(`[{label, path, reason}]`) existe en ambas plataformas y es siempre `[]` en
+Apple Mail. En Outlook lista los stores excluidos en el orden del perfil (p. ej.
+`{"label": "Exchange shared (Soporte)", "path": null, "reason":
+"shared_mailbox"}`); `accounts[]` y sus `mailboxes[]` solo traen candidatos.
 
 ### `doctor`
 Por defecto: **informe de texto human-readable** en `stdout` (mismo estilo que

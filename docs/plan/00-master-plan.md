@@ -66,7 +66,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | 🟢 |
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | 🟢 |
 | M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | 🟢 |
-| M12 | `mailboxes` agrupado por cuenta y `--fields` | I4 | W7 | M10 (lote I3 mergeado) | AC-O14, AC-O15 | [M12](M12-mailboxes-grouped.md) | 🟡 |
+| M12 | `mailboxes` agrupado por cuenta y `--fields` | I4 | W7 | M10 (lote I3 mergeado) | AC-O14, AC-O15 | [M12](M12-mailboxes-grouped.md) | 🟢 |
 | M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | ⚪ |
 | M14 | SMOKE en equipos reales, auditoría documental y cierre | I4 | W9 | M01–M13 | AC-H15, AC-O15 (p95) y verificación final de todos | [M14](M14-smoke-closure.md) | ⚪ |
 
@@ -234,8 +234,8 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-O11 | `doctor --failures` (también tras un timeout COM, D-25) | M13, M14 | UT-DR-01–UT-DR-04, UT-DR-10, SMOKE-NEW.10 | ⚪ |
 | AC-O12 | Sin *preflight* en skill, ayuda y README | M13 | DOC-12 | ⚪ |
 | AC-O13 | `hint` de `search` sin resultados | M11 | UT-GRP-08 | ⚪ |
-| AC-O14 | `mailboxes` agrupado | M12 | UT-MBX-01, UT-MBX-02, DOC-13 | ⚪ |
-| AC-O15 | `mailboxes --fields`, sin recuento, p95, ayudas | M12, M14 | UT-MBX-03–UT-MBX-05, DOC-13, SMOKE-NEW.07 | ⚪ |
+| AC-O14 | `mailboxes` agrupado | M12 | UT-MBX-01, UT-MBX-02, DOC-13 | 🟢 |
+| AC-O15 | `mailboxes --fields`, sin recuento, p95, ayudas | M12, M14 | UT-MBX-03–UT-MBX-05, DOC-13, SMOKE-NEW.07 | 🟢 |
 | AC-O16 | Sección de plugins en `doctor` | M13 | UT-DR-05–UT-DR-08, UT-DR-10 | ⚪ |
 | AC-O17 | `--failures` con plugins | M13 | UT-DR-09, UT-DR-10 | ⚪ |
 
@@ -567,3 +567,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-14 | M11 | 🟡 → 🟢 | `615147e` (merge en `integration/i3-attachments-rows`): `Ran 1373` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +50 tests) | `docs/plan/evidence/M11.md` | `--group-by`, `--count` y `hint` sin resultados; 47 UT-GRP + 3 DOC-11; TC-03 y OL-30 barren con las opciones nuevas; cobertura 91,0 % |
 | 2026-11-14 | I3 (defecto en CI) | — | `Ran 1373` con los 2 fallos ambientales SMOKE-NEW.07 tras la corrección; 75 ejecuciones de UT-RMT-05.01 en Python 3.11/3.12/3.13 OK | `docs/plan/evidence/M09.md` (sección Reapertura) | PR #9, corrida https://github.com/dayler/mailquery/actions/runs/43571189546: 2 jobs macOS (3.11 y 3.13) rojos por `UT-RMT-05.01` flaky (exit 2 en vez de 3): `time.sleep(0.1)` frente a un tope de 0,05 s podía no vencer bajo carga. Corregido con bloqueo determinista por `threading.Event` en el doble y el caso; sin cambio de producto. M09 no vuelve a 🟡 porque el lote I3 no estaba mergeado; la corrección va al mismo PR (regla 9). |
 | 2026-11-14 | Lote I3 | 🟡 → 🟢 | Rama `integration/i3-attachments-rows` con `Ran 1373`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07 de la línea base) y cobertura 91,0 %; matriz CI verde (15/15 jobs) tras corregir un test flaky de M09 | PR https://github.com/dayler/mailquery/pull/9; run del PR (verde) https://github.com/dayler/mailquery/actions/runs/43572383761; run rojo inicial https://github.com/dayler/mailquery/actions/runs/43571189546; run de `develop` https://github.com/dayler/mailquery/actions/runs/43572836705 | Merge `--no-ff` `b95ac06`. Cobertura CI 91,0 %. La corrida de `develop` posterior al merge quedó verde (HITL-09). M09–M11 integrados; AC-H12, AC-D01–AC-D06, AC-H14, AC-O04–AC-O09 y AC-O13 completos. El run inicial del PR tuvo 2 jobs macOS rojos por `UT-RMT-05.01` flaky (ver fila del 2026-11-14 "I3 (defecto en CI)"); la corrección fue al mismo PR y el segundo run quedó 15/15. |
+| 2026-11-14 | M12 | 🟡 → 🟢 | `b1d3bff` (merge en `integration/i4-mailboxes-doctor-close`): `Ran 1395`, `OK (skipped=7)` en la rama del milestone (los 2 fallos ambientales de SMOKE-NEW.07 no aparecieron; +22 tests) | `docs/plan/evidence/M12.md` | `mailboxes` agrupado, `--fields` y recuento diferido; 2 goldens actualizados; cobertura total 91,1 % |

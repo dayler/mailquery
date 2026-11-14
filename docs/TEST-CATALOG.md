@@ -26,6 +26,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
 | UT-FLD | Fila por defecto de `search`/`new` y `--fields` en `search`, `new` y `show` | `tests/test_fields.py` |
 | UT-GRP | `--group-by`, `--count` y `hint` de `search` sin resultados | `tests/test_group_count.py` |
+| UT-MBX | Salida de `mailboxes` agrupada por cuenta, su `--fields` y el recuento diferido | `tests/test_mailboxes.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -75,6 +76,9 @@ defecto de seis campos (`uid`, `subject`, `from`, `date_received`, `is_read` y
 `has_attachments`); la fila completa se valida en una segunda corrida con
 `--fields all` dentro de los casos TC-01.03–.06, TC-02.02 y TC-10.01–.02. En el
 resto de goldens, una actualización conserva los valores ya fijados.
+Los goldens `mailboxes` y `outlook/mailboxes` comparan la forma agrupada por
+cuenta sin contadores; los contadores, `name` y `url` se validan en una segunda
+corrida con `--fields name,url,total,unread` dentro de TC-01.02 y TC-02.01.
 
 ## 4. Dobles y fixtures
 
@@ -175,6 +179,8 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-O09 (delta `PRD-v2.2.md`) | Un mensaje con texto oculto y URLs en el cuerpo da `W_HIDDEN_CONTENT` y cuenta esas URLs solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con los campos de cuerpo de RF-74 (regla 2) en `show`; `W_SENDER_AUTH_FAILED` aparece con y sin `--fields`; con `--count` solo hay warnings de alcance. Los criterios de F1 sobre el cuerpo y los destinatarios (AC-H01–AC-H18) aplican en `search` y `new` cuando esos campos se entregan (RF-74) | UT-FLD-05 (parcial; completa con UT-GRP-09) | — |
 | AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10 (parcial; completa con DOC-11 y DOC-12) | — |
 | AC-O13 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, un `search` sin resultados devuelve `count: 0`, exit 0 y el hint de RF-78 con el número correcto de carpetas y cuentas (INBOX, `mailbox_list` y `--include-mailbox`), también con `--group-by` y con `--count`; una cuenta excluida no cuenta en el número de cuentas; sin cuentas leídas (ninguna declarada o todas excluidas), `hint` es `null` y aparece `W_NO_ACCOUNTS`; con resultados, `hint` no cambia; `new` sin correo nuevo da `hint: null`; el hint no contiene nombres de carpetas ni de cuentas, y calcularlo no añade llamadas al driver | UT-GRP-08 | — |
+| AC-O14 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, `mailboxes` sin `--fields` devuelve solo `ok`, `command`, `generated_at`, `accounts`, `excluded_stores` y `warnings`; cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes[]` con sus carpetas, cada una solo con `path` e `included`, y con los mismos valores e igual orden que la lista plana anterior; ninguna carpeta lleva `account`; una cuenta sin carpetas tiene `mailboxes: []`; con varios drivers se respeta el orden de `PRD.md` §11.3; un `path` copiado resuelve en `mailbox_list` y en `--include-mailbox`, y el nombre y la URL de `--fields name,url` siguen resolviendo. | UT-MBX-01, UT-MBX-02, DOC-13 | `mailboxes`, `outlook/mailboxes` |
+| AC-O15 (delta `PRD-v2.2.md`) | `mailboxes --fields name,url,total,unread` y la opción repetida añaden esos campos a cada carpeta, en el orden `name`, `path`, `url`, `total`, `unread`, `included` y con los valores de hoy; `--fields path,included` da la salida por defecto; `--fields all`, un campo desconocido o vacío ⇒ `E_USAGE` (exit 2) antes de crear el home y de abrir el store, con el mensaje y el hint de RF-80; sin `total` ni `unread` no se cuenta ningún mensaje (Apple Mail no recontar, Outlook no lee tablas de carpeta, plugin sin contadores pedidos) y el recuento se reutiliza dentro del proceso; `mailboxes --help` y la ayuda general cumplen RF-80. | UT-MBX-03, UT-MBX-04, UT-MBX-05, DOC-13, SMOKE-NEW.07 | — |
 
 ## 8. Casos
 
@@ -521,7 +527,7 @@ Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
 | .02 | P | `show` del mismo mensaje: `subject`, nombres, cada valor de `headers`, `body_text` y `attachments[].name` saneados. |
 | .03 | P | `attachment`: `original_name` saneado; `sanitized_name` y `path` iguales a los del mismo nombre original (calculados con `sanitize_name` y la ruta de caché). |
 | .04 | N | `uid`, `message_id`, `from.address`, `to[].address`, `mailbox.*`, `account.*`, `source.emlx_path` y `cached_path` salen sin cambios aunque contengan caracteres invisibles. |
-| .05 | P | Una etiqueta de cuenta y un nombre de carpeta con `U+200B` copiados de `mailboxes` resuelven en `config.toml` y en `--include-mailbox`. |
+| .05 | P | Una etiqueta de cuenta y un nombre de carpeta con `U+200B` copiados de `accounts[]` y de `accounts[].mailboxes[]` de `mailboxes` (con `--fields name,url`) resuelven en `config.toml` y en `--include-mailbox`. |
 
 #### UT-CW-02 — A2 en warnings y errores
 
@@ -858,6 +864,69 @@ Requisitos: AC-O10 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 | .01 | P | `search --help` describe `--group-by` con sus siete claves y `--count`. |
 | .02 | P | Los dos README documentan `--group-by` y `--count` con ejemplos (`domain,month`) y el `hint` de cero resultados. |
 | .03 | P | La skill explica `--group-by` y `--count` y que `new` no los admite. |
+
+#### UT-MBX-01 — Forma por defecto
+
+Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin `--fields`: claves de primer nivel exactamente `ok`, `command`, `generated_at`, `accounts`, `excluded_stores`, `warnings`, con el store sintético, el doble de Outlook y un plugin falso. |
+| .02 | P | Cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes`, en ese orden; cada carpeta solo `path` e `included`, con los mismos valores e igual orden que el catálogo plano anterior. |
+| .03 | N | Ninguna carpeta lleva `account`; no hay `mailboxes` de primer nivel. |
+| .04 | B | Una cuenta declarada sin carpetas tiene `mailboxes: []`; con dos drivers declarados, el orden de cuentas es el de `PRD.md` §11.3; una carpeta sin cuenta se agrupa en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`. |
+
+#### UT-MBX-02 — Referencias copiadas
+
+Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un `path` copiado de la salida resuelve en `mailbox_list` y en `--include-mailbox`. |
+| .02 | P | El `name` y la `url` de `--fields name,url` siguen resolviendo en `mailbox_list` y en `--include-mailbox`. |
+
+#### UT-MBX-03 — `--fields`
+
+Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--fields name,url,total,unread` y `--fields total --fields name,url,unread` añaden esos campos en el orden `name`, `path`, `url`, `total`, `unread`, `included`, con los valores del catálogo anterior. |
+| .02 | P | `--fields path,included` da exactamente la salida por defecto. |
+| .03 | N | `--fields all`, `--fields carpeta` y `--fields ""` ⇒ `E_USAGE`, exit 2, con `unknown field '<nombre>' in --fields` y `valid fields: name, path, url, total, unread, included`, antes de crear el home y sin ejecutar el comando. |
+
+#### UT-MBX-04 — Sin recuento sin `total` ni `unread`
+
+Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Apple Mail: sin `total`/`unread`, `_mailbox_counters` no se ejecuta (espía); con `--fields unread`, una vez. |
+| .02 | P | Outlook (doble): sin contadores no se leen tablas de carpeta (`Folder.GetTable` no aparece); con `--fields total`, sí. |
+| .03 | P | Plugin falso que entrega contadores: sin `--fields`, la salida no los incluye. |
+| .04 | B | `search`, `new` y `show` en Apple Mail ya no ejecutan el recuento de carpetas (espía), con la misma salida que antes. |
+| .05 | B | Apple Mail, mismo proceso: dos peticiones de contadores reutilizan el recuento (la consulta se ejecuta una vez). |
+| .06 | N | Apple Mail: un error de SQLite durante el recuento diferido de `mailboxes --fields total` da el mismo error que el recuento al cargar el catálogo (`E_INTERNAL`, exit 1); sin contadores el comando no falla. |
+| .07 | B | Plugin falso cuyas filas no traen contadores: `mailboxes --fields total` no falla y emite `null`; con contadores, los valores del plugin. |
+
+#### UT-MBX-05 — Ayudas
+
+Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `mailboxes --help` describe `--fields` con `name, path, url, total, unread, included` y que los contadores solo se calculan con `--fields total` o `unread`. |
+| .02 | P | La ayuda general muestra `list accounts and their folders (counters with --fields)` para `mailboxes`. |
+
+#### DOC-13 — Documentación de `mailboxes`
+
+Requisitos: AC-O14, AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Los dos README muestran la salida agrupada (ejemplo de PRD-v2.2 sección 8) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
+| .02 | P | La skill usa `mailboxes` sin `--fields` para ver carpetas y `--fields total,unread` solo cuando hacen falta los contadores. |
+| .03 | P | `docs/config.example.toml` explica que `mailbox_list` acepta el `path` que muestra `mailboxes` (y el nombre o la URL de `--fields name,url`). |
 
 ### Estado, búsqueda y store
 
@@ -1317,8 +1386,8 @@ Requisitos: AC-04 · Archivo: `tests/test_multidriver.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `accounts[]`, `mailboxes[]` y `excluded_stores[]` concatenados en el orden de los bloques `[scope]`. |
-| .02 | P | Un plugin devuelve `excluded_stores: []` y `accounts[]` con `label`/`uuid` opacos. |
+| .01 | P | `accounts[]` (cada uno con su `mailboxes[]`) y `excluded_stores[]` concatenados en el orden de los bloques `[scope]`. |
+| .02 | P | Un plugin devuelve `excluded_stores: []` y `accounts[]` con `label`/`uuid` opacos y sus carpetas en `mailboxes[]`. |
 | .03 | B | Un driver sin cuentas declaradas no aporta bloques y no rompe el comando. |
 
 #### UT-MD-04 — Cursor y lookback
@@ -2297,7 +2366,7 @@ Requisitos: RNF-07 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
-Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, y `search --group-by from,month` y `search --count`— sobre el fake de Outlook; bloqueante.
+Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, `search --group-by from,month`, `search --count`, y `mailboxes`, `mailboxes --fields total,unread` y `mailboxes --fields name,url`— sobre el fake de Outlook; bloqueante.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -2381,7 +2450,7 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `doctor` informa todos los chequeos documentados ⇒ golden `doctor`. |
-| .02 | P | `mailboxes`: cuentas, contadores e `included` ⇒ golden `mailboxes`. |
+| .02 | P | `mailboxes` con la forma agrupada por cuenta (cada cuenta con `uuid`, `label`, `email`, `declared` y `mailboxes[]`, cada carpeta solo con `path` e `included`) ⇒ golden `mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida nombre, URL y contadores de cada carpeta. |
 | .03 | P | `search` por defecto devuelve todos los mensajes distintos con la fila de seis campos ⇒ golden `search_default`; una segunda corrida con `--fields all` valida los campos fuera de la fila y los warnings de cuerpo. |
 | .04 | P | `search` con All Mail deduplica al canónico de INBOX con la fila de seis campos ⇒ golden `search_all_mail`; `duplicate_count`, `snippet` y `mailbox` se comprueban con `--fields all`. |
 | .05 | P | Primera corrida de `new` emite la ventana `[D - lookback, D]` con la fila de seis campos ⇒ golden `new_first_run`. |
@@ -2400,7 +2469,7 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `mailboxes` |
+| .01 | P | `mailboxes` con la forma agrupada sin contadores ⇒ golden `outlook/mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida `name`, `url` y los contadores (INBOX 3/2). |
 | .02 | P | `search` con la fila de seis campos ⇒ golden `outlook/search`; `date_sent` y las señales de contenido se comprueban con `--fields all`. |
 | .03 | P | `show` |
 | .04 | N | `show_header_only` |
@@ -2414,7 +2483,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `search --group-by from,month`, `search --count`, `new --fields all` y `show <uid> --fields attachments`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `search --group-by from,month`, `search --count`, `new --fields all`, `show <uid> --fields attachments`, `mailboxes` y `mailboxes --fields total,unread` y `--fields name,url`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
@@ -2653,7 +2722,7 @@ Archivo: `tests/test_smoke.py`
 |---|---|---|
 | .01 | P | `show <uid>` de un mensaje con adjunto local ⇒ `attachments[]` con `index`/`name`. |
 | .02 | P | `attachment <uid> --index 1` ⇒ exit 0, archivo bajo `~/.mailquery/attachments`, tamaño/hash coherentes, store y no leídos sin cambios. |
-| .03 | B | Sin Outlook o sin adjunto local ⇒ skip documentado; la clase declara el skip por plataforma. |
+| .03 | P | `attachment` no cambia los contadores de las carpetas incluidas (`mailboxes --fields url,total,unread`) ni el store; la clase se salta por plataforma en `setUpClass` fuera de Windows. |
 
 #### SMOKE-INSTALL — Instalación real con `pipx`
 
@@ -2675,12 +2744,12 @@ Con la instalación y la config de SMOKE-INSTALL.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `mailboxes` ⇒ exit 0 y JSON del contrato de salida (§12.5). |
+| .01 | P | `mailboxes` ⇒ exit 0 y JSON del contrato de salida (§12.5): seis claves de primer nivel, cada cuenta con sus `mailboxes[]`, cada carpeta con `path` e `included` y ninguna clave `mailboxes` de primer nivel. |
 | .02 | P | `new --peek --fields all` valida la fila completa; `new` valida la fila por defecto de seis campos y el contrato de salida; `cursor` no cambia con `--fields`. |
 | .03 | P | `search --since 1w` valida la fila por defecto; la misma consulta con `--fields all` valida la fila completa. |
 | .04 | P | `search --text "*e*" --since 1d` valida la fila por defecto y `scan.mode: text`; con `--fields all`, la fila completa. |
 | .05 | P | `show <messages[0].uid del search>` ⇒ ídem. |
-| .06 | N | `unread` de cada carpeta incluida, antes y después ⇒ sin cambios. |
+| .06 | N | `unread` de cada carpeta incluida (`mailboxes --fields url,total,unread`, sobre `accounts[].mailboxes[]`), antes y después ⇒ sin cambios. |
 | .07 | P | `doctor` y cada comando anterior dentro del presupuesto de §19 de su plataforma (`search --text` solo si `scan.candidates ≤ 500`). |
 
 ## 9. IDs retirados
