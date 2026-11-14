@@ -2216,7 +2216,7 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
   cada lote. `concurrency` con `cancel-in-progress` (un push nuevo a la
   misma ref cancela el run anterior) y `timeout-minutes: 20` en
   `unittest` y 15 en `install-scripts`.
-- Job `unittest`: `ubuntu-latest`, `macos-latest` y `windows-latest` ×
+- Job `test-suite`: `ubuntu-latest`, `macos-latest` y `windows-latest` ×
   Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`) = 12 jobs. Instala
   `css-inline` y `coverage` en los tres sistemas y `pywin32` solo en
   Windows; ejecuta `python -B -m coverage run -m unittest discover -s

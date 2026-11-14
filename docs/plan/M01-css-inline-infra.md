@@ -13,7 +13,7 @@ Declarar `css-inline~=0.23.1` como dependencia del núcleo, hacer que la suite y
 **Dentro:**
 
 - `pyproject.toml`: `css-inline~=0.23.1` en `[project].dependencies`, sin marcador de plataforma (ADR-33); tablas `[tool.coverage.run]` y `[tool.coverage.report]` de D-21 (`coverage` no entra en `[project].dependencies`: es solo de tests).
-- `.github/workflows/tests.yml`: instalación de `css-inline` y de `coverage~=7.17` en el job `unittest`; la suite corre bajo `coverage` y un paso separado aplica el gate del 85 % (D-21); paso de wheels en `install-scripts` (HITL-02); `timeout-minutes` 20 (`unittest`) y 15 (`install-scripts`).
+- `.github/workflows/tests.yml`: instalación de `css-inline` y de `coverage~=7.17` en el job `test-suite`; la suite corre bajo `coverage` y un paso separado aplica el gate del 85 % (D-21); paso de wheels en `install-scripts` (HITL-02); `timeout-minutes` 20 (`test-suite`) y 15 (`install-scripts`).
 - README (`README.md` y `README.es.md`): introducción (hoy "standard library only except `pywin32`" / "solo biblioteca estándar salvo `pywin32`", líneas 5–6), requisitos, "Running the tests" / "Ejecutar los tests" con un entorno virtual, `css-inline` y el comando de cobertura, y la subsección de RF-65.
 - Tests: PKG y DOC de esta dependencia y SMOKE-INSTALL.05.
 
@@ -65,7 +65,7 @@ Sin exclusiones propias: `# pragma: no cover` sigue la regla de la sección 7.4 
 
 ### 6.2 Workflow
 
-Job `unittest`: un paso antes de "Install pywin32", en los tres sistemas:
+Job `test-suite`: un paso antes de "Install pywin32", en los tres sistemas:
 
 ```yaml
       - name: Install css-inline
@@ -105,7 +105,7 @@ El `grep` falla si `pip` baja algo que no sea un wheel `0.23.x`, lo que cubre "s
 
 Antes de cerrar el milestone, el subagente ejecuta el mismo bucle en local (Git Bash, intérprete de `.venv`, con `RUNNER_TEMP` apuntando a un temporal) y pega la salida en la evidencia (f), para no gastar corridas del PR del lote en ajustes del bucle. Si los wheels descargados no son `abi3` (nombre sin `-abi3-`), el bucle se repite para `--python-version` 3.11, 3.12, 3.13 y 3.14 (bucle anidado), en local y en el paso de CI.
 
-`timeout-minutes`: 20 en `unittest`, 15 en `install-scripts`. El disparador (`pull_request` a `develop`/`main`) y `concurrency` no cambian.
+`timeout-minutes`: 20 en `test-suite`, 15 en `install-scripts`. El disparador (`pull_request` a `develop`/`main`) y `concurrency` no cambian.
 
 ### 6.3 README
 
@@ -194,7 +194,7 @@ python -B -m coverage report
 
 - [ ] `pyproject.toml` declara `css-inline~=0.23.1` sin marcador.
 - [ ] `pyproject.toml` tiene las tablas `[tool.coverage.*]` de D-21.
-- [ ] El workflow instala `css-inline` y `coverage` en `unittest`, corre la suite bajo `coverage` con el paso `Check coverage` separado, tiene el paso de wheels en Ubuntu (probado antes en local) y los timeouts 20/15; sigue sin dispararse por push.
+- [ ] El workflow instala `css-inline` y `coverage` en `test-suite`, corre la suite bajo `coverage` con el paso `Check coverage` separado, tiene el paso de wheels en Ubuntu (probado antes en local) y los timeouts 20/15; sigue sin dispararse por push.
 - [ ] Los dos README tienen introducción, requisitos, instrucciones de tests (con cobertura) y la subsección de RF-65 con el mismo contenido.
 - [ ] TC-06.03, PKG-03, DOC-07 verdes solos; SMOKE-INSTALL.05 verde en este equipo o saltado con motivo.
 - [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
@@ -206,7 +206,7 @@ python -B -m coverage report
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-13 | F1 — Dependencia | `css-inline~=0.23.1` en `[project].dependencies` y tablas `[tool.coverage.run]`/`[tool.coverage.report]`; TC-06.03 reescrito, PKG-03 y DOC-07 añadidos; grupos `test_tc_06_03_`, `test_pkg_03_` y `test_doc_07_` verdes. |
-| 2026-11-13 | F2 — CI | Job `unittest` instala `css-inline` y `coverage`, corre la suite bajo `coverage` con el paso `Check coverage`; job `install-scripts` con el paso de wheels en Ubuntu; timeouts 20/15. Bucle de wheels verde en local para las cinco etiquetas. |
+| 2026-11-13 | F2 — CI | Job `test-suite` instala `css-inline` y `coverage`, corre la suite bajo `coverage` con el paso `Check coverage`; job `install-scripts` con el paso de wheels en Ubuntu; timeouts 20/15. Bucle de wheels verde en local para las cinco etiquetas. |
 | 2026-11-13 | F3 — README | Introducción, requisitos, instrucciones de tests con entorno virtual y cobertura, y subsección de RF-65 en `README.md` y `README.es.md` con el mismo contenido; DOC-07 verde. |
 | 2026-11-13 | F4 — SMOKE | SMOKE-INSTALL.05 verde contra la instalación `pipx` real con `PIPX_HOME`/`PIPX_BIN_DIR` temporales. |
 | 2026-11-13 | F5 — Cierre | Suite completa `Ran 1072`, `FAILED (failures=2, skipped=7)`; los dos fallos son SMOKE-NEW.07 (`mailboxes` y `show`) de la línea base. Cobertura total 89,5 %. |
