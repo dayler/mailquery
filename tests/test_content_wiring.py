@@ -19,15 +19,18 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 from mailquery import cli as cli_mod
+from mailquery.backends import get_backend, outlook_com
 from mailquery.attachments import attachment_path, classify_name, sanitize_name
 from mailquery.attachments.paths import message_dir
 from mailquery.errors import MailqueryError
 from mailquery.output import sanitize_text
 from mailquery.search import SHOW_FIELDS, SEARCH_ROW_FIELDS
+from tests.fakes import outlook as fk
 from tests.fakes.plugin import (
     ACCOUNT_LABEL,
     CAPABILITIES,
@@ -166,6 +169,39 @@ def _row(**overrides) -> dict:
     row = dict(DEFAULT_ROWS[0])
     row.update(overrides)
     return row
+
+
+
+def _outlook_payload(case, argv):
+    """Run one command over the in-memory Outlook double (read-only)."""
+    tmp = tempfile.TemporaryDirectory(prefix="mailquery-cw-ol-")
+    case.addCleanup(tmp.cleanup)
+    home = Path(tmp.name) / "home"
+    home.mkdir()
+    write_config(home, '[scope."ana@example.com"]\nmailbox_list = ["INBOX/Facturas"]\n')
+    fake = fk.FakeOutlook.item_matrix(
+        datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+    )
+    backend = get_backend(
+        platform="win32",
+        outlook_app=fake,
+        registry=fake.registry,
+        security_center=fake.security_center,
+        pywin32=None,
+        tmp_root=home / "tmp",
+    )
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        mock.patch.object(outlook_com, "get_drive_type", fake.drive_type),
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        code = cli_mod.main(list(argv), home=home, backend=backend)
+    raw = stdout.getvalue()
+    payload = json.loads(raw) if raw.strip() else None
+    case.assertEqual(code, 0, f"outlook {argv}: {payload} {stderr.getvalue()}")
+    assert payload is not None
+    return payload
 
 
 class _CliCase(unittest.TestCase):
@@ -748,6 +784,12 @@ class ContentNoticeTests(_AppleCase):
             "new": self.run_ok(["new", "--peek"]),
             "show": self.run_ok(["show", "apple_mail:2714"]),
         }
+        outlook_search = _outlook_payload(self, ["search", "--since", "2026-01-01"])
+        payloads["search-outlook"] = outlook_search
+        payloads["new-outlook"] = _outlook_payload(self, ["new", "--peek"])
+        payloads["show-outlook"] = _outlook_payload(
+            self, ["show", outlook_search["messages"][0]["uid"]]
+        )
         for command, payload in payloads.items():
             with self.subTest(command=command):
                 self.assertEqual(payload["content_notice"], EXPECTED_NOTICE)
