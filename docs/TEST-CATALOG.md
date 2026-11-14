@@ -40,12 +40,13 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-ATT | Motor de adjuntos: bloqueo, sanitización, caché y límites | `tests/test_attachments.py` |
 | UT-ACT | Contenido activo en adjuntos: PDF, OLE y ZIP | `tests/test_active_content.py` |
 | UT-ATC | Comando `attachment` y `show.attachments` | `tests/test_cli.py` |
+| UT-RMT | Adjuntos de drivers `"remote"`, fallos de origen y tope duro de extracción | `tests/test_remote_attachments.py` |
 | UT-AM | Adjuntos de Apple Mail | `tests/test_backends.py`, `tests/test_integration.py` |
 | UT-OL-ATT | Adjuntos de Outlook | `tests/test_outlook.py` |
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py` |
+| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py`, `tests/test_remote_attachments.py` |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` |
 
@@ -124,15 +125,15 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-11 | Sanitización determinista y límites de nombre; ruta y fallback de 32 hex | UT-ATT-04, UT-AM-02 | `attachment_saved` |
 | AC-12 | Caché `cached`/`--force`, staging atómico, `E_IO` sin parciales, validación por manifiesto | UT-ATT-07, UT-ATT-08, UT-ATT-12, UT-ATC-04, TC-08, TC-09 | `attachment_saved`, `attachment_cached` |
 | AC-13 | Límites con `>` estricto y MiB, la caché cuenta, exceso conocido o en streaming | UT-ATT-06 | `attachment_too_large` |
-| AC-14 | `enabled = false` y rangos de `[attachments]` | UT-DRV-04, UT-ATC-05 | — |
-| AC-15 | Disponibilidad (`not_local`, `not_downloaded`, `unsupported`, `network`), S/MIME, `attachments: none` | UT-ATT-05, UT-ATT-11, UT-ATC-06, UT-ATC-10, UT-OL-ATT-03 | `outlook/attachment_unavailable` |
+| AC-14 | `enabled = false` y rangos de `[attachments]`, incluido `timeout_seconds` | UT-DRV-04, UT-ATC-05, UT-CFG-04 | — |
+| AC-15 | Disponibilidad (`not_local`, `not_downloaded`, `unsupported`, `network`), S/MIME, `attachments: none` y fallos de origen de un driver `"remote"` | UT-ATT-05, UT-ATT-11, UT-ATC-06, UT-ATC-10, UT-RMT-02, UT-OL-ATT-03 | `outlook/attachment_unavailable` |
 | AC-16 | Protocolo de errores de plugin: `reason`, `hint`, `detail`, `log_message` y `code` del núcleo | UT-ERR-01, UT-ERR-02, UT-ERR-03 | — |
-| AC-17 | Timeout de 30 s en metadatos y de 120 s en extracción | UT-ERR-04, UT-ATC-07, UT-OL-ATT-03 | — |
+| AC-17 | Timeout de 30 s en metadatos y `[attachments].timeout_seconds` (60 s por defecto) por adjunto extraído, con corte duro en un plugin externo; COM y metadatos sin cambios | UT-ERR-04, UT-ATC-07, UT-OL-ATT-03, UT-RMT-04 | — |
 | AC-18 | `doctor` con `driver`; `--version` con drivers | UT-PL-03, UT-DRV-05, PKG-02 | `doctor` |
 | AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin datos personales | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | — |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
-| AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
+| AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear, también en `attachment` y desde la caché | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04, UT-ACT-05 | — |
 | AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios | UT-CW-06 (parcial; completa con UT-FLD-07) | — |
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
@@ -150,6 +151,12 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H07 (delta `PRD-v2.2.md`) | `--strip-links` en `search`, `new` y `show`; prevalece sobre `[content].url_display`; sin opción ni clave el modo es `neutralize`; en `doctor`, `mailboxes` y `attachment` ⇒ `E_USAGE` | UT-CW-09 | — |
 | AC-H13 (delta `PRD-v2.2.md`) | `[content].url_display` inválido, clave desconocida o `content` que no es tabla ⇒ `E_CONFIG_INVALID` (exit 2) antes de abrir el store | UT-CFG-03, DOC-06.02, DOC-06.04 | — |
 | AC-H16 (delta `PRD-v2.2.md`) | Los logs no registran URLs, dominios, direcciones ni contenido; solo códigos `W_*` | UT-CW-12 | — |
+| AC-D01 (delta `PRD-v2.2.md`) | Extracción desde un plugin `attachments: "remote"` con el mismo JSON, bloqueo, límites, caché y manifiesto que un `"local"`; sin red en el núcleo | UT-RMT-01 | `attachment_saved`, `attachment_cached`, `attachment_too_large`, `attachment_blocked_name`, `attachment_blocked_content` |
+| AC-D02 (delta `PRD-v2.2.md`) | `reason: network`/`not_local` de un plugin `"remote"` ⇒ `E_ATTACHMENT_UNAVAILABLE` con su plantilla, sin archivos nuevos | UT-RMT-02 | — |
+| AC-D03 (delta `PRD-v2.2.md`) | `attachments: "none"` sigue rechazado con el hint nuevo | UT-RMT-03 | — |
+| AC-D04 (delta `PRD-v2.2.md`) | `[attachments].timeout_seconds`: 60 por defecto, 10–600, inválido ⇒ `E_CONFIG_INVALID` antes del store; documentado | UT-CFG-04, UT-RMT-05, DOC-06.05 | — |
+| AC-D05 (delta `PRD-v2.2.md`) | Corte duro de un plugin externo bloqueado antes del primer bloque o entre bloques, con `--all` informando el primero | UT-RMT-04 | — |
+| AC-D06 (delta `PRD-v2.2.md`) | Topes de 30 s intactos; nativos entre bloques y al terminar la llamada; A7 y aciertos de caché fuera del tope | UT-RMT-05, UT-OL-ATT-03.04 | — |
 
 ## 8. Casos
 
@@ -181,6 +188,16 @@ Requisitos: RF-63 · Archivo: `tests/test_config.py`
 | .02 | N | `url_display = "raw"` y `url_display = 1` ⇒ `E_CONFIG_INVALID`, exit 2, `hint` con `neutralize`, `keep` y `strip`, antes de abrir el store. |
 | .03 | N | Una clave desconocida en `[content]` ⇒ `E_CONFIG_INVALID`, exit 2. |
 | .04 | N | `content = 1` (valor que no es una tabla) ⇒ `E_CONFIG_INVALID`, exit 2, antes de abrir el store. |
+
+#### UT-CFG-04 — `[attachments].timeout_seconds`
+
+Requisitos: AC-D04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_config.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin clave ⇒ 60; 10 y 600 válidos. |
+| .02 | N | 9, 601, `"60"`, `60.0` y `true` ⇒ `E_CONFIG_INVALID`, exit 2, también en `search` y `show`, antes del store. |
+| .03 | B | Con un valor válido, `show` y `search` dan la misma salida que sin la clave. |
 
 #### UT-CLI-04 — Opciones que no existen
 
@@ -1337,11 +1354,11 @@ Requisitos: AC-15 · Archivo: `tests/test_cli.py`
 
 #### UT-ATC-07 — Timeout de extracción
 
-Requisitos: AC-17 · Archivo: `tests/test_cli.py`
+Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | Extracción que supera 120 s (plazo inyectado) ⇒ `E_CLIENT_TIMEOUT` (3), sin reintento, staging limpio y sin archivos nuevos. |
+| .01 | N | Extracción cuyo plazo configurado vence (inyectado con `_attachment_timeout`) ⇒ `E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-68, sin reintento, staging limpio y sin archivos nuevos. |
 | .02 | N | El timeout no escribe estado ni caché parcial. |
 
 #### UT-ATC-08 — Log de `attachment`
@@ -1375,8 +1392,66 @@ Requisitos: AC-07, AC-15 · Archivo: `tests/test_cli.py`
 |---|---|---|
 | .01 | P | `attachment <plugin>:<native_id> --index 1` con un plugin declarado `attachments: "local"` devuelve el contrato JSON completo y escribe el archivo en la caché; el uid de salida va prefijado. |
 | .02 | P | `--all` con el plugin devuelve todos los adjuntos locales y `count` correcto. |
-| .03 | N | Un plugin `attachments: "remote"` no puede materializar adjuntos: `attachment --index` ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`), sin red en el núcleo. |
 | .04 | N | Un plugin declara `attachments: "none"` ⇒ `E_ATTACHMENT_UNAVAILABLE` antes del store. |
+
+> `UT-ATC-10.03` (rechazo de `"remote"`) se retiró; lo sustituyen UT-RMT-01 y UT-RMT-02 (§9).
+
+#### UT-RMT-01 — Extracción desde un plugin `"remote"`
+
+Requisitos: AC-D01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Plugin falso `attachments: "remote"`, `network: true`: `attachment <driver>:<id> --index N` devuelve el JSON de §12.11 (con `content_notice`) y escribe el archivo en la caché. |
+| .02 | P | `--all` devuelve todos los adjuntos con `count` correcto; bloqueo por nombre y por contenido y límites (`max_file_size_mb`, `max_total_size_mb`, `max_count`) dan el mismo código y texto que con un plugin `"local"` equivalente. |
+| .03 | P | Segunda corrida: `cached: true` y el plugin no recibe peticiones de bytes; `--force` las vuelve a pedir. |
+| .04 | B | El núcleo no abre conexiones (`socket.socket` parcheado para fallar durante toda la corrida). |
+| .05 | P | El manifiesto escrito es igual al de un plugin `"local"` equivalente con los mismos bytes (salvo marcas de tiempo y el nombre del driver). |
+
+#### UT-RMT-02 — Fallo de origen del plugin `"remote"`
+
+Requisitos: AC-D02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | `reason: network` ⇒ `E_ATTACHMENT_UNAVAILABLE`, exit 3, con la plantilla de ese motivo; nunca `unsupported`. |
+| .02 | N | `reason: not_local` ⇒ ídem con su plantilla. |
+| .03 | B | Staging limpio y ningún archivo nuevo en la caché. |
+| .04 | B | `--all` con fallos de red en los adjuntos 2 y 3 ⇒ se informa el 2 (§10, punto 10). |
+| .05 | N | `reason: network` lanzado en el segundo bloque (dentro del hilo del corte duro) ⇒ `E_ATTACHMENT_UNAVAILABLE` con su plantilla, no `E_CLIENT_TIMEOUT`. |
+
+#### UT-RMT-03 — Driver `attachments: "none"`
+
+Requisitos: AC-D03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store, con el hint nuevo de RF-67 literal. |
+
+#### UT-RMT-04 — Corte duro en plugins externos
+
+Requisitos: AC-D05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | El plugin se bloquea antes del primer bloque (espera un `threading.Event` que el test no activa hasta el final): con el tope inyectado a 1 s, `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-68; la espera del núcleo, medida con `time.monotonic()`, cumple `elapsed < tope + 1`. |
+| .02 | N | El plugin se bloquea entre dos bloques: ídem. |
+| .03 | B | `--all` con los adjuntos 2 y 3 bloqueados: se informa el 2. |
+| .04 | B | Staging limpio y sin archivos nuevos; el hilo del plugin se libera al terminar el test (evento) y no queda ningún hilo vivo. |
+| .05 | N | Con `timeout_seconds` inyectado mayor que `METADATA_TIMEOUT_SECONDS` (parcheado a 0,05 s), un plugin que tarda más de 0,05 s en crear el flujo no se corta antes del tope del adjunto y la extracción termina con éxito. |
+| .06 | B | Plazo ya vencido antes de pedir el siguiente bloque ⇒ `E_CLIENT_TIMEOUT` sin nueva petición al plugin (un solo bloque solicitado); flujo vacío ⇒ sin error; `close()` del iterador que lanza al vencer el plazo ⇒ sigue siendo `E_CLIENT_TIMEOUT`. |
+
+#### UT-RMT-05 — Topes que no cambian y lo que no consume el tope
+
+Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `timeout_seconds = 10` y `= 600`, el tope de metadatos de un plugin sigue siendo `METADATA_TIMEOUT_SECONDS` y el de cada llamada COM sigue siendo `outlook_com.CALL_TIMEOUT_SECONDS`. |
+| .02 | P | Apple Mail y Outlook (doble): el tope se comprueba entre bloques y al terminar la llamada (un flujo lento entre bloques con tope inyectado da `E_CLIENT_TIMEOUT`); la creación del flujo ocurre en el hilo principal, no en uno aparte. |
+| .03 | B | Un acierto de caché no invoca la factoría del tope; A7 se ejecuta después y no lo consume (con un detector lento simulado y el tope ya vencido, la respuesta es de éxito). |
+| .04 | P | `cli` pasa al motor el valor de `[attachments].timeout_seconds` (espía sobre la factoría con `timeout_seconds = 180`). |
+| .05 | N | Doble de Outlook con el watchdog COM (`outlook_com.CALL_TIMEOUT_SECONDS` parcheado) vencido antes del tope del adjunto ⇒ `E_CLIENT_TIMEOUT` con el mensaje y el hint de RF-33, no los de RF-68. |
 
 #### UT-ATT-01 — Bloqueo de nombre
 
@@ -1594,6 +1669,18 @@ Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
 | .03 | B | Archivo vacío y archivo inexistente ⇒ `()` sin excepción. |
 | .04 | B | Determinismo: dos llamadas sobre el mismo archivo dan el mismo resultado. |
 
+#### UT-ACT-05 — `W_ATTACHMENT_ACTIVE_CONTENT` en `attachment`
+
+Requisitos: AC-H12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Ejemplo A7 de §8 (`factura.pdf` con `/JavaScript` índice 1, `docs.zip` con `factura.pdf.exe` índice 2): dos warnings con los textos literales, en el orden de `attachments[]`; los dos archivos se entregan; exit 0. |
+| .02 | P | Servido desde la caché (segunda corrida): los mismos warnings. |
+| .03 | N | El detalle no contiene nombres de archivo; un adjunto sin marcadores no da warning. |
+| .04 | N | Un adjunto que bloquea el catálogo sigue dando `E_ATTACHMENT_BLOCKED` (exit 4). |
+| .05 | P | Plugin `"remote"`: el mismo warning que con un driver local. |
+
 #### UT-OL-ATT-01 — Metadatos, índice y disponibilidad
 
 Requisitos: AC-07/AC-15 · Archivo: `tests/test_outlook.py`
@@ -1631,7 +1718,7 @@ Requisitos: AC-15/AC-17 · Archivo: `tests/test_outlook.py`
 | .01 | N | `E_ACCESSDENIED` en la materialización ⇒ `E_PERMISSION` (3). |
 | .02 | N | Rechazo transitorio persistente ⇒ `E_CLIENT_BUSY` (5); el doble registra la secuencia de reintentos. |
 | .03 | N | Una llamada COM de materialización que supera 30 s ⇒ `E_CLIENT_TIMEOUT` (3), staging limpio. |
-| .04 | N | El tope total de 120 s del núcleo vence aunque cada llamada COM esté por debajo de 30 s ⇒ `E_CLIENT_TIMEOUT`. |
+| .04 | N | El tope configurado de extracción vence aunque cada llamada COM esté por debajo de 30 s ⇒ `E_CLIENT_TIMEOUT`. |
 | .05 | N | Un fallo de materialización en `--all` no produce resultados parciales. |
 | .06 | P | Un adjunto de 0 bytes se materializa y publica con `size_bytes: 0`. |
 
@@ -2243,6 +2330,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, la tabla `[content]` entre las secciones documentadas permitidas y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
 | .04 | P | El ejemplo contiene el bloque comentado `# [content]` con `# url_display = "neutralize"`; una copia en un temporal con ese bloque descomentado se carga con el cargador real y da `url_display == "neutralize"`. |
+| .05 | P | Dentro del bloque comentado `# [attachments]` existe la línea `# timeout_seconds = 60 …`; una copia en un temporal con el bloque descomentado (como en DOC-06.01) da `timeout_seconds == 60` con el cargador real. El ejemplo sigue con todas las secciones comentadas. |
 
 #### DOC-07 — Actualización de seguridad de `css-inline` en los README
 
@@ -2267,6 +2355,15 @@ Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content_wiring.
 | .04 | P | `search --help`, `new --help` y `show --help` describen `--strip-links`; las ayudas de `doctor`, `mailboxes` y `attachment` no la mencionan. |
 | .05 | P | La skill describe `content_notice` en "Output contract" y lista `--strip-links` entre las opciones de `search`, `new` y `show`. |
 | .06 | P | `README.md` y `README.es.md` describen en su sección de seguridad los seis controles de quien opera el harness (puntos 2, 4, 7, 9, 10 y 11 de RF-66), con una aserción por control en cada idioma. |
+
+#### DOC-09 — Documentación de F2 y A7
+
+Requisitos: AC-H18 (delta `PRD-v2.2.md`), documentación de AC-D01/AC-D06 · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Los dos README documentan `timeout_seconds` (10–600, 60 por defecto), los drivers `"remote"` en `attachment` y `W_ATTACHMENT_ACTIVE_CONTENT`. |
+| .02 | P | La skill nombra `W_ATTACHMENT_ACTIVE_CONTENT` en "Security rules", recupera los adjuntos de drivers `"remote"` y ya no dice que no se pueden recuperar. |
 
 #### INS-SMOKE-01 — Instaladores
 
@@ -2374,3 +2471,4 @@ Estos IDs ya no tienen test y no se reutilizan:
 | TC-06.04 | `requires-python` ≥ 3.11 | — |
 | TC-07.05 | Exits en las recetas | — |
 | DOC-05.05 | Recorrido de las siete ayudas | DOC-05.03 |
+| UT-ATC-10.03 | Un plugin `attachments: "remote"` no podía materializar adjuntos (`unsupported`) | UT-RMT-01, UT-RMT-02, UT-RMT-03 |

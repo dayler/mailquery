@@ -431,6 +431,23 @@ paso por el módulo usa una única envoltura:
   backends nativos para leer solo las cabeceras (D-06): el proxy lo envuelve
   igual que `load_snippet` y en un driver nativo la llamada sigue en línea; no
   está en la ABC ni en la validación de retornos, y un plugin no lo tiene.
+- `AttachmentStreamGuard(driver)`: acota la creación y cada bloque de un flujo de
+  adjunto de un plugin externo. El motor de adjuntos lo invoca con la factoría
+  del flujo y el instante límite del adjunto (unidades de `time.monotonic`, o
+  `None` sin política) y devuelve un iterador que ejecuta en un hilo daemon la
+  creación y cada `next()` con el tiempo restante. Al vencer ⇒ `TimeoutError`,
+  que el motor convierte en `E_CLIENT_TIMEOUT`; un `PluginError` conserva su
+  `reason` para que el motor redacte la plantilla de §12.6 y cualquier otra
+  excepción del plugin es `E_PLUGIN_FAILED` (3), nunca `E_INTERNAL`. Una vez
+  gastado el presupuesto no se pide otro bloque. El `close()` del iterador del
+  plugin se intenta siempre y un fallo al cerrar no enmascara el timeout. Los
+  drivers nativos no usan el guard (sus objetos SQLite/COM son afines a su
+  hilo): se comprueban entre bloques y al terminar cada llamada. El proxy de
+  `wrap_driver` no enruta `attachment_stream` por `call_driver` en un driver
+  externo, para que la creación no quede cortada por `METADATA_TIMEOUT_SECONDS`.
+- `EXTRACTION_TIMEOUT_SECONDS = 60.0`: valor por defecto documentado del tope
+  por adjunto; la fuente efectiva es `[attachments].timeout_seconds` de
+  `config.py`. `plugins/__init__.py` mantiene su reexportación.
 - `map_plugin_error(exc, *, driver, attachments)` y
   `sanitize_error_field(value, max_bytes)` son las piezas puras (mapeo y
   saneado); `METADATA_OPERATIONS`/`ATTACHMENT_OPERATIONS` fijan el contexto.
@@ -999,14 +1016,18 @@ Esquema cerrado de `config.toml`, resolución de alcance por driver y
 
 Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
-`AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count)`,
+`AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count,
+timeout_seconds)`,
 `ContentConfig(url_display)`, `ScopeEntry(key, mailbox_list, driver, account)`,
 `Config(home, logging, search, new, attachments, content, scopes)` y
 `ResolvedScope(account_uuid, account_label, account_email, mailboxes, driver)`.
 
-- `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`; rangos `1..500`,
-  `1..1024` (`>= max_file_size_mb`) y `1..500`; una tabla ausente usa los
-  defaults. MiB = 1.048.576 bytes (los límites los aplica el motor de adjuntos).
+- `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`/`60`; rangos `1..500`,
+  `1..1024` (`>= max_file_size_mb`), `1..500` y `10..600`; una tabla ausente usa
+  los defaults. Un `timeout_seconds` que no sea entero (un `bool` no lo es) o
+  fuera de rango ⇒ `E_CONFIG_INVALID` (exit 2) en cualquier comando, antes de
+  abrir el store. MiB = 1.048.576 bytes (los límites los aplica el motor de
+  adjuntos; `timeout_seconds` lo aplica `cli.py`).
 - `ContentConfig`: `url_display` decide cómo se muestran las URLs en el asunto,
   los nombres, `headers`, `body_text` y `snippet`; valores `neutralize` (default),
   `keep` y `strip`. `cli._url_mode` aplica la precedencia `--strip-links` >
@@ -1246,9 +1267,12 @@ antes de crear el home; (3) config (incluye `[attachments]` y `[scope]`);
 (4) `[attachments].enabled=false` solo para `attachment` ⇒
 `E_ATTACHMENTS_DISABLED` (2); (5) el driver del prefijo debe estar declarado
 (`E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo), se abre y se comprueban sus
-capacidades: `attachments: "none"` **y** `"remote"` ⇒
-`E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store (el
-núcleo no puede materializar adjuntos remotos); (6) resolución de cuenta con
+capacidades: solo `attachments: "none"` ⇒ `E_ATTACHMENT_UNAVAILABLE`
+(`unsupported`, exit 3) antes de abrir el store, con el hint `install or declare
+a driver with attachments = "local" or "remote" in the [scope] blocks of
+~/.mailquery/config.toml`; un driver `"remote"` sigue el mismo flujo que uno
+`"local"` (el plugin obtiene los bytes desde su origen y el núcleo no abre red);
+(6) resolución de cuenta con
 `config.resolve_scope` (el driver se envuelve antes con `plugins.wrap_driver`);
 (7) `find_message` ⇒ `E_USAGE "message uid <uid> was not found"`; (8) la
 llamada `attachments()` puede lanzar la señal S/MIME/ilegible del
@@ -1259,10 +1283,19 @@ Después, `AttachmentsEngine.recover(...)` ejecuta las filas 11–15 con las fil
 de metadatos ya obtenidas (`entries`), de modo que el driver no se consulta dos
 veces; la CLI no reimplementa bloqueo, límites ni caché. El éxito es el JSON
 de §12.11 con `uid` prefijado, `output_dir` absoluto (`message_dir`), `count`,
-ocho campos por adjunto y `warnings: []`. El presupuesto de extracción es
-`EXTRACTION_TIMEOUT_SECONDS` (120 s, RNF-16): se pasa al motor como factoría
-`lambda: time.monotonic() + 120`, una por adjunto, y al vencer ⇒
-`E_CLIENT_TIMEOUT` (3), sin reintento, staging limpio y sin archivos nuevos.
+ocho campos por adjunto y `warnings[]` (puede llevar
+`W_ATTACHMENT_ACTIVE_CONTENT`). El presupuesto de extracción es
+`[attachments].timeout_seconds` (60 s por defecto), leído con el seam
+`_attachment_timeout(config)` y pasado al motor como factoría
+`lambda: time.monotonic() + timeout`, una por adjunto. Para un driver externo el
+CLI pasa además `stream_guard=AttachmentStreamGuard(driver)` (véase la sección de
+`plugins/api.py`); en Apple Mail y Outlook pasa `None`. Al vencer ⇒
+`E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-68, sin reintento, staging
+limpio y sin archivos nuevos. Tras `AttachmentsEngine.recover`, el CLI recorre
+`attachments[]` en orden y añade
+`W_ATTACHMENT_ACTIVE_CONTENT: attachment <index> contains <tipo> in <uid>` por
+adjunto y tipo con `attachments.active_content_types(path)`; también inspecciona
+los aciertos de caché, A7 queda fuera del tope y no cambia el exit.
 `show` no aplica `[attachments].enabled`.
 `bind_command(command)` del backend si existe; todo `E_INTERNAL`
 (también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
@@ -1482,6 +1515,13 @@ del directorio central.
   nada por ZIP. Un ZIP cifrado se lista igual. El detector nunca llama a
   `ZipFile.open()`, `read()`, `extract()` ni `testzip()`.
 
+`attachments/__init__.py` exporta `active_content_types` y la plantilla
+`W_ATTACHMENT_ACTIVE_CONTENT: attachment <index> contains <kind> in <uid>`.
+`cli._run_attachment` la aplica tras extraer o servir cada adjunto, en el orden
+de `attachments[]`: el warning no cambia el exit, no bloquea y no consume el
+tope. Un archivo bloqueado por el catálogo sigue dando `E_ATTACHMENT_BLOCKED`
+antes de A7.
+
 ### `attachments/engine.py` y `attachments/cache.py`
 
 Motor de recuperación local: límites, aciertos de caché, staging y publicación
@@ -1506,6 +1546,8 @@ class AttachmentResult(TypedDict):
     size_bytes: int
     sha256: str
 
+StreamGuard = Callable[[Callable[[], Iterable[bytes]], float | None], Iterable[bytes]]
+
 class AttachmentsEngine:
     def __init__(
         self,
@@ -1513,6 +1555,7 @@ class AttachmentsEngine:
         config: AttachmentLimits,          # config.AttachmentsConfig, duck typing
         driver: AttachmentDriver,          # MailBackend cargado, duck typing
         clock: Callable[[], float] | None = None,   # solo inyección de tests
+        stream_guard: StreamGuard | None = None,    # corte duro de drivers externos
     ) -> None: ...
 
     def recover(
@@ -1539,9 +1582,14 @@ class AttachmentsEngine:
   del `clock`) en que expira la extracción de **un** adjunto, o `None` sin
   límite. El motor la invoca una vez por adjunto, antes de leer su primer
   bloque, y el mismo instante acota la pantalla de contenido y la extracción.
-  El comando `attachment` pasa `lambda: time.monotonic() + 120` (RNF-16: 120 s por adjunto,
-  también en `--all`); al vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3), staging limpio
-  y sin archivos nuevos. El motor **no** fija políticas de tiempo por sí solo.
+  El comando `attachment` pasa el presupuesto de
+  `[attachments].timeout_seconds` (60 s por defecto, también en `--all`); al
+  vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-68,
+  staging limpio y sin archivos nuevos. El motor **no** fija políticas de tiempo
+  por sí solo.
+- `stream_guard` acota el flujo de un driver externo: recibe la factoría del
+  flujo y el instante de `deadline`, y devuelve el iterador acotado. Con
+  `None` (Apple Mail y Outlook) el flujo se abre y se itera en línea.
 - Resultado: un registro §12.11 por adjunto solicitado, en orden de índice y
   con `path` absoluto. Un fallo no devuelve registros parciales.
 - `output_dir` del comando `attachment` = `attachments.paths.message_dir(home, uid)`.
@@ -1566,9 +1614,13 @@ class AttachmentsEngine:
 6. `screen_content(rows, misses, open_stream)`: primer bloque decodificado solo
    de los adjuntos que se van a extraer (fila 13/14); bloqueo ⇒
    `E_ATTACHMENT_BLOCKED`; ilegible/no disponible ⇒ su código. Los aciertos no
-   se re-validan por contenido (RF-45, §10.3.1).
+   se re-validan por contenido (RF-45, §10.3.1). Cada flujo de un driver
+   externo se abre a través de `stream_guard` con el instante del adjunto; un
+   presupuesto agotado no pide otro bloque.
 7. Extracción a staging de los misses: `magic bytes` ya validados, `sha256`
    incremental y corte por límite si el tamaño era desconocido (fila 13/14/15).
+   La comprobación entre bloques y al terminar cada llamada se mantiene para
+   los drivers nativos.
 8. Verificación final de los aciertos: un archivo borrado o cambiado de tamaño
    durante la ejecución se re-extrae **una** vez (RF-51) con nueva pantalla de
    contenido; si la re-extracción falla, se devuelve el error del motivo.
@@ -1725,7 +1777,7 @@ class StagedAttachment:
 | `E_ATTACHMENT_UNREADABLE` | 3 | `corrupt`/`smime`/`unreadable` o error de lectura del stream; antes de publicar. |
 | `E_PERMISSION` | 3 | Permisos del driver o de la caché/staging (`EACCES`). |
 | `E_IO` | 3 | E/S al escribir el staging, publicar o por `tmp/` y `attachments/` en sistemas de archivos distintos (DP-01). |
-| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por el comando `attachment`. |
+| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por el comando `attachment`, o el `stream_guard` de un plugin externo agota el presupuesto: mensaje `attachment <i> ('<nombre>') of message <uid> did not respond within the timeout` y hint `raise [attachments].timeout_seconds in ~/.mailquery/config.toml if the driver is slow; run "mailquery doctor" and do not retry in a loop`. |
 | `E_CLIENT_BUSY` | 5 | `reason=busy` del driver (reintentable). |
 | `E_PLUGIN_FAILED` | 3 | `reason` desconocido o metadatos inválidos del driver; nunca `E_INTERNAL` en la frontera de plugin. |
 | `E_USAGE` | 2 | Índice solicitado fuera de rango o uid inválido (defensivo; el comando valida antes). |
@@ -1826,12 +1878,15 @@ driver con `attachments: "none"` devuelve `[]`; `show` nunca escribe.
    "sanitized_name": "02_Factura_Octubre_2026.pdf", "saved": true, "cached": false,
    "path": "/Users/<user>/.mailquery/attachments/apple_mail/83143/02_Factura_Octubre_2026.pdf",
    "size_bytes": 128450, "sha256": "<64 hex>"}],
- "warnings": []}
+ "warnings": ["W_ATTACHMENT_ACTIVE_CONTENT: attachment 2 contains pdf-javascript in apple_mail:83143"]}
 ```
 `ok`/`command`/`generated_at` los añade `cli` (§12.11). Un acierto de caché
 devuelve `cached: true` y `saved: true` con el `size_bytes`/`sha256` del archivo
-servido; `--force` re-extrae (`cached: false`). El error sigue el contrato
-`{ok:false, command, error:{code,message,hint}}` de §12.5 C/D/G/H/E/F.
+servido; `--force` re-extrae (`cached: false`). `warnings[]` puede llevar
+`W_ATTACHMENT_ACTIVE_CONTENT`, uno por adjunto devuelto y tipo detectado
+(`pdf-javascript`, `office-macros`, `archive-executable`), en el orden de
+`attachments[]`; el archivo se entrega igual y el exit no cambia. El error sigue
+el contrato `{ok:false, command, error:{code,message,hint}}` de §12.5 C/D/G/H/E/F.
 
 ### `mailboxes`
 ```json
