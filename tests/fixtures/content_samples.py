@@ -187,7 +187,7 @@ HTML_TYPICAL_BODY = (
     '<h1>Factura de octubre</h1><p class="invoice">Importe total: 1.234,56 €</p>'
     + "".join(
         f"<p>Línea {index}: servicio facturado del periodo, sin incidencias.</p>"
-        for index in range(1, 60)
+        for index in range(1, 90)
     )
     + "</body></html>"
 )
