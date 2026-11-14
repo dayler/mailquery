@@ -22,6 +22,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 |---|---|---|
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
 | UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` |
+| UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` |
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados y `content_notice` | `tests/test_content_wiring.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
@@ -69,11 +70,11 @@ añadida y el resto de sus valores no cambia.
 
 ## 4. Dobles y fixtures
 
-- `tests/fakes/outlook.py`: Outlook falso con solo los miembros del modelo de objetos que usa el backend. Registra cada llamada en un `CallLog` y lleva contadores de mutación que deben quedar en cero. Incluye stores, items, carpetas, fallos de COM, zona horaria inyectable y adjuntos (locales, no descargados, S/MIME, corruptos y materialización).
+- `tests/fakes/outlook.py`: Outlook falso con solo los miembros del modelo de objetos que usa el backend. Registra cada llamada en un `CallLog` y lleva contadores de mutación que deben quedar en cero. Cada item admite `body_format` (`olFormatHTML` cuando tiene HTML, texto plano si no), cabeceras de transporte propias y fallos de COM inyectables; `BodyFormat` se registra en el `CallLog` como las demás propiedades y un item de reunión, informe o tarea no lo tiene. Incluye stores, items, carpetas, fallos de COM, zona horaria inyectable y adjuntos (locales, no descargados, S/MIME, corruptos y materialización).
 - `tests/fakes/plugin.py`: plugin de prueba con API 1, capacidades configurables, `native_order_key`, cuerpo, adjuntos y fallos inyectables. Es la única vía para probar un driver externo sin publicar uno real.
 - `tests/fakes/attachment_backend.py`: backend inyectable en la CLI con capacidades, adjuntos, motivos y timeouts controlables.
 - `tests/fakes/attachment_driver.py`: driver de adjuntos para los tests del motor; entrega bytes y motivos y nunca escribe en caché.
-- `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`).
+- `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`). Un mensaje admite cabeceras MIME extra (`extra_headers`, también repetidas) y `build_store(body_samples=True)` añade las muestras de origen del cuerpo y cabeceras del remitente (texto plano y HTML distintos, HTML con elementos ocultos, HTML sin texto, todo el HTML oculto y cabeceras de autenticación) sin cambiar el store por defecto.
 - `tests/fixtures/attachment_samples.py`: contenidos de muestra para el bloqueo por *magic bytes*.
 - `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>`, un cuerpo típico de 6 KB para la medición informativa del paso a línea, las muestras de URL (inicios, terminación, dominios, tablas de modos, punycode y URL largas) y las de `Authentication-Results` y `Reply-To`.
 - `tests/fixtures/active_content_samples.py`: PDF, OLE y ZIP de muestra para el detector de contenido activo (con y sin marcadores, con `vbaProject.bin`, con ejecutables, con entradas `.bin` propias de Office y con un ZIP cuyo directorio central no se puede leer). El ZIP cifrado se fabrica activando el bit 0 de *general purpose flag* en las cabeceras local y central.
@@ -145,7 +146,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08 (parcial; completa con UT-CW-10) | — |
 | AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08 (parcial; completa con UT-CW-10) | — |
 | AC-H10 (delta `PRD-v2.2.md`) | `W_LONG_URL` y `W_SCRIPT_LINK` | UT-CNT-08 (parcial; completa con UT-CW-10) | — |
-| AC-H11 (delta `PRD-v2.2.md`) | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | UT-CNT-09 (parcial; completa con UT-BOD-03, UT-BOD-04, UT-CW-11) | — |
+| AC-H11 (delta `PRD-v2.2.md`) | Primera `Authentication-Results` (resultados de `spf`, `dkim` y `dmarc`; varias firmas DKIM con una en `pass` cuentan como `pass`) y `Reply-To` de otro dominio; sin cabecera, en correo interno de Outlook o en un mensaje de un plugin no se emiten | UT-BOD-03, UT-BOD-04 (parcial; completa con UT-CNT-09, UT-CW-11) | — |
 
 ## 8. Casos
 
@@ -1776,8 +1777,8 @@ Requisitos: RF-05, RF-06 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Texto plano. |
-| .02 | P | Texto vacío y HTML ⇒ HTML convertido. |
+| .01 | P | Item con `BodyFormat` HTML y el mismo texto en `Body` y `HTMLBody` ⇒ cuerpo del HTML, con la forma de la fila de `search` y de `show` y sus valores. |
+| .02 | P | Texto vacío y HTML ⇒ HTML convertido; un item de reunión no tiene `BodyFormat` ni `HTMLBody` (`AttributeError`) ⇒ `Body`. |
 | .03 | N | HTML sin texto ⇒ `available=true`, `readable=true`, `snippet: ""` y `W_HTML_NO_TEXT`. |
 | .04 | N | Solo cabeceras ⇒ `false/false/false` + `W_BODY_NOT_LOCAL`, sin miembros de descarga. |
 | .05 | N | S/MIME cifrado ⇒ `true/false/false` + `W_BODY_UNREADABLE` con su texto; el `CallLog` no registra miembros de cuerpo ni de adjuntos. |
@@ -1826,9 +1827,9 @@ Requisitos: RF-17 · Archivo: `tests/test_outlook.py`
 | .02 | N | `--text x` sin acotar ⇒ `E_UNBOUNDED_SCAN`; el hint no lista `--to` ni `--cc`. |
 | .03 | N | `--text x --to y` ⇒ `--to` no acota; una sola validación y un solo error. |
 | .04 | N | `--to x --since 1y` con más candidatos que `max_scan` ⇒ `E_SCAN_TOO_LARGE`. |
-| .05 | P | `--to x --since 1d` ⇒ ejecuta; `scan.mode = metadata`; `scan.candidates` = mensajes antes de aplicar `--to`; `scan.messages_read` = items abiertos. |
-| .06 | P | `--text` acotado ⇒ coincidencias en el cuerpo; `scan.mode = text`. |
-| .07 | P | `--text x --to y --since 1d` ⇒ `scan.candidates` = mensajes antes de aplicar `--to`. |
+| .05 | P | `--to x --since 1d` ⇒ ejecuta; `scan.mode = metadata`; `scan.candidates` = mensajes antes de aplicar `--to`; `scan.messages_read` = items abiertos; solo el mensaje devuelto con cuerpo legible lee sus cabeceras de transporte (1 lectura de `PR_TRANSPORT_MESSAGE_HEADERS`). |
+| .06 | P | `--text` acotado ⇒ coincidencias en el cuerpo; `scan.mode = text`; cada candidato cuyo cuerpo se lee lee también sus cabeceras de transporte (3 lecturas, una por candidato legible). |
+| .07 | P | `--text x --to y --since 1d` ⇒ `scan.candidates` = mensajes antes de aplicar `--to`; el filtro de destinatarios abre todos los items pero solo el que coincide lee su cuerpo y sus cabeceras de transporte (1 lectura). |
 
 #### OL-25 — `new` en Windows
 
@@ -1899,6 +1900,71 @@ Barrido de los comandos con todos sus flags sobre el fake de Outlook; bloqueante
 | .03 | N | 0 mutaciones. |
 | .04 | N | Nunca aparecen errores ni warnings que no aplican al backend de Outlook, ni `E_INTERNAL`. |
 | .05 | N | Las corridas de `attachment` escriben solo bajo `<home>` y dejan vacío el staging. |
+
+### Cuerpo y cabeceras del remitente (Apple Mail y Outlook)
+
+#### UT-BOD-01 — Cuerpo en Apple Mail
+
+Requisitos: RF-53 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `multipart/alternative` con texto plano y HTML distintos ⇒ `body_text` del HTML (`Factura adjunta.`), también en `BodyRow.body_text`. |
+| .02 | P | Solo texto plano ⇒ texto plano. |
+| .03 | N | HTML sin texto (solo `<img>`) con texto plano presente ⇒ `""` y `W_HTML_NO_TEXT`; el texto plano no aparece. |
+| .04 | P | `multipart/mixed` con una parte `text/plain` y otra `text/html` de cuerpo ⇒ solo el HTML. |
+| .05 | P | HTML con un elemento oculto ⇒ `hidden_chars` igual al de `html_body_to_text`; HTML todo oculto ⇒ `""`, `W_HTML_NO_TEXT` y `hidden_chars > 0`. |
+| .06 | N | `text/plain` de cuerpo más una parte `text/html` con `Content-Disposition: attachment` ⇒ `body_text` del texto plano; el HTML adjunto no aporta texto. |
+
+#### UT-BOD-02 — Cuerpo en Outlook (doble)
+
+Requisitos: RF-53 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `BodyFormat = 2` (`olFormatHTML`) con `Body` y `HTMLBody` distintos ⇒ texto del HTML, en `load_snippet` y en `load_body`. |
+| .02 | P | `BodyFormat = 1` (texto plano) y `3` (RTF) ⇒ `Body`, aunque exista `HTMLBody`. |
+| .03 | P | Item de reunión sin `BodyFormat` ni `HTMLBody` (`AttributeError`) ⇒ `Body`, sin error. |
+| .04 | N | `BodyFormat = 2` con HTML sin texto y `Body` presente ⇒ `""` y `W_HTML_NO_TEXT`. |
+| .05 | B | `BodyFormat` se lee por la lista blanca COM (sin violación del proxy de solo lectura, `mutations` y `forbidden` en cero) y no se abre ningún item más que uno por mensaje (`items_opened` y `GetItemFromID` = 1). |
+| .06 | N | `HTMLBody` que lanza un error COM (no `AttributeError`), `BodyFormat` que lanza un error COM y `BodyFormat` que devuelve `None` ⇒ `Body`, sin error. |
+
+#### UT-BOD-03 — Cabeceras del remitente en Apple Mail
+
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con dos `Authentication-Results` y una `ARC-Authentication-Results`, `authentication_results` es la primera (la de más arriba), en `load_body` y en `parse_emlx_headers`. |
+| .02 | P | `Reply-To` se entrega crudo; sin la cabecera, `None`. |
+| .03 | P | `load_headers` da las seis cabeceras de `show`, la primera `Authentication-Results` y `Reply-To` sin llamar a la extracción del cuerpo (espía sobre `emlx._extract_body_text`). |
+| .04 | B | `parse_emlx_headers` no lee más allá del bloque de cabeceras (archivo con cuerpo de varios MiB: se leen como mucho 256 KiB); archivo ausente, ilegible o que es un directorio ⇒ vacío, `read=False`, sin excepción. |
+| .05 | P | Primera `Authentication-Results` plegada con CRLF + tabulador y con `dmarc=fail` en una línea de continuación ⇒ el valor llega desplegado y contiene `dmarc=fail`, igual en `load_body` y en `load_headers`. |
+| .06 | B | `parse_emlx_headers`: bloque sin línea vacía antes del tope de 256 KiB (devuelve lo leído hasta el tope, sin excepción), línea de longitud inválida, archivo vacío, sin salto de línea, longitud cero y bloque que no se puede parsear (vacío, `read=False`) y cabeceras con *encoded words* (se decodifican como en `parse_emlx`). |
+| .07 | N | `load_headers` con un `.emlx` que no se resuelve, con una carpeta desconocida o con `resolve_path` que lanza ⇒ vacío y `read=False`; con un `.partial.emlx` ⇒ cabeceras leídas del parcial. |
+
+#### UT-BOD-04 — Cabeceras del remitente en Outlook (doble)
+
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Cabeceras de transporte con dos `Authentication-Results` y `Reply-To` ⇒ la primera y `Reply-To`, tanto en `load_body` como en `load_snippet`. |
+| .02 | N | Correo interno sin cabeceras de transporte ⇒ `None` en las dos y `headers` vacías. |
+| .03 | N | Item S/MIME: `load_headers` y `load_snippet` no abren el item (`CallLog` sin `GetItemFromID`) y devuelven vacío. |
+| .04 | P | `load_headers` abre el item (cuenta en `items_opened`, un `GetItemFromID`) y no accede a `Body`, `HTMLBody` ni `Attachments`. |
+| .05 | P | Cabeceras de transporte con la primera `Authentication-Results` plegada (CRLF + tabulador) y `dmarc=fail` en la línea de continuación ⇒ valor desplegado con `dmarc=fail`, en `load_headers` y en los dos cargadores del cuerpo. |
+| .06 | N | `load_headers` con `GetItemFromID` que falla, o con la lectura de `PR_TRANSPORT_MESSAGE_HEADERS` que lanza ⇒ vacío y `read=False`, sin excepción. |
+
+#### UT-BOD-05 — Punta a punta por `cli.main`
+
+Requisitos: RF-53, RF-60, RF-61 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --text <palabra solo del HTML> --since …` encuentra el mensaje; `--text <palabra solo del texto plano>` no lo encuentra (Apple Mail y Outlook). |
+| .02 | P | `show` del mismo mensaje da `body_text` del HTML (Apple Mail y Outlook). |
+| .03 | P | Con `css_inline` simulado ausente (parcheando `output._css_inline` y el import), `search`, `new` y `show` terminan con exit 0 y convierten el HTML original (la omisión en línea sigue). |
 
 ### Punta a punta (`cli.main`)
 

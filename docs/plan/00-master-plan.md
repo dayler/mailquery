@@ -60,7 +60,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | 🟢 |
 | M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | 🟢 |
 | M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟢 |
-| M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟡 |
+| M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟢 |
 | M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | 🟢 |
 | M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | ⚪ |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
@@ -213,7 +213,7 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-H14 | Compatibilidad: solo `content_notice` nuevo; resto sin cambios | M07, M10 | UT-CW-06, UT-FLD-07 | 🟡 |
 | AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | 🟡 |
 | AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | ⚪ |
-| AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟡 |
+| AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟢 |
 | AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | 🟡 |
 | AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | ⚪ |
 | AC-D02 | `reason: network`/`not_local` ⇒ `E_ATTACHMENT_UNAVAILABLE` | M09 | UT-RMT-02 | ⚪ |
@@ -558,3 +558,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-14 | CI (corrección del dueño) | — | — | — | La matriz corre también en `push` a `develop` tras mergear cada lote, y los PRs apuntan solo a `develop` (en alpha no hay PRs a `main`): actualizados `.github/workflows/tests.yml`, la regla 5, `TEST-CATALOG.md` §5 e `INTERFACES.md` §8.6; la corrección se registra como HITL-09 y se sincronizan la regla 4, el gate de cierre de lote, el presupuesto de la sección 7.2 y RK-14. Run de `develop`: https://github.com/dayler/mailquery/actions/runs/43556408692 (15/15 jobs en verde) |
 | 2026-11-14 | M07 | 🟡 → 🟢 | `2529b7d` (merge en `integration/i2-content`): `Ran 1154` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +19 tests UT-CW) | `docs/plan/evidence/M07.md` | A2 en campos, filtros, warnings y errores; `content_notice` tras `generated_at`; 20 goldens de éxito +1 línea; cobertura total 89,9 % |
 | 2026-11-14 | M05 | 🟡 → 🟢 | `f699d42` (merge en `integration/i2-content`): `Ran 1172` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +37 tests UT-CNT) | `docs/plan/evidence/M05.md` | A4/A5/A6 en `output.py`; `output.py` 99,5 %; sin goldens ni pragmas nuevos; desviación propia corregida (inicios `data:`/`www.` en ancho completo) |
+| 2026-11-14 | M06 | 🟡 → 🟢 | `e70e63b` (merge en `integration/i2-content`): `Ran 1163` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +28 tests UT-BOD) | `docs/plan/evidence/M06.md` | Cuerpo HTML-first y cabeceras del remitente en los dos backends; `load_headers` como gancho interno; `BodyFormat` en la lista blanca COM; sin goldens ni pragmas nuevos |

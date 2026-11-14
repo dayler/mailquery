@@ -427,6 +427,10 @@ paso por el módulo usa una única envoltura:
 - `wrap_driver(backend, *, driver=None, internal=None, timeout=None)`: proxy
   transparente que enruta cada operación de `METADATA_OPERATIONS` por
   `call_driver`; envolver dos veces es no-op. Lo usa el pool de `search.py`.
+  `METADATA_OPERATIONS` incluye `load_headers`, el gancho interno de los
+  backends nativos para leer solo las cabeceras (D-06): el proxy lo envuelve
+  igual que `load_snippet` y en un driver nativo la llamada sigue en línea; no
+  está en la ABC ni en la validación de retornos, y un plugin no lo tiene.
 - `map_plugin_error(exc, *, driver, attachments)` y
   `sanitize_error_field(value, max_bytes)` son las piezas puras (mapeo y
   saneado); `METADATA_OPERATIONS`/`ATTACHMENT_OPERATIONS` fijan el contexto.
@@ -445,6 +449,13 @@ excepción no mapeada o un retorno inválido (validadores por operación: filas
 con `attachments` lista, etc.) ⇒ `E_PLUGIN_FAILED` (3), nunca `E_INTERNAL`; un
 fallo inesperado de un driver nativo se re-lanza y el CLI sigue dando
 `E_INTERNAL` (1).
+
+**Contrato de cuerpo de un plugin (RF-53).** El plugin entrega en `body_text` el
+texto que ve el destinatario: desde el HTML cuando existe y sin el contenido
+oculto, porque `mailquery` no ve su HTML y no le aplica A3. El núcleo sí aplica
+A2, A4 y A5 (y A3 no); `BodyRow` admite `hidden_chars` y las dos cabeceras del
+remitente como claves opcionales, pero un plugin no las entrega y
+`plugin_api = 1` no cambia.
 
 Plantillas de `message` (inglés, dueño: núcleo): `not available in the local
 store`; `could not be retrieved from its origin`; `cannot be recovered by driver
@@ -544,6 +555,20 @@ native_order_key, unavailable_reason)` es la lista ordenada de adjuntos.
 No hay `StateUidError` (el estado valida sus uids en `state.py`);
 `ExcludedStoreError(entry)` (subclase de `LookupError`) sigue igual.
 
+`BodyRow` lleva además tres claves **opcionales** (`NotRequired`): `hidden_chars`
+(caracteres que omitieron los elementos ocultos del HTML del cuerpo),
+`authentication_results` (valor desplegado de la primera cabecera
+`Authentication-Results`) y `reply_to` (valor desplegado de `Reply-To`); un
+driver que no las lee (cualquier plugin) las omite y el núcleo las consulta con
+`.get`.
+
+`HeaderRow` (`TypedDict`) es el resultado del gancho opcional `load_headers(row)`
+de los adaptadores internos: `headers` con los seis valores de `show` (cadenas
+vacías cuando el mensaje no las tiene), `authentication_results` y `reply_to`
+(`None` si la cabecera falta) y `read` (`False` cuando el bloque de cabeceras no
+se pudo leer: archivo ausente, S/MIME o lectura COM fallida). No forma parte del
+protocolo v1: no está en la ABC ni en `plugin_api`.
+
 `MailBackend` (ABC; PRD §9.2 y §6.5). Metadatos declarativos
 (propiedades en la ABC, atributos de clase en los adaptadores y plugins):
 `driver` (`str`), `plugin_api` (`int`, siempre `1`) y `capabilities`
@@ -641,7 +666,8 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 | `unreadable_attachments(row)` | `search.run_show` | Outlook: `(nombres, warning)` de un item ilegible: `[]` y `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` y no es S/MIME (PRD §12.10) |
 | `recipients_open_items` (atributo) | `search.run_search` | Outlook (`True`): `--to`/`--cc` abren cada item, así que se validan como `--text` (acotamiento y `max_scan`), no acotan y se aplican después de contar los candidatos (RF-17) |
 | `items_opened` (propiedad) | `search.run_search`, `search.run_new` | Outlook: items distintos abiertos por la instancia; `scan.messages_read` = la diferencia durante el comando (en Apple Mail sigue siendo los cuerpos leídos) |
-| `load_snippet(row)` | `search.run_search`, `search.run_new` | Outlook: `load_body` sin adjuntos ni cabeceras de transporte (solo los usa `show`; PRD §19) |
+| `load_snippet(row)` | `search.run_search`, `search.run_new` | Outlook: `load_body` sin nombres de adjuntos, con el cuerpo y las cabeceras de transporte (incluida la primera `Authentication-Results` y `Reply-To`; PRD §19) |
+| `load_headers(row)` | `search.run_search`, `search.run_new`, `search.run_show` | Backends internos: solo las cabeceras de `show`, la primera `Authentication-Results` y `Reply-To`, sin leer el cuerpo (Apple Mail: bloque del `.emlx`; Outlook: `PR_TRANSPORT_MESSAGE_HEADERS`, y S/MIME no se abre) |
 | `bind_doctor_timeout(finish)` | `cli._run_doctor` | Outlook: al vencer el plazo COM durante `doctor`, el vigilante llama a `finish(backend_checks, detail)` (ver `cli.py`) |
 
 ### `backends/outlook.py`
@@ -672,7 +698,15 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
 - Items (PRD §11.3): `query` con `Folder.GetTable` (uid = `EntryID` permanente,
   fechas UTC, prefiltro DASL ensanchado y corte exacto en Python);
   `find_message` identifica el store por los bytes 4..20 del `EntryID`;
-  `load_body` nunca descarga (S/MIME y solo cabeceras sin leer contenido).
+  `load_body` nunca descarga (S/MIME y solo cabeceras sin leer contenido) y elige
+  el cuerpo con `BodyFormat`: con `olFormatHTML` (2) convierte `HTMLBody` y
+  devuelve su `hidden_chars` y `W_HTML_NO_TEXT` si no da texto; con cualquier otro
+  valor, `None` o un error COM de `BodyFormat`/`HTMLBody` usa el `Body` de texto
+  plano. Un item de reunión no tiene `BodyFormat` ni `HTMLBody` (`AttributeError`).
+  `load_body` y `load_snippet` leen `PR_TRANSPORT_MESSAGE_HEADERS` (también sin
+  nombres de adjuntos) y de ahí toman las seis cabeceras de `show`, la primera
+  `Authentication-Results` desplegada y `Reply-To`; un item sin cabeceras de
+  transporte (correo interno) devuelve `headers: {}` y las dos señales a `None`.
   Por comando, cada item se abre una vez mientras siga en caché (los 200
   primeros abiertos y el último) y los destinatarios de cada uid se leen una
   vez; `close()` vacía las cachés.
@@ -715,6 +749,12 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
   `E_CLIENT_TIMEOUT` por el vigilante COM); el tope de 120 s de la extracción
   lo aplica el motor de adjuntos mientras consume el stream. No resuelve referencias,
   no descarga y no abre red; `size_bytes` desconocido ⇒ `None`.
+- `load_headers(row) -> HeaderRow` (gancho interno, fuera del protocolo v1): un
+  item S/MIME no se abre y devuelve cabeceras vacías con `read=False`; en los
+  demás abre el item (cuenta en `items_opened`, una sola vez por caché) y lee
+  solo `PR_TRANSPORT_MESSAGE_HEADERS`, sin tocar `Body`, `HTMLBody` ni
+  `Attachments`. Si `GetItemFromID` o la lectura de la propiedad fallan, devuelve
+  vacío con `read=False` y nunca lanza.
 - Los uids de `state.json` los valida el núcleo (`state.py` + `uid.py`), no
   el backend (PRD §11.2).
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
@@ -755,7 +795,9 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   `win32com.__gen_path__` antes de importar `win32com.client`.
 - `READONLY_MEMBERS` (`{tipo: {miembro: tipo devuelto o None}}`) y
   `ReadOnlyCom(target, kind, watchdog)`: proxy de lista blanca; cualquier otro
-  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM.
+  miembro, asignación o nombre `_`/dunder ⇒ `E_INTERNAL` sin tocar COM. `Item`
+  autoriza `BodyFormat` junto a `Body` y `HTMLBody` (el cuerpo elige entre ambos
+  sin abrir ningún item más).
   **Excepción COM de adjuntos** (PRD §4/§23.1, riesgo aceptado): sobre
   `Attachment` se autorizan `Size` y `Type` (metadatos locales) y
   `SaveAsFile` —la **única** operación de escritura del proxy—, usada solo para
@@ -807,6 +849,13 @@ Los dos métodos estáticos de parseo:
   puro y sin I/O. De transición: el núcleo no lo usa.
 - `parse_native_id(native_id) -> int`: parte nativa de un uid prefijado, un
   `int`; puro y sin I/O. `show` lo usa antes de abrir el store.
+- `load_headers(row) -> HeaderRow` (gancho interno, fuera de la interfaz v1):
+  resuelve el `.emlx` de la carpeta física como `load_body` y llama a
+  `emlx.parse_emlx_headers`, que lee solo el bloque de cabeceras (256 KiB como
+  máximo). Devuelve las seis cabeceras de `show`, la primera
+  `Authentication-Results` y `Reply-To` desplegadas y `read=False` cuando el
+  archivo no se resuelve o no se puede leer. `load_body` propaga además
+  `hidden_chars`, `authentication_results` y `reply_to` desde `parse_emlx`.
 - La validación de los uids del estado vive en `state.py`, no en el
   backend.
 
@@ -871,15 +920,26 @@ son fiables). `mailbox_dir` = `mail_root/version/account_uuid/` + segmentos
 
 ### `emlx.py` (Apple Mail)
 `EmlxMessage(path, partial, headers, body_text, attachments, available,
-readable, warnings)`.
+readable, warnings, hidden_chars=0, authentication_results=None,
+reply_to=None)`.
 `resolve_path(store, mailbox, uid) -> Path | None`: fórmula
 `<mailbox_dir>/<version_uuid>/Data/<shards>/Messages/<uid>.emlx` (o
 `.partial.emlx`), `shards` = dígitos de `uid // 1000` del menos al más
 significativo (`uid < 1000` → `Data/Messages/`). Fallback recursivo solo si la
 fórmula falla; si no existe → `None`. `parse_emlx(path)` lee con
-`open(path, "rb")`, `int(line1.strip())`, payload MIME y trailer plist; texto
-plano preferente, HTML→texto con `output.html_to_text`, nombres de adjuntos;
-corrupto → `readable=False` + warning; `partial` por nombre `.partial.emlx`.
+`open(path, "rb")`, `int(line1.strip())`, payload MIME y trailer plist; el
+cuerpo sale de las partes `text/html` de cuerpo cuando existen (unión con `\n`
+de sus textos, suma de `hidden_chars` de `output.html_body_to_text`, y
+`W_HTML_NO_TEXT` sin recurrir al texto plano si ninguna da texto) y del texto
+plano solo si no hay HTML; nombres de adjuntos; corrupto → `readable=False` +
+warning; `partial` por nombre `.partial.emlx`. Entrega además la **primera**
+`Authentication-Results` y `Reply-To` desplegadas (`None` si faltan).
+`EmlxHeaders(headers, authentication_results, reply_to, read)` y
+`parse_emlx_headers(path)`: lee como mucho `HEADER_READ_LIMIT` (256 KiB), corta
+el bloque en la primera línea vacía, despliega las líneas de continuación y
+decodifica las *encoded words* con la misma política que `parse_emlx`; nunca
+lanza (archivo ausente/ilegible, línea de longitud inválida o bloque que no se
+puede parsear ⇒ cabeceras vacías y `read=False`).
 
 **Adjuntos.** Tipos `EmlxAttachment(index, name, size_bytes,
 native_order_key, unavailable_reason, external_path, part_path)` y
