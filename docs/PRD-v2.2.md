@@ -142,16 +142,16 @@ Estado de la implementación de cada contrato de la sección 0.2, desviaciones a
 
 | Contrato (sección 0.2) | Feature | Estado | Commit | Documentos consumidores actualizados | Nota para la conciliación |
 |---|---|---|---|---|---|
-| Valores de texto del JSON y de los errores | F1 | Pendiente | `4d8654c` | `TEST-CATALOG.md`, `INTERFACES.md` | Primitivas de saneado implementadas en `output.py` (`sanitize_text`); estado pendiente porque todavía falta aplicarlas a los campos de la salida de los comandos y a los textos de error. |
+| Valores de texto del JSON y de los errores | F1 | Implementado y documentado | `2529b7d` | `README.md`, `README.es.md`, `docs/INTERFACES.md` | A2 en todos los campos de contenido de `search`, `new`, `show` y `attachment`, en `warnings[]`, en `message`/`hint` de los errores y en el resumen de `stderr`; los identificadores y las rutas no cambian. |
 | Selección del cuerpo y conversión HTML → texto | F1 | Pendiente | `4d8654c` | `TEST-CATALOG.md`, `INTERFACES.md` | Primitivas implementadas en `output.py` (`html_body_to_text`, `HtmlText`, paso a línea con `css-inline` y omisión/conteo del contenido oculto); estado pendiente porque todavía falta elegir el cuerpo en los backends y aplicar el resultado en la salida. |
-| Semántica de búsqueda | F1 | Pendiente | — | — | — |
+| Semántica de búsqueda | F1 | Implementado y documentado | `2529b7d` | `README.md`, `README.es.md` | `--subject`, `--text`, `--from`, `--to` y `--cc` aplican A2 al patrón y al valor comparado antes de la normalización de mayúsculas y acentos; un valor copiado de la salida encuentra su mensaje y un patrón con caracteres invisibles también. |
 | Cuerpo, `snippet`, asunto, nombres y `headers` | F1 | Pendiente | — | — | — |
 | Opciones de `search`, `new` y `show` y su ayuda | F1 | Pendiente | — | — | — |
 | Catálogo de warnings | F1 | Pendiente | — | — | — |
 | Respuesta de `attachment` | F1 | Pendiente | — | — | — |
 | Inspección de adjuntos | F1 | Pendiente | `645fe09` | `TEST-CATALOG.md`, `INTERFACES.md` | Detector de marcadores implementado para PDF, OLE y ZIP (sin abrir, descomprimir ni bloquear); el aviso `W_ATTACHMENT_ACTIVE_CONTENT` en `attachment` queda pendiente de conectar. |
 | Contrato JSON único | F1, F3 | Pendiente | — | — | — |
-| Campos de la respuesta de `search`, `new`, `show` y `attachment` | F1 | Pendiente | — | — | — |
+| Campos de la respuesta de `search`, `new`, `show` y `attachment` | F1 | Implementado y documentado | `2529b7d` | `README.md`, `README.es.md`, `docs/INTERFACES.md` | `content_notice` con el texto fijo se inserta tras `generated_at` en las respuestas de éxito de los cuatro comandos; los errores, `doctor` y `mailboxes` no lo llevan. |
 | Skill y README | F1 | Pendiente | — | — | — |
 | Cabeceras leídas | F1 | Pendiente | — | — | — |
 | Contrato de plugins: cuerpo | F1 | Pendiente | — | — | — |

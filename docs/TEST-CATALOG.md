@@ -22,6 +22,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 |---|---|---|
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
 | UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible y hojas `<style>` | `tests/test_content.py` |
+| UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados y `content_notice` | `tests/test_content_wiring.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -60,6 +61,11 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 | TC-10 | `search_multidriver`, `new_multidriver` |
 
 `attachment_cached` se genera con una primera corrida que siembra la caché; el test documenta esa semilla.
+
+Los goldens de éxito de `search`, `new`, `show` y `attachment` llevan
+`content_notice` justo después de `generated_at`; los de error, `doctor` y
+`mailboxes` no lo llevan. La actualización de cada golden es una única línea
+añadida y el resto de sus valores no cambia.
 
 ## 4. Dobles y fixtures
 
@@ -126,10 +132,12 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
 | AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
+| AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios | UT-CW-06 (parcial; completa con UT-FLD-07) | — |
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 | AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
 | AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01 (parcial; completa con UT-CNT-06, UT-CW-13) | — |
+| AC-H03 (delta `PRD-v2.2.md`) | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
 | AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea | UT-CNT-02 (parcial; completa con UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09) | — |
 | AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS | UT-CNT-03 (parcial; completa con UT-CW-07) | — |
 | AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice` | UT-CNT-04 (parcial; completa con UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08) | — |
@@ -375,6 +383,67 @@ Requisitos: RF-66 · Archivo: `tests/test_content.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `CONTENT_NOTICE` es literalmente el texto de RF-66. |
+
+#### UT-CW-01 — A2 en los campos de contenido
+
+Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un mensaje con ANSI, C1, `U+200B`, `U+202E`, selectores y rellenos en `subject`, `from.name`, nombres de `to`/`cc` y cuerpo: `search` y `new` los devuelven saneados, incluido `snippet`. |
+| .02 | P | `show` del mismo mensaje: `subject`, nombres, cada valor de `headers`, `body_text` y `attachments[].name` saneados. |
+| .03 | P | `attachment`: `original_name` saneado; `sanitized_name` y `path` iguales a los del mismo nombre original (calculados con `sanitize_name` y la ruta de caché). |
+| .04 | N | `uid`, `message_id`, `from.address`, `to[].address`, `mailbox.*`, `account.*`, `source.emlx_path` y `cached_path` salen sin cambios aunque contengan caracteres invisibles. |
+| .05 | P | Una etiqueta de cuenta y un nombre de carpeta con `U+200B` copiados de `mailboxes` resuelven en `config.toml` y en `--include-mailbox`. |
+
+#### UT-CW-02 — A2 en warnings y errores
+
+Requisitos: RF-52 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un warning con un identificador con `U+202E` (`W_STORE_EXCLUDED` de un store excluido del plugin falso) sale saneado en `warnings[]`, mientras `excluded_stores[].label` sigue igual. |
+| .02 | P | Un error cuyo `message` cita un valor del usuario con `U+202E` sale saneado en el JSON y en `stderr`; `code` y exit sin cambios. |
+| .03 | B | `warnings[]` de `mailboxes`, `new` y `doctor --json` también pasan por A2 (todos los comandos). |
+| .04 | N | Un error con `hint` nulo conserva `"hint": null` en el JSON tras A2. |
+
+#### UT-CW-03 — Búsqueda con A2 a ambos lados
+
+Requisitos: RF-52 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Asunto original `Factura​ de octubre`: `--subject "Factura de"` lo encuentra. |
+| .02 | P | Patrón con `U+200B` (`--subject "Fac​tura"`) encuentra un asunto sin él. |
+| .03 | P | `--text` con un cuerpo con `U+202E` en medio de la palabra; `--from`, `--to` y `--cc` con nombres con `U+202E`/`U+200B`. |
+| .04 | N | Sin caracteres de A2, los resultados de `--subject` son los mismos que filtrar el resultado completo por subcadena. |
+
+#### UT-CW-04 — Adjuntos con nombres con `Cf` o controles
+
+Requisitos: RF-52 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un adjunto con un selector de variación (`U+FE00`): el bloqueo, el `sanitized_name` y la ruta de caché son los mismos que `classify_name` y `sanitize_name` dan para el nombre original. |
+| .02 | N | Un nombre con `U+200B` o un control C0 que hoy se bloquea sigue dando `E_ATTACHMENT_BLOCKED`, sin archivos. |
+
+#### UT-CW-05 — `content_notice`
+
+Requisitos: RF-66 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search`, `new` y `show` de éxito (store sintético y doble de Outlook) tienen `content_notice` con el texto exacto, justo después de `generated_at`. |
+| .02 | N | Las respuestas de error de esos comandos, `doctor --json` y `mailboxes` no lo tienen. |
+
+#### UT-CW-06 — Compatibilidad
+
+Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con la fila completa actual de `search`/`new` y `show` sin opciones, las claves son las de antes más `content_notice`, y es la única clave nueva. |
+| .02 | B | `state.json` y el manifiesto de una corrida de `new` y de `attachment` conservan su forma y contenido (sin `content_notice`). |
 
 ### Estado, búsqueda y store
 
@@ -1068,7 +1137,7 @@ Requisitos: AC-12 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Forma exacta de la respuesta de §12.11: `uid` prefijado, `output_dir` absoluto, `count`, ocho campos por adjunto, `warnings: []`. |
+| .01 | P | Forma exacta de la respuesta de §12.11: `uid` prefijado, `output_dir` absoluto, `count`, ocho campos por adjunto, `warnings: []`, y `content_notice` con el texto exacto justo después de `generated_at`. |
 | .02 | P | Primera corrida `cached:false`; segunda sin `--force` `cached:true` con `size_bytes`/`sha256` del archivo; `--force` `cached:false`. |
 | .03 | N | Mensaje bloqueado ⇒ `E_ATTACHMENT_BLOCKED` (exit 4), sin archivos, sin caché servida, con el `message`/`hint` de los ejemplos de bloqueo de §12.5. |
 | .04 | N | Un fallo de límite o disponibilidad no devuelve resultados parciales. |
