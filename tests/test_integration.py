@@ -34,6 +34,7 @@ from mailquery import __version__, cli
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import BackendRegistry
 from mailquery.config import load_config
+from mailquery.search import DEFAULT_ROW_FIELDS, SEARCH_ROW_FIELDS
 from mailquery.state import StateStore
 from tests.fakes.plugin import (
     ACCOUNT_LABEL as PLUGIN_ACCOUNT_LABEL,
@@ -94,24 +95,8 @@ DEFAULT_UID_ORDER = [
     prefixed_uid(83190),
 ]
 
-MESSAGE_FIELDS = {
-    "uid",
-    "message_id",
-    "duplicate_count",
-    "subject",
-    "from",
-    "to",
-    "cc",
-    "date_sent",
-    "date_received",
-    "mailbox",
-    "is_read",
-    "is_flagged",
-    "has_attachments",
-    "size_bytes",
-    "snippet",
-    "body",
-}
+MESSAGE_FIELDS = set(SEARCH_ROW_FIELDS)
+DEFAULT_FIELDS = set(DEFAULT_ROW_FIELDS)
 BODY_FIELDS = {"available", "readable", "partial", "truncated"}
 MAILBOX_FIELDS = {"account", "name", "path", "url"}
 ACCOUNT_FIELDS = {"uuid", "label", "email"}
@@ -330,6 +315,21 @@ class IntegrationBase(unittest.TestCase):
         self.fail(f"uid {wanted} not present in {payload['count']} results")
 
     def assert_message_shape(self, message: dict) -> None:
+        """The six-field default row of ``search``/``new``, in canonical order."""
+        self.assertEqual(list(message), list(DEFAULT_ROW_FIELDS))
+        self.assertIsInstance(message["uid"], str)
+        self.assertTrue(message["uid"].startswith("apple_mail:"))
+        self.assertIsInstance(message["subject"], str)
+        self.assertIsInstance(message["from"], dict)
+        self.assertIsInstance(message["from"].get("name"), str)
+        self.assertIsInstance(message["from"].get("address"), str)
+        if message["date_received"] is not None:
+            self.assertRegex(message["date_received"], ISO_EXACT_RE)
+        for field in ("is_read", "has_attachments"):
+            self.assertIsInstance(message[field], bool)
+
+    def assert_full_message_shape(self, message: dict) -> None:
+        """The full ``--fields all`` row with the nested objects of the contract."""
         self.assertTrue(MESSAGE_FIELDS <= set(message), MESSAGE_FIELDS - set(message))
         self.assertIsInstance(message["uid"], str)
         self.assertTrue(message["uid"].startswith("apple_mail:"))
@@ -496,7 +496,14 @@ class SearchTest(IntegrationBase):
         received = [message["date_received"] for message in payload["messages"]]
         self.assertEqual(received, sorted(received, reverse=True))
 
-        invoice = self.message_by_uid(payload, 2714)
+        # The fields outside the default row and the body warnings are checked
+        # on the full row of the same query.
+        full = self.run_ok("search", "--fields", "all")
+        self.assertEqual([message["uid"] for message in full["messages"]], DEFAULT_UID_ORDER)
+        for message in full["messages"]:
+            self.assert_full_message_shape(message)
+
+        invoice = self.message_by_uid(full, 2714)
         self.assertEqual(invoice["subject"], "Invoice 2026-10")
         self.assertEqual(invoice["from"], {"name": "Billing Team", "address": "billing@fixture.example"})
         self.assertEqual(invoice["to"], [{"name": "Fixture User", "address": "me@fixture.example"}])
@@ -519,38 +526,38 @@ class SearchTest(IntegrationBase):
         self.assertEqual(invoice["duplicate_count"], 1)
         self.assertEqual(invoice["message_id"], "<invoice-2714@fixture.example>")
 
-        partial = self.message_by_uid(payload, 79658)
+        partial = self.message_by_uid(full, 79658)
         self.assertIs(partial["body"]["partial"], True)
         self.assertEqual(partial["mailbox"]["path"], "Facturas")
         self.assertEqual(partial["snippet"], "Adjuntamos la factura de septiembre.")
         self.assertIs(partial["has_attachments"], True)
 
-        flagged = self.message_by_uid(payload, 83150)
+        flagged = self.message_by_uid(full, 83150)
         self.assertIs(flagged["is_flagged"], True)
         self.assertIs(flagged["is_read"], False)
         self.assertEqual(flagged["snippet"], "Remember this.")
 
-        gmail = self.message_by_uid(payload, 83210)
+        gmail = self.message_by_uid(full, 83210)
         self.assertIs(gmail["is_read"], False)
         self.assertIs(gmail["has_attachments"], True)
         self.assertEqual(gmail["mailbox"]["account"]["uuid"], ACCOUNT_GMAIL)
         self.assertEqual(gmail["mailbox"]["path"], "INBOX")
         self.assertEqual(gmail["snippet"], "Photo attached.")
 
-        missing = self.message_by_uid(payload, 83170)
+        missing = self.message_by_uid(full, 83170)
         self.assertIs(missing["body"]["available"], False)
         self.assertEqual(missing["snippet"], "")
-        self.assert_warning(payload, "W_EMLX_MISSING")
+        self.assert_warning(full, "W_EMLX_MISSING")
 
-        corrupt = self.message_by_uid(payload, 83180)
+        corrupt = self.message_by_uid(full, 83180)
         self.assertEqual(corrupt["snippet"], "")
-        self.assert_warning(payload, "W_EMLX_")
+        self.assert_warning(full, "W_EMLX_")
 
-        html_only = self.message_by_uid(payload, 83200)
+        html_only = self.message_by_uid(full, 83200)
         self.assertIn("HTML only", html_only["snippet"])
         self.assertIn("no plain text part", html_only["snippet"])
 
-        no_header = self.message_by_uid(payload, 83220)
+        no_header = self.message_by_uid(full, 83220)
         self.assertEqual(no_header["message_id"], "")
 
         scan = payload["scan"]
@@ -568,21 +575,24 @@ class SearchTest(IntegrationBase):
         self.assertEqual(payload["count"], 12)
         self.assertEqual([message["uid"] for message in payload["messages"]], DEFAULT_UID_ORDER)
         self.assertNotIn(prefixed_uid(83142), [message["uid"] for message in payload["messages"]])
+        for message in payload["messages"]:
+            self.assert_message_shape(message)
 
-        duplicate = self.message_by_uid(payload, 83143)
+        full = self.run_ok("search", "--fields", "all")
+        duplicate = self.message_by_uid(full, 83143)
         self.assertEqual(duplicate["duplicate_count"], 2)
         self.assertEqual(duplicate["subject"], "Shared duplicate")
         self.assertEqual(duplicate["message_id"], "<duplicate-4@fixture.example>")
         self.assertEqual(duplicate["mailbox"]["path"], "INBOX")
         self.assertEqual(duplicate["snippet"], "Duplicate body from the inbox.")
-        for message in payload["messages"]:
+        for message in full["messages"]:
             if message["uid"] != prefixed_uid(83143):
                 self.assertEqual(message["duplicate_count"], 1, message["uid"])
         self.assert_golden("search_all_mail.json", payload)
 
     def test_search_text_bounded_by_since(self) -> None:
         self.configure(ICLOUD_ONLY_CONFIG)
-        payload = self.run_ok("search", "--text", "invoice", "--since", "30d")
+        payload = self.run_ok("search", "--text", "invoice", "--since", "30d", "--fields", "snippet")
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["messages"][0]["uid"], prefixed_uid(2714))
         self.assertEqual(payload["messages"][0]["snippet"], "Please find the invoice attached.")
@@ -590,7 +600,7 @@ class SearchTest(IntegrationBase):
         self.assertEqual(payload["scan"]["candidates"], 6)
 
     def test_search_text_bounded_by_config_extra_mailbox(self) -> None:
-        payload = self.run_ok("search", "--text", "factura")
+        payload = self.run_ok("search", "--text", "factura", "--fields", "snippet")
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["messages"][0]["uid"], prefixed_uid(79658))
         self.assertEqual(payload["messages"][0]["snippet"], "Adjuntamos la factura de septiembre.")
@@ -1375,10 +1385,13 @@ class OutlookGoldenTest(unittest.TestCase):
             [message["uid"] for message in payload["messages"]],
             [prefixed_uid(self.fake.item(key).entry_id, "outlook") for key in ("normal", "header_only", "smime_encrypted")],
         )
-        normal = payload["messages"][0]
+        for message in payload["messages"]:
+            self.assertEqual(list(message), list(DEFAULT_ROW_FIELDS))
+        self.assertEqual(payload["warnings"][0], OUTLOOK_STORE_EXCLUDED)
+        full = self.run_ok("search", "--fields", "all")
+        normal = full["messages"][0]
         self.assertEqual(normal["date_received"], "2026-11-02T09:54:09-04:00")
         self.assertEqual(normal["date_sent"], "2026-11-02T09:54:03-04:00")
-        self.assertEqual(payload["warnings"][0], OUTLOOK_STORE_EXCLUDED)
         _assert_golden(self, "outlook/search.json", payload, self.root)
 
     def test_tc_02_03_show(self) -> None:
@@ -1681,7 +1694,7 @@ class JsonShapeParityTest(_AttachmentUidMixin, _BothBackendsCase):
     def test_tc_05_01_list_commands_have_the_same_keys(self) -> None:
         """TC-05.01: search/new/show/mailboxes share the recursive key set on both backends."""
         for label, argv in (
-            ("search", ("search", "--limit", "200")),
+            ("search", ("search", "--limit", "200", "--fields", "all")),
             ("new", ("new",)),
             ("mailboxes", ("mailboxes",)),
             ("doctor", ("doctor", "--json")),

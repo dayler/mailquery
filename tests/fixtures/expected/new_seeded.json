@@ -8,163 +8,47 @@
   "messages": [
     {
       "uid": "apple_mail:83143",
-      "message_id": "<duplicate-4@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Shared duplicate",
       "from": {
         "name": "Shared Sender",
         "address": "shared@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Duplicate body from the inbox.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83150",
-      "message_id": "<flagged-83150@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Flagged reminder",
       "from": {
         "name": "Reminders",
         "address": "reminders@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": false,
-      "is_flagged": true,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Remember this.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83160",
-      "message_id": "<gmail-83160@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Gmail labelled",
       "from": {
         "name": "Gmail Sender",
         "address": "gmail@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
-          "label": "Gmail (fixture@gmail.com)",
-          "email": "fixture@gmail.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Label membership comes from the labels table.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83170",
-      "message_id": "<missing-83170@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Missing body",
       "from": {
         "name": "Ghost",
         "address": "ghost@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "",
-      "body": {
-        "available": false,
-        "readable": false,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     }
   ],
   "scan": {
@@ -184,7 +68,5 @@
       "lookback_seconds": 600
     }
   },
-  "warnings": [
-    "W_EMLX_MISSING: no .emlx file for uid 83170"
-  ]
+  "warnings": []
 }
