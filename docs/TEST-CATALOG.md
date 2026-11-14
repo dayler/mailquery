@@ -21,7 +21,9 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | Prefijo | Qué cubre | Archivo |
 |---|---|---|
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
-| UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible y hojas `<style>` | `tests/test_content.py` |
+| UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` |
+| UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` |
+| UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -43,7 +45,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py` |
+| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py` |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` |
 
@@ -61,15 +63,20 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 
 `attachment_cached` se genera con una primera corrida que siembra la caché; el test documenta esa semilla.
 
+Los goldens de éxito de `search`, `new`, `show` y `attachment` llevan
+`content_notice` justo después de `generated_at`; los de error, `doctor` y
+`mailboxes` no lo llevan. La actualización de cada golden es una única línea
+añadida y el resto de sus valores no cambia.
+
 ## 4. Dobles y fixtures
 
-- `tests/fakes/outlook.py`: Outlook falso con solo los miembros del modelo de objetos que usa el backend. Registra cada llamada en un `CallLog` y lleva contadores de mutación que deben quedar en cero. Incluye stores, items, carpetas, fallos de COM, zona horaria inyectable y adjuntos (locales, no descargados, S/MIME, corruptos y materialización).
+- `tests/fakes/outlook.py`: Outlook falso con solo los miembros del modelo de objetos que usa el backend. Registra cada llamada en un `CallLog` y lleva contadores de mutación que deben quedar en cero. Cada item admite `body_format` (`olFormatHTML` cuando tiene HTML, texto plano si no), cabeceras de transporte propias y fallos de COM inyectables; `BodyFormat` se registra en el `CallLog` como las demás propiedades y un item de reunión, informe o tarea no lo tiene. Incluye stores, items, carpetas, fallos de COM, zona horaria inyectable y adjuntos (locales, no descargados, S/MIME, corruptos y materialización).
 - `tests/fakes/plugin.py`: plugin de prueba con API 1, capacidades configurables, `native_order_key`, cuerpo, adjuntos y fallos inyectables. Es la única vía para probar un driver externo sin publicar uno real.
 - `tests/fakes/attachment_backend.py`: backend inyectable en la CLI con capacidades, adjuntos, motivos y timeouts controlables.
 - `tests/fakes/attachment_driver.py`: driver de adjuntos para los tests del motor; entrega bytes y motivos y nunca escribe en caché.
-- `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`).
+- `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`). Un mensaje admite cabeceras MIME extra (`extra_headers`, también repetidas) y `build_store(body_samples=True)` añade las muestras de origen del cuerpo y cabeceras del remitente (texto plano y HTML distintos, HTML con elementos ocultos, HTML sin texto, todo el HTML oculto y cabeceras de autenticación) sin cambiar el store por defecto.
 - `tests/fixtures/attachment_samples.py`: contenidos de muestra para el bloqueo por *magic bytes*.
-- `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>` y un cuerpo típico de 6 KB para la medición informativa del paso a línea.
+- `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>`, un cuerpo típico de 6 KB para la medición informativa del paso a línea, las muestras de URL (inicios, terminación, dominios, tablas de modos, punycode y URL largas) y las de `Authentication-Results` y `Reply-To`.
 - `tests/fixtures/active_content_samples.py`: PDF, OLE y ZIP de muestra para el detector de contenido activo (con y sin marcadores, con `vbaProject.bin`, con ejecutables, con entradas `.bin` propias de Office y con un ZIP cuyo directorio central no se puede leer). El ZIP cifrado se fabrica activando el bit 0 de *general purpose flag* en las cabeceras local y central.
 
 ## 5. CI y saltos
@@ -126,13 +133,23 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
 | AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
+| AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios | UT-CW-06 (parcial; completa con UT-FLD-07) | — |
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 | AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
-| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01 (parcial; completa con UT-CNT-06, UT-CW-13) | — |
-| AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea | UT-CNT-02 (parcial; completa con UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09) | — |
-| AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS | UT-CNT-03 (parcial; completa con UT-CW-07) | — |
-| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice` | UT-CNT-04 (parcial; completa con UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08) | — |
+| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01, UT-CNT-06, UT-CW-13 | — |
+| AC-H03 (delta `PRD-v2.2.md`) | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
+| AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea y por hoja; `W_HIDDEN_CONTENT`; cuerpo todo oculto con `W_HTML_NO_TEXT` y `--text` sin el oculto | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | — |
+| AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` en los comandos | UT-CNT-03, UT-CW-07 | — |
+| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice`; reglas de seguridad en la skill y los README | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | — |
+| AC-H06 (delta `PRD-v2.2.md`) | Detección y modos de URL en todos los campos; truncado sobre el texto transformado; filtros iguales en los tres modos | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | — |
+| AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08, UT-CW-10 | — |
+| AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08, UT-CW-10 | — |
+| AC-H10 (delta `PRD-v2.2.md`) | `W_LONG_URL` y `W_SCRIPT_LINK` | UT-CNT-08, UT-CW-10 | — |
+| AC-H11 (delta `PRD-v2.2.md`) | Primera `Authentication-Results` (resultados de `spf`, `dkim` y `dmarc`; varias firmas DKIM con una en `pass` cuentan como `pass`) y `Reply-To` de otro dominio; sin cabecera, en correo interno de Outlook o en un mensaje de un plugin no se emiten; `headers` de `show` no cambia | UT-BOD-03, UT-BOD-04, UT-CNT-09, UT-CW-11 | — |
+| AC-H07 (delta `PRD-v2.2.md`) | `--strip-links` en `search`, `new` y `show`; prevalece sobre `[content].url_display`; sin opción ni clave el modo es `neutralize`; en `doctor`, `mailboxes` y `attachment` ⇒ `E_USAGE` | UT-CW-09 | — |
+| AC-H13 (delta `PRD-v2.2.md`) | `[content].url_display` inválido, clave desconocida o `content` que no es tabla ⇒ `E_CONFIG_INVALID` (exit 2) antes de abrir el store | UT-CFG-03, DOC-06.02, DOC-06.04 | — |
+| AC-H16 (delta `PRD-v2.2.md`) | Los logs no registran URLs, dominios, direcciones ni contenido; solo códigos `W_*` | UT-CW-12 | — |
 
 ## 8. Casos
 
@@ -153,6 +170,17 @@ Archivo: `tests/test_config.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | `[logging].retention_days = 7` ⇒ `E_CONFIG_INVALID` con el hint `retention_days was replaced by max_size_mb`. |
+
+#### UT-CFG-03 — `[content]`
+
+Requisitos: RF-63 · Archivo: `tests/test_config.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin tabla ⇒ `neutralize`; `neutralize`, `keep` y `strip` son válidos. |
+| .02 | N | `url_display = "raw"` y `url_display = 1` ⇒ `E_CONFIG_INVALID`, exit 2, `hint` con `neutralize`, `keep` y `strip`, antes de abrir el store. |
+| .03 | N | Una clave desconocida en `[content]` ⇒ `E_CONFIG_INVALID`, exit 2. |
+| .04 | N | `content = 1` (valor que no es una tabla) ⇒ `E_CONFIG_INVALID`, exit 2, antes de abrir el store. |
 
 #### UT-CLI-04 — Opciones que no existen
 
@@ -375,6 +403,217 @@ Requisitos: RF-66 · Archivo: `tests/test_content.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `CONTENT_NOTICE` es literalmente el texto de RF-66. |
+
+#### UT-CNT-05 — Detección de URLs
+
+Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Cada inicio de RF-54 se detecta, también en mayúsculas (`HTTPS://`, `WWW.`, `HXXPS://`, `JAVASCRIPT:`, `DATA:`): `http`, `https`, `ftp`, `smb`, `file`, `javascript:`, `vbscript:`, `data:text/html…`, `www.`, `hxxp://`, `hxxps://` y la ruta UNC; `kind`, `scheme`, `script` y los offsets son los esperados. |
+| .02 | P | `ｈｔｔｐｓ：／／evil.example/pay` y `ｈｘｘｐ：／／evil.example/pay` se detectan (inicios con esquema en ancho completo). |
+| .03 | P | `evil[.]example/pay` se detecta como una sola URL de tipo `bracket_domain`, sin esquema y sin marca de script. |
+| .04 | N | No son URL: `JavaScript: un lenguaje`, `Data: 12/11`, `metadata:x`, `facturas.example/f/1`, `mailto:a@b.example`, `tel:123`, `ms-word:ofe`, `http://` sin nada detrás, `data:12`, `data:text/html`, `\\`, `\\evil.example` sin `\` final, `\\evil\` sin nada detrás, `www.-x`, `www. x`, los inicios en ancho completo de `data:` y `www.`, `＼＼evil.example\share`, `a[.]`, `[.]b`, `[.]`, `xhttp://a` y la cadena vacía. |
+| .05 | B | Terminación: espacio, `"`, `'`, `<` y `>` cortan la URL; dos URLs seguidas no se solapan. |
+| .06 | P | `url_domain`: con usuario y puerto (`https://u:p@host.example:8080/x` → `host.example`), `www.` con puerto, UNC y `[.]` (`evil[.]example/pay` → `evil.example`); `None` para `javascript:`, `vbscript:` y `data:`. |
+| .07 | P | `url_domain` con inicio en ancho completo (`ｈｔｔｐｓ：／／evil.example/pay`) y ya neutralizado (`hxxps://evil.example/pay`) → `evil.example`; `address_domain` de una dirección (también con dos separadas por coma), de `None`, de `""` o sin `@` da el dominio o `None`. |
+| .08 | N | No son URL `www.` sin letra ni dígito detrás (`www.-x`, `www. x`, `www.`) y `[.]` sin letra o dígito a los dos lados (`a[.]`, `[.]b`, `[.]`, `...[.]...`). |
+
+#### UT-CNT-06 — Modos de URL
+
+Requisitos: RF-54 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `keep` deja el texto igual. |
+| .02 | P | `neutralize`: cada fila de las tablas A4 de la sección 8 de PRD-v2.2 da el resultado indicado, también con el esquema en mayúsculas (`HTTPS://`, `WWW.`). |
+| .03 | P | `strip`: cada URL → `[link omitted]` (filas de la sección 8 de PRD-v2.2) y el resto del texto no cambia. |
+| .04 | B | Una URL ya neutralizada, ASCII y de 2.048 caracteres o menos (`hxxps://…`, `evil[.]example/pay`) no cambia con `neutralize`. |
+| .05 | B | Idempotencia: `render_urls(render_urls(x, "neutralize"), "neutralize") == render_urls(x, "neutralize")` para todas las muestras. |
+| .06 | B | El texto fuera de las URLs no cambia en ningún modo; dos llamadas dan el mismo resultado; un texto sin URLs (incluidos caracteres con NFKC de varios caracteres) no cambia; `render_urls(x, "otro")` lanza `ValueError`. |
+| .07 | P | Esquemas de script en mayúsculas y en ancho completo: `JAVASCRIPT:x` → `JAVASCRIPT[:]x`, `VbScript:x` → `VbScript[:]x`, `DATA:text/html,x` → `DATA[:]text/html,x`, `ｊａｖａｓｃｒｉｐｔ：x` → `ｊａｖａｓｃｒｉｐｔ[:]x`. |
+
+#### UT-CNT-07 — Punycode y acortado
+
+Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `https://pаypal.com/login` (а cirílica) → `hxxps://xn--pypal-4ve.com/login`; solo cambian la etiqueta no ASCII y el esquema. |
+| .02 | P | Dominio entero en otro alfabeto, dominio `www.` no ASCII y dominio con dos etiquetas no ASCII: cada etiqueta no ASCII en ACE y las etiquetas ASCII intactas. |
+| .03 | B | URL de 2.048 caracteres sale entera; de 2.049 sale con 256 + `…[+1793 characters]`; el ejemplo de 5.000 da `…[+4744 characters]`. |
+| .04 | B | `keep` nunca acorta ni cambia el dominio; `strip` da `[link omitted]` también para la URL larga. |
+| .05 | B | El acortado se calcula sobre la URL ya neutralizada (con punycode): el `<n>` correcto cuando el ACE cambia la longitud (`…[+1800 characters]`). |
+| .06 | P | URL ya neutralizada por el remitente (D-20): `hxxps://pаypal.com/x` → `hxxps://xn--pypal-4ve.com/x` (el esquema no cambia, el dominio sí); una `hxxps://` de 5.000 caracteres sale con sus primeros 256 + `…[+4744 characters]`. |
+| .07 | P | ACE en el host de una ruta UNC no ASCII (`\\pаypal\share` → `[\\]xn--pypal-4ve\share`) y en un dominio `[.]` no ASCII (`pаypal[.]com/x` → `xn--pypal-4ve[.]com/x`). |
+
+#### UT-CNT-08 — Conteos y textos de las señales
+
+Requisitos: RF-55, RF-57–RF-59 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `count_url_signals` suma URLs de varios textos; una URL de script cuenta en `external` y en `script`; una de 2.049 cuenta en `long` y una de exactamente 2.048 no; sin entradas da ceros y dos llamadas coinciden. |
+| .02 | P | `non_ascii_domains` cuenta una URL con alfabetos mezclados, una con dominio entero en otro alfabeto y una dirección `soporte@pаypal.com`; no cuenta usuario ni ruta no ASCII de la URL ni dominios ASCII parecidos (`paypa1.com`). |
+| .03 | P | Los textos de los siete warnings son literalmente los de RF-55–RF-61 (con `<n>`, `<uid>` y `<resultados>`). |
+| .04 | P | `content_warnings` devuelve solo los que aplican, en el orden `W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`, `W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED`, `W_REPLY_TO_MISMATCH`; ninguno contiene URL, dominio ni dirección. |
+| .05 | B | Sin URLs, sin oculto y sin señales del remitente → lista vacía. |
+| .06 | P | `JAVASCRIPT:x`, `VbScript:x`, `DATA:text/html,x` y `ｊａｖａｓｃｒｉｐｔ：x` cuentan en `script` y en `external`. |
+
+#### UT-CNT-09 — Señales del remitente
+
+Requisitos: RF-60, RF-61 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | El ejemplo A6 de la sección 8 de PRD-v2.2 → `"spf=softfail dkim=none dmarc=fail"`. |
+| .02 | N | Todo `pass`; `none`/`neutral` sin fallos; cabecera ausente (`None`) → `None`. |
+| .03 | P | `permerror` y `fail` cuentan; mayúsculas (`SPF=FAIL`) → `spf=fail`; un mecanismo ausente no aparece en el resultado. |
+| .04 | B | Varias firmas DKIM: una `pass` → `pass`; ninguna `pass` → la primera. |
+| .05 | B | Resultado desconocido (`dkim=weird`) → `unknown`, y el resultado no contiene otro texto de la cabecera (comentarios, `header.from=…`, `header.d=…`, el servidor). |
+| .06 | P | `reply_to_mismatch`: dominio distinto → `True` (también con varias direcciones y una distinta); el mismo dominio con otras mayúsculas → `False`. |
+| .07 | N | Sin `Reply-To`, `from_address` sin `@`, `Reply-To` sin direcciones con dominio o mal formado (`"<<<"`, `""`) → `False`. |
+| .08 | P | Valor plegado: `"mx.example;\r\n\tspf=pass smtp.mailfrom=a.example;\r\n\tdmarc=fail header.from=a.example"` → `"spf=pass dmarc=fail"`. |
+| .09 | B | `sender_auth_failure("")`, una cabecera sin mecanismos reconocidos y `spf=temperror dkim=policy dmarc=pass` (sin fallo) → `None`. |
+
+#### UT-CW-01 — A2 en los campos de contenido
+
+Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un mensaje con ANSI, C1, `U+200B`, `U+202E`, selectores y rellenos en `subject`, `from.name`, nombres de `to`/`cc` y cuerpo: `search` y `new` los devuelven saneados, incluido `snippet`. |
+| .02 | P | `show` del mismo mensaje: `subject`, nombres, cada valor de `headers`, `body_text` y `attachments[].name` saneados. |
+| .03 | P | `attachment`: `original_name` saneado; `sanitized_name` y `path` iguales a los del mismo nombre original (calculados con `sanitize_name` y la ruta de caché). |
+| .04 | N | `uid`, `message_id`, `from.address`, `to[].address`, `mailbox.*`, `account.*`, `source.emlx_path` y `cached_path` salen sin cambios aunque contengan caracteres invisibles. |
+| .05 | P | Una etiqueta de cuenta y un nombre de carpeta con `U+200B` copiados de `mailboxes` resuelven en `config.toml` y en `--include-mailbox`. |
+
+#### UT-CW-02 — A2 en warnings y errores
+
+Requisitos: RF-52 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un warning con un identificador con `U+202E` (`W_STORE_EXCLUDED` de un store excluido del plugin falso) sale saneado en `warnings[]`, mientras `excluded_stores[].label` sigue igual. |
+| .02 | P | Un error cuyo `message` cita un valor del usuario con `U+202E` sale saneado en el JSON y en `stderr`; `code` y exit sin cambios. |
+| .03 | B | `warnings[]` de `mailboxes`, `new` y `doctor --json` también pasan por A2 (todos los comandos). |
+| .04 | N | Un error con `hint` nulo conserva `"hint": null` en el JSON tras A2. |
+
+#### UT-CW-03 — Búsqueda con A2 a ambos lados
+
+Requisitos: RF-52 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Asunto original `Factura​ de octubre`: `--subject "Factura de"` lo encuentra. |
+| .02 | P | Patrón con `U+200B` (`--subject "Fac​tura"`) encuentra un asunto sin él. |
+| .03 | P | `--text` con un cuerpo con `U+202E` en medio de la palabra; `--from`, `--to` y `--cc` con nombres con `U+202E`/`U+200B`. |
+| .04 | N | Sin caracteres de A2, los resultados de `--subject` son los mismos que filtrar el resultado completo por subcadena. |
+
+#### UT-CW-04 — Adjuntos con nombres con `Cf` o controles
+
+Requisitos: RF-52 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un adjunto con un selector de variación (`U+FE00`): el bloqueo, el `sanitized_name` y la ruta de caché son los mismos que `classify_name` y `sanitize_name` dan para el nombre original. |
+| .02 | N | Un nombre con `U+200B` o un control C0 que hoy se bloquea sigue dando `E_ATTACHMENT_BLOCKED`, sin archivos. |
+
+#### UT-CW-05 — `content_notice`
+
+Requisitos: RF-66 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search`, `new` y `show` de éxito (store sintético y doble de Outlook) tienen `content_notice` con el texto exacto, justo después de `generated_at`. |
+| .02 | N | Las respuestas de error de esos comandos, `doctor --json` y `mailboxes` no lo tienen. |
+
+#### UT-CW-06 — Compatibilidad
+
+Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con la fila completa actual de `search`/`new` y `show` sin opciones, las claves son las de antes más `content_notice`, y es la única clave nueva. |
+| .02 | B | `state.json` y el manifiesto de una corrida de `new` y de `attachment` conservan su forma y contenido (sin `content_notice`). |
+
+#### UT-CW-07 — Cuerpo visible en los comandos
+
+Requisitos: RF-53, RF-56 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un mensaje con texto oculto en línea y por una hoja `<style>`: `search`, `new` y `show` dan una vez `W_HIDDEN_CONTENT: <n> hidden character(s) omitted from the body of <uid>` con el `<n>` de `html_body_to_text`; el mensaje se devuelve y el exit es 0. |
+| .02 | P | `W_HIDDEN_CONTENT` va antes de `W_EXTERNAL_LINKS`; el detalle no contiene texto del mensaje. |
+| .03 | N | Un mensaje sin texto omitido, de texto plano o de un plugin no da `W_HIDDEN_CONTENT`. |
+| .04 | P | Un HTML todo oculto da `W_HTML_NO_TEXT` además de `W_HIDDEN_CONTENT`; `--text` con una palabra del texto oculto no encuentra el mensaje (Apple Mail y Outlook). |
+
+#### UT-CW-08 — Modos de URL en los campos
+
+Requisitos: RF-54 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `keep`, `neutralize` y `strip`: `subject`, `from.name`, `to[].name`, `cc[].name`, cada valor de `headers` (`show`), `body_text` y `snippet` se transforman igual que `render_urls` (incluido `Subject` en `headers` con `--strip-links`). |
+| .02 | N | Nombres de adjuntos, `warnings[]`, textos de error, direcciones y `uid` no cambian en ningún modo. |
+| .03 | P | Los filtros devuelven los mismos mensajes en los tres modos; `--subject evil.example` encuentra el asunto con la URL neutralizada o quitada. |
+| .04 | B | `show` con una URL que hace superar 20.000 caracteres solo antes de acortarla: el truncado y `W_BODY_TRUNCATED` se calculan sobre el texto transformado. |
+
+#### UT-CW-09 — `--strip-links` y precedencia
+
+Requisitos: RF-54, RF-63 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin opción ni clave ⇒ `neutralize`. |
+| .02 | P | `[content].url_display = "keep"` ⇒ `keep`; `"strip"` ⇒ `strip`. |
+| .03 | P | `--strip-links` con `url_display = "keep"` ⇒ `strip` en `search`, `new` y `show`. |
+| .04 | N | `doctor --strip-links`, `mailboxes --strip-links` y `attachment <uid> --all --strip-links` ⇒ `E_USAGE`, exit 2. |
+
+#### UT-CW-10 — Señales de enlaces en los comandos
+
+Requisitos: RF-55, RF-57, RF-58, RF-59 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Una URL en el asunto y otra en el cuerpo ⇒ `W_EXTERNAL_LINKS: 2 …`; la del asunto cuenta una vez aunque `headers` la repita (`show`). |
+| .02 | P | La URL larga y el enlace de script: `W_EXTERNAL_LINKS: 2`, `W_SCRIPT_LINK: 1`, `W_LONG_URL: 1`, en ese orden, en los tres modos y en los tres comandos. |
+| .03 | P | Homoglifos: `W_EXTERNAL_LINKS: 1` y `W_NON_ASCII_DOMAIN: 2` (URL + dirección); con `neutralize`, `xn--pypal-4ve.com` en el cuerpo y la dirección igual. |
+| .04 | P | `search`, `new` y `show` dan los mismos conteos; en `new`, todos antes de `W_FIRST_RUN`. |
+| .05 | N | Sin URLs en esos campos no aparece ninguno de los cuatro; un texto que empieza como un esquema sin cumplir la definición (`JavaScript: …`) no cuenta. |
+| .06 | P | Cuerpo con `JAVASCRIPT:x`, `VbScript:x`, `DATA:text/html,x` y `ｊａｖａｓｃｒｉｐｔ：x` ⇒ `W_EXTERNAL_LINKS: 4` y `W_SCRIPT_LINK: 4` en los tres comandos; con `neutralize`, `JAVASCRIPT[:]x`, `VbScript[:]x`, `DATA[:]text/html,x` y `ｊａｖａｓｃｒｉｐｔ[:]x`. |
+| .07 | P | Un mensaje con `W_BODY_UNREADABLE` y una URL en el asunto ⇒ `W_EXTERNAL_LINKS: 1` en `show`. |
+| .08 | N | `attachment`, `mailboxes` y `doctor --json` no contienen `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`, `W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` ni `W_REPLY_TO_MISMATCH`. |
+| .09 | P | Un mensaje de un plugin sin cuerpo legible con una URL en el asunto y otra en el nombre del remitente ⇒ `W_EXTERNAL_LINKS: 2`; no se emite `W_HIDDEN_CONTENT`. |
+
+#### UT-CW-11 — Señales del remitente en los comandos
+
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | El ejemplo A6 en Apple Mail y en Outlook: `W_SENDER_AUTH_FAILED: spf=softfail dkim=none dmarc=fail in <uid>` y `W_REPLY_TO_MISMATCH: … in <uid>` en `search`, `new` y `show`, en ese orden y después de las señales de enlaces. |
+| .02 | N | Todo `pass`, sin cabecera, con `Reply-To` del mismo dominio o con el fallo solo en la segunda `Authentication-Results`: sin warnings. |
+| .03 | N | Un mensaje de un plugin y correo interno de Outlook sin cabeceras de transporte: sin warnings. |
+| .04 | N | `headers` de `show` sigue con sus seis cabeceras (sin `Reply-To` ni `Authentication-Results`); el exit no cambia. |
+| .05 | P | Un mensaje S/MIME de Apple Mail con `dmarc=fail` en la primera `Authentication-Results` ⇒ `W_SENDER_AUTH_FAILED` (la exclusión de S/MIME solo aplica al item de Outlook). |
+
+#### UT-CW-12 — Logs sin contenido
+
+Requisitos: RF-64 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Tras `search`, `new` y `show` de mensajes con URLs, dominio no ASCII, direcciones y A6, `~/.mailquery/logs/mailquery.log` (del `HOME` temporal) contiene los códigos `W_*` y no contiene ninguna URL, dominio, dirección ni texto del mensaje. |
+| .02 | P | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` se registran solo por código, sin sus detalles ni las direcciones. |
+
+#### UT-CW-13 — Determinismo de punta a punta
+
+Requisitos: RNF-19 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | B | La misma consulta dos veces, con cada modo, da el mismo JSON salvo `generated_at` y `scan.duration_ms`. |
 
 ### Estado, búsqueda y store
 
@@ -1068,7 +1307,7 @@ Requisitos: AC-12 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Forma exacta de la respuesta de §12.11: `uid` prefijado, `output_dir` absoluto, `count`, ocho campos por adjunto, `warnings: []`. |
+| .01 | P | Forma exacta de la respuesta de §12.11: `uid` prefijado, `output_dir` absoluto, `count`, ocho campos por adjunto, `warnings: []`, y `content_notice` con el texto exacto justo después de `generated_at`. |
 | .02 | P | Primera corrida `cached:false`; segunda sin `--force` `cached:true` con `size_bytes`/`sha256` del archivo; `--force` `cached:false`. |
 | .03 | N | Mensaje bloqueado ⇒ `E_ATTACHMENT_BLOCKED` (exit 4), sin archivos, sin caché servida, con el `message`/`hint` de los ejemplos de bloqueo de §12.5. |
 | .04 | N | Un fallo de límite o disponibilidad no devuelve resultados parciales. |
@@ -1630,8 +1869,8 @@ Requisitos: RF-05, RF-06 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Texto plano. |
-| .02 | P | Texto vacío y HTML ⇒ HTML convertido. |
+| .01 | P | Item con `BodyFormat` HTML y el mismo texto en `Body` y `HTMLBody` ⇒ cuerpo del HTML, con la forma de la fila de `search` y de `show` y sus valores. |
+| .02 | P | Texto vacío y HTML ⇒ HTML convertido; un item de reunión no tiene `BodyFormat` ni `HTMLBody` (`AttributeError`) ⇒ `Body`. |
 | .03 | N | HTML sin texto ⇒ `available=true`, `readable=true`, `snippet: ""` y `W_HTML_NO_TEXT`. |
 | .04 | N | Solo cabeceras ⇒ `false/false/false` + `W_BODY_NOT_LOCAL`, sin miembros de descarga. |
 | .05 | N | S/MIME cifrado ⇒ `true/false/false` + `W_BODY_UNREADABLE` con su texto; el `CallLog` no registra miembros de cuerpo ni de adjuntos. |
@@ -1680,9 +1919,9 @@ Requisitos: RF-17 · Archivo: `tests/test_outlook.py`
 | .02 | N | `--text x` sin acotar ⇒ `E_UNBOUNDED_SCAN`; el hint no lista `--to` ni `--cc`. |
 | .03 | N | `--text x --to y` ⇒ `--to` no acota; una sola validación y un solo error. |
 | .04 | N | `--to x --since 1y` con más candidatos que `max_scan` ⇒ `E_SCAN_TOO_LARGE`. |
-| .05 | P | `--to x --since 1d` ⇒ ejecuta; `scan.mode = metadata`; `scan.candidates` = mensajes antes de aplicar `--to`; `scan.messages_read` = items abiertos. |
-| .06 | P | `--text` acotado ⇒ coincidencias en el cuerpo; `scan.mode = text`. |
-| .07 | P | `--text x --to y --since 1d` ⇒ `scan.candidates` = mensajes antes de aplicar `--to`. |
+| .05 | P | `--to x --since 1d` ⇒ ejecuta; `scan.mode = metadata`; `scan.candidates` = mensajes antes de aplicar `--to`; `scan.messages_read` = items abiertos; solo el mensaje devuelto con cuerpo legible lee sus cabeceras de transporte (1 lectura de `PR_TRANSPORT_MESSAGE_HEADERS`). |
+| .06 | P | `--text` acotado ⇒ coincidencias en el cuerpo; `scan.mode = text`; cada candidato cuyo cuerpo se lee lee también sus cabeceras de transporte (3 lecturas, una por candidato legible). |
+| .07 | P | `--text x --to y --since 1d` ⇒ `scan.candidates` = mensajes antes de aplicar `--to`; el filtro de destinatarios abre todos los items pero solo el que coincide lee su cuerpo y sus cabeceras de transporte (1 lectura). |
 
 #### OL-25 — `new` en Windows
 
@@ -1744,7 +1983,7 @@ Requisitos: RNF-07 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
-Barrido de los comandos con todos sus flags sobre el fake de Outlook; bloqueante.
+Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`— sobre el fake de Outlook; bloqueante.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -1753,6 +1992,71 @@ Barrido de los comandos con todos sus flags sobre el fake de Outlook; bloqueante
 | .03 | N | 0 mutaciones. |
 | .04 | N | Nunca aparecen errores ni warnings que no aplican al backend de Outlook, ni `E_INTERNAL`. |
 | .05 | N | Las corridas de `attachment` escriben solo bajo `<home>` y dejan vacío el staging. |
+
+### Cuerpo y cabeceras del remitente (Apple Mail y Outlook)
+
+#### UT-BOD-01 — Cuerpo en Apple Mail
+
+Requisitos: RF-53 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `multipart/alternative` con texto plano y HTML distintos ⇒ `body_text` del HTML (`Factura adjunta.`), también en `BodyRow.body_text`. |
+| .02 | P | Solo texto plano ⇒ texto plano. |
+| .03 | N | HTML sin texto (solo `<img>`) con texto plano presente ⇒ `""` y `W_HTML_NO_TEXT`; el texto plano no aparece. |
+| .04 | P | `multipart/mixed` con una parte `text/plain` y otra `text/html` de cuerpo ⇒ solo el HTML. |
+| .05 | P | HTML con un elemento oculto ⇒ `hidden_chars` igual al de `html_body_to_text`; HTML todo oculto ⇒ `""`, `W_HTML_NO_TEXT` y `hidden_chars > 0`. |
+| .06 | N | `text/plain` de cuerpo más una parte `text/html` con `Content-Disposition: attachment` ⇒ `body_text` del texto plano; el HTML adjunto no aporta texto. |
+
+#### UT-BOD-02 — Cuerpo en Outlook (doble)
+
+Requisitos: RF-53 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `BodyFormat = 2` (`olFormatHTML`) con `Body` y `HTMLBody` distintos ⇒ texto del HTML, en `load_snippet` y en `load_body`. |
+| .02 | P | `BodyFormat = 1` (texto plano) y `3` (RTF) ⇒ `Body`, aunque exista `HTMLBody`. |
+| .03 | P | Item de reunión sin `BodyFormat` ni `HTMLBody` (`AttributeError`) ⇒ `Body`, sin error. |
+| .04 | N | `BodyFormat = 2` con HTML sin texto y `Body` presente ⇒ `""` y `W_HTML_NO_TEXT`. |
+| .05 | B | `BodyFormat` se lee por la lista blanca COM (sin violación del proxy de solo lectura, `mutations` y `forbidden` en cero) y no se abre ningún item más que uno por mensaje (`items_opened` y `GetItemFromID` = 1). |
+| .06 | N | `HTMLBody` que lanza un error COM (no `AttributeError`), `BodyFormat` que lanza un error COM y `BodyFormat` que devuelve `None` ⇒ `Body`, sin error. |
+
+#### UT-BOD-03 — Cabeceras del remitente en Apple Mail
+
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con dos `Authentication-Results` y una `ARC-Authentication-Results`, `authentication_results` es la primera (la de más arriba), en `load_body` y en `parse_emlx_headers`. |
+| .02 | P | `Reply-To` se entrega crudo; sin la cabecera, `None`. |
+| .03 | P | `load_headers` da las seis cabeceras de `show`, la primera `Authentication-Results` y `Reply-To` sin llamar a la extracción del cuerpo (espía sobre `emlx._extract_body_text`). |
+| .04 | B | `parse_emlx_headers` no lee más allá del bloque de cabeceras (archivo con cuerpo de varios MiB: se leen como mucho 256 KiB); archivo ausente, ilegible o que es un directorio ⇒ vacío, `read=False`, sin excepción. |
+| .05 | P | Primera `Authentication-Results` plegada con CRLF + tabulador y con `dmarc=fail` en una línea de continuación ⇒ el valor llega desplegado y contiene `dmarc=fail`, igual en `load_body` y en `load_headers`. |
+| .06 | B | `parse_emlx_headers`: bloque sin línea vacía antes del tope de 256 KiB (devuelve lo leído hasta el tope, sin excepción), línea de longitud inválida, archivo vacío, sin salto de línea, longitud cero y bloque que no se puede parsear (vacío, `read=False`) y cabeceras con *encoded words* (se decodifican como en `parse_emlx`). |
+| .07 | N | `load_headers` con un `.emlx` que no se resuelve, con una carpeta desconocida o con `resolve_path` que lanza ⇒ vacío y `read=False`; con un `.partial.emlx` ⇒ cabeceras leídas del parcial. |
+
+#### UT-BOD-04 — Cabeceras del remitente en Outlook (doble)
+
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Cabeceras de transporte con dos `Authentication-Results` y `Reply-To` ⇒ la primera y `Reply-To`, tanto en `load_body` como en `load_snippet`. |
+| .02 | N | Correo interno sin cabeceras de transporte ⇒ `None` en las dos y `headers` vacías. |
+| .03 | N | Item S/MIME: `load_headers` y `load_snippet` no abren el item (`CallLog` sin `GetItemFromID`) y devuelven vacío. |
+| .04 | P | `load_headers` abre el item (cuenta en `items_opened`, un `GetItemFromID`) y no accede a `Body`, `HTMLBody` ni `Attachments`. |
+| .05 | P | Cabeceras de transporte con la primera `Authentication-Results` plegada (CRLF + tabulador) y `dmarc=fail` en la línea de continuación ⇒ valor desplegado con `dmarc=fail`, en `load_headers` y en los dos cargadores del cuerpo. |
+| .06 | N | `load_headers` con `GetItemFromID` que falla, o con la lectura de `PR_TRANSPORT_MESSAGE_HEADERS` que lanza ⇒ vacío y `read=False`, sin excepción. |
+
+#### UT-BOD-05 — Punta a punta por `cli.main`
+
+Requisitos: RF-53, RF-60, RF-61 · Archivo: `tests/test_body_sources.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --text <palabra solo del HTML> --since …` encuentra el mensaje; `--text <palabra solo del texto plano>` no lo encuentra (Apple Mail y Outlook). |
+| .02 | P | `show` del mismo mensaje da `body_text` del HTML (Apple Mail y Outlook). |
+| .03 | P | Con `css_inline` simulado ausente (parcheando `output._css_inline` y el import), `search`, `new` y `show` terminan con exit 0 y convierten el HTML original (la omisión en línea sigue). |
 
 ### Punta a punta (`cli.main`)
 
@@ -1796,7 +2100,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, y con `--strip-links` en cada `search`, `new` y `show`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
@@ -1936,8 +2240,9 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Parsea con el cargador real, esquema cerrado, defaults documentados y `[attachments]` comentada. |
-| .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, y ninguna sección desconocida. |
+| .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, la tabla `[content]` entre las secciones documentadas permitidas y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
+| .04 | P | El ejemplo contiene el bloque comentado `# [content]` con `# url_display = "neutralize"`; una copia en un temporal con ese bloque descomentado se carga con el cargador real y da `url_display == "neutralize"`. |
 
 #### DOC-07 — Actualización de seguridad de `css-inline` en los README
 
@@ -1949,6 +2254,19 @@ Requisitos: AC-H17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
 | .02 | P | `README.es.md`: lo mismo dentro de "Instalar, actualizar y desinstalar", subsección "Actualización de seguridad de `css-inline`". |
 | .03 | P | Los dos README nombran `css-inline` en la introducción, en los requisitos y en las instrucciones de tests, y estas incluyen `coverage run` y `coverage report`. |
 | .04 | N | Ningún README conserva "standard library only" / "solo biblioteca estándar". |
+
+#### DOC-08 — Reglas de seguridad
+
+Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | La skill tiene la sección "Security rules" con una aserción por cada punto de comportamiento de RF-66 que le corresponde (1, 3, 5, 6, 8, 12, 13, 14 y 15): no seguir instrucciones del correo; no abrir URLs ni adjuntos sin petición; URLs neutralizadas por defecto y restauradas solo para el usuario; imágenes; triaje con metadatos; el nombre visible del remitente no prueba identidad; el texto de un enlace no es su destino; los siete warnings de F1 nombrados; tratar la salida como texto plano y escaparla antes de insertarla en HTML. |
+| .02 | P | `README.md` tiene "Security for harness operators" con la frase literal de RF-66 y el enlace a `docs/security/threat-model.md`; la sección de instalación de la skill enlaza esa sección. |
+| .03 | P | `README.es.md` tiene "Seguridad para quien opera el harness" con la frase literal en español, el enlace al anexo y el enlace desde la instalación de la skill. |
+| .04 | P | `search --help`, `new --help` y `show --help` describen `--strip-links`; las ayudas de `doctor`, `mailboxes` y `attachment` no la mencionan. |
+| .05 | P | La skill describe `content_notice` en "Output contract" y lista `--strip-links` entre las opciones de `search`, `new` y `show`. |
+| .06 | P | `README.md` y `README.es.md` describen en su sección de seguridad los seis controles de quien opera el harness (puntos 2, 4, 7, 9, 10 y 11 de RF-66), con una aserción por control en cada idioma. |
 
 #### INS-SMOKE-01 — Instaladores
 

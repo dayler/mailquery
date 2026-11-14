@@ -120,6 +120,14 @@ deduplicar por fuera, usa `message_id`.
 - Windows: `W_BODY_NOT_LOCAL` (Outlook solo tiene las cabeceras del item en
   local; el cuerpo nunca se descarga) y `W_STORE_EXCLUDED` (una cuenta declarada
   es un store excluido y no se lee).
+- Señales de contenido de F1, una por mensaje: `W_HIDDEN_CONTENT` (texto oculto
+  omitido del cuerpo), `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`,
+  `W_NON_ASCII_DOMAIN` (dominios no ASCII en URLs o direcciones),
+  `W_SENDER_AUTH_FAILED` (el proveedor vio fallar SPF/DKIM/DMARC) y
+  `W_REPLY_TO_MISMATCH` (las respuestas irían a otro dominio). Las URLs de la
+  salida llegan neutralizadas por defecto (`hxxps://`, `[:]`, `www[.]`, `[\\]`,
+  punycode y acortadas); `--strip-links` las quita. Que no aparezca un aviso no
+  prueba que el mensaje sea seguro.
 
 Campos que **no** vienen en `new` y no deben inventarse: cuerpo completo
 (usar `show`), texto de adjuntos, tamaño del adjunto o estado de la

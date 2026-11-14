@@ -235,7 +235,7 @@ class ContentTests(unittest.TestCase):
             f"uid {self.UID} snippet {self.BODY}"
         )
 
-        def failing_search(backend, config, filters):
+        def failing_search(backend, config, filters, **kwargs):
             # Labels are unavailable: resolving a label logs a warning.
             backend.labels.label_for(ACCOUNT_ICLOUD)
             backend.labels.label_for(ACCOUNT_GMAIL)

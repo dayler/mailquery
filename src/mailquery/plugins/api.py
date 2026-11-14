@@ -92,6 +92,7 @@ METADATA_OPERATIONS: Final[frozenset[str]] = frozenset(
         "find_message",
         "load_body",
         "load_snippet",
+        "load_headers",
         "parse_uid",
         "parse_native_id",
         "attachments",

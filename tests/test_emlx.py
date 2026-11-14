@@ -249,7 +249,7 @@ class ParseEmlxTests(EmlxTestCase):
         self.assertFalse(result.partial)
         self.assertEqual(result.headers["Subject"], "Invoice 2026-10")
         self.assertIn("finance@fixture.example", result.headers["Cc"])
-        # text/plain wins over the HTML alternative.
+        # The body comes from the HTML part; this fixture carries the same text in both.
         self.assertEqual(result.body_text, "Please find the invoice attached.")
         self.assertEqual(result.attachments, ("invoice-2026-10.pdf",))
         self.assertEqual(result.warnings, ())

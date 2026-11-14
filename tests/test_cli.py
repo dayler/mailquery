@@ -28,6 +28,7 @@ from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.attachments import attachment_path, sanitize_name
 from mailquery.attachments.paths import message_dir
 from mailquery.errors import MailqueryError
+from mailquery.output import CONTENT_NOTICE
 from mailquery.plugins import EXTRACTION_TIMEOUT_SECONDS, PluginError, Reason
 from mailquery.search import Filters
 
@@ -886,7 +887,10 @@ class DispatchTests(_CliTestCase):
         self.assertEqual(store_args[0], self.fx.home)
         self.assertTrue(callable(store_args[1]))
         self.assertEqual(run_mock.call_args.args[2], state_store)
-        self.assertEqual(run_mock.call_args.kwargs, {"peek": True, "limit": 7})
+        self.assertEqual(
+            run_mock.call_args.kwargs,
+            {"peek": True, "limit": 7, "url_mode": "neutralize"},
+        )
         rendered = self.json_object(stdout)
         self.assertEqual(rendered["cursor"], {"previous": None, "current": None})
         self.assertEqual(rendered["count"], 0)
@@ -2499,10 +2503,11 @@ class AttachmentJsonCacheTests(AttachmentTestBase):
         payload = self.json_object(stdout)
         self.assertEqual(
             list(payload),
-            ["ok", "command", "generated_at", "uid", "output_dir", "count",
-             "attachments", "warnings"],
+            ["ok", "command", "generated_at", "content_notice", "uid",
+             "output_dir", "count", "attachments", "warnings"],
         )
         self.assertEqual(payload["command"], "attachment")
+        self.assertEqual(payload["content_notice"], CONTENT_NOTICE)
         self.assertEqual(payload["uid"], self.UID)
         self.assertTrue(os.path.isabs(payload["output_dir"]))
         self.assertEqual(

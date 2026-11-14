@@ -44,7 +44,13 @@ from mailquery.config import (
 )
 from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
-from mailquery.output import configure_streams, now_iso, write_json
+from mailquery.output import (
+    CONTENT_NOTICE,
+    configure_streams,
+    now_iso,
+    sanitize_text,
+    write_json,
+)
 from mailquery.plugins import (
     EXTRACTION_TIMEOUT_SECONDS,
     PluginContext,
@@ -75,6 +81,8 @@ _CLIENT_NAMES = {"apple_mail": "Apple Mail", "outlook": "Outlook"}
 
 _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
+#: Commands whose successful response carries the fixed untrusted-content notice.
+_CONTENT_NOTICE_COMMANDS = frozenset({"search", "new", "show", "attachment"})
 
 _ROOT_EPILOG = """\
 Examples:
@@ -159,6 +167,10 @@ Notes:
   [search].max_scan candidates after the filters, with E_SCAN_TOO_LARGE (exit 4).
   --include-mailbox takes folders of declared accounts; INBOX is the inbox of the
   first declared account.
+  URLs in the subject, the names, the headers and the body are neutralized by
+  default ([content].url_display = "keep" keeps the exact text); --strip-links
+  replaces every URL with [link omitted]. The filters always compare the original
+  text, so the results are the same in every mode.
 """
 
 _NEW_EPILOG = """\
@@ -174,6 +186,9 @@ Notes:
   arrived after the cursor. --peek never writes the state.
   Messages with a null, invalid or future date are ignored until their date is valid.
   Accounts or folders added to config.toml do not emit their history: use search.
+  URLs and link signals follow the message processing of search: the URLs are
+  neutralized by default ([content].url_display = "keep" keeps the exact text) and
+  --strip-links replaces them with [link omitted].
 """
 
 _SHOW_EPILOG = """\
@@ -184,6 +199,9 @@ Notes:
   The body is truncated to 20,000 characters; headers and attachment names are
   included. Only messages of accounts declared in config.toml can be shown; use
   the uid reported by search or new.
+  The URLs of the subject, the names, the headers and the body are neutralized by
+  default ([content].url_display = "keep" keeps the exact text) and --strip-links
+  replaces them with [link omitted].
 """
 
 
@@ -424,6 +442,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help=f"maximum number of results (default: [search].default_limit; max {MAX_SEARCH_LIMIT})",
     )
+    search_parser.add_argument(
+        "--strip-links",
+        action="store_true",
+        help="replace every URL with [link omitted] (overrides [content].url_display)",
+    )
 
     new_parser = subparsers.add_parser(
         "new",
@@ -446,6 +469,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"maximum number of messages in this run "
         f"(default: [new].default_limit; max {MAX_NEW_LIMIT})",
     )
+    new_parser.add_argument(
+        "--strip-links",
+        action="store_true",
+        help="replace every URL with [link omitted] (overrides [content].url_display)",
+    )
 
     show_parser = subparsers.add_parser(
         "show",
@@ -456,6 +484,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_parser.set_defaults(command="show")
     _style_parser(show_parser, root=False)
+    show_parser.add_argument(
+        "--strip-links",
+        action="store_true",
+        help="replace every URL with [link omitted] (overrides [content].url_display)",
+    )
     # The uid format is validated in main() by _parse_command_uid, not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
@@ -983,7 +1016,13 @@ def _execute(
     elif command == "mailboxes":
         payload = run_mailboxes(backend, config, **extra)
     elif command == "search":
-        payload = run_search(backend, config, filters, **extra)  # type: ignore[arg-type]
+        payload = run_search(
+            backend,
+            config,
+            filters,  # type: ignore[arg-type]
+            url_mode=_url_mode(config, args),
+            **extra,
+        )
     elif command == "new":
         state_store = StateStore(home_path, state_validator)
         payload = run_new(
@@ -992,6 +1031,7 @@ def _execute(
             state_store,
             peek=bool(args.peek),
             limit=new_limit,
+            url_mode=_url_mode(config, args),
             **extra,
         )
     elif command == "show":
@@ -1004,9 +1044,15 @@ def _execute(
                 driver=uid_driver or None,
                 drivers=mapping or None,
                 native=native,
+                url_mode=_url_mode(config, args),
             )
         else:
-            payload = run_show(backend, config, args.uid)
+            payload = run_show(
+                backend,
+                config,
+                args.uid,
+                url_mode=_url_mode(config, args),
+            )
     else:  # pragma: no cover - argparse prevents this
         raise MailqueryError(
             "E_USAGE",
@@ -1014,6 +1060,17 @@ def _execute(
             'run "mailquery --help" to see the available commands',
         )
     return payload
+
+
+def _url_mode(config: Config, args: argparse.Namespace) -> str:
+    """Effective URL display mode of ``search``, ``new`` and ``show``.
+
+    ``--strip-links`` wins over ``[content].url_display``, which wins over the
+    ``neutralize`` default already carried by the config.
+    """
+    if bool(getattr(args, "strip_links", False)):
+        return "strip"
+    return config.content.url_display
 
 
 def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
@@ -1180,7 +1237,7 @@ def _run_attachment(
     payload_entries = [
         {
             "index": int(record["index"]),
-            "original_name": str(record["original_name"]),
+            "original_name": sanitize_text(str(record["original_name"])),
             "sanitized_name": str(record["sanitized_name"]),
             "saved": bool(record["saved"]),
             "cached": bool(record["cached"]),
@@ -1285,16 +1342,28 @@ def _with_count(payload: dict) -> dict:
 
 
 def _success_payload(command: str, payload: dict) -> dict:
+    """Wrap a command payload with the success keys, the notice and sanitized warnings.
+
+    The fixed content notice follows ``generated_at`` for the commands that
+    return message content. Every warning string loses terminal escapes and
+    invisible characters; warnings never carry content beyond the identifier
+    they cite.
+    """
     merged: dict[str, Any] = {
         "ok": True,
         "command": command,
         "generated_at": now_iso(),
     }
+    if command in _CONTENT_NOTICE_COMMANDS:
+        merged["content_notice"] = CONTENT_NOTICE
     for key, value in payload.items():
         if key in _PAYLOAD_RESERVED_KEYS:
             continue
         merged[key] = value
     merged.setdefault("warnings", [])
+    merged["warnings"] = [
+        sanitize_text(str(warning)) for warning in (merged.get("warnings") or ())
+    ]
     return merged
 
 
@@ -1370,13 +1439,7 @@ def _emit_doctor_report(
     checks: list[dict], json_output: bool, logger: Any, client: str
 ) -> None:
     """Write the doctor payload (JSON or text report) and log the end line."""
-    payload = {
-        "ok": True,
-        "command": "doctor",
-        "generated_at": now_iso(),
-        "checks": checks,
-        "warnings": [],
-    }
+    payload = _success_payload("doctor", {"checks": checks, "warnings": []})
     if json_output:
         write_json(payload)
     else:
@@ -1818,10 +1881,14 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
 
 
 def _report_error(error: MailqueryError, command: str | None) -> int:
-    write_json(error.to_payload(command or "-"))
-    sys.stderr.write(f"mailquery: {error.code}: {error.message}\n")
-    if error.hint:
-        sys.stderr.write(f"mailquery: hint: {error.hint}\n")
+    """Write the error JSON and the human summary, both with the sanitized texts."""
+    payload = error.to_payload(command or "-")
+    write_json(payload)
+    message = payload["error"]["message"]
+    hint = payload["error"]["hint"]
+    sys.stderr.write(f"mailquery: {error.code}: {message}\n")
+    if hint:
+        sys.stderr.write(f"mailquery: hint: {hint}\n")
     sys.stderr.flush()
     return error.exit_code
 

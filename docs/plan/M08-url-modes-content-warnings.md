@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W3 (sola)
 **Rama:** `feature/m08-url-modes-content-warnings`, creada desde la punta de `integration/i2-content` (con M05, M06 y M07 ya integrados) · **Worktree:** `../mailquery-wt/m08`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -67,12 +67,12 @@ Usa R-01 (M02).
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — `[content]` y opción | `config.py`, `--strip-links`, precedencia; UT-CFG-03, UT-CW-09 | ⚪ |
-| F2 — Modos de URL | Paso 4 del punto 3 de la sección 2; UT-CW-08 | ⚪ |
-| F3 — Señales | Pasos 2, 3, 5 y 6; UT-CW-07, UT-CW-10, UT-CW-11 | ⚪ |
-| F4 — Logs, determinismo y solo lectura | UT-CW-12, UT-CW-13; barridos de TC-03 y OL-30 | ⚪ |
-| F5 — Documentación | Sección 2, punto 6; DOC-06.02, DOC-06.04, DOC-08 | ⚪ |
-| F6 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — `[content]` y opción | `config.py`, `--strip-links`, precedencia; UT-CFG-03, UT-CW-09 | 🟢 |
+| F2 — Modos de URL | Paso 4 del punto 3 de la sección 2; UT-CW-08 | 🟢 |
+| F3 — Señales | Pasos 2, 3, 5 y 6; UT-CW-07, UT-CW-10, UT-CW-11 | 🟢 |
+| F4 — Logs, determinismo y solo lectura | UT-CW-12, UT-CW-13; barridos de TC-03 y OL-30 | 🟢 |
+| F5 — Documentación | Sección 2, punto 6; DOC-06.02, DOC-06.04, DOC-08 | 🟢 |
+| F6 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -225,4 +225,9 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 | `ContentConfig` y `[content]` en el esquema cerrado (`url_display`, default `neutralize`; inválido, clave desconocida o `content` no tabla ⇒ `E_CONFIG_INVALID` antes del store). `--strip-links` en `search`, `new` y `show` con la precedencia `--strip-links` > `[content]` > `neutralize`; ayudas y epílogos de los tres comandos. UT-CFG-03 (4 casos) y UT-CW-09 (4 casos) verdes solos. |
+| 2026-11-14 | F2 | A4 en `subject`, `from.name`, `to[].name`, `cc[].name`, los seis valores de `headers` y el cuerpo completo; `snippet` y truncado de `show` sobre el texto ya transformado; filtros sin cambios. UT-CW-08 (4 casos) verde solo. |
+| 2026-11-14 | F3 | `_LoadedBody` con `hidden_chars`, `authentication_results` y `reply_to` (también en las filas del escaneo `--text`); conteos de A5 sobre el texto saneado completo y las direcciones, sin `headers`; `W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`, `W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` por mensaje tras los warnings de cuerpo. UT-CW-07 (4), UT-CW-10 (9) y UT-CW-11 (5) verdes solos. |
+| 2026-11-14 | F4 | UT-CW-12 (2 casos) comprueba que el log solo lleva códigos `W_*`; UT-CW-13 (1 caso) que la misma consulta repite el JSON salvo `generated_at` y `scan.duration_ms`; TC-03 y OL-30 recorren `--strip-links` sin cambiar sus aserciones. |
+| 2026-11-14 | F5 | README y README.es con `[content]`, `--strip-links`, cuerpo HTML y los siete warnings, más "Security for harness operators" / "Seguridad para quien opera el harness" con la frase literal y el enlace al anexo; skill con `--strip-links`, `content_notice` y "Security rules"; `config.example.toml` con el bloque `[content]` comentado; anexo de seguridad y recetas al día. DOC-06.02 ampliado, DOC-06.04 y DOC-08 (6 casos) verdes solos. |
+| 2026-11-14 | F6 | Suite completa `Ran 1259`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales de la línea base: SMOKE-NEW.07 de `mailboxes` y `show`); cobertura total 90,6 % y módulos tocados `cli.py` 91,3 %, `config.py` 96,8 % y `search.py` 92,2 % (línea base 91,0–91,2 / 96,7 / 92,0); `git diff --check` limpio; sin goldens actualizados (el store por defecto no tiene URLs, contenido oculto ni cabeceras A6); bloques para `TEST-CATALOG.md`/`INTERFACES.md` y propuesta de registro en `.worktrees/reports/M08.md`. |

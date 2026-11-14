@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W2 (en paralelo con M05 y M06)
 **Rama:** `feature/m07-content-notice-sanitized-fields`, creada desde la punta de `integration/i2-content` · **Worktree:** `../mailquery-wt/m07`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración)
 
 ## 1. Objetivo
 
@@ -53,12 +53,12 @@ Usa R-01 (M02).
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Campos | A2 en los campos de `search`/`new`/`show` y en `original_name`; UT-CW-01 | ⚪ |
-| F2 — Búsqueda | A2 a ambos lados de los filtros; UT-CW-03; UT-CW-04 | ⚪ |
-| F3 — Warnings y errores | A2 central en `warnings[]`, `to_payload` y `stderr`; UT-CW-02 | ⚪ |
-| F4 — `content_notice` | Inserción en `_success_payload`; goldens; UT-ATC-04.01; UT-CW-05, UT-CW-06 | ⚪ |
-| F5 — README | Sección 2, punto 7 | ⚪ |
-| F6 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Campos | A2 en los campos de `search`/`new`/`show` y en `original_name`; UT-CW-01 | 🟢 |
+| F2 — Búsqueda | A2 a ambos lados de los filtros; UT-CW-03; UT-CW-04 | 🟢 |
+| F3 — Warnings y errores | A2 central en `warnings[]`, `to_payload` y `stderr`; UT-CW-02 | 🟢 |
+| F4 — `content_notice` | Inserción en `_success_payload`; goldens; UT-ATC-04.01; UT-CW-05, UT-CW-06 | 🟢 |
+| F5 — README | Sección 2, punto 7 | 🟢 |
+| F6 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -170,4 +170,9 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 | A2 en `subject`, `from.name`, nombres de `to`/`cc`, valores de `headers`, `body_text` y `attachments[].name` de `show`, y en `original_name` de `attachment`; identificadores y rutas sin tocar; UT-CW-01 (5 casos) verde solo. |
+| 2026-11-14 | F2 | A2 al patrón y al valor comparado en `_filter_terms` y `matches` (`--subject`, `--text`, `--from`, `--to`, `--cc`); UT-CW-03 (4 casos) y UT-CW-04 (2 casos) verdes solos. |
+| 2026-11-14 | F3 | A2 central de `warnings[]` en `_success_payload` (también en el payload de `doctor`), de `message`/`hint` en `MailqueryError.to_payload` y del resumen de `stderr`; UT-CW-02 (4 casos) verde solo. |
+| 2026-11-14 | F4 | `content_notice` tras `generated_at` en `search`, `new`, `show` y `attachment`; 20 goldens con solo esa línea añadida; UT-ATC-04.01 actualizado; UT-CW-05 (2 casos) y UT-CW-06 (2 casos) verdes solos. |
+| 2026-11-14 | F5 | `content_notice` en la descripción de la salida y en los cuatro ejemplos JSON de `README.md` y `README.es.md`, con la frase de recordatorio fijo. |
+| 2026-11-14 | F6 | Suite completa `Ran 1154`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 p95 de la línea base); cobertura total 89,9 % y `cli.py` 91,2 %, `errors.py` 97,1 %, `search.py` 92,0 %; evidencia y bloques entregados al orquestador. |

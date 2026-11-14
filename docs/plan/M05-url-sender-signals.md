@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W2 (en paralelo con M06 y M07)
 **Rama:** `feature/m05-url-sender-signals`, creada desde la punta de `integration/i2-content` · **Worktree:** `../mailquery-wt/m05`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F5 cerradas; pendiente de integración)
 
 ## 1. Objetivo
 
@@ -66,11 +66,11 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Detección | `find_urls`, `url_domain`, `address_domain`; UT-CNT-05 | ⚪ |
-| F2 — Modos | `render_urls` con punycode y acortado; UT-CNT-06, UT-CNT-07 | ⚪ |
-| F3 — Conteos y textos | `count_url_signals`, textos de warnings, `content_warnings`; UT-CNT-08 | ⚪ |
-| F4 — A6 | `sender_auth_failure`, `reply_to_mismatch`; UT-CNT-09 | ⚪ |
-| F5 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Detección | `find_urls`, `url_domain`, `address_domain`; UT-CNT-05 | 🟢 |
+| F2 — Modos | `render_urls` con punycode y acortado; UT-CNT-06, UT-CNT-07 | 🟢 |
+| F3 — Conteos y textos | `count_url_signals`, textos de warnings, `content_warnings`; UT-CNT-08 | 🟢 |
+| F4 — A6 | `sender_auth_failure`, `reply_to_mismatch`; UT-CNT-09 | 🟢 |
+| F5 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -185,4 +185,8 @@ Ninguno (solo se añaden funciones).
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 | `UrlMatch`, `find_urls`, `url_domain` y `address_domain`: inicios (a)–(e) sin distinguir mayúsculas y con los inicios con esquema en ancho completo comparados por su forma NFKC, `data:` con tipo MIME, `www.` con letra o dígito, UNC y token completo con `[.]`; dominios con usuario, puerto y `[.]` leído como `.`; UT-CNT-05 (8 casos) verde solo. |
+| 2026-11-14 | F2 | `URL_MODES`, `render_urls` en `keep`/`neutralize`/`strip`, ACE con el códec `punycode` sobre la etiqueta en minúsculas, neutralización de esquemas (también en ancho completo y de los ya neutralizados) y acortado a 256 caracteres con el conteo sobre la URL neutralizada; UT-CNT-06 (7 casos) y UT-CNT-07 (7 casos) verdes solos. |
+| 2026-11-14 | F3 | `UrlSignals`, `count_url_signals` (externos, script, largos y dominios no ASCII de URL y dirección), los siete textos `W_*` y `content_warnings` en el orden de los warnings; UT-CNT-08 (6 casos) verde solo. |
+| 2026-11-14 | F4 | `sender_auth_failure` (despliegue de líneas, comentarios, `spf`/`dkim`/`dmarc`, varias firmas DKIM y resultados desconocidos) y `reply_to_mismatch` con `email.utils.getaddresses`; UT-CNT-09 (9 casos) verde solo. |
+| 2026-11-14 | F5 | Suite completa `Ran 1172`, `FAILED (failures=2, skipped=7)` (los 2 fallos de p95 de SMOKE-NEW.07 de la línea base); `output.py` 99,5 %; sin goldens; sin pragmas nuevos; evidencia y bloques entregados al orquestador. |

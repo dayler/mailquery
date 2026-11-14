@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from mailquery.output import sanitize_text
+
 # Exit code -> error codes. Exit 0 means success.
 _EXIT_ERRORS: Final[dict[int, tuple[str, ...]]] = {
     1: ("E_INTERNAL",),
@@ -96,14 +98,19 @@ class MailqueryError(Exception):
         return f"{self.code}: {self.message}"
 
     def to_payload(self, command: str) -> dict:
-        """Render this error as the JSON error contract."""
+        """Render this error as the JSON error contract with sanitized texts.
+
+        ``message`` and a non-null ``hint`` lose terminal escapes and invisible
+        characters; a null ``hint`` stays ``null``. ``code`` is unchanged.
+        """
+        hint = None if self.hint is None else sanitize_text(str(self.hint))
         return {
             "ok": False,
             "command": command,
             "error": {
                 "code": self.code,
-                "message": self.message,
-                "hint": self.hint,
+                "message": sanitize_text(str(self.message)),
+                "hint": hint,
             },
         }
 

@@ -1,8 +1,9 @@
 """Samples of untrusted message content for the content tests.
 
 The tables group inputs by the behavior they exercise so the sanitizer, the
-HTML conversion and the later URL and signal tests share the same samples.
-Nothing here touches the disk or the network: every value is a literal.
+HTML conversion, the URL modes and the link and sender signals share the same
+samples. Nothing here touches the disk or the network: every value is a
+literal.
 """
 
 from __future__ import annotations
@@ -85,6 +86,15 @@ HTML_HIDDEN_STYLE_SHEET = (
 )
 HTML_HIDDEN_STYLE_SHEET_TEXT = "Total: 100 €"
 HTML_HIDDEN_STYLE_SHEET_COUNT = 30
+
+#: Hidden content declared inline and by a stylesheet rule of the message.
+HTML_HIDDEN_INLINE_AND_SHEET = (
+    "<style>.n{display:none}</style>"
+    '<p class="n">Instrucciones ocultas por hoja</p>'
+    '<p style="display:none">Instrucciones ocultas en línea</p>'
+    "<p>Factura adjunta: https://evil.example/factura</p>"
+)
+HTML_HIDDEN_INLINE_AND_SHEET_TEXT = "Factura adjunta: https://evil.example/factura"
 
 HTML_ALL_HIDDEN = "<p hidden>todo el cuerpo está oculto</p>"
 
@@ -190,4 +200,264 @@ HTML_TYPICAL_BODY = (
         for index in range(1, 90)
     )
     + "</body></html>"
+)
+
+# ---------------------------------------------------------------------------
+# URL samples.
+# ---------------------------------------------------------------------------
+
+#: One URL of every start, with its kind, scheme and script flag.
+URL_STARTS: tuple[tuple[str, str, str | None, bool], ...] = (
+    ("http://example.test/a", "scheme", "http", False),
+    ("https://example.test/a", "scheme", "https", False),
+    ("ftp://example.test/a", "scheme", "ftp", False),
+    ("smb://example.test/a", "scheme", "smb", False),
+    ("file://example.test/a", "scheme", "file", False),
+    ("javascript:fetch(1)", "scheme", "javascript", True),
+    ("vbscript:msgbox(1)", "scheme", "vbscript", True),
+    ("data:text/html;base64,PHA+", "data", "data", True),
+    ("www.banco.example/login", "www", None, False),
+    ("hxxp://example.test/a", "neutralized", "hxxp", False),
+    ("hxxps://example.test/a", "neutralized", "hxxps", False),
+    ("\\\\evil.example\\compartido\\f.pdf", "unc", None, False),
+)
+
+#: The same starts written in uppercase.
+URL_STARTS_UPPERCASE: tuple[tuple[str, str, str | None, bool], ...] = (
+    ("HTTPS://example.test/a", "scheme", "https", False),
+    ("WWW.banco.example/login", "www", None, False),
+    ("HXXPS://example.test/a", "neutralized", "hxxps", False),
+    ("JAVASCRIPT:fetch(1)", "scheme", "javascript", True),
+    ("DATA:text/html,x", "data", "data", True),
+)
+
+#: Scheme starts written with fullwidth characters.
+URL_STARTS_FULLWIDTH: tuple[tuple[str, str, str | None, bool], ...] = (
+    ("ｈｔｔｐｓ：／／evil.example/pay", "scheme", "https", False),
+    ("ｈｘｘｐ：／／evil.example/pay", "neutralized", "hxxp", False),
+)
+
+#: Sequences that start like a URL but are not one.
+NOT_URLS: tuple[str, ...] = (
+    "JavaScript: un lenguaje",
+    "Data: 12/11",
+    "metadata:x",
+    "facturas.example/f/1",
+    "mailto:a@b.example",
+    "tel:123",
+    "ms-word:ofe",
+    "http://",
+    "data:12",
+    "data:text/html",
+    "\\\\",
+    "\\\\evil.example",
+    "\\\\evil\\",
+    "www.-x",
+    "www. x",
+    "ｗｗｗ.banco.example/login",
+    "ｄａｔａ：text/html,x",
+    "＼＼evil.example\\share",
+    "a[.]",
+    "[.]b",
+    "[.]",
+    "xhttp://a",
+)
+
+#: Text with URLs and the URLs a scan must find, in order.
+URL_TERMINATION: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("http://a.example b", ("http://a.example",)),
+    ('http://a.example"b', ("http://a.example",)),
+    ("http://a.example'b", ("http://a.example",)),
+    ("<http://a.example>b", ("http://a.example",)),
+    ("http://a.example\tb", ("http://a.example",)),
+    ("http://a.example http://b.example", ("http://a.example", "http://b.example")),
+)
+
+#: URL and the domain read from it; ``None`` when the URL has no domain.
+URL_DOMAINS: tuple[tuple[str, str | None], ...] = (
+    ("https://u:p@host.example:8080/x", "host.example"),
+    ("https://host.example:8080/x", "host.example"),
+    ("www.banco.example:8080/login", "www.banco.example"),
+    ("\\\\evil.example\\compartido\\f.pdf", "evil.example"),
+    ("evil[.]example/pay", "evil.example"),
+    ("javascript:fetch(1)", None),
+    ("vbscript:msgbox(1)", None),
+    ("data:text/html;base64,PHA+", None),
+    ("ｈｔｔｐｓ：／／evil.example/pay", "evil.example"),
+    ("hxxps://evil.example/pay", "evil.example"),
+)
+
+#: Address and the domain read from it.
+ADDRESS_DOMAINS: tuple[tuple[str | None, str | None], ...] = (
+    (None, None),
+    ("sin-arroba", None),
+    ("", None),
+    ("avisos@banco.example", "banco.example"),
+    ("soporte@pаypal.com", "pаypal.com"),
+    ("primera@a.example, segunda@b.example", "b.example"),
+)
+
+#: Input text, its neutralized form and its stripped form.
+URL_MODE_TABLE: tuple[tuple[str, str, str], ...] = (
+    (
+        "Revisa https://example.com/factura antes del 30/11.",
+        "Revisa hxxps://example.com/factura antes del 30/11.",
+        "Revisa [link omitted] antes del 30/11.",
+    ),
+    (
+        "Entra a www.banco.example/login",
+        "Entra a www[.]banco.example/login",
+        "Entra a [link omitted]",
+    ),
+    (
+        "En \\\\evil.example\\compartido\\f.pdf",
+        "En [\\\\]evil.example\\compartido\\f.pdf",
+        "En [link omitted]",
+    ),
+    ("Abre file://evil.example/doc", "Abre file[:]//evil.example/doc", "Abre [link omitted]"),
+    (
+        "Pega javascript:fetch(1)",
+        "Pega javascript[:]fetch(1)",
+        "Pega [link omitted]",
+    ),
+    (
+        "Ver data:text/html;base64,PHA+",
+        "Ver data[:]text/html;base64,PHA+",
+        "Ver [link omitted]",
+    ),
+    (
+        "Ir a ｈｔｔｐｓ：／／evil.example/pay",
+        "Ir a hxxps://evil.example/pay",
+        "Ir a [link omitted]",
+    ),
+    (
+        "Ir a hxxps://evil[.]example/pay",
+        "Ir a hxxps://evil[.]example/pay",
+        "Ir a [link omitted]",
+    ),
+    ("Dominio evil[.]example/pay", "Dominio evil[.]example/pay", "Dominio [link omitted]"),
+    ("JavaScript: un lenguaje", "JavaScript: un lenguaje", "JavaScript: un lenguaje"),
+    ("Data: 12/11", "Data: 12/11", "Data: 12/11"),
+    ("metadata:x", "metadata:x", "metadata:x"),
+    ("facturas.example/f/1", "facturas.example/f/1", "facturas.example/f/1"),
+)
+
+#: Text with an uppercase start and its neutralized form.
+URL_MODE_UPPERCASE: tuple[tuple[str, str], ...] = (
+    ("HTTPS://example.com/factura", "hxxps://example.com/factura"),
+    ("WWW.banco.example/login", "www[.]banco.example/login"),
+)
+
+#: Already neutralized URLs and their neutralized form.
+URL_MODE_ALREADY_NEUTRAL: tuple[str, ...] = (
+    "hxxps://evil.example/pay",
+    "evil[.]example/pay",
+    "Dominio evil[.]example/pay",
+)
+
+#: Script starts in uppercase and fullwidth, and their neutralized form.
+URL_SCRIPT_SAMPLES: tuple[tuple[str, str], ...] = (
+    ("JAVASCRIPT:x", "JAVASCRIPT[:]x"),
+    ("VbScript:x", "VbScript[:]x"),
+    ("DATA:text/html,x", "DATA[:]text/html,x"),
+    ("ｊａｖａｓｃｒｉｐｔ：x", "ｊａｖａｓｃｒｉｐｔ[:]x"),
+)
+
+#: Non-ASCII URLs and their neutralized form: ACE labels, UNC host and ``[.]``.
+URL_PUNYCODE: tuple[tuple[str, str], ...] = (
+    ("https://pаypal.com/login", "hxxps://xn--pypal-4ve.com/login"),
+    ("https://раураl.com/x", "hxxps://xn--l-7sba6dbr.com/x"),
+    ("www.pаypal.com/login", "www[.]xn--pypal-4ve.com/login"),
+    ("hxxps://pаypal.com/x", "hxxps://xn--pypal-4ve.com/x"),
+    ("\\\\pаypal\\share", "[\\\\]xn--pypal-4ve\\share"),
+    ("pаypal[.]com/x", "xn--pypal-4ve[.]com/x"),
+)
+
+#: Start of a long URL with an ASCII domain.
+URL_LONG_BASE = "https://evil.example/"
+#: Start of a long URL whose non-ASCII label grows with its ACE form.
+URL_LONG_ACE_BASE = "https://pаypal.com/"
+#: Start of a long URL already neutralized by the sender.
+URL_LONG_NEUTRAL_BASE = "hxxps://evil.example/"
+
+#: Texts whose links are counted.
+URL_SIGNAL_TEXTS: tuple[str, ...] = ("Mira https://a.example/1", "y javascript:fetch(1)")
+#: Addresses whose domains are counted.
+URL_SIGNAL_ADDRESSES: tuple[str, ...] = ("soporte@pаypal.com", "paypa1@example.com")
+#: One URL per non-ASCII case: mixed alphabet, other alphabet, ASCII lookalike.
+URL_SIGNAL_NON_ASCII: tuple[str, ...] = (
+    "https://pаypal.com/login",
+    "https://раураl.com/x",
+    "https://paypa1.com/x",
+)
+#: URL with a non-ASCII user part and path but an ASCII domain.
+URL_SIGNAL_NON_ASCII_OUTSIDE_DOMAIN = "https://sоporte@example.com/rаta"
+
+# ---------------------------------------------------------------------------
+# Sender header samples.
+# ---------------------------------------------------------------------------
+
+#: ``Authentication-Results`` value of the documented example and its warning.
+AUTH_RESULTS_EXAMPLE = (
+    "mx.example.net; spf=softfail smtp.mailfrom=banco.example; dkim=none; "
+    "dmarc=fail header.from=banco.example",
+    "spf=softfail dkim=none dmarc=fail",
+)
+#: Value where the three mechanisms pass.
+AUTH_RESULTS_PASS = (
+    "mx.example.net; spf=pass smtp.mailfrom=a.example; dkim=pass header.d=a.example; "
+    "dmarc=pass header.from=a.example"
+)
+#: Value without failures.
+AUTH_RESULTS_NO_FAILURE = "mx.example; spf=none dkim=neutral dmarc=none"
+#: Folded value and the mechanisms it reports.
+AUTH_RESULTS_FOLDED = (
+    "mx.example;\r\n\tspf=pass smtp.mailfrom=a.example;\r\n\tdmarc=fail header.from=a.example",
+    "spf=pass dmarc=fail",
+)
+#: Value with a failing mechanism and an unknown result.
+AUTH_RESULTS_UNKNOWN = (
+    "mx.example; spf=fail smtp.mailfrom=a.example; dkim=weird (no key) "
+    "header.d=a.example; dmarc=none header.from=a.example",
+    "spf=fail dkim=unknown dmarc=none",
+)
+#: Value with one failing and one passing DKIM signature.
+AUTH_RESULTS_DKIM_PASS = ("mx.example; spf=fail; dkim=fail; dkim=pass", "spf=fail dkim=pass")
+#: Value with no passing DKIM signature.
+AUTH_RESULTS_DKIM_FIRST = (
+    "mx.example; spf=fail; dkim=softfail; dkim=none",
+    "spf=fail dkim=softfail",
+)
+#: Value with ``permerror``, ``pass`` and ``fail``.
+AUTH_RESULTS_PERMERROR = (
+    "mx.example; spf=permerror; dkim=pass; dmarc=fail",
+    "spf=permerror dkim=pass dmarc=fail",
+)
+#: Uppercase value with a single failing mechanism.
+AUTH_RESULTS_UPPERCASE = ("mx.example; SPF=FAIL", "spf=fail")
+#: Value where only ``spf`` fails.
+AUTH_RESULTS_SPF_ONLY = (
+    "mx.example; spf=fail; dkim=pass; dmarc=pass",
+    "spf=fail dkim=pass dmarc=pass",
+)
+#: Values that carry no failure.
+AUTH_RESULTS_WITHOUT_FAILURE: tuple[str, ...] = (
+    "",
+    "mx.example; reason=local",
+    "mx.example; spf=temperror dkim=policy dmarc=pass",
+)
+
+#: ``Reply-To``, sender address and a domain that differs.
+REPLY_TO_MISMATCH: tuple[tuple[str, str], ...] = (
+    ("cobros@otro.example", "avisos@banco.example"),
+    ("cobros@otro.example, segundo@banco.example", "avisos@banco.example"),
+)
+#: ``Reply-To``, sender address and no mismatch.
+REPLY_TO_MATCH: tuple[tuple[str | None, str | None], ...] = (
+    ("Cobros <cobros@Banco.Example>", "avisos@banco.example"),
+    (None, "avisos@banco.example"),
+    ("cobros@otro.example", "sin-arroba"),
+    ("sin-arroba", "avisos@banco.example"),
+    ("<<<", "avisos@banco.example"),
+    ("", "avisos@banco.example"),
 )

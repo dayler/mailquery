@@ -20,7 +20,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from functools import cmp_to_key
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 
 from mailquery import config as config_module
 from mailquery import output
@@ -228,17 +228,20 @@ def matches(pattern: str, text: str) -> bool:
     """Case-insensitive wildcard/substring match against untrusted text.
 
     ``*`` matches any sequence and ``?`` any single character; a pattern
-    without wildcards is a plain substring. Both sides are Unicode-normalized
-    (NFKD, combining marks removed, casefolded) so accented and unaccented
-    spellings of the same word match each other.
+    without wildcards is a plain substring. Both sides lose terminal escapes and
+    invisible characters before matching and are Unicode-normalized (NFKD,
+    combining marks removed, casefolded), so accented and unaccented spellings
+    of the same word match each other and an invisible character no longer
+    hides a match.
     """
     if pattern is None:
         return True
-    raw_pattern = str(pattern)
+    raw_pattern = output.sanitize_text(str(pattern))
     if not raw_pattern:
         return True
     expression = wildcard_to_regex(_fold(raw_pattern))
-    return re.search(expression, _fold(text or ""), re.IGNORECASE) is not None
+    haystack = output.sanitize_text("" if text is None else str(text))
+    return re.search(expression, _fold(haystack), re.IGNORECASE) is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -449,6 +452,7 @@ def run_search(
     *,
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
+    url_mode: str = "neutralize",
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "warnings"}``.
 
@@ -458,6 +462,9 @@ def run_search(
     the per-driver results are deduplicated inside their driver,
     merged with the total order ``(date_received DESC, driver ASC,
     native_order_key DESC)`` and paginated after the merge.
+
+    ``url_mode`` renders the URLs of the content fields (``neutralize``,
+    ``keep`` or ``strip``); the link and sender signals do not depend on it.
     """
     started = time.perf_counter()
     native_name, pool = _driver_pool(backend, drivers, native)
@@ -560,7 +567,11 @@ def run_search(
 
     recipients = _page_recipients(page, runs)
     messages, body_warnings, reads = _build_messages(
-        page, runs, recipients, cached_bodies=bool(text_terms)
+        page,
+        runs,
+        recipients,
+        cached_bodies=bool(text_terms),
+        url_mode=url_mode,
     )
     warnings.extend(body_warnings)
     messages_read = 0
@@ -591,6 +602,7 @@ def run_new(
     clock: Callable[[], float] | None = None,
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
+    url_mode: str = "neutralize",
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "cursor", "warnings"}``.
 
@@ -701,7 +713,7 @@ def run_new(
 
     recipients = _page_recipients(page, runs)
     messages, body_warnings, reads = _build_messages(
-        page, runs, recipients, cached_bodies=False
+        page, runs, recipients, cached_bodies=False, url_mode=url_mode
     )
     warnings.extend(body_warnings)
     warnings.extend(first_run_warnings)
@@ -752,6 +764,7 @@ def run_show(
     driver: str | None = None,
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
+    url_mode: str = "neutralize",
 ) -> dict:
     """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
@@ -763,6 +776,9 @@ def run_show(
     raises ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
     raises ``E_USAGE`` with an actionable hint. A uid whose store is excluded
     (Outlook) raises ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
+
+    ``url_mode`` renders the URLs of the subject, the names, the headers and the
+    body before the body is truncated.
     """
     native_name, pool = _driver_pool(backend, drivers, native)
     target = str(driver or (backend is not None and _driver(backend)) or native_name)
@@ -804,13 +820,14 @@ def run_show(
     body = _load_body(target_backend, row, with_details=True)
     warnings = _activation_warnings([target_backend], excluded)
     warnings.extend(_flatten_warnings([body.warnings]))
+    fields = _content_fields(row, to_list, cc_list, body)
 
     body_text = ""
     body_truncated = False
     if body.readable:
-        cleaned = output.sanitize_text(body.text)
-        body_truncated = len(cleaned) > output.SHOW_BODY_MAX_CHARS
-        body_text = cleaned[: output.SHOW_BODY_MAX_CHARS]
+        rendered = _rendered_body(fields.body_text, url_mode)
+        body_truncated = len(rendered) > output.SHOW_BODY_MAX_CHARS
+        body_text = rendered[: output.SHOW_BODY_MAX_CHARS]
         if body_truncated:
             warnings.append(
                 "W_BODY_TRUNCATED: the body was truncated to "
@@ -828,8 +845,8 @@ def run_show(
         warnings,
     )
 
-    headers = _show_headers(body.headers, row, to_list, cc_list)
-    message = _message_metadata(accounts, row, mailbox, to_list, cc_list, target)
+    headers = _show_headers(body.headers, row, fields, url_mode)
+    message = _message_metadata(accounts, row, mailbox, target, fields, url_mode)
     message.update(
         {
             "headers": headers,
@@ -844,6 +861,7 @@ def run_show(
             },
         }
     )
+    warnings.extend(_content_warnings(show_uid, fields))
     return {"message": _ordered_fields(message, SHOW_FIELDS), "warnings": warnings}
 
 
@@ -1296,10 +1314,26 @@ def _scan_too_large(
 def _recipient_lists(
     recipients: dict[Any, dict[str, list[dict]]], uid: Any
 ) -> tuple[list[dict], list[dict]]:
+    """To and Cc rows of one message with their display names sanitized.
+
+    The addresses are identifiers and are copied unchanged.
+    """
     bucket = recipients.get(uid, {})
-    to_list = [dict(entry) for entry in bucket.get("to", [])]
-    cc_list = [dict(entry) for entry in bucket.get("cc", [])]
-    return to_list, cc_list
+    return _sanitized_recipients(bucket.get("to", [])), _sanitized_recipients(
+        bucket.get("cc", [])
+    )
+
+
+def _sanitized_recipients(entries: Iterable[dict]) -> list[dict]:
+    """Copies of recipient rows with ``name`` stripped of terminal and invisible text."""
+    cleaned: list[dict] = []
+    for entry in entries:
+        item = dict(entry)
+        name = item.get("name")
+        if name is not None:
+            item["name"] = output.sanitize_text(str(name))
+        cleaned.append(item)
+    return cleaned
 
 
 # --------------------------------------------------------------------------- #
@@ -1401,6 +1435,9 @@ def _scan_bodies(
         matched_row = dict(row)
         matched_row["_body_text"] = body.text
         matched_row["_body_partial"] = body.partial
+        matched_row["_body_hidden_chars"] = body.hidden_chars
+        matched_row["_body_authentication_results"] = body.authentication_results
+        matched_row["_body_reply_to"] = body.reply_to
         matched.append(matched_row)
     return matched, warnings, messages_read
 
@@ -1492,21 +1529,113 @@ def _mailbox_priority_for_row(
 # --------------------------------------------------------------------------- #
 
 
+class _ContentFields(NamedTuple):
+    """Sanitized content of one message, before the URL display mode.
+
+    ``signals``, ``hidden_chars``, ``auth_failure`` and ``reply_mismatch`` feed
+    the content warnings and do not depend on the URL display mode.
+    """
+
+    subject: str
+    sender_name: str
+    to_list: list[dict]
+    cc_list: list[dict]
+    body_text: str
+    hidden_chars: int
+    signals: output.UrlSignals
+    auth_failure: str | None
+    reply_mismatch: bool
+
+
+def _content_fields(
+    row: dict,
+    to_list: list[dict],
+    cc_list: list[dict],
+    body: "_LoadedBody",
+) -> _ContentFields:
+    """Sanitize the content fields and count the signals of one message.
+
+    The subject, the sender name, the recipient names and the whole body lose
+    terminal escapes and invisible characters. The link signals count those
+    fields plus the addresses, before the URL display mode is applied and before
+    the snippet or the body truncation. An unreadable body contributes no text.
+    """
+    subject = output.sanitize_text(str(row.get("subject") or ""))
+    sender_name = output.sanitize_text(str(row.get("sender_name") or ""))
+    to_list = _sanitized_recipients(to_list)
+    cc_list = _sanitized_recipients(cc_list)
+    body_text = output.sanitize_text(body.text) if body.readable else ""
+    texts = [
+        subject,
+        sender_name,
+        *(str(entry.get("name") or "") for entry in to_list),
+        *(str(entry.get("name") or "") for entry in cc_list),
+        body_text,
+    ]
+    addresses = [
+        str(row.get("sender_address") or ""),
+        *(str(entry.get("address") or "") for entry in to_list),
+        *(str(entry.get("address") or "") for entry in cc_list),
+    ]
+    return _ContentFields(
+        subject=subject,
+        sender_name=sender_name,
+        to_list=to_list,
+        cc_list=cc_list,
+        body_text=body_text,
+        hidden_chars=int(body.hidden_chars),
+        signals=output.count_url_signals(texts, addresses),
+        auth_failure=output.sender_auth_failure(body.authentication_results),
+        reply_mismatch=output.reply_to_mismatch(
+            body.reply_to, row.get("sender_address")
+        ),
+    )
+
+
+def _content_warnings(uid: str, fields: _ContentFields) -> list[str]:
+    """The content warnings of one message, in their canonical order."""
+    return output.content_warnings(
+        uid,
+        fields.hidden_chars,
+        fields.signals,
+        fields.auth_failure,
+        fields.reply_mismatch,
+    )
+
+
+def _rendered_body(body_text: str, url_mode: str) -> str:
+    """The body text with its URLs rendered in ``url_mode``."""
+    return output.render_urls(body_text, url_mode) if body_text else ""
+
+
+def _rendered_recipients(entries: Iterable[dict], url_mode: str) -> list[dict]:
+    """Copies of the recipient rows with the names rendered in ``url_mode``."""
+    rendered: list[dict] = []
+    for entry in entries:
+        item = dict(entry)
+        if item.get("name") is not None:
+            item["name"] = output.render_urls(str(item["name"]), url_mode)
+        rendered.append(item)
+    return rendered
+
+
 def _build_messages(
     page: Sequence[dict],
     runs: "Mapping[str, _DriverRun]",
     recipients: "Mapping[str, dict[Any, Any]]",
     *,
     cached_bodies: bool,
+    url_mode: str,
 ) -> tuple[list[dict], list[str], "dict[str, int]"]:
     """Build the merged page, reading only the returned page of each driver.
 
     The body always comes from the message's physical mailbox (a Gmail message
     labelled INBOX is stored under ``[Gmail]/All Mail``), while the reported
     ``mailbox`` is the effective in-scope one (INBOX). The body warnings are
-    accumulated per message and flattened in message order. ``messages_read`` is
-    returned per driver so the caller can combine it with the ``items_opened``
-    hook of a driver that opens items instead of bodies (Outlook).
+    accumulated per message and flattened in message order, followed by the
+    content warnings of that message. ``messages_read`` is returned per driver
+    so the caller can combine it with the ``items_opened`` hook of a driver that
+    opens items instead of bodies (Outlook).
     """
     messages: list[dict] = []
     warnings: list[list[str]] = []
@@ -1524,18 +1653,20 @@ def _build_messages(
             body = _load_body(run.backend, row)
             if _was_read(body):
                 messages_read[driver] += 1
-        warnings.append(list(body.warnings))
-        messages.append(
-            _message_payload(
-                run.accounts,
-                row,
-                display_mailbox,
-                to_list,
-                cc_list,
-                body,
-                driver,
-            )
+        fields = _content_fields(row, to_list, cc_list, body)
+        message = _message_payload(
+            run.accounts,
+            row,
+            display_mailbox,
+            driver,
+            body,
+            fields,
+            url_mode,
         )
+        warnings.append(
+            [*body.warnings, *_content_warnings(message["uid"], fields)]
+        )
+        messages.append(message)
     return messages, _flatten_warnings(warnings), messages_read
 
 
@@ -1567,10 +1698,12 @@ def _show_attachments(
     """``show.attachments``: one entry per attachment of the message.
 
     ``{"index", "name", "cached_path"}`` with the original name and the stable
-    1..N index of the driver. ``cached_path`` is computed with the cache helper
-    from the sanitized name and is ``null`` when the name is not safe or the
-    cached entry is not a regular file; ``show`` never creates, opens or reads
-    a cache entry. A driver with ``attachments: "none"`` returns ``[]``.
+    1..N index of the driver. ``name`` loses terminal escapes and invisible
+    characters; ``cached_path`` is computed with the cache helper from the
+    original name, so the file the engine writes is the one ``show`` reports, and
+    is ``null`` when the name is not safe or the cached entry is not a regular
+    file; ``show`` never creates, opens or reads a cache entry. A driver with
+    ``attachments: "none"`` returns ``[]``.
 
     The API 1 ``attachments(uid)`` operation is the source of truth for every
     driver that implements it. Until then a built-in driver falls back
@@ -1600,7 +1733,7 @@ def _show_attachments(
     return [
         {
             "index": index,
-            "name": name,
+            "name": output.sanitize_text(name),
             "cached_path": _show_cached_path(config.home, show_uid, index, name),
         }
         for index, name in names
@@ -1702,16 +1835,16 @@ def _message_payload(
     accounts: "dict[str, AccountRow]",
     row: dict,
     mailbox: "MailboxRow | None",
-    to_list: list[dict],
-    cc_list: list[dict],
-    body: "_LoadedBody",
     driver: str,
+    body: "_LoadedBody",
+    fields: _ContentFields,
+    url_mode: str,
 ) -> dict:
     """The ``search``/``new`` row of one message, in ``SEARCH_ROW_FIELDS`` order."""
-    message = _message_metadata(accounts, row, mailbox, to_list, cc_list, driver)
+    message = _message_metadata(accounts, row, mailbox, driver, fields, url_mode)
     message["duplicate_count"] = int(row.get("duplicate_count", 1))
-    message["snippet"] = _body_snippet(body.text)
-    message["body"] = _body_payload(body)
+    message["snippet"] = _body_snippet(fields.body_text, url_mode)
+    message["body"] = _body_payload(body, fields.body_text, url_mode)
     return _ordered_fields(message, SEARCH_ROW_FIELDS)
 
 
@@ -1719,21 +1852,27 @@ def _message_metadata(
     accounts: "dict[str, AccountRow]",
     row: dict,
     mailbox: "MailboxRow | None",
-    to_list: list[dict],
-    cc_list: list[dict],
     driver: str,
+    fields: _ContentFields,
+    url_mode: str,
 ) -> dict:
-    """Metadata fields shared by the ``search``/``new`` row and the ``show`` message."""
+    """Metadata fields shared by the ``search``/``new`` row and the ``show`` message.
+
+    The subject, the sender name and the recipient names lose terminal escapes
+    and invisible characters and then render their URLs in ``url_mode``;
+    ``uid``, ``message_id``, the addresses and the mailbox identifiers are
+    copied unchanged.
+    """
     return {
         "uid": uid_module.format_uid(driver, str(row["uid"])),
         "message_id": row.get("message_id") or "",
-        "subject": row.get("subject") or "",
+        "subject": output.render_urls(fields.subject, url_mode),
         "from": {
-            "name": row.get("sender_name") or "",
+            "name": output.render_urls(fields.sender_name, url_mode),
             "address": row.get("sender_address") or "",
         },
-        "to": to_list,
-        "cc": cc_list,
+        "to": _rendered_recipients(fields.to_list, url_mode),
+        "cc": _rendered_recipients(fields.cc_list, url_mode),
         "date_sent": output.iso_timestamp(row.get("date_sent")),
         "date_received": output.iso_timestamp(row.get("date_received")),
         "mailbox": _mailbox_payload(accounts, mailbox),
@@ -1843,9 +1982,11 @@ class _LoadedBody:
     """Body of one message as read by the core.
 
     ``headers`` and ``attachments`` are filled by the full ``load_body``
-    (``show``); the body-only loader leaves them empty. ``warnings`` belongs to
-    this message and the caller flattens the warnings of the page in message
-    order.
+    (``show``); the body-only loader leaves them empty. ``hidden_chars`` counts
+    the text omitted from an HTML body, and ``authentication_results`` and
+    ``reply_to`` carry the sender headers when the driver reads them (a driver
+    or plugin without them leaves ``0``/``None``). ``warnings`` belongs to this
+    message and the caller flattens the warnings of the page in message order.
     """
 
     text: str
@@ -1856,6 +1997,9 @@ class _LoadedBody:
     attachments: tuple
     source: dict
     warnings: tuple[str, ...]
+    hidden_chars: int = 0
+    authentication_results: str | None = None
+    reply_to: str | None = None
 
 
 def _load_body(
@@ -1881,6 +2025,9 @@ def _received_body(loaded: "BodyRow") -> _LoadedBody:
         attachments=tuple(loaded.get("attachments") or ()),
         source=dict(loaded.get("source") or {}),
         warnings=tuple(str(warning) for warning in (loaded.get("warnings") or ())),
+        hidden_chars=int(loaded.get("hidden_chars") or 0),
+        authentication_results=loaded.get("authentication_results"),
+        reply_to=loaded.get("reply_to"),
     )
 
 
@@ -1896,6 +2043,9 @@ def _cached_body(row: dict) -> _LoadedBody:
         attachments=(),
         source={"emlx_path": None, "partial": partial},
         warnings=(),
+        hidden_chars=int(row.get("_body_hidden_chars") or 0),
+        authentication_results=row.get("_body_authentication_results"),
+        reply_to=row.get("_body_reply_to"),
     )
 
 
@@ -1909,49 +2059,65 @@ def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
     return loader if callable(loader) else backend.load_body
 
 
-def _body_snippet(body_text: str) -> str:
-    """One-line snippet of the body text for the ``search``/``new`` row."""
-    return output.make_snippet(body_text) if body_text else ""
+def _body_snippet(body_text: str, url_mode: str) -> str:
+    """One-line snippet of the body text, after rendering its URLs in ``url_mode``."""
+    return output.make_snippet(_rendered_body(body_text, url_mode))
 
 
-def _body_payload(body: _LoadedBody) -> dict:
+def _body_payload(body: "_LoadedBody", body_text: str, url_mode: str) -> dict:
     """The ``body`` object of the ``search``/``new`` row."""
     return {
         "available": body.available,
         "readable": body.readable,
         "partial": body.partial,
-        "truncated": _snippet_truncated(body.text),
+        "truncated": _snippet_truncated(body_text, url_mode),
     }
 
 
-def _snippet_truncated(body_text: str) -> bool:
+def _snippet_truncated(body_text: str, url_mode: str) -> bool:
+    """Whether the one-line body exceeds the snippet length after rendering URLs."""
     if not body_text:
         return False
-    single_line = " ".join(output.sanitize_text(body_text).split())
+    rendered = _rendered_body(body_text, url_mode)
+    single_line = " ".join(rendered.split())
     return len(single_line) > output.SNIPPET_CHARS
 
 
 def _show_headers(
-    raw_headers: dict, row: dict, to_list: list[dict], cc_list: list[dict]
+    raw_headers: dict,
+    row: dict,
+    fields: _ContentFields,
+    url_mode: str,
 ) -> dict[str, str]:
-    sender = _format_address(row.get("sender_name"), row.get("sender_address"))
+    """The six ``show.headers`` values sanitized and with their URLs rendered.
+
+    A header value repeats the message text (a subject, a name or a
+    ``Message-ID``) and is untrusted like it.
+    """
+    sender = _format_address(fields.sender_name, row.get("sender_address"))
     to_value = ", ".join(
-        _format_address(entry.get("name"), entry.get("address")) for entry in to_list
+        _format_address(entry.get("name"), entry.get("address"))
+        for entry in fields.to_list
     )
     cc_value = ", ".join(
-        _format_address(entry.get("name"), entry.get("address")) for entry in cc_list
+        _format_address(entry.get("name"), entry.get("address"))
+        for entry in fields.cc_list
     )
     date_value = output.iso_timestamp(
         row.get("date_sent") or row.get("date_received")
     ) or ""
-    return {
+    headers = {
         "From": _header_lookup(raw_headers, "From") or sender,
         "To": _header_lookup(raw_headers, "To") or to_value,
         "Cc": _header_lookup(raw_headers, "Cc") or cc_value,
-        "Subject": _header_lookup(raw_headers, "Subject") or str(row.get("subject") or ""),
+        "Subject": _header_lookup(raw_headers, "Subject") or fields.subject,
         "Date": _header_lookup(raw_headers, "Date") or date_value,
         "Message-ID": _header_lookup(raw_headers, "Message-ID")
         or str(row.get("message_id") or ""),
+    }
+    return {
+        name: output.render_urls(output.sanitize_text(value), url_mode)
+        for name, value in headers.items()
     }
 
 
@@ -2046,13 +2212,15 @@ def _filter_terms(values: Iterable[str], *, split: bool = False) -> tuple[str, .
     word is an AND term, with or without wildcards. Without it (``--text``,
     ``--from``, ``--to``, ``--cc``) the whole value is one pattern. Repeated
     CLI flags are ANDed too because every value contributes terms; an empty
-    value contributes none.
+    value contributes none. Every value loses terminal escapes and invisible
+    characters before it is used as a pattern, so a value copied from the
+    output matches the message whose raw text carries those characters.
     """
     terms: list[str] = []
     for value in values or ():
         if value is None:
             continue
-        text = str(value).strip()
+        text = output.sanitize_text(str(value)).strip()
         if not text:
             continue
         if split:

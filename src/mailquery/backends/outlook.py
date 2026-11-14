@@ -5,8 +5,9 @@ Implemented: the connection (``describe``), ``name``, ``labels_available``,
 ``bind_command`` hook, the stores of the profile (``accounts``,
 ``excluded_stores``), their folders (``mailboxes``, ``resolve_mailbox``), their
 items (``query``, ``membership``, ``duplicate_counts``, ``recipients``,
-``attachment_names``, ``find_message``) and their bodies (``load_body`` plus the
-``show`` hooks ``not_found_hint`` and ``unreadable_attachments``). Folder
+``attachment_names``, ``find_message``) and their bodies (``load_body``, the
+header-only ``load_headers`` and the ``show`` hooks ``not_found_hint`` and
+``unreadable_attachments``). Folder
 counters are read only by ``mailboxes`` (core hook
 ``mailboxes_without_counters``). The ``search`` hooks ``recipients_open_items``,
 ``items_opened`` and ``load_snippet`` serve the bounded ``--text``/``--to``/``--cc``
@@ -38,6 +39,7 @@ from mailquery.backends.base import (
     AttachmentMetadataRow,
     BodyRow,
     ExcludedStoreError,
+    HeaderRow,
     MailBackend,
     MailboxRow,
     MessageRow,
@@ -51,6 +53,14 @@ BACKEND_NAME = "outlook"
 STRATEGY = "com_readonly"
 
 _UID_PATTERN = re.compile(r"[0-9A-F]+")
+
+#: A folded header line: CRLF or LF followed by a space or a tab.
+_FOLDED_LINE = re.compile(r"\r?\n(?=[ \t])")
+
+# OlBodyFormat
+OL_FORMAT_PLAIN = 1
+OL_FORMAT_HTML = 2
+OL_FORMAT_RTF = 3
 
 # OlAccountType
 OL_EXCHANGE = 0
@@ -105,6 +115,9 @@ PR_TRANSPORT_MESSAGE_HEADERS = PROPTAG + "007D001F"
 
 #: Headers of ``show``, read from the transport headers when present.
 SHOW_HEADER_NAMES = ("From", "To", "Cc", "Subject", "Date", "Message-ID")
+#: Sender headers whose first occurrence carries the sender signals.
+AUTHENTICATION_RESULTS_HEADER = "Authentication-Results"
+REPLY_TO_HEADER = "Reply-To"
 #: Warnings of ``load_body`` and ``show``.
 SMIME_ENCRYPTED_WARNING = "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
 SMIME_SIGNED_WARNING = "W_BODY_UNREADABLE: S/MIME signed content is not supported"
@@ -990,18 +1003,48 @@ class OutlookBackend(MailBackend):
         2. Item not found or that cannot be opened ⇒ ``W_BODY_UNREADABLE``.
         3. Header-only item (``DownloadState``) ⇒ ``W_BODY_NOT_LOCAL``; nothing
            else of the item is read.
-        4. ``Body``; if empty, ``HTMLBody`` converted to text (a meeting item has
-           no ``HTMLBody``: no HTML); HTML without text ⇒ ``W_HTML_NO_TEXT``.
+        4. ``HTMLBody`` converted to text when the item's ``BodyFormat`` is HTML,
+           else ``Body``; HTML without text ⇒ ``W_HTML_NO_TEXT``. It also returns
+           the count of characters the HTML hidden elements omitted.
         5. Names of the visible attachments and the transport headers (missing
-           for internal mail: ``{}``, and ``show`` synthesizes them).
+           for internal mail: ``{}``, and ``show`` synthesizes them), with the
+           first ``Authentication-Results`` and ``Reply-To``.
 
         ``partial`` and ``source.partial`` are always ``False`` and
         ``source.emlx_path`` ``None``.
         """
         return self._load_body(row, details=True)
 
+    def load_headers(self, row: MessageRow) -> HeaderRow:
+        """Read only the transport headers of one item (never downloads).
+
+        An S/MIME item is not opened and gives empty headers with
+        ``read=False``. Any other item is opened (it counts in
+        ``items_opened``) and only ``PR_TRANSPORT_MESSAGE_HEADERS`` is read: the
+        body, the HTML body and the attachments are untouched. A failure to open
+        the item or to read the property gives empty headers with ``read=False``
+        and never raises.
+        """
+        uid = str(row.get("uid") or "")
+        if is_smime_class(row.get("message_class")):
+            return _unread_headers()
+        try:
+            item = self._open_item(uid) if uid else None
+            if item is None or item is _UNOPENABLE:
+                return _unread_headers()
+            raw = _get_property(item.PropertyAccessor, PR_TRANSPORT_MESSAGE_HEADERS)
+        except Exception:  # noqa: BLE001 - a header read never breaks the command
+            return _unread_headers()
+        headers, authentication_results, reply_to = _transport_headers(raw)
+        return {
+            "headers": headers,
+            "authentication_results": authentication_results,
+            "reply_to": reply_to,
+            "read": True,
+        }
+
     def _load_body(self, row: MessageRow, *, details: bool) -> BodyRow:
-        """:meth:`load_body`; without ``details`` no attachment or header is read."""
+        """:meth:`load_body`; without ``details`` the attachment names are not read."""
         uid = str(row.get("uid") or "")
         message_class = row.get("message_class")
         if is_smime_class(message_class):
@@ -1021,19 +1064,28 @@ class OutlookBackend(MailBackend):
                     f"W_BODY_NOT_LOCAL: only the headers of uid {uid} are stored locally; "
                     "the body is never downloaded"
                 )
-            body_text, warnings = _item_text(item)
+            body_text, warnings, hidden_chars = _item_text(item)
             attachments: list[dict[str, str]] = []
-            headers: dict[str, str] = {}
+            headers, authentication_results, reply_to = _transport_headers(
+                _get_property(item.PropertyAccessor, PR_TRANSPORT_MESSAGE_HEADERS)
+            )
             if details:
                 attachments = [{"name": name} for name in _visible_attachment_names(item)]
-                headers = _parse_headers(
-                    _get_property(item.PropertyAccessor, PR_TRANSPORT_MESSAGE_HEADERS)
-                )
         except outlook_com.ComCallError as exc:
             if exc.hresult in ITEM_UNOPENABLE_HRESULTS:
                 return _unavailable_body(_unopenable_warning(uid))
             raise
-        return _body(True, True, headers, body_text, attachments, warnings)
+        return _body(
+            True,
+            True,
+            headers,
+            body_text,
+            attachments,
+            warnings,
+            hidden_chars=hidden_chars,
+            authentication_results=authentication_results,
+            reply_to=reply_to,
+        )
 
     # -- core hooks (looked up with getattr; outside the backend protocol) --- #
 
@@ -1063,10 +1115,10 @@ class OutlookBackend(MailBackend):
         return len(self._opened)
 
     def load_snippet(self, row: MessageRow) -> BodyRow:
-        """:meth:`load_body` for ``search``/``new``: the body only.
+        """:meth:`load_body` for ``search``/``new``: the body and its sender headers.
 
-        Attachment names and transport headers are only needed by ``show``
-        (``attachments: []``, ``headers: {}``).
+        Attachment names are only needed by ``show`` (``attachments: []``, and
+        ``headers`` carry the transport header values it would emit).
         """
         return self._load_body(row, details=False)
 
@@ -1800,44 +1852,53 @@ def _unlink_quietly(path: Path) -> None:
         pass
 
 
-def _item_text(item: outlook_com.ReadOnlyCom) -> tuple[str, list[str]]:
-    """Plain ``Body``; if empty, ``HTMLBody`` converted with the common code.
+def _item_text(item: outlook_com.ReadOnlyCom) -> tuple[str, list[str], int]:
+    """Body text, warnings and the count of characters its hidden elements omitted.
 
-    A MeetingItem has no ``HTMLBody`` (``AttributeError`` under dynamic
-    dispatch, verified on the host): it counts as no HTML. HTML that yields no
-    text gives ``""`` and ``W_HTML_NO_TEXT``.
+    The item's ``BodyFormat`` selects the body: ``olFormatHTML`` converts
+    ``HTMLBody`` with the common code (a meeting-like item has no ``HTMLBody``
+    under dynamic dispatch: ``AttributeError``); any other value, ``None`` and a
+    failed COM read of ``BodyFormat`` or ``HTMLBody`` fall back to the plain
+    ``Body``. HTML that yields no text gives ``""`` and ``W_HTML_NO_TEXT`` even
+    when ``Body`` has text.
     """
-    text = _text(item.Body).strip()
-    if text:
-        return text, []
     try:
-        html = _text(item.HTMLBody)
+        body_format = item.BodyFormat
     except AttributeError:
-        html = ""
-    if not html.strip():
-        return "", []
-    converted = output.html_to_text(html)
-    if converted:
-        return converted, []
-    return "", [HTML_NO_TEXT_WARNING]
+        body_format = None
+    except outlook_com.ComCallError:
+        body_format = None
+    if body_format == OL_FORMAT_HTML:
+        try:
+            html = _text(item.HTMLBody)
+        except (AttributeError, outlook_com.ComCallError):
+            html = ""
+        else:
+            converted = output.html_body_to_text(html)
+            if converted.text:
+                return converted.text, [], converted.hidden_chars
+            return "", [HTML_NO_TEXT_WARNING], converted.hidden_chars
+    return _text(item.Body).strip(), [], 0
 
 
-def _parse_headers(raw: Any) -> dict[str, str]:
-    """From/To/Cc/Subject/Date/Message-ID of ``PR_TRANSPORT_MESSAGE_HEADERS``.
+def _transport_headers(raw: Any) -> tuple[dict[str, str], str | None, str | None]:
+    """Headers of ``PR_TRANSPORT_MESSAGE_HEADERS``; ``({}, None, None)`` without it.
 
-    ``{}`` when the item has none (internal mail): ``show`` then synthesizes
-    them from the item's properties and recipients.
+    Returns the six values ``show`` emits, the unfolded first
+    ``Authentication-Results`` and the unfolded ``Reply-To``. Internal mail has
+    no transport headers: ``show`` then synthesizes them from the item's
+    properties and recipients and the sender signals are absent.
     """
     text = _text(raw)
     if not text.strip():
-        return {}
+        return {}, None, None
     from email import policy as email_policy  # lazy: ~15 ms, only needed by show
     from email.parser import HeaderParser
 
     try:
         parsed = HeaderParser(policy=email_policy.default).parsestr(text)
     except Exception:  # noqa: BLE001 - malformed headers never break show
-        return {}
+        return {}, None, None
     headers: dict[str, str] = {}
     for name in SHOW_HEADER_NAMES:
         try:
@@ -1845,7 +1906,26 @@ def _parse_headers(raw: Any) -> dict[str, str]:
         except Exception:  # noqa: BLE001 - a malformed header is treated as missing
             value = None
         headers[name] = str(value).strip() if value is not None else ""
-    return headers
+    return headers, _first_header(parsed, AUTHENTICATION_RESULTS_HEADER), _first_header(
+        parsed, REPLY_TO_HEADER
+    )
+
+
+def _first_header(message: Any, name: str) -> str | None:
+    """Unfolded value of the first header called ``name``, or ``None``."""
+    try:
+        values = message.get_all(name)
+    except Exception:  # noqa: BLE001 - malformed headers never break the read
+        return None
+    if not values:
+        return None
+    return _unfolded(str(values[0]))
+
+
+def _unfolded(value: str) -> str | None:
+    """One header value without its folded line breaks, or ``None`` when empty."""
+    unfolded = _FOLDED_LINE.sub("", value).strip()
+    return unfolded or None
 
 
 def _body(
@@ -1855,6 +1935,10 @@ def _body(
     body_text: str,
     attachments: list[dict[str, str]],
     warnings: list[str],
+    *,
+    hidden_chars: int = 0,
+    authentication_results: str | None = None,
+    reply_to: str | None = None,
 ) -> BodyRow:
     """A ``load_body`` result: ``partial`` always false, no ``.emlx``."""
     return {
@@ -1866,6 +1950,19 @@ def _body(
         "attachments": attachments,  # type: ignore[typeddict-item]
         "source": {"emlx_path": None, "partial": False},
         "warnings": warnings,
+        "hidden_chars": hidden_chars,
+        "authentication_results": authentication_results,
+        "reply_to": reply_to,
+    }
+
+
+def _unread_headers() -> HeaderRow:
+    """Header row of an item whose headers are not read."""
+    return {
+        "headers": {},
+        "authentication_results": None,
+        "reply_to": None,
+        "read": False,
     }
 
 
