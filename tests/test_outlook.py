@@ -3393,6 +3393,10 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             (self.home / "state.json").unlink(missing_ok=True)  # each scenario starts afresh
             runs: list[tuple[str, ...]] = [("mailboxes",)]
             runs += [("search", *flags, "--strip-links") for flags in self._SEARCHES]
+            runs += [
+                ("search", "--group-by", "from,month"),
+                ("search", "--count"),
+            ]
             runs += [("new", *flags, "--strip-links") for flags in self._NEWS]
             runs += [
                 ("show", spec.entry_id, "--strip-links")
