@@ -57,7 +57,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 |---|---|---|---|---|---|---|---|
 | M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | 🟢 |
 | M02 | Refactor: armado único de mensajes en `search.py` | I1 | W1 | — | — (preserva comportamiento) | [M02](M02-message-assembly-refactor.md) | 🟢 |
-| M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | 🟡 |
+| M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | 🟢 |
 | M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | 🟢 |
 | M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟡 |
 | M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟡 |
@@ -197,11 +197,11 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 
 | AC | Qué exige (resumen) | Milestone(s) | Grupos de test | Estado |
 |---|---|---|---|---|
-| AC-H01 | A2 en campos de contenido, identificadores intactos | M03, M07 | UT-CNT-01, UT-CW-01, UT-CW-02 | ⚪ |
-| AC-H02 | `\n`/`\t`, CRLF, idempotencia, determinismo de F1 | M03, M05, M08 | UT-CNT-01, UT-CNT-03, UT-CNT-06, UT-CW-13 | ⚪ |
+| AC-H01 | A2 en campos de contenido, identificadores intactos | M03, M07 | UT-CNT-01, UT-CW-01, UT-CW-02 | 🟡 |
+| AC-H02 | `\n`/`\t`, CRLF, idempotencia, determinismo de F1 | M03, M05, M08 | UT-CNT-01, UT-CNT-03, UT-CNT-06, UT-CW-13 | 🟡 |
 | AC-H03 | Búsqueda con A2 a ambos lados; bloqueo y caché sin cambios | M07 | UT-CW-03, UT-CW-04 | ⚪ |
-| AC-H04 | Cuerpo desde HTML; omisión de ocultos en línea | M03, M06, M08, M14 | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | ⚪ |
-| AC-H05 | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` | M03, M08 | UT-CNT-03, UT-CW-07 | ⚪ |
+| AC-H04 | Cuerpo desde HTML; omisión de ocultos en línea | M03, M06, M08, M14 | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | 🟡 |
+| AC-H05 | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` | M03, M08 | UT-CNT-03, UT-CW-07 | 🟡 |
 | AC-H06 | Detección y modos de URL en todos los campos | M05, M08 | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | ⚪ |
 | AC-H07 | `--strip-links`, precedencia, default `neutralize` | M08 | UT-CW-09 | ⚪ |
 | AC-H08 | `W_EXTERNAL_LINKS` | M05, M08 | UT-CNT-08, UT-CW-10 | ⚪ |
@@ -214,7 +214,7 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | 🟡 |
 | AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | ⚪ |
 | AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟡 |
-| AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | ⚪ |
+| AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | 🟡 |
 | AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | ⚪ |
 | AC-D02 | `reason: network`/`not_local` ⇒ `E_ATTACHMENT_UNAVAILABLE` | M09 | UT-RMT-02 | ⚪ |
 | AC-D03 | `attachments: "none"` sigue rechazado con el hint nuevo | M09 | UT-RMT-03 | ⚪ |
@@ -552,3 +552,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-13 | M02 | 🟡 → 🟢 | `f8806dc` (merge en `integration/i1-prep`): `Ran 1066`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +2 tests nuevos) | `docs/plan/evidence/M02.md` | UT-SR-17; refactor sin cambios de goldens; cobertura total 89 %, `search.py` 92 %; commits con `--no-verify` por el hook local roto |
 | 2026-11-13 | M04 | 🟡 → 🟢 | `645fe09` (merge en `integration/i1-prep`): `Ran 1087`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +23 tests UT-ACT) | `docs/plan/evidence/M04.md` | Detector `attachments/active_content.py` al 100 %; UT-ACT-05 y DOC-09 se difieren a M09 (conexión con `attachment`) |
 | 2026-11-13 | M01 | 🟡 → 🟢 | `3ebe4c7` (merge en `integration/i1-prep`): `Ran 1072` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +8 tests) | `docs/plan/evidence/M01.md` | `css-inline~=0.23.1` + `coverage` en CI y READMEs; configuración `[tool.coverage.*]`; los wheels se comprueban en CI (resultado se anota en el cierre de I1); commits con `--no-verify` por el hook local roto |
+| 2026-11-13 | M03 | 🟡 → 🟢 | `4d8654c` (merge en `integration/i1-prep`): `Ran 1102` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +38 tests) | `docs/plan/evidence/M03.md` | A2/A3 en `output.py`; `output.py` 99 %; NFR-20 informativo 35,9 µs; sin pragmas nuevos |

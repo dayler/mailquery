@@ -142,8 +142,8 @@ Estado de la implementación de cada contrato de la sección 0.2, desviaciones a
 
 | Contrato (sección 0.2) | Feature | Estado | Commit | Documentos consumidores actualizados | Nota para la conciliación |
 |---|---|---|---|---|---|
-| Valores de texto del JSON y de los errores | F1 | Pendiente | — | — | — |
-| Selección del cuerpo y conversión HTML → texto | F1 | Pendiente | — | — | — |
+| Valores de texto del JSON y de los errores | F1 | Pendiente | `4d8654c` | `TEST-CATALOG.md`, `INTERFACES.md` | Primitivas de saneado implementadas en `output.py` (`sanitize_text`); estado pendiente porque todavía falta aplicarlas a los campos de la salida de los comandos y a los textos de error. |
+| Selección del cuerpo y conversión HTML → texto | F1 | Pendiente | `4d8654c` | `TEST-CATALOG.md`, `INTERFACES.md` | Primitivas implementadas en `output.py` (`html_body_to_text`, `HtmlText`, paso a línea con `css-inline` y omisión/conteo del contenido oculto); estado pendiente porque todavía falta elegir el cuerpo en los backends y aplicar el resultado en la salida. |
 | Semántica de búsqueda | F1 | Pendiente | — | — | — |
 | Cuerpo, `snippet`, asunto, nombres y `headers` | F1 | Pendiente | — | — | — |
 | Opciones de `search`, `new` y `show` y su ayuda | F1 | Pendiente | — | — | — |

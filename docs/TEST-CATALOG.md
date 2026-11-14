@@ -14,13 +14,14 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 - **Aislamiento.** Ningún test usa el `HOME`, el `~/.mailquery` ni el `config.toml` del usuario. Todo subproceso fija `HOME` y, en Windows, `USERPROFILE` a un directorio temporal.
 - **Independencia.** Cada caso crea sus datos temporales y no depende del orden. Un fixture compartido en `setUpClass` solo se permite si es de solo lectura.
 - **Plataforma.** Una diferencia de plataforma va dentro del test como aserción condicional. Los únicos saltos permitidos son los de la sección 5.
-- **Red y herramientas.** Sin red, salvo `pipx install` en las SMOKE. Solo `unittest`, sin otros frameworks de test.
+- **Red y herramientas.** Sin red externa, salvo `pipx install` en las SMOKE; UT-CNT-03.05 y UT-CNT-03.11 usan un servidor HTTP en `127.0.0.1` dentro del propio test. Solo `unittest`, sin otros frameworks de test.
 
 ## 2. Prefijos y archivos
 
 | Prefijo | Qué cubre | Archivo |
 |---|---|---|
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
+| UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible y hojas `<style>` | `tests/test_content.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -68,6 +69,7 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 - `tests/fakes/attachment_driver.py`: driver de adjuntos para los tests del motor; entrega bytes y motivos y nunca escribe en caché.
 - `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`).
 - `tests/fixtures/attachment_samples.py`: contenidos de muestra para el bloqueo por *magic bytes*.
+- `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>` y un cuerpo típico de 6 KB para la medición informativa del paso a línea.
 - `tests/fixtures/active_content_samples.py`: PDF, OLE y ZIP de muestra para el detector de contenido activo (con y sin marcadores, con `vbaProject.bin`, con ejecutables, con entradas `.bin` propias de Office y con un ZIP cuyo directorio central no se puede leer). El ZIP cifrado se fabrica activando el bit 0 de *general purpose flag* en las cabeceras local y central.
 
 ## 5. CI y saltos
@@ -126,6 +128,11 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
+| AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
+| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01 (parcial; completa con UT-CNT-06, UT-CW-13) | — |
+| AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea | UT-CNT-02 (parcial; completa con UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09) | — |
+| AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS | UT-CNT-03 (parcial; completa con UT-CW-07) | — |
+| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice` | UT-CNT-04 (parcial; completa con UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08) | — |
 
 ## 8. Casos
 
@@ -303,6 +310,71 @@ Archivo: `tests/test_output.py`
 |---|---|---|
 | .01 | P | Caracteres de control en `snippet` ⇒ eliminados. |
 | .02 | P | Secuencias ANSI en `body_text` de `show` ⇒ eliminadas. |
+
+#### UT-CNT-01 — Saneado del texto
+
+Requisitos: RF-52 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Quita secuencias ANSI CSI (`\x1b[31m…\x1b[0m`). |
+| .02 | P | `\r\n` y `\r` → `\n`. |
+| .03 | P | Elimina C0 salvo `\n` y `\t`, y DEL; conserva `\n` y `\t`. |
+| .04 | P | Elimina C1 `U+0080..U+009F` (extremos y uno intermedio). |
+| .05 | P | Elimina `Cf`: `U+200B`, `U+200D`, `U+202E`, `U+2066`, `U+FEFF`, `U+00AD` y un *tag character* `U+E0041`. |
+| .06 | P | Elimina `U+FE00`, `U+FE0D`, `U+E0100`, `U+E01EF`; conserva `U+FE0E` y `U+FE0F` (`"❤️"` sale igual). |
+| .07 | P | Elimina los rellenos Hangul `U+115F`, `U+1160`, `U+3164` y `U+FFA0`. |
+| .08 | B | Idempotente: `sanitize_text(sanitize_text(x)) == sanitize_text(x)` para cada muestra. |
+| .09 | B | Sin normalización: `"é"` (e + acento combinante) y `"ｆ"` (ancho completo) no cambian. |
+| .10 | B | El resto del texto no cambia (acentos, CJK, emoji sin `Cf`); el ejemplo de saneado de la sección 8 del PRD da sus tres salidas. |
+| .11 | B | `max_chars` recorta como hoy y no recorta más allá. |
+| .12 | P | Quita secuencias OSC terminadas en `ST` y en `BEL`; el texto visible se conserva. |
+| .13 | B | `sanitize_text("")` devuelve `""`. |
+
+#### UT-CNT-02 — HTML → texto con omisión en línea
+
+Requisitos: RF-53, RF-56 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `hidden`, `hidden=""` y `hidden="hidden"` omiten el elemento y sus descendientes. |
+| .02 | P | `style` con `display:none`, `visibility:hidden`, `mso-hide:all`, `font-size:0` u `opacity:0` omite; también con mayúsculas, espacios, `!important`, `0.0`, `.0`, `0px`, `0%`, `0em` y tras otra declaración (`color:red; display:none`). |
+| .03 | N | No omiten: `font-size:0.8em`, `font-size:inherit`, `opacity:0.5`, `xdisplay:none`, `min-font-size:0` ni `display:none` dentro de un valor de otra propiedad. |
+| .04 | N | `aria-hidden="true"` conserva el texto. |
+| .05 | B | `<br hidden>`, `<img hidden>` e `<input style="display:none">` no omiten el texto siguiente. |
+| .06 | B | Elemento oculto sin cierre por la vía de fallo del paso a línea: se omite hasta el final. |
+| .07 | B | Anidación de la misma etiqueta: `<div hidden><div>a</div>b</div>c` da `c`. |
+| .08 | P | El texto visible alrededor no cambia (ejemplo A3 «HTML oculto» de la sección 8 del PRD → `Factura adjunta.`). |
+| .09 | B | Todo oculto → `text == ""` y `hidden_chars > 0`. |
+| .10 | P | Conteo: el ejemplo de la hoja `<style>` da 30; un texto oculto con un `U+200B` cuenta sin él (el saneado va antes de contar). |
+| .11 | B | Conteo con entidades y comentarios dentro del oculto: `<div hidden>a&nbsp;&amp;<!-- c -->b</div>` cuenta los caracteres ya decodificados y no cuenta el comentario. |
+| .12 | B | Ramas del analizador: `<div hidden><span>x</div>y` da `y`; `<div hidden/>z` no omite `z`; `<script>` dentro de un oculto no aporta texto a ningún flujo; `style` mal formado (`display`, `;;`, sin `:`) no omite; un `</script>` huérfano no rompe la conversión. |
+
+#### UT-CNT-03 — Hojas `<style>` y `css-inline`
+
+Requisitos: RF-53, RNF-18 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Una regla de clase con `display:none` en `<style>` oculta el elemento (ejemplo A3 de la sección 8 del PRD). |
+| .02 | P | Reglas por id, por etiqueta y con selector compuesto también ocultan. |
+| .03 | N | Una regla dentro de `@media` no oculta nada. |
+| .04 | N | `<link rel="stylesheet" href="file:///<tmp>/hide.css">` a un archivo local con `.x{display:none}`: el texto sigue presente. |
+| .05 | N | `<link rel="stylesheet" href="http://127.0.0.1:<puerto>/hide.css">` con un `http.server` en un hilo de este test: el servidor recibe 0 peticiones y el texto sigue presente. |
+| .06 | P | `import css_inline` falla (simulado): se convierte el HTML original sin excepción y la omisión en línea sigue funcionando; una segunda llamada no reintenta la importación. |
+| .07 | P | `inline()` lanza una excepción (simulada): se convierte el HTML original sin excepción. |
+| .08 | B | El inliner se construye con `load_remote_stylesheets=False` y sin `base_url` (espía sobre el constructor). |
+| .09 | B | Determinismo: la misma entrada dos veces da el mismo `HtmlText`. |
+| .10 | B | Regla de `<style>` con `display:none !important` y estilo en línea que la contradice: se omite (riesgo aceptado del PRD) y se cuenta. |
+| .11 | N | `<style>@import url("http://127.0.0.1:<puerto>/hide.css");</style>` y `@import` a un `file:///<tmp>/hide.css` local con `.x{display:none}`: el servidor de .05 recibe 0 peticiones y el texto sigue presente. El fallo real de CSS se cubre en .07 porque ningún CSS probado hace lanzar a `css-inline` 0.23.1. |
+
+#### UT-CNT-04 — Texto de `content_notice`
+
+Requisitos: RF-66 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `CONTENT_NOTICE` es literalmente el texto de RF-66. |
 
 ### Estado, búsqueda y store
 
