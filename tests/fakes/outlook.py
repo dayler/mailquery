@@ -255,6 +255,7 @@ OOM_MEMBERS: dict[str, dict[str, str | None]] = {
         "EntryID": None,
         "Parent": "Folder",
         "DownloadState": None,
+        "BodyFormat": None,
         "Body": None,
         "HTMLBody": None,
         "Attachments": "Attachments",
@@ -886,6 +887,9 @@ class ItemSpec:
     headers: Any = AUTO  # None: no transport headers (internal mail)
     body: str = ""
     html: str = ""
+    #: OlBodyFormat of the item: 2 (olFormatHTML) when it has HTML, 1 (plain)
+    #: otherwise. ``None`` models a property that returns no value.
+    body_format: int | None = AUTO
     attachments: list[AttachmentSpec] = field(default_factory=list)
     recipients: list[RecipientSpec] = field(default_factory=list)
     msg_status: int = 0
@@ -1637,8 +1641,8 @@ class FakeItem(_ComObject):
 
     _KIND = "Item"
     _PROPS = (
-        "MessageClass", "EntryID", "Parent", "DownloadState", "Body", "HTMLBody",
-        "Attachments", "Recipients", "PropertyAccessor",
+        "MessageClass", "EntryID", "Parent", "DownloadState", "BodyFormat", "Body",
+        "HTMLBody", "Attachments", "Recipients", "PropertyAccessor",
     )
 
     def __init__(self, runtime: _Runtime, spec: ItemSpec) -> None:
@@ -1657,6 +1661,15 @@ class FakeItem(_ComObject):
 
     def _get_DownloadState(self) -> int:
         return self._spec.download_state
+
+    def _get_BodyFormat(self) -> int | None:
+        # A MeetingItem, ReportItem or TaskItem has no BodyFormat, like its missing
+        # HTMLBody: it counts as no HTML and the plain Body is used.
+        if self._spec.kind not in ("mail", "post"):
+            raise AttributeError("<unknown>.BodyFormat")
+        if self._spec.body_format is AUTO:
+            return 2 if self._spec.html else 1
+        return self._spec.body_format
 
     def _get_Body(self) -> str:
         return self._spec.body

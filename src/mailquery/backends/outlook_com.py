@@ -186,6 +186,7 @@ READONLY_MEMBERS: dict[str, dict[str, str | None]] = {
         "EntryID": None,
         "Parent": "Folder",
         "DownloadState": None,
+        "BodyFormat": None,
         "Body": None,
         "HTMLBody": None,
         "Attachments": "Attachments",
