@@ -431,6 +431,23 @@ paso por el módulo usa una única envoltura:
   backends nativos para leer solo las cabeceras (D-06): el proxy lo envuelve
   igual que `load_snippet` y en un driver nativo la llamada sigue en línea; no
   está en la ABC ni en la validación de retornos, y un plugin no lo tiene.
+- `AttachmentStreamGuard(driver)`: acota la creación y cada bloque de un flujo de
+  adjunto de un plugin externo. El motor de adjuntos lo invoca con la factoría
+  del flujo y el instante límite del adjunto (unidades de `time.monotonic`, o
+  `None` sin política) y devuelve un iterador que ejecuta en un hilo daemon la
+  creación y cada `next()` con el tiempo restante. Al vencer ⇒ `TimeoutError`,
+  que el motor convierte en `E_CLIENT_TIMEOUT`; un `PluginError` conserva su
+  `reason` para que el motor redacte la plantilla de §12.6 y cualquier otra
+  excepción del plugin es `E_PLUGIN_FAILED` (3), nunca `E_INTERNAL`. Una vez
+  gastado el presupuesto no se pide otro bloque. El `close()` del iterador del
+  plugin se intenta siempre y un fallo al cerrar no enmascara el timeout. Los
+  drivers nativos no usan el guard (sus objetos SQLite/COM son afines a su
+  hilo): se comprueban entre bloques y al terminar cada llamada. El proxy de
+  `wrap_driver` no enruta `attachment_stream` por `call_driver` en un driver
+  externo, para que la creación no quede cortada por `METADATA_TIMEOUT_SECONDS`.
+- `EXTRACTION_TIMEOUT_SECONDS = 60.0`: valor por defecto documentado del tope
+  por adjunto; la fuente efectiva es `[attachments].timeout_seconds` de
+  `config.py`. `plugins/__init__.py` mantiene su reexportación.
 - `map_plugin_error(exc, *, driver, attachments)` y
   `sanitize_error_field(value, max_bytes)` son las piezas puras (mapeo y
   saneado); `METADATA_OPERATIONS`/`ATTACHMENT_OPERATIONS` fijan el contexto.
@@ -999,14 +1016,18 @@ Esquema cerrado de `config.toml`, resolución de alcance por driver y
 
 Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
-`AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count)`,
+`AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count,
+timeout_seconds)`,
 `ContentConfig(url_display)`, `ScopeEntry(key, mailbox_list, driver, account)`,
 `Config(home, logging, search, new, attachments, content, scopes)` y
 `ResolvedScope(account_uuid, account_label, account_email, mailboxes, driver)`.
 
-- `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`; rangos `1..500`,
-  `1..1024` (`>= max_file_size_mb`) y `1..500`; una tabla ausente usa los
-  defaults. MiB = 1.048.576 bytes (los límites los aplica el motor de adjuntos).
+- `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`/`60`; rangos `1..500`,
+  `1..1024` (`>= max_file_size_mb`), `1..500` y `10..600`; una tabla ausente usa
+  los defaults. Un `timeout_seconds` que no sea entero (un `bool` no lo es) o
+  fuera de rango ⇒ `E_CONFIG_INVALID` (exit 2) en cualquier comando, antes de
+  abrir el store. MiB = 1.048.576 bytes (los límites los aplica el motor de
+  adjuntos; `timeout_seconds` lo aplica `cli.py`).
 - `ContentConfig`: `url_display` decide cómo se muestran las URLs en el asunto,
   los nombres, `headers`, `body_text` y `snippet`; valores `neutralize` (default),
   `keep` y `strip`. `cli._url_mode` aplica la precedencia `--strip-links` >
@@ -1062,11 +1083,11 @@ max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
 `wildcard_to_regex(pattern)`, `matches(pattern, text)`,
 `run_search(backend, config, filters, *, drivers=None, native=None,
-url_mode="neutralize")`,
+url_mode="neutralize", fields=None, group_by=None, count=False)`,
 `run_new(backend, config, state_store, *, peek=False, limit=None, clock=None,
-drivers=None, native=None, url_mode="neutralize")`,
+drivers=None, native=None, url_mode="neutralize", fields=None)`,
 `run_show(backend, config, uid, *, driver=None, drivers=None, native=None,
-url_mode="neutralize")`,
+url_mode="neutralize", fields=None)`,
 `run_mailboxes(backend, config, *, drivers=None, native=None)`.
 Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
 `None` cuando la config no lo declara); `drivers` es el mapping
@@ -1081,30 +1102,53 @@ antes de abrir el store, PRD §12.11); los mensajes de error de `run_show`
 (`E_USAGE`, `E_ACCOUNT_NOT_IN_SCOPE`) muestran el uid prefijado.
 `state_store` es un `StateStore` creado con `is_installed` del registro.
 
-**Orden canónico de campos.** `SEARCH_ROW_FIELDS` y `SHOW_FIELDS` son tuplas públicas con el orden
-exacto de las claves de cada fila de `messages[]` de `search`/`new` y de `message` de `show`.
-`search`/`new` usan el mismo constructor de metadatos que `show` y añaden `duplicate_count`, `snippet`
-y `body`; `show` añade `headers`, `body_text`, `body_truncated`, `attachments`, `partial`, `readable` y
-`source`. El cuerpo se lee con un único cargador que devuelve el texto, las banderas
-`available`/`readable`/`partial`, las cabeceras, los adjuntos del cuerpo y los warnings de ese mensaje;
-`search`/`new` los aplanan en el orden de `messages[]` y `show` hace lo mismo con su único mensaje.
+**Orden canónico de campos.** `SEARCH_ROW_FIELDS`, `DEFAULT_ROW_FIELDS` y `SHOW_FIELDS` son tuplas
+públicas con el orden exacto de las claves de la fila de `messages[]` y de `message` de `show`. Sin
+`--fields`, cada fila de `search`/`new` es `DEFAULT_ROW_FIELDS` (`uid`, `subject`, `from`,
+`date_received`, `is_read`, `has_attachments`); `search_row_fields(requested)` la amplía con los campos
+pedidos y `all` devuelve `SEARCH_ROW_FIELDS`. `show_message_fields(requested)` devuelve `uid` más los
+campos pedidos, y sin selección o con `all`, `SHOW_FIELDS`. Los campos salen siempre en el orden
+canónico, sea cual sea el orden de la lista. El cuerpo solo se lee si se entrega `snippet`/`body` en
+`search`/`new`, si `--text` lo necesita para filtrar, o si `show` entrega un campo de cuerpo o
+`attachments`; los destinatarios solo si se entregan `to`/`cc` (o `headers` en `show`); los adjuntos
+solo si `show` entrega `attachments`. `mailbox` y `duplicate_count` se siguen calculando para la
+deduplicación aunque no se entreguen. Las cabeceras de A6 salen del `BodyRow` cuando el cuerpo se leyó y,
+si no, del gancho `load_headers(row)` de los backends nativos (un plugin no lo tiene); solo cuentan en
+`scan.messages_read` las lecturas efectivas.
 
-**Procesamiento del contenido (F1, PRD-v2.2 §10).** Por mensaje, `_content_fields`
-sanea (`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y
-el cuerpo completo, y cuenta las señales sobre esos textos y las direcciones
-(`from`, `to`, `cc`), nunca sobre `headers`; un cuerpo ilegible no aporta texto.
-Después, el modo de URL (`url_mode`) se aplica con `output.render_urls` a esos
-campos y a los seis valores de `headers` de `show`, y el `snippet` (`search`/`new`)
-o el truncado a 20.000 caracteres (`show`, con `body_truncated` y
-`W_BODY_TRUNCATED`) se calculan sobre el texto ya transformado. Los filtros
-comparan el texto saneado (A2), nunca el transformado por A4, así que los
-resultados no dependen del modo. Los warnings por mensaje son los del estado del
-cuerpo seguidos de `output.content_warnings(...)`:
-`W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`,
-`W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH`. El
-`hidden_chars`, la primera `Authentication-Results` y `Reply-To` vienen del
-`BodyRow` (0/`None` si el driver no los entrega); las filas del escaneo `--text`
-los conservan. `body.truncated` se calcula sobre el texto transformado.
+**Procesamiento del contenido (F1, PRD-v2.2 §10).** Por mensaje, `_content_fields` sanea
+(`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y el cuerpo completo, y
+cuenta las señales solo sobre los campos que esa respuesta entrega (y sobre las direcciones de `from`,
+`to` y `cc` entregados), nunca sobre `headers`; un cuerpo ilegible no aporta texto. Los warnings del
+estado del cuerpo y `W_HIDDEN_CONTENT` solo se emiten si se entrega cuerpo; `--text` sin
+`snippet`/`body` filtra con el texto pero no entrega sus warnings. `W_SENDER_AUTH_FAILED` y
+`W_REPLY_TO_MISMATCH` se emiten siempre que el mensaje los justifica. El resto del procesamiento (A4,
+`--strip-links`, truncado, orden de los warnings) no cambia.
+
+**Agrupación y recuento (F3, RF-72/RF-73/RF-78).** `GROUP_KEYS` (`from`, `domain`,
+`mailbox`, `account`, `day`, `week`, `month`), `GROUP_MAX_KEYS` (2), `GROUP_MAX_GROUPS` (50),
+`GROUP_DEFAULT_LIMIT` (5) y `GROUP_MAX_LIMIT` (50) son constantes públicas. Con `group_by`,
+`run_search` agrupa los mensajes **después** de los filtros y de la deduplicación y devuelve
+`{count, truncated, hint, groups, scan, warnings}`: cada grupo lleva sus claves en el orden
+pedido, su `count` total y sus mensajes más recientes (como mucho `filters.limit`, 5 sin
+`--limit`), con la fila de M10 menos `from`/`mailbox` si esa es la clave. `from` es la
+dirección en minúsculas (`null` sin dirección), `domain` la parte tras el último `@` (`null`
+sin dirección o sin `@`), `day`/`week`/`month` salen de `date_received` en
+`output.LOCAL_ZONE` (`null` sin fecha válida: nula, ≤ 0 o no representable) y
+`mailbox`/`account` usan la etiqueta de la cuenta de la carpeta reportada (o su `uuid`).
+Orden: grupos sin claves `null` por su mensaje más reciente descendente, los grupos sin
+fechas después y, al final, los grupos con alguna clave `null`; a igualdad, claves
+ascendentes con `null` al final (`mailbox` por cuenta y ruta). Más de 50 grupos ⇒
+`truncated: true`, `W_RESULTS_TRUNCATED: <n> more group(s); refine the filters` y hint
+`<n> more group(s); refine the filters`; `count` sigue siendo el total de mensajes. Con
+`count`, `run_search` devuelve `{count, hint, warnings, scan}` sin `messages` ni
+`truncated`, con solo warnings de alcance y sin leer cuerpos ni cabeceras. El `hint` de un
+`search` con `count: 0` es `no messages matched in <n> folder(s) of <m> account(s); run
+"mailquery mailboxes" to see other folders, or add --include-mailbox`: `<m>` son las cuentas
+de `resolved` (nunca las excluidas) y `<n>` sus carpetas únicas (INBOX, `mailbox_list` y
+`--include-mailbox`); sin cuentas leídas es `null`. Se calcula del alcance ya resuelto, sin
+llamadas nuevas al driver. Las filas emitidas son las únicas que se leen (cabeceras de A6 o
+cuerpo si la fila lo entrega).
 
 **Motor multi-driver (PRD RF-37, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
@@ -1202,7 +1246,27 @@ ayuda `replace every URL with [link omitted] (overrides [content].url_display)`;
 ningún otro comando la acepta (argparse ⇒ `E_USAGE`, exit 2). `_url_mode(config,
 args)` calcula el modo efectivo (`--strip-links` > `[content].url_display` >
 `neutralize`) y `_execute` lo pasa como `url_mode=` a `run_search`, `run_new` y
-`run_show`.
+`run_show`. `--fields` es una opción de `search`, `new` y `show` (`action="append"`, `metavar="LIST"`): cada valor
+se parte por comas, se recortan los espacios de cada nombre y los nombres distinguen mayúsculas.
+`search`/`new` la usan para **añadir** campos a la fila por defecto y `show` para **elegir** los campos
+de `message` (`uid` siempre). Un nombre desconocido o vacío ⇒ `E_USAGE` (exit 2) con
+`unknown field '<nombre>' in --fields` y `valid fields: <lista del comando>`; se valida en `_main`
+antes de crear `~/.mailquery`, de leer la config y de abrir el store. `_execute` pasa la selección como
+`fields=` a `run_search`, `run_new` y `run_show`. Las ayudas de los tres comandos listan sus campos en
+el epílogo. `--group-by` (`action="append"`, `metavar="KEYS"`) y `--count` (`store_true`) son opciones
+**solo de `search`**: `new` no las define y argparse responde `E_USAGE` (exit 2) sin tocar
+`state.json`. `_grouping_selection(args)` se ejecuta en `_main` antes de crear
+`~/.mailquery`, de leer la config y de abrir el store: parte cada valor de `--group-by` por
+comas, recorta los espacios y compara las claves distinguiendo mayúsculas; una clave
+desconocida o vacía ⇒ `unknown key '<clave>' in --group-by`, una repetida ⇒ `duplicate key
+'<clave>' in --group-by` y más de dos ⇒ `--group-by accepts at most two keys`, todas con el
+hint `valid keys: from, domain, mailbox, account, day, week, month; at most two`.
+`--count` combinado con `--fields`, `--group-by` o `--limit` ⇒ `--count cannot be combined
+with --fields, --group-by or --limit` con el hint `use --count alone, or drop it to list the
+messages`. Con `--group-by`, `--limit` se valida en 0–50 ⇒ `invalid --limit <v> with
+--group-by: expected 0 to 50` y hint `use --limit between 0 and 50 messages per group`
+(por eso `_build_filters(args, group_by=...)` no aplica el rango plano 1–200). `_execute`
+pasa las claves como `group_by=` y `--count` como `count=` a `run_search`.
 
 **Ciclo de vida
 multi-driver:** el comando crea **un** `BackendRegistry` y
@@ -1246,9 +1310,12 @@ antes de crear el home; (3) config (incluye `[attachments]` y `[scope]`);
 (4) `[attachments].enabled=false` solo para `attachment` ⇒
 `E_ATTACHMENTS_DISABLED` (2); (5) el driver del prefijo debe estar declarado
 (`E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo), se abre y se comprueban sus
-capacidades: `attachments: "none"` **y** `"remote"` ⇒
-`E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store (el
-núcleo no puede materializar adjuntos remotos); (6) resolución de cuenta con
+capacidades: solo `attachments: "none"` ⇒ `E_ATTACHMENT_UNAVAILABLE`
+(`unsupported`, exit 3) antes de abrir el store, con el hint `install or declare
+a driver with attachments = "local" or "remote" in the [scope] blocks of
+~/.mailquery/config.toml`; un driver `"remote"` sigue el mismo flujo que uno
+`"local"` (el plugin obtiene los bytes desde su origen y el núcleo no abre red);
+(6) resolución de cuenta con
 `config.resolve_scope` (el driver se envuelve antes con `plugins.wrap_driver`);
 (7) `find_message` ⇒ `E_USAGE "message uid <uid> was not found"`; (8) la
 llamada `attachments()` puede lanzar la señal S/MIME/ilegible del
@@ -1259,10 +1326,19 @@ Después, `AttachmentsEngine.recover(...)` ejecuta las filas 11–15 con las fil
 de metadatos ya obtenidas (`entries`), de modo que el driver no se consulta dos
 veces; la CLI no reimplementa bloqueo, límites ni caché. El éxito es el JSON
 de §12.11 con `uid` prefijado, `output_dir` absoluto (`message_dir`), `count`,
-ocho campos por adjunto y `warnings: []`. El presupuesto de extracción es
-`EXTRACTION_TIMEOUT_SECONDS` (120 s, RNF-16): se pasa al motor como factoría
-`lambda: time.monotonic() + 120`, una por adjunto, y al vencer ⇒
-`E_CLIENT_TIMEOUT` (3), sin reintento, staging limpio y sin archivos nuevos.
+ocho campos por adjunto y `warnings[]` (puede llevar
+`W_ATTACHMENT_ACTIVE_CONTENT`). El presupuesto de extracción es
+`[attachments].timeout_seconds` (60 s por defecto), leído con el seam
+`_attachment_timeout(config)` y pasado al motor como factoría
+`lambda: time.monotonic() + timeout`, una por adjunto. Para un driver externo el
+CLI pasa además `stream_guard=AttachmentStreamGuard(driver)` (véase la sección de
+`plugins/api.py`); en Apple Mail y Outlook pasa `None`. Al vencer ⇒
+`E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-68, sin reintento, staging
+limpio y sin archivos nuevos. Tras `AttachmentsEngine.recover`, el CLI recorre
+`attachments[]` en orden y añade
+`W_ATTACHMENT_ACTIVE_CONTENT: attachment <index> contains <tipo> in <uid>` por
+adjunto y tipo con `attachments.active_content_types(path)`; también inspecciona
+los aciertos de caché, A7 queda fuera del tope y no cambia el exit.
 `show` no aplica `[attachments].enabled`.
 `bind_command(command)` del backend si existe; todo `E_INTERNAL`
 (también un `MailqueryError`, p. ej. `ComCallError`) se registra en el log con
@@ -1482,6 +1558,13 @@ del directorio central.
   nada por ZIP. Un ZIP cifrado se lista igual. El detector nunca llama a
   `ZipFile.open()`, `read()`, `extract()` ni `testzip()`.
 
+`attachments/__init__.py` exporta `active_content_types` y la plantilla
+`W_ATTACHMENT_ACTIVE_CONTENT: attachment <index> contains <kind> in <uid>`.
+`cli._run_attachment` la aplica tras extraer o servir cada adjunto, en el orden
+de `attachments[]`: el warning no cambia el exit, no bloquea y no consume el
+tope. Un archivo bloqueado por el catálogo sigue dando `E_ATTACHMENT_BLOCKED`
+antes de A7.
+
 ### `attachments/engine.py` y `attachments/cache.py`
 
 Motor de recuperación local: límites, aciertos de caché, staging y publicación
@@ -1506,6 +1589,8 @@ class AttachmentResult(TypedDict):
     size_bytes: int
     sha256: str
 
+StreamGuard = Callable[[Callable[[], Iterable[bytes]], float | None], Iterable[bytes]]
+
 class AttachmentsEngine:
     def __init__(
         self,
@@ -1513,6 +1598,7 @@ class AttachmentsEngine:
         config: AttachmentLimits,          # config.AttachmentsConfig, duck typing
         driver: AttachmentDriver,          # MailBackend cargado, duck typing
         clock: Callable[[], float] | None = None,   # solo inyección de tests
+        stream_guard: StreamGuard | None = None,    # corte duro de drivers externos
     ) -> None: ...
 
     def recover(
@@ -1539,9 +1625,14 @@ class AttachmentsEngine:
   del `clock`) en que expira la extracción de **un** adjunto, o `None` sin
   límite. El motor la invoca una vez por adjunto, antes de leer su primer
   bloque, y el mismo instante acota la pantalla de contenido y la extracción.
-  El comando `attachment` pasa `lambda: time.monotonic() + 120` (RNF-16: 120 s por adjunto,
-  también en `--all`); al vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3), staging limpio
-  y sin archivos nuevos. El motor **no** fija políticas de tiempo por sí solo.
+  El comando `attachment` pasa el presupuesto de
+  `[attachments].timeout_seconds` (60 s por defecto, también en `--all`); al
+  vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-68,
+  staging limpio y sin archivos nuevos. El motor **no** fija políticas de tiempo
+  por sí solo.
+- `stream_guard` acota el flujo de un driver externo: recibe la factoría del
+  flujo y el instante de `deadline`, y devuelve el iterador acotado. Con
+  `None` (Apple Mail y Outlook) el flujo se abre y se itera en línea.
 - Resultado: un registro §12.11 por adjunto solicitado, en orden de índice y
   con `path` absoluto. Un fallo no devuelve registros parciales.
 - `output_dir` del comando `attachment` = `attachments.paths.message_dir(home, uid)`.
@@ -1566,9 +1657,13 @@ class AttachmentsEngine:
 6. `screen_content(rows, misses, open_stream)`: primer bloque decodificado solo
    de los adjuntos que se van a extraer (fila 13/14); bloqueo ⇒
    `E_ATTACHMENT_BLOCKED`; ilegible/no disponible ⇒ su código. Los aciertos no
-   se re-validan por contenido (RF-45, §10.3.1).
+   se re-validan por contenido (RF-45, §10.3.1). Cada flujo de un driver
+   externo se abre a través de `stream_guard` con el instante del adjunto; un
+   presupuesto agotado no pide otro bloque.
 7. Extracción a staging de los misses: `magic bytes` ya validados, `sha256`
    incremental y corte por límite si el tamaño era desconocido (fila 13/14/15).
+   La comprobación entre bloques y al terminar cada llamada se mantiene para
+   los drivers nativos.
 8. Verificación final de los aciertos: un archivo borrado o cambiado de tamaño
    durante la ejecución se re-extrae **una** vez (RF-51) con nueva pantalla de
    contenido; si la re-extracción falla, se devuelve el error del motivo.
@@ -1725,7 +1820,7 @@ class StagedAttachment:
 | `E_ATTACHMENT_UNREADABLE` | 3 | `corrupt`/`smime`/`unreadable` o error de lectura del stream; antes de publicar. |
 | `E_PERMISSION` | 3 | Permisos del driver o de la caché/staging (`EACCES`). |
 | `E_IO` | 3 | E/S al escribir el staging, publicar o por `tmp/` y `attachments/` en sistemas de archivos distintos (DP-01). |
-| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por el comando `attachment`. |
+| `E_CLIENT_TIMEOUT` | 3 | Vence el `deadline` inyectado por el comando `attachment`, o el `stream_guard` de un plugin externo agota el presupuesto: mensaje `attachment <i> ('<nombre>') of message <uid> did not respond within the timeout` y hint `raise [attachments].timeout_seconds in ~/.mailquery/config.toml if the driver is slow; run "mailquery doctor" and do not retry in a loop`. |
 | `E_CLIENT_BUSY` | 5 | `reason=busy` del driver (reintentable). |
 | `E_PLUGIN_FAILED` | 3 | `reason` desconocido o metadatos inválidos del driver; nunca `E_INTERNAL` en la frontera de plugin. |
 | `E_USAGE` | 2 | Índice solicitado fuera de rango o uid inválido (defensivo; el comando valida antes). |
@@ -1782,11 +1877,39 @@ transforman.
  "scan": {"mode": "metadata", "candidates": 1, "messages_read": 1, "duration_ms": 211}}
 ```
 Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<EntryID>"`
-(Windows).
-`hint` (RF-15) es `null`/ausente cuando `truncated=false`; cuando
+(Windows). `hint` (RF-15) es `null` cuando hay resultados y `truncated=false`; cuando
 `truncated=true` es un string accionable, p. ej. `"refina los filtros o sube
 --limit (máx. 200)"`, y además se emite
-`W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`.
+`W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`. Con
+`count: 0` y al menos una cuenta leída, `hint` es
+`no messages matched in <n> folder(s) of <m> account(s); run "mailquery mailboxes" to see
+other folders, or add --include-mailbox` (sin nombres y sin llamadas nuevas al driver); sin
+cuentas leídas es `null` y aparece `W_NO_ACCOUNTS`.
+
+Con `--group-by`, `messages[]` se sustituye por `groups[]` (RF-72):
+```json
+{"count": 2, "truncated": false, "hint": null,
+ "groups": [
+   {"domain": "banco.example", "month": "2026-11", "count": 1,
+    "messages": [<message sin from/mailbox si son la clave>]},
+   {"domain": "luz.example", "month": "2026-11", "count": 1, "messages": [<message>]}
+ ],
+ "scan": {"mode": "metadata", "candidates": 2, "messages_read": 0, "duration_ms": 12}}
+```
+Cada grupo lleva sus claves en el orden pedido, su `count` y sus mensajes más recientes (como
+mucho `--limit`, 5 por defecto y 0–50); `count` de la respuesta es el total de mensajes que
+cumplen los filtros. Con más de 50 grupos, `truncated: true`, hint `<n> more group(s);
+refine the filters` y `W_RESULTS_TRUNCATED: <n> more group(s); refine the filters`.
+
+Con `--count` (RF-73), la respuesta es exactamente:
+```json
+{"ok": true, "command": "search", "generated_at": "<ISO local>",
+ "content_notice": "<texto fijo>", "count": 143, "hint": null, "warnings": [],
+ "scan": {"mode": "metadata", "candidates": 143, "messages_read": 0, "duration_ms": 41}}
+```
+`count` es el total tras deduplicar y sin el límite de 200 ni `--limit`; no hay `messages`
+ni `truncated`; `hint` es el de RF-78 solo cuando `count: 0`; los warnings son solo de
+alcance. `--count` no se admite con `--fields`, `--group-by` ni `--limit`.
 
 ### `new`
 Igual que `search` más:
@@ -1826,12 +1949,15 @@ driver con `attachments: "none"` devuelve `[]`; `show` nunca escribe.
    "sanitized_name": "02_Factura_Octubre_2026.pdf", "saved": true, "cached": false,
    "path": "/Users/<user>/.mailquery/attachments/apple_mail/83143/02_Factura_Octubre_2026.pdf",
    "size_bytes": 128450, "sha256": "<64 hex>"}],
- "warnings": []}
+ "warnings": ["W_ATTACHMENT_ACTIVE_CONTENT: attachment 2 contains pdf-javascript in apple_mail:83143"]}
 ```
 `ok`/`command`/`generated_at` los añade `cli` (§12.11). Un acierto de caché
 devuelve `cached: true` y `saved: true` con el `size_bytes`/`sha256` del archivo
-servido; `--force` re-extrae (`cached: false`). El error sigue el contrato
-`{ok:false, command, error:{code,message,hint}}` de §12.5 C/D/G/H/E/F.
+servido; `--force` re-extrae (`cached: false`). `warnings[]` puede llevar
+`W_ATTACHMENT_ACTIVE_CONTENT`, uno por adjunto devuelto y tipo detectado
+(`pdf-javascript`, `office-macros`, `archive-executable`), en el orden de
+`attachments[]`; el archivo se entrega igual y el exit no cambia. El error sigue
+el contrato `{ok:false, command, error:{code,message,hint}}` de §12.5 C/D/G/H/E/F.
 
 ### `mailboxes`
 ```json
@@ -1907,17 +2033,30 @@ plantilla de §12.6 (con el `detail` saneado tras `": "`) y `hint` es el del
 plugin saneado o el defecto del motivo/código.
 
 ### Mensaje (`search`/`new`)
+
+Sin `--fields`, cada elemento de `messages[]` tiene exactamente estas claves, en este orden:
+
+```json
+{"uid": "apple_mail:83143", "subject": "...",
+ "from": {"name": "", "address": ""},
+ "date_received": "<ISO>|null", "is_read": false, "has_attachments": false}
+```
+
+`--fields` añade campos a esa fila y `--fields all` devuelve la fila completa de 2.0.x:
+
 ```json
 {"uid": "apple_mail:83143", "message_id": "<...>", "duplicate_count": 1, "subject": "...",
  "from": {"name": "", "address": ""}, "to": [{"name": "", "address": ""}], "cc": [],
  "date_sent": "<ISO>|null", "date_received": "<ISO>|null",
  "mailbox": {"account": {"uuid": "", "label": "", "email": ""}, "name": "INBOX", "path": "INBOX", "url": "imap://..."},
  "is_read": false, "is_flagged": false, "has_attachments": false, "size_bytes": 0,
- "snippet": "", "body": {"available": true, "partial": false, "truncated": false}}
+ "snippet": "", "body": {"available": true, "readable": true, "partial": false, "truncated": false}}
 ```
-`message_id` = `message_global_data.message_id_header` (vacío `""` si falta).
-`body.available` = existe y se pudo abrir el `.emlx`; `body.partial` = es
-`.partial.emlx`; `body.truncated` = el snippet se recortó a 200.
+
+`message_id` = `message_global_data.message_id_header` (vacío `""` si falta). `body.available` = existe
+y se pudo abrir el `.emlx`; `body.partial` = es `.partial.emlx`; `body.truncated` = el snippet se
+recortó a 200. En `show`, `--fields` elige el subconjunto de `SHOW_FIELDS` (`uid` siempre incluido);
+sin `--fields` o con `all` se devuelve el mensaje completo.
 
 ### Warnings de contenido (`search`, `new`, `show`)
 

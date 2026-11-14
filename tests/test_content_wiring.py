@@ -186,6 +186,14 @@ def _row(**overrides) -> dict:
 
 
 
+def _with_full_row(argv):
+    """Append ``--fields all`` to ``search``/``new`` so the F1 assertions keep every field."""
+    args = list(argv)
+    if args and args[0] in ("search", "new"):
+        args.extend(["--fields", "all"])
+    return args
+
+
 def _outlook_payload(case, argv):
     """Run one command over the in-memory Outlook double (read-only)."""
     tmp = tempfile.TemporaryDirectory(prefix="mailquery-cw-ol-")
@@ -210,7 +218,7 @@ def _outlook_payload(case, argv):
         contextlib.redirect_stdout(stdout),
         contextlib.redirect_stderr(stderr),
     ):
-        code = cli_mod.main(list(argv), home=home, backend=backend)
+        code = cli_mod.main(_with_full_row(argv), home=home, backend=backend)
     raw = stdout.getvalue()
     payload = json.loads(raw) if raw.strip() else None
     case.assertEqual(code, 0, f"outlook {argv}: {payload} {stderr.getvalue()}")
@@ -284,7 +292,7 @@ def _outlook_cli(case, home, fake, backend, argv):
         contextlib.redirect_stdout(stdout),
         contextlib.redirect_stderr(stderr),
     ):
-        code = cli_mod.main(list(argv), home=home, backend=backend)
+        code = cli_mod.main(_with_full_row(argv), home=home, backend=backend)
     raw = stdout.getvalue()
     payload = json.loads(raw) if raw.strip() else None
     return code, payload, stderr.getvalue()
@@ -367,7 +375,7 @@ def _apple_cli(fx, argv):
     stdout, stderr = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         code = cli_mod.main(
-            list(argv),
+            _with_full_row(argv),
             home=fx.home,
             mail_root=fx.mail_root,
             accounts_db=fx.accounts_db,
@@ -386,7 +394,7 @@ def _plugin_cli(home, argv, plugin=None, *, backend=None):
         contextlib.redirect_stdout(stdout),
         contextlib.redirect_stderr(stderr),
     ):
-        code = cli_mod.main(list(argv), home=home, backend=backend)
+        code = cli_mod.main(_with_full_row(argv), home=home, backend=backend)
     raw = stdout.getvalue()
     payload = json.loads(raw) if raw.strip() else None
     return code, payload, stderr.getvalue()

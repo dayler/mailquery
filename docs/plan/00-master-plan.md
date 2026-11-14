@@ -30,7 +30,7 @@ Quién actualiza cada indicador y cuándo: sección 9.4.
 | P0 — Preparación | Aprobación del PRD, commit del plan, entorno local, línea base, registro de conciliación | — | Sección 2.1 | 🟢 |
 | P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | 🟢 |
 | P2 — Implementación | F1 completo, F2, F3 | Lotes I2, I3, I4 (M05–M13) | Todos los milestones de código en 🟢 | 🟡 |
-| P3 — Integración | Un PR por lote, matriz completa, merge `--no-ff` | I1–I4 | Cuatro PR mergeados, URL de cada run en el registro de ejecución | ⚪ |
+| P3 — Integración | Un PR por lote, matriz completa, merge `--no-ff` | I1–I4 | Cuatro PR mergeados, URL de cada run en el registro de ejecución | 🟡 |
 | P4 — Documentación y cierre | SMOKE en equipos reales, auditoría de documentos consumidores, registro de conciliación final | M14 (lote I4) | Gate de cierre de fase (sección 8.4) | ⚪ |
 
 P2 y P3 se solapan en el tiempo: cada lote se integra (P3) antes de abrir el siguiente.
@@ -63,9 +63,9 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟢 |
 | M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | 🟢 |
 | M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | 🟢 |
-| M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
-| M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | ⚪ |
-| M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | ⚪ |
+| M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | 🟢 |
+| M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | 🟢 |
+| M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | 🟢 |
 | M12 | `mailboxes` agrupado por cuenta y `--fields` | I4 | W7 | M10 (lote I3 mergeado) | AC-O14, AC-O15 | [M12](M12-mailboxes-grouped.md) | ⚪ |
 | M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | ⚪ |
 | M14 | SMOKE en equipos reales, auditoría documental y cierre | I4 | W9 | M01–M13 | AC-H15, AC-O15 (p95) y verificación final de todos | [M14](M14-smoke-closure.md) | ⚪ |
@@ -208,29 +208,29 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-H09 | `W_NON_ASCII_DOMAIN` y punycode | M05, M08 | UT-CNT-07, UT-CNT-08, UT-CW-10 | 🟢 |
 | AC-H10 | `W_LONG_URL` y `W_SCRIPT_LINK` | M05, M08 | UT-CNT-08, UT-CW-10 | 🟢 |
 | AC-H11 | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | M05, M06, M08 | UT-CNT-09, UT-BOD-03, UT-BOD-04, UT-CW-11 | 🟢 |
-| AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | 🟡 |
+| AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | 🟢 |
 | AC-H13 | `[content]` inválido ⇒ `E_CONFIG_INVALID` | M08 | UT-CFG-03, DOC-06.02, DOC-06.04 | 🟢 |
-| AC-H14 | Compatibilidad: solo `content_notice` nuevo; resto sin cambios | M07, M10 | UT-CW-06, UT-FLD-07 | 🟡 |
+| AC-H14 | Compatibilidad: solo `content_notice` nuevo; resto sin cambios | M07, M10 | UT-CW-06, UT-FLD-07 | 🟢 |
 | AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | 🟡 |
 | AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | 🟢 |
 | AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟢 |
 | AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | 🟡 |
-| AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | ⚪ |
-| AC-D02 | `reason: network`/`not_local` ⇒ `E_ATTACHMENT_UNAVAILABLE` | M09 | UT-RMT-02 | ⚪ |
-| AC-D03 | `attachments: "none"` sigue rechazado con el hint nuevo | M09 | UT-RMT-03 | ⚪ |
-| AC-D04 | `[attachments].timeout_seconds` | M09 | UT-CFG-04, UT-RMT-05, DOC-06.05 | ⚪ |
-| AC-D05 | Corte duro en plugin externo | M09 | UT-RMT-04 | ⚪ |
-| AC-D06 | Topes de 30 s intactos; nativos entre bloques; A7 y caché fuera del tope | M09 | UT-RMT-05, UT-OL-ATT-03.04 | ⚪ |
-| AC-O01 | Fila mínima y lecturas | M10, M11, M14 | UT-FLD-01, UT-FLD-02, UT-GRP-07, SMOKE-NEW.08 | ⚪ |
-| AC-O02 | `--fields` en `search`/`new` | M10 | UT-FLD-03 | ⚪ |
-| AC-O03 | `show --fields` | M10 | UT-FLD-04 | ⚪ |
+| AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | 🟢 |
+| AC-D02 | `reason: network`/`not_local` ⇒ `E_ATTACHMENT_UNAVAILABLE` | M09 | UT-RMT-02 | 🟢 |
+| AC-D03 | `attachments: "none"` sigue rechazado con el hint nuevo | M09 | UT-RMT-03 | 🟢 |
+| AC-D04 | `[attachments].timeout_seconds` | M09 | UT-CFG-04, UT-RMT-05, DOC-06.05 | 🟢 |
+| AC-D05 | Corte duro en plugin externo | M09 | UT-RMT-04 | 🟢 |
+| AC-D06 | Topes de 30 s intactos; nativos entre bloques; A7 y caché fuera del tope | M09 | UT-RMT-05, UT-OL-ATT-03.04 | 🟢 |
+| AC-O01 | Fila mínima y lecturas | M10, M11, M14 | UT-FLD-01, UT-FLD-02, UT-GRP-07, SMOKE-NEW.08 | 🟡 |
+| AC-O02 | `--fields` en `search`/`new` | M10 | UT-FLD-03 | 🟡 |
+| AC-O03 | `show --fields` | M10 | UT-FLD-04 | 🟡 |
 | AC-O04 | `--group-by from` | M11 | UT-GRP-01 | ⚪ |
 | AC-O05 | Dos claves, fechas, errores | M11 | UT-GRP-02, UT-GRP-03 | ⚪ |
 | AC-O06 | Más de 50 grupos | M11 | UT-GRP-04 | ⚪ |
 | AC-O07 | `--count` | M11 | UT-GRP-05 | ⚪ |
-| AC-O08 | `new --fields`; `new --group-by`/`--count` rechazados | M10, M11 | UT-FLD-06, UT-GRP-06 | ⚪ |
-| AC-O09 | Warnings según lo entregado | M10, M11 | UT-FLD-05, UT-GRP-09 | ⚪ |
-| AC-O10 | Ayudas, skill, README y recetas (RF-75); `doctor --help` | M10, M11, M13 | DOC-10, DOC-11, DOC-12 | ⚪ |
+| AC-O08 | `new --fields`; `new --group-by`/`--count` rechazados | M10, M11 | UT-FLD-06, UT-GRP-06 | 🟢 |
+| AC-O09 | Warnings según lo entregado | M10, M11 | UT-FLD-05, UT-GRP-09 | 🟢 |
+| AC-O10 | Ayudas, skill, README y recetas (RF-75); `doctor --help` | M10, M11, M13 | DOC-10, DOC-11, DOC-12 | 🟡 |
 | AC-O11 | `doctor --failures` (también tras un timeout COM, D-25) | M13, M14 | UT-DR-01–UT-DR-04, UT-DR-10, SMOKE-NEW.10 | ⚪ |
 | AC-O12 | Sin *preflight* en skill, ayuda y README | M13 | DOC-12 | ⚪ |
 | AC-O13 | `hint` de `search` sin resultados | M11 | UT-GRP-08 | ⚪ |
@@ -560,3 +560,9 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-14 | M05 | 🟡 → 🟢 | `f699d42` (merge en `integration/i2-content`): `Ran 1172` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +37 tests UT-CNT) | `docs/plan/evidence/M05.md` | A4/A5/A6 en `output.py`; `output.py` 99,5 %; sin goldens ni pragmas nuevos; desviación propia corregida (inicios `data:`/`www.` en ancho completo) |
 | 2026-11-14 | M06 | 🟡 → 🟢 | `e70e63b` (merge en `integration/i2-content`): `Ran 1163` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +28 tests UT-BOD) | `docs/plan/evidence/M06.md` | Cuerpo HTML-first y cabeceras del remitente en los dos backends; `load_headers` como gancho interno; `BodyFormat` en la lista blanca COM; sin goldens ni pragmas nuevos |
 | 2026-11-14 | M08 | 🟡 → 🟢 | `a0695a9` (merge en `integration/i2-content`): `Ran 1259` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +40 tests) | `docs/plan/evidence/M08.md` | F1 conectado en `search`/`new`/`show`; `--strip-links` y `[content]`; siete warnings; README/skill/anexo; barridos TC-03 y OL-30 con `--strip-links`; sin goldens ni pragmas nuevos |
+| 2026-11-14 | Lote I2 | 🟡 → 🟢 | Rama `integration/i2-content` con `Ran 1259`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07 de la línea base) y cobertura 90,6 %; matriz CI verde (15/15 jobs) | PR https://github.com/dayler/mailquery/pull/8; run del PR https://github.com/dayler/mailquery/actions/runs/43560577814; run de `develop` https://github.com/dayler/mailquery/actions/runs/43560928939 | Merge `--no-ff` `fd05c91`. Cobertura CI 90,6 %. La corrida de `develop` posterior al merge quedó verde (HITL-09). M05–M08 integrados; AC-H01–AC-H03, AC-H05–AC-H11, AC-H13, AC-H16 y AC-H17 completos. |
+| 2026-11-14 | CI (visibilidad de TCs) | — | — | — | Job `unittest` renombrado a `test suite (os, Python X)` y paso "Run UTs and automated TCs under coverage"; nuevo paso `integration-tests` que re-ejecuta los 46 TCs (`-k test_tc_`) como paso propio, sin añadir jobs (siguen 15 por corrida). Sincronizados este plan, `docs/INTERFACES.md` §8.6 y `docs/TEST-CATALOG.md` §5. Runs de `develop` verdes: https://github.com/dayler/mailquery/actions/runs/43561808490 (nombres) y https://github.com/dayler/mailquery/actions/runs/43562284156 (paso `integration-tests`, `Ran 46 tests`) |
+| 2026-11-14 | M09 | 🟡 → 🟢 | `fb24b4a` (merge en `integration/i3-attachments-rows`): `Ran 1291` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +33 tests, −1 retirado UT-ATC-10.03) | `docs/plan/evidence/M09.md` | Drivers `remote`, `[attachments].timeout_seconds` con corte duro (`AttachmentStreamGuard`) y `W_ATTACHMENT_ACTIVE_CONTENT`; BUG-01 cerrado; cobertura 90,6 % |
+| 2026-11-14 | M10 | 🟡 → 🟢 | `ccc78f0` (merge en `integration/i3-attachments-rows`): `Ran 1323` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +32 tests) | `docs/plan/evidence/M10.md` | Fila mínima de seis campos y `--fields` en `search`/`new`/`show`; sin cuerpos innecesarios; 8 goldens de fila actualizados con `--fields all` en los casos; cobertura 90,7 % |
+| 2026-11-14 | M11 | 🟡 → 🟢 | `615147e` (merge en `integration/i3-attachments-rows`): `Ran 1373` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +50 tests) | `docs/plan/evidence/M11.md` | `--group-by`, `--count` y `hint` sin resultados; 47 UT-GRP + 3 DOC-11; TC-03 y OL-30 barren con las opciones nuevas; cobertura 91,0 % |
+| 2026-11-14 | I3 (defecto en CI) | — | `Ran 1373` con los 2 fallos ambientales SMOKE-NEW.07 tras la corrección; 75 ejecuciones de UT-RMT-05.01 en Python 3.11/3.12/3.13 OK | `docs/plan/evidence/M09.md` (sección Reapertura) | PR #9, corrida https://github.com/dayler/mailquery/actions/runs/43571189546: 2 jobs macOS (3.11 y 3.13) rojos por `UT-RMT-05.01` flaky (exit 2 en vez de 3): `time.sleep(0.1)` frente a un tope de 0,05 s podía no vencer bajo carga. Corregido con bloqueo determinista por `threading.Event` en el doble y el caso; sin cambio de producto. M09 no vuelve a 🟡 porque el lote I3 no estaba mergeado; la corrección va al mismo PR (regla 9). |

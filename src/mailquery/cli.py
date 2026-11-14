@@ -21,6 +21,7 @@ from typing import Any, Mapping, Sequence
 
 from mailquery import __version__
 from mailquery import uid as uid_module
+from mailquery.attachments import W_ATTACHMENT_ACTIVE_CONTENT, active_content_types
 from mailquery.attachments.engine import AttachmentsEngine
 from mailquery.attachments.paths import message_dir
 from mailquery.backends import backend_class, get_backend
@@ -52,12 +53,17 @@ from mailquery.output import (
     write_json,
 )
 from mailquery.plugins import (
-    EXTRACTION_TIMEOUT_SECONDS,
     PluginContext,
     call_driver,
     wrap_driver,
 )
+from mailquery.plugins.api import AttachmentStreamGuard, RESERVED_DRIVER_NAMES
 from mailquery.search import (
+    GROUP_KEYS,
+    GROUP_MAX_KEYS,
+    GROUP_MAX_LIMIT,
+    SEARCH_ROW_FIELDS,
+    SHOW_FIELDS,
     Filters,
     _config_for_driver,
     _excluded_store_error,
@@ -83,6 +89,25 @@ _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
 #: Commands whose successful response carries the fixed untrusted-content notice.
 _CONTENT_NOTICE_COMMANDS = frozenset({"search", "new", "show", "attachment"})
+#: Field names accepted by ``--fields`` in ``search``/``new`` and in ``show``.
+_SEARCH_FIELDS = (*SEARCH_ROW_FIELDS, "all")
+_SHOW_FIELDS = (*SHOW_FIELDS, "all")
+_SEARCH_FIELDS_TEXT = ", ".join(_SEARCH_FIELDS)
+_SHOW_FIELDS_TEXT = ", ".join(_SHOW_FIELDS)
+_SEARCH_FIELDS_BLOCK = textwrap.fill(
+    "Valid fields: " + _SEARCH_FIELDS_TEXT,
+    width=92,
+    initial_indent="  ",
+    subsequent_indent="  ",
+)
+_SHOW_FIELDS_BLOCK = textwrap.fill(
+    "Valid fields: " + _SHOW_FIELDS_TEXT,
+    width=92,
+    initial_indent="  ",
+    subsequent_indent="  ",
+)
+#: Grouping keys of ``search --group-by``, in the order its error hint lists them.
+_SEARCH_GROUP_KEYS_TEXT = ", ".join(GROUP_KEYS)
 
 _ROOT_EPILOG = """\
 Examples:
@@ -157,6 +182,8 @@ Examples:
   mailquery search --since 2w --unread
   mailquery search --from "*@bank.com*" --since 2mo
   mailquery search --text "*invoice*" --since 1mo --has-attachments
+  mailquery search --since 6mo --subject factura --group-by domain,month --limit 1
+  mailquery search --unread --count
 
 Notes:
   --text needs a narrowing filter: --since, --until, --subject, --from or an extra
@@ -171,6 +198,18 @@ Notes:
   default ([content].url_display = "keep" keeps the exact text); --strip-links
   replaces every URL with [link omitted]. The filters always compare the original
   text, so the results are the same in every mode.
+  --fields adds fields to the default row (uid, subject, from, date_received,
+  is_read, has_attachments), comma-separated or with the option repeated; --fields
+  all returns the full row.
+  --group-by groups the results by one or two keys (from, domain, mailbox, account,
+  day, week, month) and returns groups[] instead of messages[]; each group has its
+  keys, count and newest messages. With --group-by, --limit is the messages per
+  group (0 to 50, 5 by default) and at most 50 groups are returned.
+  --count returns only the number of matching messages, without messages or
+  truncated; it cannot be combined with --fields, --group-by or --limit.
+  When search finds no messages, hint says how many folders and accounts were
+  searched and how to widen the scope.
+""" + _SEARCH_FIELDS_BLOCK + """
 """
 
 _NEW_EPILOG = """\
@@ -189,11 +228,16 @@ Notes:
   URLs and link signals follow the message processing of search: the URLs are
   neutralized by default ([content].url_display = "keep" keeps the exact text) and
   --strip-links replaces them with [link omitted].
+  --fields adds fields to the default row (uid, subject, from, date_received,
+  is_read, has_attachments), comma-separated or with the option repeated; --fields
+  all returns the full row.
+""" + _SEARCH_FIELDS_BLOCK + """
 """
 
 _SHOW_EPILOG = """\
 Examples:
   mailquery show 83143
+  mailquery show 83143 --fields attachments
 
 Notes:
   The body is truncated to 20,000 characters; headers and attachment names are
@@ -202,6 +246,10 @@ Notes:
   The URLs of the subject, the names, the headers and the body are neutralized by
   default ([content].url_display = "keep" keeps the exact text) and --strip-links
   replaces them with [link omitted].
+  --fields selects the fields of message (uid is always included), comma-separated
+  or with the option repeated; without it, or with --fields all, the whole message
+  is returned.
+""" + _SHOW_FIELDS_BLOCK + """
 """
 
 
@@ -447,6 +495,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace every URL with [link omitted] (overrides [content].url_display)",
     )
+    search_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="adds fields to the default row (uid, subject, from, date_received, "
+        "is_read, has_attachments); comma-separated or repeatable; all adds the full "
+        "row",
+    )
+    search_parser.add_argument(
+        "--group-by",
+        action="append",
+        metavar="KEYS",
+        help="groups the results by up to two keys, comma-separated or repeatable: "
+        "from, domain, mailbox, account, day, week, month",
+    )
+    search_parser.add_argument(
+        "--count",
+        action="store_true",
+        help="returns only the number of matching messages, without messages",
+    )
 
     new_parser = subparsers.add_parser(
         "new",
@@ -474,6 +542,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace every URL with [link omitted] (overrides [content].url_display)",
     )
+    new_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="adds fields to the default row (uid, subject, from, date_received, "
+        "is_read, has_attachments); comma-separated or repeatable; all adds the full "
+        "row",
+    )
 
     show_parser = subparsers.add_parser(
         "show",
@@ -488,6 +564,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--strip-links",
         action="store_true",
         help="replace every URL with [link omitted] (overrides [content].url_display)",
+    )
+    show_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="selects the fields of message (uid is always included); "
+        "comma-separated or repeatable; all selects every field",
     )
     # The uid format is validated in main() by _parse_command_uid, not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
@@ -585,6 +668,18 @@ def _main(
         return _report_error(exc, _guess_command(raw_argv))
 
     command = str(args.command)
+    if command in ("search", "new", "show"):
+        # Before the home exists, the config is read or the store is opened.
+        try:
+            args.fields_selection = _fields_selection(args, command)
+        except MailqueryError as exc:
+            return _report_error(exc, command)
+    if command == "search":
+        # --group-by/--count and their --limit range, before the home exists too.
+        try:
+            args.group_keys, args.count_only = _grouping_selection(args)
+        except MailqueryError as exc:
+            return _report_error(exc, command)
     registry = BackendRegistry()
     if command == "attachment":
         # Exactly one of --index/--all and a positive --index,
@@ -991,10 +1086,12 @@ def _execute(
     registry: BackendRegistry | None = None,
 ) -> dict:
     command = str(args.command)
+    fields = getattr(args, "fields_selection", None)
     filters: Filters | None = None
     new_limit: int | None = None
     if command == "search":
-        filters = _build_filters(args)
+        group_keys = tuple(getattr(args, "group_keys", ()) or ())
+        filters = _build_filters(args, group_by=group_keys)
     elif command == "new":
         new_limit = _validate_limit(args.limit, MAX_NEW_LIMIT)
 
@@ -1021,6 +1118,9 @@ def _execute(
             config,
             filters,  # type: ignore[arg-type]
             url_mode=_url_mode(config, args),
+            fields=fields,
+            group_by=group_keys,
+            count=bool(getattr(args, "count_only", False)),
             **extra,
         )
     elif command == "new":
@@ -1032,6 +1132,7 @@ def _execute(
             peek=bool(args.peek),
             limit=new_limit,
             url_mode=_url_mode(config, args),
+            fields=fields,
             **extra,
         )
     elif command == "show":
@@ -1045,6 +1146,7 @@ def _execute(
                 drivers=mapping or None,
                 native=native,
                 url_mode=_url_mode(config, args),
+                fields=fields,
             )
         else:
             payload = run_show(
@@ -1052,6 +1154,7 @@ def _execute(
                 config,
                 args.uid,
                 url_mode=_url_mode(config, args),
+                fields=fields,
             )
     else:  # pragma: no cover - argparse prevents this
         raise MailqueryError(
@@ -1071,6 +1174,94 @@ def _url_mode(config: Config, args: argparse.Namespace) -> str:
     if bool(getattr(args, "strip_links", False)):
         return "strip"
     return config.content.url_display
+
+
+def _fields_selection(
+    args: argparse.Namespace, command: str
+) -> tuple[str, ...] | None:
+    """Validate ``--fields`` and return the selected names, or ``None``.
+
+    Each value is split on commas and the surrounding spaces of every name are
+    stripped; names are compared case-sensitively. An unknown or empty name is
+    ``E_USAGE`` with the valid field list of the command.
+    """
+    raw = getattr(args, "fields", None)
+    if raw is None:
+        return None
+    valid = _SEARCH_FIELDS if command in ("search", "new") else _SHOW_FIELDS
+    selected: list[str] = []
+    for value in raw:
+        for item in str(value).split(","):
+            name = item.strip()
+            if name not in valid:
+                raise MailqueryError(
+                    "E_USAGE",
+                    f"unknown field '{name}' in --fields",
+                    f"valid fields: {', '.join(valid)}",
+                    "invalid --fields value",
+                )
+            if name not in selected:
+                selected.append(name)
+    return tuple(selected)
+
+
+def _grouping_selection(
+    args: argparse.Namespace,
+) -> tuple[tuple[str, ...], bool]:
+    """Validate ``--group-by``, ``--count`` and their ``--limit`` range.
+
+    Returns the grouping keys in the requested order, without duplicates, and
+    whether the command only counts messages. Every ``--group-by`` value is
+    split on commas, the spaces around each key are stripped and the keys are
+    compared case-sensitively. An unknown or empty key, a repeated key, more
+    than two keys, ``--count`` combined with another output option and a
+    ``--limit`` outside 0 to 50 with ``--group-by`` are ``E_USAGE``.
+    """
+    keys: list[str] = []
+    for value in getattr(args, "group_by", None) or ():
+        for item in str(value).split(","):
+            key = item.strip()
+            if key not in GROUP_KEYS:
+                raise MailqueryError(
+                    "E_USAGE",
+                    f"unknown key '{key}' in --group-by",
+                    f"valid keys: {_SEARCH_GROUP_KEYS_TEXT}; at most two",
+                    "invalid --group-by value",
+                )
+            if key in keys:
+                raise MailqueryError(
+                    "E_USAGE",
+                    f"duplicate key '{key}' in --group-by",
+                    f"valid keys: {_SEARCH_GROUP_KEYS_TEXT}; at most two",
+                    "invalid --group-by value",
+                )
+            keys.append(key)
+    if len(keys) > GROUP_MAX_KEYS:
+        raise MailqueryError(
+            "E_USAGE",
+            "--group-by accepts at most two keys",
+            f"valid keys: {_SEARCH_GROUP_KEYS_TEXT}; at most two",
+            "invalid --group-by value",
+        )
+    only_count = bool(getattr(args, "count", False))
+    limit = getattr(args, "limit", None)
+    if only_count and (
+        getattr(args, "fields", None) is not None or keys or limit is not None
+    ):
+        raise MailqueryError(
+            "E_USAGE",
+            "--count cannot be combined with --fields, --group-by or --limit",
+            "use --count alone, or drop it to list the messages",
+            "invalid --count combination",
+        )
+    if keys and limit is not None and not 0 <= int(limit) <= GROUP_MAX_LIMIT:
+        raise MailqueryError(
+            "E_USAGE",
+            f"invalid --limit {int(limit)} with --group-by: expected 0 to 50",
+            "use --limit between 0 and 50 messages per group",
+            "invalid --limit value",
+        )
+    return tuple(keys), only_count
 
 
 def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
@@ -1113,15 +1304,32 @@ def _require_attachment_capabilities(instance: Any, driver: str) -> None:
     """Only a driver that can materialize attachments may continue."""
     capabilities = getattr(instance, "capabilities", None) or {}
     mode = str(capabilities.get("attachments", "local"))
-    if mode not in ("none", "remote"):
+    if mode != "none":
         return
     raise MailqueryError(
         "E_ATTACHMENT_UNAVAILABLE",
         f"attachment recovery is unsupported by driver {driver!r}",
-        'install or declare a driver with attachments = "local" in the [scope] '
-        "blocks of ~/.mailquery/config.toml",
+        'install or declare a driver with attachments = "local" or "remote" in the '
+        "[scope] blocks of ~/.mailquery/config.toml",
         "attachment recovery is unsupported by the driver",
     )
+
+
+def _attachment_timeout(config: Config) -> float:
+    """Per-attachment extraction budget in seconds (``[attachments].timeout_seconds``)."""
+    return float(config.attachments.timeout_seconds)
+
+
+def _attachment_stream_guard(driver: str) -> AttachmentStreamGuard | None:
+    """Bound the attachment stream of an external driver (``None`` for built-ins).
+
+    The built-in drivers keep their SQLite/COM objects in the calling thread and
+    are only checked between blocks; an external plugin is waited on in a
+    worker thread with the remaining per-attachment budget.
+    """
+    if driver in RESERVED_DRIVER_NAMES:
+        return None
+    return AttachmentStreamGuard(driver)
 
 
 def _attachment_not_found(uid: str) -> MailqueryError:
@@ -1170,10 +1378,12 @@ def _run_attachment(
     """Run the ``attachment`` command on the opened driver of the uid.
 
     The CLI resolves the account/scope, checks the message and its attachment
-    indexes and hands the extraction to ``AttachmentsEngine`` with the 120 s
-    ``EXTRACTION_TIMEOUT_SECONDS`` deadline. The success payload carries ``uid``,
-    ``output_dir``, ``count``, ``attachments`` and ``warnings``; the engine returns
-    one record per requested attachment.
+    indexes and hands the extraction to ``AttachmentsEngine`` with the
+    configured per-attachment budget (``[attachments].timeout_seconds``). The
+    success payload carries ``uid``, ``output_dir``, ``count``, ``attachments``
+    and ``warnings``; the engine returns one record per requested attachment and
+    every delivered file is scanned for active-content markers afterwards, so
+    the warning never consumes the extraction budget.
     """
     driver = str(getattr(args, "uid_driver", "") or "")
     native_uid = getattr(args, "uid", None)
@@ -1225,8 +1435,14 @@ def _run_attachment(
         for value in indices:
             if value not in available:
                 raise _attachment_out_of_range(show_uid, value, len(entries))
-    engine = AttachmentsEngine(home_path, config.attachments, wrapped)
-    deadline = lambda: time.monotonic() + EXTRACTION_TIMEOUT_SECONDS  # noqa: E731
+    engine = AttachmentsEngine(
+        home_path,
+        config.attachments,
+        wrapped,
+        stream_guard=_attachment_stream_guard(driver),
+    )
+    timeout = _attachment_timeout(config)
+    deadline = lambda: time.monotonic() + timeout  # noqa: E731
     records = engine.recover(
         show_uid,
         indices,
@@ -1247,12 +1463,19 @@ def _run_attachment(
         }
         for record in records
     ]
+    warnings = [
+        W_ATTACHMENT_ACTIVE_CONTENT.format(
+            index=int(record["index"]), kind=kind, uid=show_uid
+        )
+        for record in records
+        for kind in active_content_types(Path(str(record["path"])))
+    ]
     return {
         "uid": show_uid,
         "output_dir": str(message_dir(home_path, show_uid)),
         "count": len(payload_entries),
         "attachments": payload_entries,
-        "warnings": [],
+        "warnings": warnings,
     }
 
 
@@ -1279,8 +1502,18 @@ def _log_backend_connection(backend: Any) -> None:
         pass
 
 
-def _build_filters(args: argparse.Namespace) -> Filters:
-    limit = _validate_limit(args.limit, MAX_SEARCH_LIMIT)
+def _build_filters(
+    args: argparse.Namespace, *, group_by: Sequence[str] = ()
+) -> Filters:
+    """Build the filters of ``search``; with grouping, ``--limit`` is per group.
+
+    ``--group-by`` validates its own ``--limit`` range (0 to 50) before the
+    home exists, so the flat 1 to 200 range does not apply to it.
+    """
+    if group_by:
+        limit = None if args.limit is None else int(args.limit)
+    else:
+        limit = _validate_limit(args.limit, MAX_SEARCH_LIMIT)
     include = _parse_include_mailboxes(args.include_mailbox)
     since = parse_relative_time(args.since) if args.since is not None else None
     until = parse_relative_time(args.until) if args.until is not None else None

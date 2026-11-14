@@ -889,7 +889,7 @@ class DispatchTests(_CliTestCase):
         self.assertEqual(run_mock.call_args.args[2], state_store)
         self.assertEqual(
             run_mock.call_args.kwargs,
-            {"peek": True, "limit": 7, "url_mode": "neutralize"},
+            {"peek": True, "limit": 7, "url_mode": "neutralize", "fields": None},
         )
         rendered = self.json_object(stdout)
         self.assertEqual(rendered["cursor"], {"previous": None, "current": None})
@@ -2796,11 +2796,11 @@ class AttachmentTimeoutTests(AttachmentTestBase):
     UID = "apple_mail:83143"
 
     def test_ut_atc_07_01_extraction_deadline_is_enforced(self) -> None:
-        """UT-ATC-07.01: an expired 120 s deadline ⇒ E_CLIENT_TIMEOUT (3), no retry, clean staging."""
-        self.assertEqual(EXTRACTION_TIMEOUT_SECONDS, 120.0)
+        """UT-ATC-07.01: an expired configured deadline ⇒ E_CLIENT_TIMEOUT (3), clean staging."""
+        self.assertEqual(EXTRACTION_TIMEOUT_SECONDS, 60.0)
         backend = self.attachment_backend()
-        with mock.patch.object(cli_mod, "EXTRACTION_TIMEOUT_SECONDS", 0.0):
-            self.assert_error(
+        with mock.patch.object(cli_mod, "_attachment_timeout", return_value=0.0):
+            payload = self.assert_error(
                 3,
                 self.run_attachment(
                     ["attachment", self.UID, "--index", "1"], backend
@@ -2808,6 +2808,12 @@ class AttachmentTimeoutTests(AttachmentTestBase):
                 "E_CLIENT_TIMEOUT",
                 "attachment",
             )
+        self.assertEqual(
+            payload["error"]["hint"],
+            "raise [attachments].timeout_seconds in ~/.mailquery/config.toml if the "
+            'driver is slow; run "mailquery doctor" and do not retry in a loop',
+        )
+        self.assertIn("did not respond within the timeout", payload["error"]["message"])
         self.assertFalse((self.fx.home / "attachments").exists())
         staging = self.fx.home / "tmp" / "staging"
         self.assertFalse(staging.exists() and any(staging.iterdir()))
@@ -2815,7 +2821,7 @@ class AttachmentTimeoutTests(AttachmentTestBase):
     def test_ut_atc_07_02_timeout_writes_no_state_or_cache(self) -> None:
         """UT-ATC-07.02: the timeout writes no state.json and no partial cache file."""
         backend = self.attachment_backend(attachments=ATTACHMENT_DEFAULT_ROWS)
-        with mock.patch.object(cli_mod, "EXTRACTION_TIMEOUT_SECONDS", 0.0):
+        with mock.patch.object(cli_mod, "_attachment_timeout", return_value=0.0):
             self.assert_error(
                 3,
                 self.run_attachment(["attachment", self.UID, "--all"], backend),
@@ -2936,21 +2942,6 @@ class AttachmentPluginTests(AttachmentTestBase):
         payload = self.json_object(stdout)
         self.assertEqual(payload["count"], 3)
         self.assertEqual([entry["index"] for entry in payload["attachments"]], [1, 2, 3])
-
-    def test_ut_atc_10_03_remote_plugin_cannot_materialize(self) -> None:
-        """UT-ATC-10.03: ``attachments: "remote"`` ⇒ E_ATTACHMENT_UNAVAILABLE (unsupported), no store."""
-        capabilities = {"network": True, "readonly": "promise", "body_local": True,
-                        "attachments": "remote", "native_order": "text"}
-        backend = self.plugin_backend(capabilities=capabilities)
-        _entry, result = self.run_plugin(
-            ["attachment", self.PLUGIN_UID, "--index", "1"], backend, config=self.CONFIG
-        )
-        code, stdout, _ = result
-        payload = self.json_object(stdout)
-        self.assertEqual(code, 3)
-        self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_UNAVAILABLE")
-        self.assertIn("unsupported", payload["error"]["message"].lower())
-        self.assertNotIn("find_message", backend.calls)
 
     def test_ut_atc_10_04_none_plugin_is_rejected_before_the_store(self) -> None:
         """UT-ATC-10.04: a plugin declaring ``attachments: "none"`` fails pre-store."""

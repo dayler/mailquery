@@ -1327,6 +1327,98 @@ class ContentConfigTests(_DriverConfigCase):
         self.assertEqual(payload["error"]["code"], "E_CONFIG_INVALID")
 
 
+class AttachmentTimeoutConfigTests(unittest.TestCase):
+    """UT-CFG-04 — ``[attachments].timeout_seconds`` defaults, range and effects."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name) / "home"
+        self.addCleanup(cli._close_logging_handlers)
+
+    def _load(self, content: str) -> AttachmentsConfig:
+        write_config(self.home, content)
+        return load_config(self.home).attachments
+
+    def _error(self, content: str) -> MailqueryError:
+        write_config(self.home, content)
+        with self.assertRaises(MailqueryError) as context:
+            load_config(self.home)
+        error = context.exception
+        self.assertEqual(error.code, "E_CONFIG_INVALID")
+        self.assertEqual(error.exit_code, 2)
+        return error
+
+    def test_ut_cfg_04_01_default_and_accepted_limits(self) -> None:
+        """UT-CFG-04.01: no key ⇒ 60; 10 and 600 are accepted."""
+        self.assertEqual(self._load("# no attachments table\n").timeout_seconds, 60)
+        for value in (10, 600):
+            with self.subTest(value=value):
+                config = self._load(f"[attachments]\ntimeout_seconds = {value}\n")
+                self.assertEqual(config.timeout_seconds, value)
+
+    def test_ut_cfg_04_02_invalid_values_are_config_errors_before_the_store(self) -> None:
+        """UT-CFG-04.02: 9, 601, "60", 60.0 and true ⇒ E_CONFIG_INVALID (2) before the store."""
+        for value in ("9", "601", '"60"', "60.0", "true"):
+            content = f"[attachments]\ntimeout_seconds = {value}\n"
+            with self.subTest(value=value):
+                error = self._error(content)
+                self.assertIn("timeout_seconds", error.message)
+                self._assert_error_before_the_store(content, ["search"])
+                self._assert_error_before_the_store(
+                    content, ["show", "apple_mail:2714"]
+                )
+
+    def test_ut_cfg_04_03_valid_value_keeps_search_and_show_output(self) -> None:
+        """UT-CFG-04.03: a valid value changes neither ``search`` nor ``show`` output."""
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        configured = DEFAULT_CONFIG.replace(
+            "max_count = 50\n", "max_count = 50\ntimeout_seconds = 180\n"
+        )
+        self.assertIn("timeout_seconds = 180", configured)
+        outputs: dict[tuple[str, str], dict] = {}
+        for label, config in (("base", DEFAULT_CONFIG), ("configured", configured)):
+            for command, argv in (
+                ("search", ["search", "--since", "7d"]),
+                ("show", ["show", "2714"]),
+            ):
+                write_config(fx.home, config)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(
+                    stderr
+                ):
+                    code = cli.main(
+                        argv,
+                        home=fx.home,
+                        mail_root=fx.mail_root,
+                        accounts_db=fx.accounts_db,
+                    )
+                self.assertEqual(code, 0, stdout.getvalue() + stderr.getvalue())
+                payload = json.loads(stdout.getvalue())
+                payload.pop("generated_at", None)
+                # Scan counters and durations are performance data, not contract output.
+                payload.pop("scan", None)
+                outputs[(label, command)] = payload
+        for command in ("search", "show"):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    outputs[("base", command)], outputs[("configured", command)]
+                )
+
+    def _assert_error_before_the_store(self, content: str, argv: list[str]) -> None:
+        """The CLI reports the config error instead of a missing-store error."""
+        write_config(self.home, content)
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_mail_root = Path(tmp) / "missing-mail"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = cli.main(argv, home=self.home, mail_root=missing_mail_root)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["error"]["code"], "E_CONFIG_INVALID")
+
+
 # --------------------------------------------------------------------------- #
 # UT-DRV-01/02 against the synthetic store (prefixed fixture config)
 # --------------------------------------------------------------------------- #

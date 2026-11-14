@@ -2,15 +2,20 @@
 
 Public API of the attachment core. The policy layer (catalog, blocking,
 sanitization, paths, screening) is pure: it never writes files, never reads the
-cache and never opens a path. On top of it sit the filesystem engine
-(:class:`AttachmentsEngine`) and the cache/staging layer
-(:class:`AttachmentCache`, :class:`StagingArea`), consumed by the ``show`` and
-``attachment`` commands and by the backend adapters. Only stdlib and the
-mailquery package are imported.
+cache and never opens a path. The active-content detector reads the bytes of an
+already-extracted attachment without opening, executing or decompressing it. On
+top of them sit the filesystem engine (:class:`AttachmentsEngine`) and the
+cache/staging layer (:class:`AttachmentCache`, :class:`StagingArea`), consumed
+by the ``show`` and ``attachment`` commands and by the backend adapters. Only
+stdlib and the mailquery package are imported.
 """
 
 from __future__ import annotations
 
+from mailquery.attachments.active_content import (
+    ACTIVE_CONTENT_TYPES,
+    active_content_types,
+)
 from mailquery.attachments.blocking import (
     CONTENT_BLOCK_DETAIL,
     CONTENT_INSPECTION_BYTES,
@@ -94,7 +99,16 @@ from mailquery.attachments.screening import (
     screen_names,
 )
 
+#: Active-content warning of ``attachment``: one per delivered attachment and type.
+W_ATTACHMENT_ACTIVE_CONTENT = (
+    "W_ATTACHMENT_ACTIVE_CONTENT: attachment {index} contains {kind} in {uid}"
+)
+
 __all__ = [
+    # active content
+    "ACTIVE_CONTENT_TYPES",
+    "W_ATTACHMENT_ACTIVE_CONTENT",
+    "active_content_types",
     # catalog
     "CATALOG",
     "CATEGORY_EXECUTABLES",

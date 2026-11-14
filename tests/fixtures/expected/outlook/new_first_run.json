@@ -8,43 +8,14 @@
   "messages": [
     {
       "uid": "outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F1021C825B949012A897284BB4C1C9BAE4576845869F3E6E9B874AEA265FFE7DA4EBC601BF89BF1613C0DF5A088DF13C40CED1E",
-      "message_id": "<factura-2026-10@proveedor.example>",
-      "duplicate_count": 1,
       "subject": "Factura octubre 2026",
       "from": {
         "name": "Proveedor SA",
         "address": "facturas@proveedor.example"
       },
-      "to": [
-        {
-          "name": "Ana Pérez",
-          "address": "ana.perez@example.com"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10",
-          "label": "Exchange (ana.perez@example.com)",
-          "email": "ana.perez@example.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": true,
-      "size_bytes": 48213,
-      "snippet": "Estimado cliente, adjuntamos la factura de octubre.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": true
     }
   ],
   "scan": {

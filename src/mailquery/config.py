@@ -54,7 +54,16 @@ MIN_MAX_TOTAL_SIZE_MB = 1
 MAX_MAX_TOTAL_SIZE_MB = 1024
 MIN_MAX_COUNT = 1
 MAX_MAX_COUNT = 500
-ATTACHMENTS_KEYS = ("enabled", "max_file_size_mb", "max_total_size_mb", "max_count")
+DEFAULT_ATTACHMENT_TIMEOUT_SECONDS = 60
+MIN_ATTACHMENT_TIMEOUT_SECONDS = 10
+MAX_ATTACHMENT_TIMEOUT_SECONDS = 600
+ATTACHMENTS_KEYS = (
+    "enabled",
+    "max_file_size_mb",
+    "max_total_size_mb",
+    "max_count",
+    "timeout_seconds",
+)
 
 MIN_MAX_SIZE_MB = 1
 MAX_MAX_SIZE_MB = 1024
@@ -121,6 +130,7 @@ class AttachmentsConfig:
     max_file_size_mb: int = DEFAULT_MAX_FILE_SIZE_MB
     max_total_size_mb: int = DEFAULT_MAX_TOTAL_SIZE_MB
     max_count: int = DEFAULT_MAX_COUNT
+    timeout_seconds: int = DEFAULT_ATTACHMENT_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -483,11 +493,20 @@ def _parse_attachments(value: Any) -> AttachmentsConfig:
             "raise max_total_size_mb or lower max_file_size_mb so the total limit is "
             "at least the per-file limit (defaults: 100 and 200)",
         )
+    timeout_seconds = _parse_int(
+        table,
+        display="[attachments]",
+        key="timeout_seconds",
+        default=DEFAULT_ATTACHMENT_TIMEOUT_SECONDS,
+        minimum=MIN_ATTACHMENT_TIMEOUT_SECONDS,
+        maximum=MAX_ATTACHMENT_TIMEOUT_SECONDS,
+    )
     return AttachmentsConfig(
         enabled=enabled,
         max_file_size_mb=max_file_size_mb,
         max_total_size_mb=max_total_size_mb,
         max_count=max_count,
+        timeout_seconds=timeout_seconds,
     )
 
 

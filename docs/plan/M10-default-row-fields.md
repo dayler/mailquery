@@ -2,7 +2,7 @@
 
 **Lote:** I3 · rama del lote `integration/i3-attachments-rows` · **Oleada:** W5 (sola)
 **Rama:** `feature/m10-default-row-fields`, creada desde la punta de `integration/i3-attachments-rows` (con M09 integrado) · **Worktree:** `../mailquery-wt/m10`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F7 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -58,13 +58,13 @@ Usa R-01 (M02).
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Opción | Parser y validación temprana de `--fields`; ayudas; UT-FLD-03 (errores) | ⚪ |
-| F2 — Fila por defecto | Selección de campos, lecturas condicionadas, `load_headers` para A6; UT-FLD-01, UT-FLD-02, UT-FLD-03, UT-FLD-06 | ⚪ |
-| F3 — `show --fields` | UT-FLD-04 | ⚪ |
-| F4 — Warnings | RF-74 reglas 1–3; UT-FLD-05 | ⚪ |
-| F5 — Tests y goldens existentes | Ajuste de expectativas y goldens; UT-FLD-07 | ⚪ |
-| F6 — Documentación | Sección 9; DOC-10 | ⚪ |
-| F7 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Opción | Parser y validación temprana de `--fields`; ayudas; UT-FLD-03 (errores) | 🟢 |
+| F2 — Fila por defecto | Selección de campos, lecturas condicionadas, `load_headers` para A6; UT-FLD-01, UT-FLD-02, UT-FLD-03, UT-FLD-06 | 🟢 |
+| F3 — `show --fields` | UT-FLD-04 | 🟢 |
+| F4 — Warnings | RF-74 reglas 1–3; UT-FLD-05 | 🟢 |
+| F5 — Tests y goldens existentes | Ajuste de expectativas y goldens; UT-FLD-07 | 🟢 |
+| F6 — Documentación | Sección 9; DOC-10 | 🟢 |
+| F7 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -201,18 +201,24 @@ Reglas:
 
 ## 12. Definition of Done
 
-- [ ] Fila por defecto de seis campos; `--fields` añade en `search`/`new` y elige en `show`; validación antes del home.
-- [ ] Sin cuerpo sin `snippet`/`body`/`--text`; cabeceras de A6 de los mensajes devueltos contadas en `scan.messages_read`.
-- [ ] Warnings según RF-74, reglas 1–3.
-- [ ] Goldens y tests existentes ajustados y listados, sin borrar aserciones (sección 8).
-- [ ] Ayudas, README, skill (incluido el punto 16) y recetas actualizados.
-- [ ] UT-FLD-01–07 y DOC-10 verdes solos.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] Fila por defecto de seis campos; `--fields` añade en `search`/`new` y elige en `show`; validación antes del home.
+- [x] Sin cuerpo sin `snippet`/`body`/`--text`; cabeceras de A6 de los mensajes devueltos contadas en `scan.messages_read`.
+- [x] Warnings según RF-74, reglas 1–3.
+- [x] Goldens y tests existentes ajustados y listados, sin borrar aserciones (sección 8).
+- [x] Ayudas, README, skill (incluido el punto 16) y recetas actualizados.
+- [x] UT-FLD-01–07 y DOC-10 verdes solos.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 | `--fields` (`action=append`, lista separada por comas, espacios recortados, nombres con distinción de mayúsculas) en `search`, `new` y `show`; validación en `_main` antes de crear `~/.mailquery` y de abrir el store, con `unknown field '<nombre>' in --fields` y `valid fields: <lista del comando>`. UT-FLD-03.04–.06 verdes solos. |
+| 2026-11-14 | F2 | `DEFAULT_ROW_FIELDS` de seis campos; campos entregados = por defecto ∪ pedidos (`all` = `SEARCH_ROW_FIELDS`) en el orden canónico; cuerpo solo con `snippet`/`body` o `--text`; destinatarios solo si se entregan; cabeceras A6 desde el `BodyRow` o desde `load_headers` contadas en `scan.messages_read`. UT-FLD-01, UT-FLD-02, UT-FLD-03 y UT-FLD-06 verdes solos. |
+| 2026-11-14 | F3 | `show --fields`: `uid` siempre; cuerpo solo con `body_text`, `body_truncated`, `partial`, `readable`, `source` o `attachments`; adjuntos solo con `attachments`; `headers` sin cuerpo desde `load_headers` o sintetizadas. UT-FLD-04 verde solo. |
+| 2026-11-14 | F4 | Warnings según RF-74 reglas 1–3: conteos de enlaces solo sobre campos entregados; warnings del estado del cuerpo y `W_HIDDEN_CONTENT` solo con cuerpo entregado; `W_ATTACHMENTS_UNAVAILABLE` solo con `attachments`; avisos del remitente siempre. UT-FLD-05 verde solo. |
+| 2026-11-14 | F5 | UT-FLD-07 y expectativas heredadas ajustadas pidiendo los campos con `--fields`/`fields=("all",)`, sin borrar aserciones; 8 goldens de filas a seis campos actualizados y justificados; UT-CW, TC-01–TC-04, TC-10, OL-30 y TC-03 con las invocaciones nuevas. |
+| 2026-11-14 | F6 | Ayudas y epílogos con las listas de campos; README/README.es con la fila por defecto, `--fields` y los warnings según lo entregado; skill con la fila, `new --fields snippet`, `new` frente a `search --unread` y la regla 16; recetas 01 (`mailquery new --fields snippet`) y 02 (`--fields` para cada campo consumido). DOC-10 verde solo. |
+| 2026-11-14 | F7 | Suite completa `Ran 1323`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales de la línea base: SMOKE-NEW.07 de `mailboxes` y `show`); cobertura total 90,7 % y módulos tocados `cli.py` 91,7 %, `search.py` 92,9 %; `git diff --check` limpio; evidencia y bloques en `.worktrees/reports/M10.md`. |

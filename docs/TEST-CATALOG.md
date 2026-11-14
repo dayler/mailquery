@@ -24,6 +24,8 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` |
 | UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` |
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
+| UT-FLD | Fila por defecto de `search`/`new` y `--fields` en `search`, `new` y `show` | `tests/test_fields.py` |
+| UT-GRP | `--group-by`, `--count` y `hint` de `search` sin resultados | `tests/test_group_count.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -40,12 +42,13 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-ATT | Motor de adjuntos: bloqueo, sanitización, caché y límites | `tests/test_attachments.py` |
 | UT-ACT | Contenido activo en adjuntos: PDF, OLE y ZIP | `tests/test_active_content.py` |
 | UT-ATC | Comando `attachment` y `show.attachments` | `tests/test_cli.py` |
+| UT-RMT | Adjuntos de drivers `"remote"`, fallos de origen y tope duro de extracción | `tests/test_remote_attachments.py` |
 | UT-AM | Adjuntos de Apple Mail | `tests/test_backends.py`, `tests/test_integration.py` |
 | UT-OL-ATT | Adjuntos de Outlook | `tests/test_outlook.py` |
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py` |
+| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py`, `tests/test_remote_attachments.py` |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` |
 
@@ -65,8 +68,13 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 
 Los goldens de éxito de `search`, `new`, `show` y `attachment` llevan
 `content_notice` justo después de `generated_at`; los de error, `doctor` y
-`mailboxes` no lo llevan. La actualización de cada golden es una única línea
-añadida y el resto de sus valores no cambia.
+`mailboxes` no lo llevan. Los goldens de fila de `search`/`new` (`search_default`,
+`search_all_mail`, `search_multidriver`, `new_first_run`, `new_seeded`,
+`new_multidriver`, `outlook/search` y `outlook/new_first_run`) comparan la fila por
+defecto de seis campos (`uid`, `subject`, `from`, `date_received`, `is_read` y
+`has_attachments`); la fila completa se valida en una segunda corrida con
+`--fields all` dentro de los casos TC-01.03–.06, TC-02.02 y TC-10.01–.02. En el
+resto de goldens, una actualización conserva los valores ya fijados.
 
 ## 4. Dobles y fixtures
 
@@ -124,16 +132,16 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-11 | Sanitización determinista y límites de nombre; ruta y fallback de 32 hex | UT-ATT-04, UT-AM-02 | `attachment_saved` |
 | AC-12 | Caché `cached`/`--force`, staging atómico, `E_IO` sin parciales, validación por manifiesto | UT-ATT-07, UT-ATT-08, UT-ATT-12, UT-ATC-04, TC-08, TC-09 | `attachment_saved`, `attachment_cached` |
 | AC-13 | Límites con `>` estricto y MiB, la caché cuenta, exceso conocido o en streaming | UT-ATT-06 | `attachment_too_large` |
-| AC-14 | `enabled = false` y rangos de `[attachments]` | UT-DRV-04, UT-ATC-05 | — |
-| AC-15 | Disponibilidad (`not_local`, `not_downloaded`, `unsupported`, `network`), S/MIME, `attachments: none` | UT-ATT-05, UT-ATT-11, UT-ATC-06, UT-ATC-10, UT-OL-ATT-03 | `outlook/attachment_unavailable` |
+| AC-14 | `enabled = false` y rangos de `[attachments]`, incluido `timeout_seconds` | UT-DRV-04, UT-ATC-05, UT-CFG-04 | — |
+| AC-15 | Disponibilidad (`not_local`, `not_downloaded`, `unsupported`, `network`), S/MIME, `attachments: none` y fallos de origen de un driver `"remote"` | UT-ATT-05, UT-ATT-11, UT-ATC-06, UT-ATC-10, UT-RMT-02, UT-OL-ATT-03 | `outlook/attachment_unavailable` |
 | AC-16 | Protocolo de errores de plugin: `reason`, `hint`, `detail`, `log_message` y `code` del núcleo | UT-ERR-01, UT-ERR-02, UT-ERR-03 | — |
-| AC-17 | Timeout de 30 s en metadatos y de 120 s en extracción | UT-ERR-04, UT-ATC-07, UT-OL-ATT-03 | — |
+| AC-17 | Timeout de 30 s en metadatos y `[attachments].timeout_seconds` (60 s por defecto) por adjunto extraído, con corte duro en un plugin externo; COM y metadatos sin cambios | UT-ERR-04, UT-ATC-07, UT-OL-ATT-03, UT-RMT-04 | — |
 | AC-18 | `doctor` con `driver`; `--version` con drivers | UT-PL-03, UT-DRV-05, PKG-02 | `doctor` |
 | AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin datos personales | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | — |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
-| AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
-| AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios | UT-CW-06 (parcial; completa con UT-FLD-07) | — |
+| AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear, también en `attachment` y desde la caché | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04, UT-ACT-05 | — |
+| AC-H14 (delta `PRD-v2.2.md`) | Compatibilidad: solo `content_notice` nuevo; el resto de campos, `state.json`, el manifiesto y la caché sin cambios (con `--fields all` en `search`/`new` y sin `--fields` en `show`) | UT-CW-06, UT-FLD-07 | — |
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 | AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
@@ -141,7 +149,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H03 (delta `PRD-v2.2.md`) | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
 | AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea y por hoja; `W_HIDDEN_CONTENT`; cuerpo todo oculto con `W_HTML_NO_TEXT` y `--text` sin el oculto | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | — |
 | AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` en los comandos | UT-CNT-03, UT-CW-07 | — |
-| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice`; reglas de seguridad en la skill y los README | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | — |
+| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice`; reglas de seguridad en la skill y los README, incluida la regla de triaje sin contenido (punto 16) | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | — |
 | AC-H06 (delta `PRD-v2.2.md`) | Detección y modos de URL en todos los campos; truncado sobre el texto transformado; filtros iguales en los tres modos | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | — |
 | AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08, UT-CW-10 | — |
 | AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08, UT-CW-10 | — |
@@ -150,6 +158,23 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H07 (delta `PRD-v2.2.md`) | `--strip-links` en `search`, `new` y `show`; prevalece sobre `[content].url_display`; sin opción ni clave el modo es `neutralize`; en `doctor`, `mailboxes` y `attachment` ⇒ `E_USAGE` | UT-CW-09 | — |
 | AC-H13 (delta `PRD-v2.2.md`) | `[content].url_display` inválido, clave desconocida o `content` que no es tabla ⇒ `E_CONFIG_INVALID` (exit 2) antes de abrir el store | UT-CFG-03, DOC-06.02, DOC-06.04 | — |
 | AC-H16 (delta `PRD-v2.2.md`) | Los logs no registran URLs, dominios, direcciones ni contenido; solo códigos `W_*` | UT-CW-12 | — |
+| AC-D01 (delta `PRD-v2.2.md`) | Extracción desde un plugin `attachments: "remote"` con el mismo JSON, bloqueo, límites, caché y manifiesto que un `"local"`; sin red en el núcleo | UT-RMT-01 | `attachment_saved`, `attachment_cached`, `attachment_too_large`, `attachment_blocked_name`, `attachment_blocked_content` |
+| AC-D02 (delta `PRD-v2.2.md`) | `reason: network`/`not_local` de un plugin `"remote"` ⇒ `E_ATTACHMENT_UNAVAILABLE` con su plantilla, sin archivos nuevos | UT-RMT-02 | — |
+| AC-D03 (delta `PRD-v2.2.md`) | `attachments: "none"` sigue rechazado con el hint nuevo | UT-RMT-03 | — |
+| AC-D04 (delta `PRD-v2.2.md`) | `[attachments].timeout_seconds`: 60 por defecto, 10–600, inválido ⇒ `E_CONFIG_INVALID` antes del store; documentado | UT-CFG-04, UT-RMT-05, DOC-06.05 | — |
+| AC-D05 (delta `PRD-v2.2.md`) | Corte duro de un plugin externo bloqueado antes del primer bloque o entre bloques, con `--all` informando el primero | UT-RMT-04 | — |
+| AC-D06 (delta `PRD-v2.2.md`) | Topes de 30 s intactos; nativos entre bloques y al terminar la llamada; A7 y aciertos de caché fuera del tope | UT-RMT-05, UT-OL-ATT-03.04 | — |
+| AC-O01 (delta `PRD-v2.2.md`) | En macOS y en Windows, sin `--fields`, cada fila de `search` y `new` tiene exactamente `uid`, `subject`, `from`, `date_received`, `is_read` y `has_attachments`, en ese orden y con los valores de `PRD.md` §12.5; los campos fuera de `messages[]` son los de hoy más `content_notice`, y el `hint` sigue RF-78; sin `--text` no se lee ningún cuerpo, solo las cabeceras de A6 de los mensajes devueltos; sin `--text` (ni `--to`/`--cc` en Windows, `PRD.md` RF-17), `--group-by` no lee cuerpos y `--count` no lee cuerpos ni cabeceras (`scan.messages_read: 0`) | UT-FLD-01, UT-FLD-02 (parcial; completa con UT-GRP-07 y SMOKE-NEW.08) | `search_default`, `search_all_mail`, `search_multidriver`, `new_first_run`, `new_seeded`, `new_multidriver`, `outlook/search`, `outlook/new_first_run` |
+| AC-O02 (delta `PRD-v2.2.md`) | `--fields snippet` añade `snippet` a la fila por defecto; `--fields all` da la fila completa de `PRD.md` §12.5; `--fields to,uid` y `--fields uid --fields to` dan lo mismo, en el orden de `PRD.md` §12.5; un campo desconocido o vacío ⇒ `E_USAGE` (exit 2) antes de abrir el store, con el mensaje y el hint de RF-70 | UT-FLD-03 | — |
+| AC-O03 (delta `PRD-v2.2.md`) | `show <uid> --fields attachments` devuelve solo `uid` y `attachments`, sin entregar el cuerpo ni emitir warnings del cuerpo; `show <uid> --fields body_text` no consulta los adjuntos; sin `--fields`, `show` devuelve los mismos campos que hoy más `content_notice`, con los valores y los warnings de F1 | UT-FLD-04 | — |
+| AC-O04 (delta `PRD-v2.2.md`) | `search --group-by from` devuelve un grupo por remitente con su `count` y sus 5 mensajes más recientes, de más reciente a más antiguo y sin `from` en las filas; los grupos van ordenados por su mensaje más reciente; `--limit 0` da `messages: []`; `--fields snippet` añade `snippet` a las filas; la deduplicación se aplica antes de agrupar | UT-GRP-01 | — |
+| AC-O05 (delta `PRD-v2.2.md`) | `--group-by domain,month` y `--group-by domain --group-by month` dan un grupo plano por cada combinación con mensajes, con las dos claves en ese orden; `day`, `week` y `month` usan la zona horaria local y la semana ISO 8601 también en el cambio de año, y los mensajes sin fecha forman el grupo `null`, al final; tres claves, una repetida, una desconocida o `--limit` fuera de 0–50 ⇒ `E_USAGE` (exit 2) antes de abrir el store, con los mensajes y hints de RF-72 | UT-GRP-02, UT-GRP-03 | — |
+| AC-O06 (delta `PRD-v2.2.md`) | Con más de 50 grupos, la respuesta trae 50, `truncated: true`, el hint de RF-72 y `W_RESULTS_TRUNCATED`; `count` es el total de mensajes de todos los grupos | UT-GRP-04 | — |
+| AC-O07 (delta `PRD-v2.2.md`) | `search --count` devuelve solo `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`, `warnings` y `scan`, con el total después de deduplicar y sin el límite de 200 y `hint: null`; cero resultados ⇒ `count: 0`, el hint de RF-78 y exit 0; con `--fields`, `--group-by` o `--limit` ⇒ `E_USAGE`; con `--text` aplica `PRD.md` RF-17 | UT-GRP-05 | — |
+| AC-O08 (delta `PRD-v2.2.md`) | `new --fields snippet` añade `snippet` y el cursor avanza igual que sin `--fields`; `new --group-by from` y `new --count` ⇒ `E_USAGE` (exit 2) sin tocar el cursor | UT-FLD-06 (parcial; completa con UT-GRP-06) | — |
+| AC-O09 (delta `PRD-v2.2.md`) | Un mensaje con texto oculto y URLs en el cuerpo da `W_HIDDEN_CONTENT` y cuenta esas URLs solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con los campos de cuerpo de RF-74 (regla 2) en `show`; `W_SENDER_AUTH_FAILED` aparece con y sin `--fields`; con `--count` solo hay warnings de alcance. Los criterios de F1 sobre el cuerpo y los destinatarios (AC-H01–AC-H18) aplican en `search` y `new` cuando esos campos se entregan (RF-74) | UT-FLD-05 (parcial; completa con UT-GRP-09) | — |
+| AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10 (parcial; completa con DOC-11 y DOC-12) | — |
+| AC-O13 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, un `search` sin resultados devuelve `count: 0`, exit 0 y el hint de RF-78 con el número correcto de carpetas y cuentas (INBOX, `mailbox_list` y `--include-mailbox`), también con `--group-by` y con `--count`; una cuenta excluida no cuenta en el número de cuentas; sin cuentas leídas (ninguna declarada o todas excluidas), `hint` es `null` y aparece `W_NO_ACCOUNTS`; con resultados, `hint` no cambia; `new` sin correo nuevo da `hint: null`; el hint no contiene nombres de carpetas ni de cuentas, y calcularlo no añade llamadas al driver | UT-GRP-08 | — |
 
 ## 8. Casos
 
@@ -181,6 +206,16 @@ Requisitos: RF-63 · Archivo: `tests/test_config.py`
 | .02 | N | `url_display = "raw"` y `url_display = 1` ⇒ `E_CONFIG_INVALID`, exit 2, `hint` con `neutralize`, `keep` y `strip`, antes de abrir el store. |
 | .03 | N | Una clave desconocida en `[content]` ⇒ `E_CONFIG_INVALID`, exit 2. |
 | .04 | N | `content = 1` (valor que no es una tabla) ⇒ `E_CONFIG_INVALID`, exit 2, antes de abrir el store. |
+
+#### UT-CFG-04 — `[attachments].timeout_seconds`
+
+Requisitos: AC-D04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_config.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin clave ⇒ 60; 10 y 600 válidos. |
+| .02 | N | 9, 601, `"60"`, `60.0` y `true` ⇒ `E_CONFIG_INVALID`, exit 2, también en `search` y `show`, antes del store. |
+| .03 | B | Con un valor válido, `show` y `search` dan la misma salida que sin la clave. |
 
 #### UT-CLI-04 — Opciones que no existen
 
@@ -614,6 +649,215 @@ Requisitos: RNF-19 · Archivo: `tests/test_content_wiring.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | B | La misma consulta dos veces, con cada modo, da el mismo JSON salvo `generated_at` y `scan.duration_ms`. |
+
+#### UT-FLD-01 — Fila por defecto
+
+Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin `--fields`, cada fila de `search` y `new` tiene exactamente `uid`, `subject`, `from`, `date_received`, `is_read` y `has_attachments`, en ese orden, con los mismos valores que la fila completa; se comprueba sobre el store sintético y sobre el doble de Outlook. |
+| .02 | P | Los campos fuera de `messages[]` son los de antes más `content_notice`; `hint`, `scan` y, en `new`, `cursor` no cambian. |
+
+#### UT-FLD-02 — Sin lectura de cuerpos
+
+Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Apple Mail: sin `--text`, `search` y `new` no llaman a la extracción del cuerpo (espía sobre `emlx._extract_body_text`) y leen las cabeceras de cada mensaje devuelto; `scan.messages_read` = número de mensajes devueltos. |
+| .02 | P | Outlook (doble): sin `--text`, el `CallLog` no tiene accesos a `Body`, `HTMLBody` ni `BodyFormat`; `items_opened` cuenta los items abiertos para las cabeceras de A6; un item S/MIME no se abre. |
+| .03 | P | Con `--text`, el cuerpo se lee para filtrar como hoy, pero sin `--fields snippet` la fila no lleva `snippet` ni `body`. |
+| .04 | P | Plugin falso con espías: con la fila por defecto, `search` y `new` no llaman a `load_snippet` ni a `load_body`; el plugin no tiene `load_headers` y no se calculan las señales del remitente. |
+| .05 | B | Apple Mail, mensaje cuyo `.emlx` no existe: `load_headers` no lee (`read=False`), el mensaje no cuenta en `scan.messages_read` y su fila sale sin warnings del remitente ni del cuerpo. |
+| .06 | P | `--to` como filtro sin `--fields to`: filtra por destinatarios (los lee) y la fila no lleva `to` ni `cc`; las URLs de los nombres de destinatarios no se cuentan. |
+
+#### UT-FLD-03 — `--fields` en `search` y `new`
+
+Requisitos: AC-O02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--fields snippet` añade `snippet` al final de la fila por defecto. |
+| .02 | P | `--fields all` da la fila completa de `PRD.md` sección 12.5 (`SEARCH_ROW_FIELDS`). |
+| .03 | P | `--fields to,uid` y `--fields uid --fields to` dan la fila por defecto más `to`, en el orden canónico. |
+| .04 | N | `--fields remitente` ⇒ `E_USAGE`, exit 2, mensaje y hint literales de PRD-v2.2 sección 8; `--fields ""` y `--fields uid,,to` ⇒ ídem con `''`. |
+| .05 | B | El error ocurre antes de crear el home (el `HOME` temporal no tiene `.mailquery`) y sin abrir el store. |
+| .06 | B | D-24: `--fields "to, uid"` equivale a `--fields to,uid`; `--fields ALL` y `--fields Snippet` ⇒ `E_USAGE` con `unknown field 'ALL'` / `unknown field 'Snippet'`; `--fields " "` ⇒ ídem con `''`. |
+
+#### UT-FLD-04 — `show --fields`
+
+Requisitos: AC-O03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--fields attachments` → `message` con solo `uid` y `attachments`; ningún warning de cuerpo; en un mensaje S/MIME, `attachments: []` (se lee el cuerpo para aplicar la regla, sin entregarlo). |
+| .02 | P | `--fields body_text` → no consulta los adjuntos (`attachments()` y `attachment_names()` del backend no se llaman). |
+| .03 | P | `--fields headers` → `uid` y `headers` sin leer el cuerpo (Apple Mail con `load_headers`; Outlook sin `Body`/`HTMLBody`). |
+| .04 | P | Sin `--fields` → los mismos campos y valores que antes más `content_notice`. |
+| .05 | N | Campo desconocido ⇒ `E_USAGE` con la lista de `show`. |
+| .06 | P | `--fields source` y `--fields partial`, cada uno solo: leen el cuerpo, entregan `uid` y ese campo, y emiten los warnings del cuerpo (cuerpo entregado según RF-74). |
+
+#### UT-FLD-05 — Warnings según lo entregado
+
+Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Mensaje con texto oculto y URLs en el cuerpo: `W_HIDDEN_CONTENT` y el conteo de las URLs del cuerpo solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con `body_text` (o `body_truncated`, `partial`, `readable`, `source`) en `show`. |
+| .02 | P | URL en el asunto: contada con la fila por defecto; URL en el nombre de un destinatario: contada solo con `--fields to`. |
+| .03 | P | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` aparecen con y sin `--fields`, también con `show --fields attachments`. |
+| .04 | N | `W_BODY_UNREADABLE`, `W_EMLX_MISSING` (Apple Mail) y `W_BODY_NOT_LOCAL` (Outlook) solo con cuerpo entregado; con `--text` sin `snippet` no aparecen. |
+| .05 | N | `W_ATTACHMENTS_UNAVAILABLE` solo si `show` entrega `attachments`. |
+
+#### UT-FLD-06 — `new --fields`
+
+Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `new --fields snippet` añade `snippet`. |
+| .02 | B | El `state.json` tras `new --fields snippet` es igual al de `new` sin `--fields` sobre el mismo store (cursor y anillo). |
+
+#### UT-FLD-07 — Compatibilidad final de F1
+
+Requisitos: AC-H14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `--fields all` en `search`/`new` y sin `--fields` en `show`, están todos los campos existentes y la única clave nueva respecto de 2.0.x es `content_notice`. |
+
+#### DOC-10 — Documentación de la fila y de `--fields`
+
+Requisitos: AC-O10, AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --help`, `new --help` y `show --help` describen `--fields` con la lista de su comando. |
+| .02 | P | Los dos README documentan la fila por defecto y `--fields` con ejemplos (`--fields snippet`, `--fields all`, `show apple_mail:2714 --fields attachments`). |
+| .03 | P | La skill explica la fila por defecto, `new --fields snippet` para resumir el correo nuevo, cuándo usar `new` y cuándo `search --unread`, y la regla de triaje sin contenido (punto 16). |
+| .04 | P | `docs/recipes/01-new-mail-digest.md` usa `mailquery new --fields snippet`; todas las líneas `mailquery search` de `02-search-invoices.md` piden con `--fields` los campos que consumen. |
+
+#### UT-GRP-01 — `--group-by from`
+
+Requisitos: AC-O01, AC-O04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un grupo por remitente (dirección en minúsculas) con su `count` y sus 5 mensajes más recientes, de más reciente a más antiguo, sin `from` en las filas. |
+| .02 | P | Los grupos van ordenados por su mensaje más reciente. |
+| .03 | B | `--limit 0` → `messages: []` en cada grupo y `count` correcto. |
+| .04 | P | `--fields snippet` añade `snippet` a las filas de los grupos. |
+| .05 | P | La deduplicación se aplica antes de agrupar (el duplicado Gmail/INBOX del store sintético cuenta una vez). |
+| .06 | P | Con `[search].default_limit = 20` en la configuración, `--group-by from` sin `--limit` da 5 mensajes por grupo (RF-72: `default_limit` no aplica). |
+
+#### UT-GRP-02 — Dos claves y fechas
+
+Requisitos: AC-O01, AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--group-by domain,month` y `--group-by domain --group-by month` dan el mismo resultado: un grupo plano por combinación con mensajes, con `domain` y `month` en ese orden (ejemplo de PRD-v2.2 sección 8). |
+| .02 | P | `day`, `week`, `month` usan la zona local (`output.LOCAL_ZONE` inyectada): un mensaje a las 02:00 UTC cae en el día anterior con UTC−4. |
+| .03 | B | Semana ISO en el cambio de año: 2026-12-31 y 2027-01-01 → `2026-W53`; 2027-01-04 → `2027-W01`. |
+| .04 | B | Mensajes sin fecha (nula, 0 o no representable) forman el grupo `null` de `day`/`week`/`month` y van al final; mensajes sin dirección del remitente, el grupo `null` de `from`/`domain`. |
+| .05 | P | `mailbox` da `{"account": <etiqueta>, "path": <ruta>}` sin `mailbox` en las filas; `account` da la etiqueta (o el `uuid` sin etiqueta). |
+| .06 | B | A igualdad de mensaje más reciente, los grupos se ordenan por sus claves ascendentes; un grupo sin fechas va después de los que tienen. |
+| .07 | B | Remitente con una dirección sin `@`: `from` = la dirección en minúsculas y `domain` = `null`. |
+| .08 | B | `--group-by domain,month` con dos grupos del mismo dominio, uno con `month: null`: el grupo con `null` va después de los grupos sin claves `null`, ordenado por claves ascendentes con `null` al final. |
+
+#### UT-GRP-03 — Errores de `--group-by` y `--limit`
+
+Requisitos: AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | Tres claves, una repetida, una desconocida: `E_USAGE`, exit 2, con los mensajes y el hint literales. |
+| .02 | N | `--limit 51` y `--limit -1` con `--group-by`: `E_USAGE` con el mensaje y el hint literales. |
+| .03 | B | Los errores ocurren antes de crear el home y sin abrir el store. |
+| .04 | B | `--limit 50` con `--group-by` es válido (hasta 50 mensajes por grupo). |
+| .05 | N | D-24: `--group-by ""` y `--group-by from,` ⇒ `unknown key '' in --group-by`; `--group-by FROM` ⇒ `unknown key 'FROM' in --group-by`; `--group-by "from, month"` equivale a `--group-by from,month`. |
+
+#### UT-GRP-04 — Más de 50 grupos
+
+Requisitos: AC-O06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con 53 remitentes: 50 grupos, `truncated: true`, hint `3 more group(s); refine the filters`, warning `W_RESULTS_TRUNCATED: 3 more group(s); refine the filters`; `count` es el total de mensajes de los 53 grupos. |
+| .02 | B | Exactamente 50 remitentes: 50 grupos, `truncated: false`, sin `W_RESULTS_TRUNCATED`. |
+| .03 | B | 51 remitentes: 50 grupos, `truncated: true`, `1 more group(s); refine the filters`. |
+
+#### UT-GRP-05 — `--count`
+
+Requisitos: AC-O07, AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Respuesta con exactamente `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`, `warnings`, `scan`, en ese orden; `hint: null` con resultados. |
+| .02 | P | Con 250 mensajes (plugin falso) el `count` es 250, sin el límite de 200 ni de `--limit`, y después de deduplicar. |
+| .03 | P | Cero resultados → `count: 0`, hint de RF-78, exit 0. |
+| .04 | N | `--count` con `--fields`, con `--group-by` y con `--limit` ⇒ `E_USAGE` con el mensaje y el hint literales. |
+| .05 | N | `--count --text x` sin filtro de acotamiento ⇒ `E_UNBOUNDED_SCAN`; con más candidatos que `[search].max_scan` ⇒ `E_SCAN_TOO_LARGE`. |
+
+#### UT-GRP-06 — `new` sin agrupación ni recuento
+
+Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | `new --group-by from` y `new --count` ⇒ `E_USAGE`, exit 2, y `state.json` no cambia (ni se crea si no existía). |
+
+#### UT-GRP-07 — Lecturas
+
+Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--group-by` sin `--text`: ninguna extracción de cuerpo; cabeceras leídas solo de los mensajes emitidos (con `--limit 1`, una por grupo; con `--limit 0`, ninguna). |
+| .02 | P | `--count` sin `--text`: ni cuerpos ni cabeceras; `scan.messages_read: 0` (Apple Mail y doble de Outlook, sin `--to`/`--cc`; el doble no abre ningún item). |
+| .03 | P | `--group-by from --text <patrón>`: los cuerpos se leen para filtrar, los grupos solo contienen mensajes que cumplen el patrón y las filas no llevan `snippet` sin `--fields snippet`. |
+
+#### UT-GRP-08 — `hint` de `search` sin resultados
+
+Requisitos: AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | macOS, Windows y plugin: dos cuentas declaradas con solo INBOX → `no messages matched in 2 folder(s) of 2 account(s); run "mailquery mailboxes" to see other folders, or add --include-mailbox`. |
+| .02 | P | `<n>` cuenta INBOX, `mailbox_list` y `--include-mailbox`; también con `--group-by` y con `--count`; una cuenta declarada sin ninguna carpeta cuenta como leída con 0 carpetas. |
+| .03 | B | Una cuenta declarada cuyo store está excluido (`W_STORE_EXCLUDED`) no cuenta en `<m>` ni sus carpetas en `<n>`. |
+| .04 | N | Sin cuentas leídas (ninguna declarada o todas excluidas) → `hint: null` y `W_NO_ACCOUNTS`. |
+| .05 | N | Con resultados, `hint` como antes; `new` sin correo nuevo → `hint: null`. |
+| .06 | B | El hint no contiene nombres de carpetas ni de cuentas, y la secuencia de llamadas al driver es la misma que la de la misma búsqueda sin calcular el hint (comparación del `CallLog` del doble y de las llamadas del plugin falso). |
+| .07 | B | D-23: una cuenta con INBOX también en `mailbox_list` y una carpeta en `mailbox_list` y en `--include-mailbox` cuenta cada carpeta una vez (`<n>` = carpetas únicas por cuenta). |
+
+#### UT-GRP-09 — Warnings con `--count` y `--group-by`
+
+Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `--count`, solo warnings de alcance (`W_NO_ACCOUNTS`, `W_STORE_EXCLUDED`, `W_ACCOUNT_LABELS_UNAVAILABLE`), aunque los mensajes tengan URLs o fallos de autenticación (Apple Mail y plugin falso). |
+| .02 | P | Con `--group-by`, `W_SENDER_AUTH_FAILED` de un mensaje emitido aparece; el conteo de URLs del cuerpo solo con `--fields snippet`. |
+
+#### UT-GRP-10 — `content_notice` con cualquier opción
+
+Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --count` y `search --group-by from` de éxito llevan `content_notice` tras `generated_at`. |
+
+#### DOC-11 — Documentación de `--group-by` y `--count`
+
+Requisitos: AC-O10 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `search --help` describe `--group-by` con sus siete claves y `--count`. |
+| .02 | P | Los dos README documentan `--group-by` y `--count` con ejemplos (`domain,month`) y el `hint` de cero resultados. |
+| .03 | P | La skill explica `--group-by` y `--count` y que `new` no los admite. |
 
 ### Estado, búsqueda y store
 
@@ -1337,11 +1581,11 @@ Requisitos: AC-15 · Archivo: `tests/test_cli.py`
 
 #### UT-ATC-07 — Timeout de extracción
 
-Requisitos: AC-17 · Archivo: `tests/test_cli.py`
+Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | Extracción que supera 120 s (plazo inyectado) ⇒ `E_CLIENT_TIMEOUT` (3), sin reintento, staging limpio y sin archivos nuevos. |
+| .01 | N | Extracción cuyo plazo configurado vence (inyectado con `_attachment_timeout`) ⇒ `E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-68, sin reintento, staging limpio y sin archivos nuevos. |
 | .02 | N | El timeout no escribe estado ni caché parcial. |
 
 #### UT-ATC-08 — Log de `attachment`
@@ -1375,8 +1619,66 @@ Requisitos: AC-07, AC-15 · Archivo: `tests/test_cli.py`
 |---|---|---|
 | .01 | P | `attachment <plugin>:<native_id> --index 1` con un plugin declarado `attachments: "local"` devuelve el contrato JSON completo y escribe el archivo en la caché; el uid de salida va prefijado. |
 | .02 | P | `--all` con el plugin devuelve todos los adjuntos locales y `count` correcto. |
-| .03 | N | Un plugin `attachments: "remote"` no puede materializar adjuntos: `attachment --index` ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`), sin red en el núcleo. |
 | .04 | N | Un plugin declara `attachments: "none"` ⇒ `E_ATTACHMENT_UNAVAILABLE` antes del store. |
+
+> `UT-ATC-10.03` (rechazo de `"remote"`) se retiró; lo sustituyen UT-RMT-01 y UT-RMT-02 (§9).
+
+#### UT-RMT-01 — Extracción desde un plugin `"remote"`
+
+Requisitos: AC-D01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Plugin falso `attachments: "remote"`, `network: true`: `attachment <driver>:<id> --index N` devuelve el JSON de §12.11 (con `content_notice`) y escribe el archivo en la caché. |
+| .02 | P | `--all` devuelve todos los adjuntos con `count` correcto; bloqueo por nombre y por contenido y límites (`max_file_size_mb`, `max_total_size_mb`, `max_count`) dan el mismo código y texto que con un plugin `"local"` equivalente. |
+| .03 | P | Segunda corrida: `cached: true` y el plugin no recibe peticiones de bytes; `--force` las vuelve a pedir. |
+| .04 | B | El núcleo no abre conexiones (`socket.socket` parcheado para fallar durante toda la corrida). |
+| .05 | P | El manifiesto escrito es igual al de un plugin `"local"` equivalente con los mismos bytes (salvo marcas de tiempo y el nombre del driver). |
+
+#### UT-RMT-02 — Fallo de origen del plugin `"remote"`
+
+Requisitos: AC-D02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | `reason: network` ⇒ `E_ATTACHMENT_UNAVAILABLE`, exit 3, con la plantilla de ese motivo; nunca `unsupported`. |
+| .02 | N | `reason: not_local` ⇒ ídem con su plantilla. |
+| .03 | B | Staging limpio y ningún archivo nuevo en la caché. |
+| .04 | B | `--all` con fallos de red en los adjuntos 2 y 3 ⇒ se informa el 2 (§10, punto 10). |
+| .05 | N | `reason: network` lanzado en el segundo bloque (dentro del hilo del corte duro) ⇒ `E_ATTACHMENT_UNAVAILABLE` con su plantilla, no `E_CLIENT_TIMEOUT`. |
+
+#### UT-RMT-03 — Driver `attachments: "none"`
+
+Requisitos: AC-D03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store, con el hint nuevo de RF-67 literal. |
+
+#### UT-RMT-04 — Corte duro en plugins externos
+
+Requisitos: AC-D05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | El plugin se bloquea antes del primer bloque (espera un `threading.Event` que el test no activa hasta el final): con el tope inyectado a 1 s, `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-68; la espera del núcleo, medida con `time.monotonic()`, cumple `elapsed < tope + 1`. |
+| .02 | N | El plugin se bloquea entre dos bloques: ídem. |
+| .03 | B | `--all` con los adjuntos 2 y 3 bloqueados: se informa el 2. |
+| .04 | B | Staging limpio y sin archivos nuevos; el hilo del plugin se libera al terminar el test (evento) y no queda ningún hilo vivo. |
+| .05 | N | Con `timeout_seconds` inyectado mayor que `METADATA_TIMEOUT_SECONDS` (parcheado a 0,05 s), un plugin que tarda más de 0,05 s en crear el flujo no se corta antes del tope del adjunto y la extracción termina con éxito. |
+| .06 | B | Plazo ya vencido antes de pedir el siguiente bloque ⇒ `E_CLIENT_TIMEOUT` sin nueva petición al plugin (un solo bloque solicitado); flujo vacío ⇒ sin error; `close()` del iterador que lanza al vencer el plazo ⇒ sigue siendo `E_CLIENT_TIMEOUT`. |
+
+#### UT-RMT-05 — Topes que no cambian y lo que no consume el tope
+
+Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `timeout_seconds = 10` y `= 600`, el tope de metadatos de un plugin sigue siendo `METADATA_TIMEOUT_SECONDS` y el de cada llamada COM sigue siendo `outlook_com.CALL_TIMEOUT_SECONDS`. |
+| .02 | P | Apple Mail y Outlook (doble): el tope se comprueba entre bloques y al terminar la llamada (un flujo lento entre bloques con tope inyectado da `E_CLIENT_TIMEOUT`); la creación del flujo ocurre en el hilo principal, no en uno aparte. |
+| .03 | B | Un acierto de caché no invoca la factoría del tope; A7 se ejecuta después y no lo consume (con un detector lento simulado y el tope ya vencido, la respuesta es de éxito). |
+| .04 | P | `cli` pasa al motor el valor de `[attachments].timeout_seconds` (espía sobre la factoría con `timeout_seconds = 180`). |
+| .05 | N | Doble de Outlook con el watchdog COM (`outlook_com.CALL_TIMEOUT_SECONDS` parcheado) vencido antes del tope del adjunto ⇒ `E_CLIENT_TIMEOUT` con el mensaje y el hint de RF-33, no los de RF-68. |
 
 #### UT-ATT-01 — Bloqueo de nombre
 
@@ -1594,6 +1896,18 @@ Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
 | .03 | B | Archivo vacío y archivo inexistente ⇒ `()` sin excepción. |
 | .04 | B | Determinismo: dos llamadas sobre el mismo archivo dan el mismo resultado. |
 
+#### UT-ACT-05 — `W_ATTACHMENT_ACTIVE_CONTENT` en `attachment`
+
+Requisitos: AC-H12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Ejemplo A7 de §8 (`factura.pdf` con `/JavaScript` índice 1, `docs.zip` con `factura.pdf.exe` índice 2): dos warnings con los textos literales, en el orden de `attachments[]`; los dos archivos se entregan; exit 0. |
+| .02 | P | Servido desde la caché (segunda corrida): los mismos warnings. |
+| .03 | N | El detalle no contiene nombres de archivo; un adjunto sin marcadores no da warning. |
+| .04 | N | Un adjunto que bloquea el catálogo sigue dando `E_ATTACHMENT_BLOCKED` (exit 4). |
+| .05 | P | Plugin `"remote"`: el mismo warning que con un driver local. |
+
 #### UT-OL-ATT-01 — Metadatos, índice y disponibilidad
 
 Requisitos: AC-07/AC-15 · Archivo: `tests/test_outlook.py`
@@ -1631,7 +1945,7 @@ Requisitos: AC-15/AC-17 · Archivo: `tests/test_outlook.py`
 | .01 | N | `E_ACCESSDENIED` en la materialización ⇒ `E_PERMISSION` (3). |
 | .02 | N | Rechazo transitorio persistente ⇒ `E_CLIENT_BUSY` (5); el doble registra la secuencia de reintentos. |
 | .03 | N | Una llamada COM de materialización que supera 30 s ⇒ `E_CLIENT_TIMEOUT` (3), staging limpio. |
-| .04 | N | El tope total de 120 s del núcleo vence aunque cada llamada COM esté por debajo de 30 s ⇒ `E_CLIENT_TIMEOUT`. |
+| .04 | N | El tope configurado de extracción vence aunque cada llamada COM esté por debajo de 30 s ⇒ `E_CLIENT_TIMEOUT`. |
 | .05 | N | Un fallo de materialización en `--all` no produce resultados parciales. |
 | .06 | P | Un adjunto de 0 bytes se materializa y publica con `size_bytes: 0`. |
 
@@ -1983,7 +2297,7 @@ Requisitos: RNF-07 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
-Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`— sobre el fake de Outlook; bloqueante.
+Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, y `search --group-by from,month` y `search --count`— sobre el fake de Outlook; bloqueante.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -2068,10 +2382,10 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 |---|---|---|
 | .01 | P | `doctor` informa todos los chequeos documentados ⇒ golden `doctor`. |
 | .02 | P | `mailboxes`: cuentas, contadores e `included` ⇒ golden `mailboxes`. |
-| .03 | P | `search` por defecto devuelve todos los mensajes distintos ⇒ golden `search_default`. |
-| .04 | P | `search` con All Mail deduplica al canónico de INBOX ⇒ golden `search_all_mail`. |
-| .05 | P | Primera corrida de `new` emite la ventana `[D - lookback, D]` ⇒ golden `new_first_run`. |
-| .06 | P | Corrida con estado sembrado emite los mensajes nuevos y avanza el cursor ⇒ golden `new_seeded`. |
+| .03 | P | `search` por defecto devuelve todos los mensajes distintos con la fila de seis campos ⇒ golden `search_default`; una segunda corrida con `--fields all` valida los campos fuera de la fila y los warnings de cuerpo. |
+| .04 | P | `search` con All Mail deduplica al canónico de INBOX con la fila de seis campos ⇒ golden `search_all_mail`; `duplicate_count`, `snippet` y `mailbox` se comprueban con `--fields all`. |
+| .05 | P | Primera corrida de `new` emite la ventana `[D - lookback, D]` con la fila de seis campos ⇒ golden `new_first_run`. |
+| .06 | P | Corrida con estado sembrado emite los mensajes nuevos con la fila de seis campos y avanza el cursor ⇒ golden `new_seeded`. |
 | .07 | P | `show` de un mensaje de texto con adjunto ⇒ golden `show_2714`. |
 | .08 | N | `show` con el `.emlx` ausente ⇒ golden `show_83170`. |
 | .09 | N | `show` con el `.emlx` corrupto ⇒ golden `show_83180`. |
@@ -2087,11 +2401,11 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `mailboxes` |
-| .02 | P | `search` |
+| .02 | P | `search` con la fila de seis campos ⇒ golden `outlook/search`; `date_sent` y las señales de contenido se comprueban con `--fields all`. |
 | .03 | P | `show` |
 | .04 | N | `show_header_only` |
 | .05 | N | `show_smime` |
-| .06 | P | `new_first_run` |
+| .06 | P | `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
 | .07 | P | `doctor` |
 
 #### TC-03 — Gate de solo lectura de Apple Mail
@@ -2100,7 +2414,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, y con `--strip-links` en cada `search`, `new` y `show`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `search --group-by from,month`, `search --count`, `new --fields all` y `show <uid> --fields attachments`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
@@ -2175,8 +2489,8 @@ Requisitos: AC-04 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `search` con `apple_mail` y el plugin de prueba declarados ⇒ golden `search_multidriver`: resultados fusionados en orden total. |
-| .02 | P | `new` sobre la ventana de primera corrida fusionada de los dos drivers ⇒ golden `new_multidriver`. |
+| .01 | P | `search` con `apple_mail` y el plugin de prueba declarados ⇒ golden `search_multidriver`: resultados fusionados en orden total con la fila de seis campos. |
+| .02 | P | `new` sobre la ventana de primera corrida fusionada de los dos drivers ⇒ golden `new_multidriver` con la fila de seis campos. |
 
 ### Empaquetado y documentación
 
@@ -2243,6 +2557,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, la tabla `[content]` entre las secciones documentadas permitidas y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
 | .04 | P | El ejemplo contiene el bloque comentado `# [content]` con `# url_display = "neutralize"`; una copia en un temporal con ese bloque descomentado se carga con el cargador real y da `url_display == "neutralize"`. |
+| .05 | P | Dentro del bloque comentado `# [attachments]` existe la línea `# timeout_seconds = 60 …`; una copia en un temporal con el bloque descomentado (como en DOC-06.01) da `timeout_seconds == 60` con el cargador real. El ejemplo sigue con todas las secciones comentadas. |
 
 #### DOC-07 — Actualización de seguridad de `css-inline` en los README
 
@@ -2267,6 +2582,15 @@ Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content_wiring.
 | .04 | P | `search --help`, `new --help` y `show --help` describen `--strip-links`; las ayudas de `doctor`, `mailboxes` y `attachment` no la mencionan. |
 | .05 | P | La skill describe `content_notice` en "Output contract" y lista `--strip-links` entre las opciones de `search`, `new` y `show`. |
 | .06 | P | `README.md` y `README.es.md` describen en su sección de seguridad los seis controles de quien opera el harness (puntos 2, 4, 7, 9, 10 y 11 de RF-66), con una aserción por control en cada idioma. |
+
+#### DOC-09 — Documentación de F2 y A7
+
+Requisitos: AC-H18 (delta `PRD-v2.2.md`), documentación de AC-D01/AC-D06 · Archivo: `tests/test_remote_attachments.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Los dos README documentan `timeout_seconds` (10–600, 60 por defecto), los drivers `"remote"` en `attachment` y `W_ATTACHMENT_ACTIVE_CONTENT`. |
+| .02 | P | La skill nombra `W_ATTACHMENT_ACTIVE_CONTENT` en "Security rules", recupera los adjuntos de drivers `"remote"` y ya no dice que no se pueden recuperar. |
 
 #### INS-SMOKE-01 — Instaladores
 
@@ -2352,9 +2676,9 @@ Con la instalación y la config de SMOKE-INSTALL.
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `mailboxes` ⇒ exit 0 y JSON del contrato de salida (§12.5). |
-| .02 | P | `new` ⇒ ídem. |
-| .03 | P | `search --since 1w` ⇒ ídem. |
-| .04 | P | `search --text "*e*" --since 1d` ⇒ ídem. |
+| .02 | P | `new --peek --fields all` valida la fila completa; `new` valida la fila por defecto de seis campos y el contrato de salida; `cursor` no cambia con `--fields`. |
+| .03 | P | `search --since 1w` valida la fila por defecto; la misma consulta con `--fields all` valida la fila completa. |
+| .04 | P | `search --text "*e*" --since 1d` valida la fila por defecto y `scan.mode: text`; con `--fields all`, la fila completa. |
 | .05 | P | `show <messages[0].uid del search>` ⇒ ídem. |
 | .06 | N | `unread` de cada carpeta incluida, antes y después ⇒ sin cambios. |
 | .07 | P | `doctor` y cada comando anterior dentro del presupuesto de §19 de su plataforma (`search --text` solo si `scan.candidates ≤ 500`). |
@@ -2374,3 +2698,4 @@ Estos IDs ya no tienen test y no se reutilizan:
 | TC-06.04 | `requires-python` ≥ 3.11 | — |
 | TC-07.05 | Exits en las recetas | — |
 | DOC-05.05 | Recorrido de las siete ayudas | DOC-05.03 |
+| UT-ATC-10.03 | Un plugin `attachments: "remote"` no podía materializar adjuntos (`unsupported`) | UT-RMT-01, UT-RMT-02, UT-RMT-03 |

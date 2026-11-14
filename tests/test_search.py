@@ -359,8 +359,9 @@ class SearchFixtureTest(unittest.TestCase):
         return self.config
 
     def run_search(self, **filters: object) -> dict:
+        # The F1 assertions read the full row; ``--fields all`` asks for it.
         return search.run_search(
-            self.backend, self.config, search.Filters(**filters)
+            self.backend, self.config, search.Filters(**filters), fields=("all",)
         )
 
     def multi_driver_config(self, *, mailbox_list: tuple[str, ...] = ()) -> Config:
@@ -960,7 +961,11 @@ class SearchTextTest(SearchFixtureTest):
         self.assertEqual(result["count"], 0)
         self.assertEqual(result["messages"], [])
         self.assertFalse(result["truncated"])
-        self.assertIsNone(result["hint"])
+        self.assertEqual(
+            result["hint"],
+            'no messages matched in 4 folder(s) of 3 account(s); run "mailquery '
+            'mailboxes" to see other folders, or add --include-mailbox',
+        )
         self.assertEqual(result["scan"]["mode"], "text")
 
     def test_text_narrowed_by_extra_folder(self) -> None:
@@ -1011,6 +1016,7 @@ class NewTest(SearchFixtureTest):
     """Cursor semantics of ``new`` (PRD 11.2, 12.3, 18)."""
 
     def run_new(self, state: StateStore, **kwargs: object) -> dict:
+        kwargs.setdefault("fields", ("all",))
         return search.run_new(
             self.backend, self.config, state, **kwargs
         )
@@ -1048,7 +1054,10 @@ class NewTest(SearchFixtureTest):
         self.addCleanup(store.close)
         labels = AccountLabels(fx.accounts_db, tmp_dir=fx.home / "tmp")
         result = search.run_new(
-            AppleMailBackend(store, labels), load_config(fx.home), StateStore(fx.home, _all_installed)
+            AppleMailBackend(store, labels),
+            load_config(fx.home),
+            StateStore(fx.home, _all_installed),
+            fields=("all",),
         )
         self.assertEqual(self.uids(result), [prefixed_uid(83170)])
         self.assertEqual(result["count"], 1)
@@ -1253,6 +1262,7 @@ class NewDatesTest(ExtendedSearchFixtureTest):
 
     def run_new(self, state: StateStore, now: float | None = None, **kwargs: object) -> dict:
         moment = self.fx.now.timestamp() if now is None else now
+        kwargs.setdefault("fields", ("all",))
         return search.run_new(
             self.backend,
             self.config,
@@ -1760,7 +1770,7 @@ class SearchBodyTest(SearchFixtureTest):
         )
         result = search.run_search(
             AppleMailBackend(store, labels), config,
-            search.Filters(subject=(message.subject,)),
+            search.Filters(subject=(message.subject,)), fields=("all",),
         )
         self.assertEqual(
             result["messages"][0]["body"],
@@ -1779,6 +1789,7 @@ class SearchBodyTest(SearchFixtureTest):
                     AppleMailBackend(store, labels),
                     config,
                     search.Filters(subject=self.SHARED),
+                    fields=("all",),
                 )
                 body = result["messages"][0]["body"]
                 self.assertIs(body["truncated"], truncated)
@@ -1796,7 +1807,7 @@ class SearchBodyTest(SearchFixtureTest):
         make_fixtures._write_emlx_files(fx.mail_root, message, fx.now)
         result = search.run_search(
             AppleMailBackend(store, labels), config,
-            search.Filters(subject=(message.subject,)),
+            search.Filters(subject=(message.subject,)), fields=("all",),
         )
         found = [m for m in result["messages"] if m["uid"] == prefixed_uid(83200)]
         self.assertEqual(len(found), 1)
@@ -1863,7 +1874,11 @@ class LabelsUnavailableTest(SearchFixtureTest):
     def test_ut_sr_06_03_first_run_of_new_warns_labels_before_first_run(self) -> None:
         """UT-SR-06.03: first new run: labels warning first of the scope ones, W_FIRST_RUN last."""
         result = search.run_new(
-            self.backend, self.config, self.fresh_state(), peek=True
+            self.backend,
+            self.config,
+            self.fresh_state(),
+            peek=True,
+            fields=("all",),
         )
         codes = warning_codes(result["warnings"])
         self.assertEqual(codes[0], "W_ACCOUNT_LABELS_UNAVAILABLE")
@@ -2104,7 +2119,9 @@ class CanonicalFieldOrderTest(SearchFixtureTest):
 
     def test_ut_sr_17_01_search_row_keys_follow_the_canonical_order(self) -> None:
         """UT-SR-17.01: every ``search`` row has ``SEARCH_ROW_FIELDS`` keys in order."""
-        result = search.run_search(self.backend, self.config, search.Filters())
+        result = search.run_search(
+            self.backend, self.config, search.Filters(), fields=("all",)
+        )
         self.assertEqual(len(result["messages"]), len(DEFAULT_UIDS))
         for message in result["messages"]:
             with self.subTest(uid=message["uid"]):

@@ -224,15 +224,29 @@ class SmokeTest(unittest.TestCase):
         return data
 
     def _check_list_shape(self, data):
+        """The six-field default row of ``search``/``new``."""
         for key in ("count", "truncated", "hint", "warnings", "messages", "scan"):
             self.assertIn(key, data)
         self.assertEqual(data["count"], len(data["messages"]))
         for key in ("mode", "candidates", "messages_read", "duration_ms"):
             self.assertIn(key, data["scan"])
         for m in data["messages"]:
-            for key in ("uid", "subject", "from", "to", "cc", "date_received", "mailbox",
-                        "is_read", "body"):
-                self.assertIn(key, m)
+            self.assertEqual(
+                list(m),
+                ["uid", "subject", "from", "date_received", "is_read", "has_attachments"],
+            )
+
+    def _check_full_list_shape(self, data):
+        """The full ``--fields all`` row of ``search``/``new``."""
+        for m in data["messages"]:
+            self.assertEqual(
+                list(m),
+                [
+                    "uid", "message_id", "duplicate_count", "subject", "from", "to",
+                    "cc", "date_sent", "date_received", "mailbox", "is_read",
+                    "is_flagged", "has_attachments", "size_bytes", "snippet", "body",
+                ],
+            )
 
     def _counters(self):
         data = self._json(["mailboxes"], "mailboxes")
@@ -302,6 +316,8 @@ class SmokeTest(unittest.TestCase):
 
     def test_smoke_new_02_new_json(self):
         """SMOKE-NEW.02: new => exit 0 and PRD 12.5 JSON."""
+        full = self._json(["new", "--peek", "--fields", "all"], "new")
+        self._check_full_list_shape(full)
         data = self._json(["new"], "new", record="new")
         self._check_list_shape(data)
         self.assertIn("cursor", data)
@@ -312,12 +328,21 @@ class SmokeTest(unittest.TestCase):
         """SMOKE-NEW.03: search --since 1w => exit 0 and PRD 12.5 JSON."""
         data = self._json(["search", "--since", "1w"], "search", record="search")
         self._check_list_shape(data)
+        self._check_full_list_shape(
+            self._json(["search", "--since", "1w", "--fields", "all"], "search")
+        )
 
     def test_smoke_new_04_search_text_json(self):
         """SMOKE-NEW.04: search --text "*e*" --since 1d => exit 0 and PRD 12.5 JSON."""
         data = self._json(["search", "--text", "*e*", "--since", "1d"], "search")
         self._check_list_shape(data)
         self.assertEqual(data["scan"]["mode"], "text")
+        self._check_full_list_shape(
+            self._json(
+                ["search", "--text", "*e*", "--since", "1d", "--fields", "all"],
+                "search",
+            )
+        )
 
     def test_smoke_new_05_show_json(self):
         """SMOKE-NEW.05: show <messages[0].uid of the search> => exit 0 and PRD 12.5 JSON."""

@@ -8,169 +8,53 @@
   "messages": [
     {
       "uid": "apple_mail:83160",
-      "message_id": "<gmail-83160@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Gmail labelled",
       "from": {
         "name": "Gmail Sender",
         "address": "gmail@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
-          "label": "Gmail (fixture@gmail.com)",
-          "email": "fixture@gmail.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Label membership comes from the labels table.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "graph:P2",
-      "message_id": "<P2@plugin.example>",
-      "duplicate_count": 1,
       "subject": "Plugin P2",
       "from": {
         "name": "Plugin Sender",
         "address": "plugin@example.com"
       },
-      "to": [
-        {
-          "name": "Plugin User",
-          "address": "user@example.com"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "graph-account",
-          "label": "Graph (user@example.com)",
-          "email": null
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "graph://graph-account/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 10,
-      "snippet": "Plugin body",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "graph:P1",
-      "message_id": "<P1@plugin.example>",
-      "duplicate_count": 1,
       "subject": "Plugin P1",
       "from": {
         "name": "Plugin Sender",
         "address": "plugin@example.com"
       },
-      "to": [
-        {
-          "name": "Plugin User",
-          "address": "user@example.com"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "graph-account",
-          "label": "Graph (user@example.com)",
-          "email": null
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "graph://graph-account/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 10,
-      "snippet": "Plugin body",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83170",
-      "message_id": "<missing-83170@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Missing body",
       "from": {
         "name": "Ghost",
         "address": "ghost@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "",
-      "body": {
-        "available": false,
-        "readable": false,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     }
   ],
   "scan": {
     "mode": "metadata",
     "candidates": 4,
-    "messages_read": 3
+    "messages_read": 1
   },
   "cursor": {
     "previous": null,
@@ -181,7 +65,6 @@
     }
   },
   "warnings": [
-    "W_EMLX_MISSING: no .emlx file for uid 83170",
     "W_FIRST_RUN: first run: emitted the messages received in the last 10min before the newest message"
   ]
 }

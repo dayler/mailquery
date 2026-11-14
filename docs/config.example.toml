@@ -48,6 +48,7 @@
 # max_file_size_mb = 100         # 1..500
 # max_total_size_mb = 200        # 1..1024 (>= max_file_size_mb)
 # max_count = 50                 # 1..500
+# timeout_seconds = 60          # 10..600, seconds per attachment in "attachment"
 
 # --- Untrusted content presentation ----------------------------------------
 # [content]
@@ -110,8 +111,9 @@
 # fails with E_MAILBOX_NOT_FOUND.
 #
 # `[attachments]` accepts only `enabled`, `max_file_size_mb`,
-# `max_total_size_mb` and `max_count`; a value out of range (or a total lower
-# than the per-file limit) fails with E_CONFIG_INVALID (exit 2).
+# `max_total_size_mb`, `max_count` and `timeout_seconds`; a value out of range
+# (or a total lower than the per-file limit) fails with E_CONFIG_INVALID
+# (exit 2).
 # `[content]` accepts only `url_display` (`neutralize`, `keep` or `strip`); any
 # other value or key fails with E_CONFIG_INVALID (exit 2).
 # ----------------------------------------------------------------------------

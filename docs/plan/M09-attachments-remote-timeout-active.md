@@ -2,7 +2,7 @@
 
 **Lote:** I3 · rama del lote `integration/i3-attachments-rows` · **Oleada:** W4 (sola)
 **Rama:** `feature/m09-attachments-remote-timeout-active`, creada desde la punta de `integration/i3-attachments-rows` (abierta desde `develop` con el lote I2 mergeado) · **Worktree:** `../mailquery-wt/m09`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -53,12 +53,12 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Configuración | `timeout_seconds`; UT-CFG-04 | ⚪ |
-| F2 — `"remote"` | Capacidad; UT-RMT-01, UT-RMT-02, UT-RMT-03; retirar UT-ATC-10.03 | ⚪ |
-| F3 — Tope | Seam `_attachment_timeout`, corte duro para externos, nativos entre bloques; UT-RMT-04, UT-RMT-05; UT-ATC-07 | ⚪ |
-| F4 — A7 | Warnings tras extraer o servir desde caché; UT-ACT-05 | ⚪ |
-| F5 — Documentación | Sección 9; DOC-06.05 | ⚪ |
-| F6 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Configuración | `timeout_seconds`; UT-CFG-04 | 🟢 |
+| F2 — `"remote"` | Capacidad; UT-RMT-01, UT-RMT-02, UT-RMT-03; retirar UT-ATC-10.03 | 🟢 |
+| F3 — Tope | Seam `_attachment_timeout`, corte duro para externos, nativos entre bloques; UT-RMT-04, UT-RMT-05; UT-ATC-07 | 🟢 |
+| F4 — A7 | Warnings tras extraer o servir desde caché; UT-ACT-05 | 🟢 |
+| F5 — Documentación | Sección 9; DOC-06.05 | 🟢 |
+| F6 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -208,4 +208,9 @@ python -B -m coverage report --include="src/mailquery/cli.py,src/mailquery/confi
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 | `[attachments].timeout_seconds` en el esquema cerrado: entero de 10 a 600, default 60, `bool`/string/float fuera; `AttachmentsConfig.timeout_seconds` y `ATTACHMENTS_KEYS`. UT-CFG-04 (3 casos, incluido el fallo antes del store en `search` y `show`) verde solo. |
+| 2026-11-14 | F2 | `_require_attachment_capabilities` rechaza solo `attachments: "none"`, con el hint nuevo; `"remote"` recorre el mismo motor (bloqueo, límites, caché, manifiesto, `--force`). UT-RMT-01 (5), UT-RMT-02 (5) y UT-RMT-03 (1) verdes solos; UT-ATC-10.03 retirado y sustituido por UT-RMT-01–03. |
+| 2026-11-14 | F3 | Seam `cli._attachment_timeout`; `AttachmentStreamGuard` corta en un hilo daemon la creación del flujo y cada bloque de un plugin externo con el tiempo restante; los nativos siguen en línea con la comprobación entre bloques y cada llamada; `EXTRACTION_TIMEOUT_SECONDS` queda en `60.0` como default documentado. UT-RMT-04 (6), UT-RMT-05 (5) y UT-ATC-07 (2) verdes solos; UT-OL-ATT-03.04 solo cambia de texto. |
+| 2026-11-14 | F4 | `W_ATTACHMENT_ACTIVE_CONTENT` por adjunto y tipo, en el orden de `attachments[]`, después de extraer o servir desde caché; fuera del tope; A7 no cambia el exit ni el archivo. UT-ACT-05 (5 casos) verde solo. |
+| 2026-11-14 | F5 | README y README.es con `timeout_seconds` (10–600, 60), los drivers `"remote"` y A7, más "Troubleshooting"; skill con la regla de A7 y los adjuntos remotos; `config.example.toml` con la línea comentada; recetas 01 y 02; BUG-01 cerrado en `KNOWN-DEFECTS.md`. DOC-06.05 y DOC-09 (2 casos) verdes solos. |
+| 2026-11-14 | F6 | Suite completa `Ran 1291`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales de la línea base: SMOKE-NEW.07 de `mailboxes` y `show`); cobertura total 90,6 % y módulos tocados `cli.py` 91,5 %, `config.py` 96,8 %, `attachments/engine.py` 87,8 % y `plugins/api.py` 90,7 %; `git diff --check` limpio; sin goldens actualizados; bloques para `TEST-CATALOG.md`/`INTERFACES.md` y propuesta de registro en `.worktrees/reports/M09.md`. |
