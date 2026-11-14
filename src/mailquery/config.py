@@ -2,8 +2,8 @@
 
 Owns the optional ``~/.mailquery/config.toml``: parsing with ``tomllib``,
 strict validation (unknown keys are errors), defaults, the declaration of
-observed accounts (``[scope."<driver>:<account>"]``) and the ``[attachments]``
-limits.
+observed accounts (``[scope."<driver>:<account>"]``), the ``[attachments]``
+limits and the ``[content]`` presentation.
 
 The driver prefix is split at the **first** ``:``: a block without one uses the
 platform's native driver (``apple_mail`` on macOS, ``outlook`` on Windows). The
@@ -70,7 +70,12 @@ MAX_LOOKBACK_SECONDS = 86400  # 1 day
 MIN_UUID_PREFIX = 8
 
 # Fixed order used for top-level validation and error hints.
-_TOP_LEVEL_KEYS = ("logging", "search", "new", "attachments", "scope")
+_TOP_LEVEL_KEYS = ("logging", "search", "new", "attachments", "content", "scope")
+
+#: ``[content]`` values and the accepted URL display modes.
+DEFAULT_URL_DISPLAY = "neutralize"
+URL_DISPLAY_MODES = ("neutralize", "keep", "strip")
+CONTENT_KEYS = ("url_display",)
 
 #: Built-in drivers: ``[scope]`` accounts of these resolve by label, email or UUID/prefix.
 _INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
@@ -119,6 +124,13 @@ class AttachmentsConfig:
 
 
 @dataclass(frozen=True)
+class ContentConfig:
+    """``[content]`` table: how untrusted content is presented in the output."""
+
+    url_display: str = DEFAULT_URL_DISPLAY
+
+
+@dataclass(frozen=True)
 class ScopeEntry:
     """One ``[scope."<driver>:<cuenta>"]`` block exactly as written by the user.
 
@@ -146,6 +158,7 @@ class Config:
     search: SearchConfig = field(default_factory=SearchConfig)
     new: NewConfig = field(default_factory=NewConfig)
     attachments: AttachmentsConfig = field(default_factory=AttachmentsConfig)
+    content: ContentConfig = field(default_factory=ContentConfig)
     scopes: tuple[ScopeEntry, ...] = ()
 
     @property
@@ -271,6 +284,7 @@ def _parse_config(
     search_cfg = _parse_search(data.get("search"))
     new_cfg = _parse_new(data.get("new"))
     attachments_cfg = _parse_attachments(data.get("attachments"))
+    content_cfg = _parse_content(data.get("content"))
     scopes = _parse_scopes(data.get("scope"), registry)
     return Config(
         home=home,
@@ -278,6 +292,7 @@ def _parse_config(
         search=search_cfg,
         new=new_cfg,
         attachments=attachments_cfg,
+        content=content_cfg,
         scopes=scopes,
     )
 
@@ -287,14 +302,14 @@ def _unknown_top_level(key: str, value: Any) -> MailqueryError:
         return config_error(
             f"unknown top-level section [{key}]",
             'account blocks must be declared as [scope."<account-id>"], not as '
-            "top-level tables; only [logging], [search], [new], [attachments] and "
-            "[scope.*] are allowed",
+            "top-level tables; only [logging], [search], [new], [attachments], "
+            "[content] and [scope.*] are allowed",
             "unknown top-level section in config.toml",
         )
     return config_error(
         f"unknown top-level key {key!r}",
-        "only the [logging], [search], [new], [attachments] and [scope.*] sections "
-        "are allowed; see docs/config.example.toml",
+        "only the [logging], [search], [new], [attachments], [content] and "
+        "[scope.*] sections are allowed; see docs/config.example.toml",
         "unknown top-level key in config.toml",
     )
 
@@ -474,6 +489,26 @@ def _parse_attachments(value: Any) -> AttachmentsConfig:
         max_total_size_mb=max_total_size_mb,
         max_count=max_count,
     )
+
+
+def _parse_content(value: Any) -> ContentConfig:
+    """``[content]``: closed schema and the URL display mode."""
+    if value is None:
+        return ContentConfig()
+    table = _as_table(value, "content")
+    for key in table:
+        if key not in CONTENT_KEYS:
+            raise _unknown_key("[content]", CONTENT_KEYS, key)
+    url_display = table.get("url_display", DEFAULT_URL_DISPLAY)
+    if not isinstance(url_display, str) or url_display not in URL_DISPLAY_MODES:
+        raise config_error(
+            f"[content].url_display must be one of "
+            f"{', '.join(URL_DISPLAY_MODES)} (got {url_display!r})",
+            'set [content].url_display = "neutralize", "keep" or "strip" in '
+            "~/.mailquery/config.toml",
+            "invalid [content].url_display in config.toml",
+        )
+    return ContentConfig(url_display=url_display)
 
 
 def _parse_scopes(
