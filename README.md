@@ -163,7 +163,8 @@ It detects the installed harnesses, shows a menu (each detected harness, a custo
 path, or install in all) and copies `skills/mailquery/SKILL.md` into the harness
 skill root. Non-interactive mode: `./skills/install.sh --harness dsh --scope
 project`, `--all`, `--path DIR`, `--dry-run`, `--force`. Details in
-[`skills/README.md`](skills/README.md).
+[`skills/README.md`](skills/README.md). The agent rules of the skill complement
+the operator controls of [Security for harness operators](#security-for-harness-operators).
 
 ## Running the tests
 
@@ -287,11 +288,11 @@ unique, or the UUID (or a prefix of ≥ 8 characters); with spaces, dots or `@` 
 must be quoted. A label that contains `:` must be declared with the explicit
 driver prefix, because the first `:` separates the driver. A `[scope]` block of
 a driver that is not installed fails with `E_DRIVER_UNKNOWN` (exit 2). All
-properties (`[logging]`, `[search]`, `[new]`, `[attachments]`, accounts) are in
-[`docs/config.example.toml`](docs/config.example.toml) and in PRD §15.
-Precedence: CLI flags, `config.toml`, defaults. The 1.x daily log rotation was
-replaced by `[logging].max_size_mb`; the retired key gives `E_CONFIG_INVALID`
-with the hint `retention_days was replaced by max_size_mb`.
+properties (`[logging]`, `[search]`, `[new]`, `[attachments]`, `[content]`,
+accounts) are in [`docs/config.example.toml`](docs/config.example.toml) and in
+PRD §15. Precedence: CLI flags, `config.toml`, defaults. The 1.x daily log
+rotation was replaced by `[logging].max_size_mb`; the retired key gives
+`E_CONFIG_INVALID` with the hint `retention_days was replaced by max_size_mb`.
 
 ### Attachment recovery (`[attachments]`)
 
@@ -317,6 +318,24 @@ An external plugin may use `~/.mailquery/<driver>.toml` and
 The core never reads, creates, rotates or deletes them. A plugin that needs
 temporaries uses `~/.mailquery/tmp/plugin-<driver>/` (0700/0600) and cleans it
 itself. Secrets must never be written to `config.toml` or `state.json`.
+
+### Content presentation (`[content]`)
+
+```toml
+[content]
+url_display = "neutralize"     # neutralize | keep | strip (default neutralize)
+```
+
+`url_display` decides how URLs are shown in the subject, the sender and
+recipient names, `headers`, `body_text` and `snippet`: `neutralize` makes them
+readable but inert (`hxxps://`, `[:]`, `www[.]`, `[\\]`, non-ASCII domains in
+punycode and URLs longer than 2,048 characters shortened to 256 characters plus
+`…[+N characters]`), `keep` leaves the exact text (the 2.0.x behavior) and
+`strip` replaces every URL with `[link omitted]`. The command line wins:
+`--strip-links` on `search`, `new` and `show` forces `strip`, and no other
+command accepts it. An invalid value or an unknown key gives `E_CONFIG_INVALID`
+(exit 2) before the store is opened. Attachment names, warnings, error texts,
+addresses and identifiers are never transformed.
 
 ## Commands
 
@@ -407,7 +426,9 @@ read and the reason (`shared_mailbox`, `public_folders`, `online_mode`,
 
 Filters: `--subject`, `--text`, `--from`, `--to`, `--cc`, `--since`, `--until`,
 `--unread`, `--flagged`, `--has-attachments`, `--include-mailbox` and `--limit`
-(default 20, max 200). Patterns are substrings with the wildcards `*` and `?`,
+(default 20, max 200). `--strip-links` replaces every URL of the returned
+subject, names, headers and body with `[link omitted]`, over `[content].url_display`.
+Patterns are substrings with the wildcards `*` and `?`,
 case- and accent-insensitive; in `--subject`, space-separated terms are AND.
 Dates: ISO 8601 or relative (`30min`, `24h`, `7d`, `1w`, `1mo`, `1y`, `today`,
 `yesterday`); `--since` is inclusive and `--until` exclusive.
@@ -455,7 +476,8 @@ folders of declared accounts. `scan.mode` is `metadata` or `text`.
 
 Messages received since the last run, **only once**: it uses a global cursor
 stored in `~/.mailquery/state.json` (default 100, max 500). `--peek` returns the
-new messages without advancing the cursor or writing state. The **first run**
+new messages without advancing the cursor or writing state. `--strip-links`
+forces `strip` for that run. The **first run**
 (no cursor) emits, in ascending order, the messages received in the
 `[new].lookback` (default `10min`) before the newest one in the scope, at least
 that one, and adds `W_FIRST_RUN`; later runs emit what arrived after the cursor.
@@ -487,6 +509,7 @@ with `body_truncated` and `W_BODY_TRUNCATED`) and attachments. The `uid` is an
 arithmetic. The legacy unprefixed uid is accepted for the native driver. It only
 shows messages from declared accounts (`E_ACCOUNT_NOT_IN_SCOPE` otherwise). An
 invalid or missing uid gives `E_USAGE` (exit 2). `show` never writes to disk.
+`--strip-links` forces `strip` for that run, over `[content].url_display`.
 
 ```bash
 mailquery show apple_mail:2714
@@ -588,6 +611,14 @@ commands and the exit code line below.
 
 ## Body and warnings
 
+The body is the **HTML converted to text** when the message has HTML (also for
+`--text`); plain text is used only when there is no HTML. The message
+stylesheets are applied, linked stylesheets are never loaded, and hidden
+elements (`hidden`, `display:none`, `visibility:hidden`, `mso-hide:all`,
+`font-size:0`, `opacity:0`) contribute no text; their characters are counted in
+`W_HIDDEN_CONTENT`. An HTML body without any visible text gives an empty body
+and `W_HTML_NO_TEXT` instead of falling back to the plain-text alternative.
+
 `body.available` tells whether a local body exists and `body.readable` whether it
 could be read. Warnings (`"W_CODE: reason"`) are not errors. On both platforms:
 `W_NO_ACCOUNTS`, `W_FIRST_RUN`, `W_RESULTS_TRUNCATED`, `W_BODY_TRUNCATED`,
@@ -597,6 +628,67 @@ returns an empty attachment list and keeps only the body warning). macOS only:
 `W_EMLX_MISSING`, `W_EMLX_CORRUPT` and `W_ACCOUNT_LABELS_UNAVAILABLE`. Windows
 only: `W_BODY_NOT_LOCAL` (the item only has headers locally; it is never
 downloaded) and `W_STORE_EXCLUDED`. Full catalogue: PRD §12.10.
+
+`search`, `new` and `show` also add the content warnings of F1, per message, in
+this order and after the body warnings of the same message:
+
+| Warning | Meaning |
+|---|---|
+| `W_HIDDEN_CONTENT` | Text omitted from an HTML body by a hiding technique of RF-53, with the omitted character count. |
+| `W_EXTERNAL_LINKS` | URLs found in the subject, the sender and recipient names or the whole body. |
+| `W_SCRIPT_LINK` | URLs that start with `javascript:`, `vbscript:` or `data:`. |
+| `W_LONG_URL` | URLs longer than 2,048 characters. |
+| `W_NON_ASCII_DOMAIN` | Domains with non-ASCII characters in those URLs and in the sender/recipient addresses. |
+| `W_SENDER_AUTH_FAILED` | The first `Authentication-Results` header reports `fail`, `softfail` or `permerror` for SPF, DKIM or DMARC. |
+| `W_REPLY_TO_MISMATCH` | `Reply-To` uses another domain than `From`. |
+
+The details never contain the URL, the domain, the address or message text; the
+counts do not depend on the URL display mode, and the sender signals appear even
+when `from` is not delivered. `attachment`, `mailboxes` and `doctor` never emit
+these warnings. URLs are shown as in `[content]` (neutralized by default):
+
+| Text | `neutralize` (default) | `strip` |
+|---|---|---|
+| `Revisa https://example.com/factura` | `Revisa hxxps://example.com/factura` | `Revisa [link omitted]` |
+| `Entra a www.banco.example/login` | `Entra a www[.]banco.example/login` | `Entra a [link omitted]` |
+| `Abre file://evil.example/doc` | `Abre file[:]//evil.example/doc` | `Abre [link omitted]` |
+| `Pega javascript:fetch(1)` | `Pega javascript[:]fetch(1)` | `Pega [link omitted]` |
+| `En \\evil.example\compartido\f.pdf` | `En [\\]evil.example\compartido\f.pdf` | `En [link omitted]` |
+| `https://pаypal.com/login` | `hxxps://xn--pypal-4ve.com/login` | `[link omitted]` |
+
+## Security for harness operators
+
+Email content is untrusted input. `mailquery` removes invisible characters,
+takes the body from the HTML the recipient sees, omits hidden content,
+neutralizes URLs by default and emits link and sender signals, but **these are
+signals, not a security boundary**.
+
+**`mailquery` does not detect or block prompt injection; the real protection is
+limiting what the agent can do.**
+
+The operator of the harness has to apply these controls (the rest of the
+checklist is in the [security annex](docs/security/threat-model.md)):
+
+- **Least privilege (checklist 2).** For mail tasks do not expose a shell, file
+  writing, a browser or fetch to the agent. If a task needs them, use a separate
+  session with an allowlist and human confirmation.
+- **Human confirmation (checklist 4).** Any side effect — opening a URL,
+  downloading, executing, sending, deleting, writing or installing — needs the
+  user's explicit confirmation.
+- **Provenance (checklist 7).** Label the mail content as untrusted in the
+  context; keep it delimited and do not mix it with the system or user
+  instructions.
+- **Agent sandbox (checklist 9).** Run the agent in a container or VM without
+  host credentials and with restricted network access.
+- **Audit (checklist 10).** Record tool calls, attempted URLs, downloads and
+  openings, and alert on anomalous patterns.
+- **Incident response (checklist 11).** Be able to revoke credentials and
+  isolate the host; do not rely on the agent alone.
+
+The complete threat model, the attacker assumptions and the remaining risks are
+in the [security annex](docs/security/threat-model.md)
+([`docs/security/threat-model.md`](docs/security/threat-model.md)). The skill
+carries the agent-side rules of the same checklist.
 
 ## Exit codes
 

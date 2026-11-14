@@ -67,6 +67,9 @@ mailquery search --text "*factura*" --since 2w --include-mailbox "Facturas"
 
 # Tope explícito de resultados
 mailquery search --text "*factura*" --since 2w --has-attachments --limit 50
+
+# Sin URLs en la salida (sustituidas por [link omitted])
+mailquery search --text "*factura*" --since 2w --strip-links
 ```
 
 Si el usuario pide el detalle de una factura concreta, con el `uid` tal como lo
@@ -157,6 +160,15 @@ su longitud ni lo partas, y devuélvelo tal cual a `show` y `attachment`.
 - Windows: `W_BODY_NOT_LOCAL` (Outlook solo tiene las cabeceras del item en
   local; el cuerpo nunca se descarga, así que `--text` no puede encontrarlo) y
   `W_STORE_EXCLUDED` (una cuenta declarada es un store excluido y no se lee).
+- Señales de contenido de F1, una por mensaje: `W_HIDDEN_CONTENT` (texto oculto
+  omitido del cuerpo), `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`,
+  `W_NON_ASCII_DOMAIN` (dominios no ASCII en URLs o direcciones),
+  `W_SENDER_AUTH_FAILED` (el proveedor vio fallar SPF/DKIM/DMARC) y
+  `W_REPLY_TO_MISMATCH` (las respuestas irían a otro dominio). Las URLs de la
+  salida llegan neutralizadas por defecto (`hxxps://`, `[:]`, `www[.]`, `[\\]`,
+  punycode y acortadas); `--strip-links` las quita y los filtros siguen
+  comparando el texto original, así que los resultados no cambian. Que no
+  aparezca un aviso no prueba que el mensaje sea seguro.
 
 Campos que **no** trae `search` y no deben inventarse: importe, número de
 factura, IVA, moneda, contenido del adjunto, nombre real del archivo dentro del
