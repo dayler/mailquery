@@ -113,6 +113,9 @@ SHOW_FIELDS = (
     "source",
 )
 
+#: Canonical key order of every folder of ``mailboxes``.
+MAILBOX_FIELDS = ("name", "path", "url", "total", "unread", "included")
+
 #: Row fields that require reading the body of the message.
 _SEARCH_BODY_FIELDS = frozenset({"snippet", "body"})
 
@@ -1032,17 +1035,26 @@ def run_mailboxes(
     *,
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
+    fields: Sequence[str] | None = None,
 ) -> dict:
-    """Return ``{"accounts", "mailboxes", "excluded_stores", "warnings"}``.
+    """Return ``{"accounts", "excluded_stores", "warnings"}``.
 
     Drivers are concatenated in the order their ``[scope]`` blocks first appear
-    in the config: ``accounts[]`` of each driver (declared
-    first, with their ``declared`` flag), then every folder of the driver with
-    its counters and ``included`` flag, then its ``excluded_stores[]``. The
-    native driver stays out of a command whose config declares only other
-    drivers; with no ``[scope]`` blocks at all it is listed with every account
-    undeclared (2.0.1 behavior: discovery and ``W_NO_ACCOUNTS``).
+    in the config: each account of the driver (declared first, with its
+    ``declared`` flag) carries its folders in ``mailboxes[]``, and then its
+    ``excluded_stores[]``. The native driver stays out of a command whose
+    config declares only other drivers; with no ``[scope]`` blocks at all it is
+    listed with every account undeclared (2.0.1 behavior: discovery and
+    ``W_NO_ACCOUNTS``).
+
+    Every folder carries ``path`` and ``included``; ``name``, ``url``,
+    ``total`` and ``unread`` are added only when ``fields`` requests them, in
+    the order of :data:`MAILBOX_FIELDS`. Without ``total`` or ``unread`` the
+    folders are listed without counting any message (a driver that offers a
+    counter-less catalog is asked for it).
     """
+    requested = frozenset(fields or ())
+    need_counters = bool(requested & {"total", "unread"})
     native_name, pool = _driver_pool(backend, drivers, native)
     excluded: list[dict] = []
     resolved = _resolved_scope(config, backend, excluded, drivers=drivers, native=native_name)
@@ -1055,7 +1067,6 @@ def run_mailboxes(
     warnings.extend(_activation_warnings([pool[driver] for driver in order], excluded))
 
     accounts: list[dict] = []
-    mailboxes: list[dict] = []
     excluded_stores: list[dict] = []
     seen_accounts: set[tuple[str, str]] = set()
     for driver in order:
@@ -1063,7 +1074,10 @@ def run_mailboxes(
         if driver_backend is None:  # pragma: no cover - pool holds every driver in order
             continue
         accounts_by_uuid = _accounts_by_uuid(driver_backend)
-        backend_mailboxes = list(driver_backend.mailboxes())
+        if need_counters:
+            backend_mailboxes = list(driver_backend.mailboxes())
+        else:
+            backend_mailboxes = list(config_module.listed_mailboxes(driver_backend))
         scopes = groups.get(driver, ())
         declared_ids = {_scope_account_uuid(scope) for scope in scopes}
         allowed_ids = {
@@ -1071,6 +1085,8 @@ def run_mailboxes(
             for scope in scopes
             for mailbox in getattr(scope, "mailboxes", ()) or ()
         }
+        driver_accounts: list[dict] = []
+        account_by_uuid: dict[str, dict] = {}
         for scope in scopes:
             uuid = _scope_account_uuid(scope)
             key = (driver, uuid)
@@ -1079,35 +1095,63 @@ def run_mailboxes(
             seen_accounts.add(key)
             account = _account_payload(accounts_by_uuid, uuid)
             account["declared"] = True
-            accounts.append(account)
+            account["mailboxes"] = []
+            account_by_uuid[uuid] = account
+            driver_accounts.append(account)
         for mailbox in backend_mailboxes:
-            uuid = mailbox["account_uuid"]
-            key = (driver, str(uuid or ""))
+            uuid = str(mailbox["account_uuid"] or "")
+            key = (driver, uuid)
             if not uuid or key in seen_accounts:
                 continue
             seen_accounts.add(key)
             account = _account_payload(accounts_by_uuid, uuid)
             account["declared"] = uuid in declared_ids
-            accounts.append(account)
-        mailboxes.extend(
-            {
-                "account": _account_payload(accounts_by_uuid, mailbox["account_uuid"]),
-                "name": mailbox["name"],
-                "path": mailbox["path"],
-                "url": mailbox["url"],
-                "total": int(mailbox["total"]),
-                "unread": int(mailbox["unread"]),
-                "included": mailbox["id"] in allowed_ids,
-            }
+            account["mailboxes"] = []
+            account_by_uuid[uuid] = account
+            driver_accounts.append(account)
+        missing_account = any(
+            str(mailbox["account_uuid"] or "") not in account_by_uuid
             for mailbox in backend_mailboxes
         )
+        if missing_account:
+            # A folder without an account is grouped under the empty account,
+            # added once in the position where the folders are walked.
+            account = _account_payload(accounts_by_uuid, "")
+            account["declared"] = "" in declared_ids
+            account["mailboxes"] = []
+            account_by_uuid[""] = account
+            driver_accounts.append(account)
+        for mailbox in backend_mailboxes:
+            uuid = str(mailbox["account_uuid"] or "")
+            account_by_uuid[uuid]["mailboxes"].append(
+                _listed_mailbox_payload(mailbox, allowed_ids, requested)
+            )
+        accounts.extend(driver_accounts)
         excluded_stores.extend(driver_backend.excluded_stores())
 
     return {
         "accounts": accounts,
-        "mailboxes": mailboxes,
         "excluded_stores": excluded_stores,
         "warnings": warnings,
+    }
+
+
+def _listed_mailbox_payload(
+    mailbox: "MailboxRow", allowed_ids: set[Any], requested: frozenset[str]
+) -> dict:
+    """One ``mailboxes`` folder: ``path``/``included`` always, the rest on request."""
+    values = {
+        "name": mailbox["name"],
+        "path": mailbox["path"],
+        "url": mailbox["url"],
+        "total": mailbox.get("total"),
+        "unread": mailbox.get("unread"),
+        "included": mailbox["id"] in allowed_ids,
+    }
+    return {
+        name: values[name]
+        for name in MAILBOX_FIELDS
+        if name in ("path", "included") or name in requested
     }
 
 

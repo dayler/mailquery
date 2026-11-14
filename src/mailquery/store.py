@@ -16,7 +16,7 @@ import sqlite3
 import tempfile
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import unquote, urlsplit
@@ -520,7 +520,11 @@ class StoreVersion:
 
 @dataclass(frozen=True)
 class Mailbox:
-    """One row of the ``mailboxes`` table plus recalculated counters."""
+    """One row of the ``mailboxes`` table plus its recalculated counters.
+
+    ``message_count`` and ``unread_count`` are ``None`` until the counters are
+    requested with :meth:`EnvelopeStore.mailboxes_with_counters`.
+    """
 
     rowid: int
     url: str
@@ -530,12 +534,12 @@ class Mailbox:
     account_kind: str  # "imap" | "local"
     is_inbox: bool
     is_aggregate: bool
-    message_count: int
-    unread_count: int
+    message_count: int | None
+    unread_count: int | None
 
 
 def _mailbox_from_row(
-    row: sqlite3.Row, counters: dict[int, tuple[int, int]]
+    row: sqlite3.Row, counters: dict[int, tuple[int, int]] | None = None
 ) -> Mailbox:
     rowid = int(row["rowid"])
     url = str(row["url"] or "")
@@ -543,7 +547,7 @@ def _mailbox_from_row(
     path = "/".join(segments)
     name = segments[-1] if segments else ""
     folded_path = path.casefold()
-    total, unread = counters.get(rowid, (0, 0))
+    total, unread = counters.get(rowid, (0, 0)) if counters is not None else (None, None)
     return Mailbox(
         rowid=rowid,
         url=url,
@@ -624,6 +628,7 @@ class EnvelopeStore:
         self.tmp_dir = Path(tmp_dir) if tmp_dir is not None else None
         self._owns_tmp_dir = strategy == STRATEGY_COPY and self.tmp_dir is not None
         self._mailboxes: tuple[Mailbox, ...] | None = None
+        self._counted_mailboxes: tuple[Mailbox, ...] | None = None
         self._by_rowid: dict[int, Mailbox] = {}
         self._closed = False
 
@@ -633,17 +638,41 @@ class EnvelopeStore:
         rows = run_query(
             self.connection, "SELECT ROWID AS rowid, url FROM mailboxes ORDER BY ROWID"
         )
-        counters = _mailbox_counters(self.connection)
-        mailboxes = tuple(_mailbox_from_row(row, counters) for row in rows)
+        mailboxes = tuple(_mailbox_from_row(row) for row in rows)
         self._mailboxes = mailboxes
         self._by_rowid = {mailbox.rowid: mailbox for mailbox in mailboxes}
         return mailboxes
 
     @property
     def mailboxes(self) -> tuple[Mailbox, ...]:
+        """The folder catalog of ``mailboxes`` without counters.
+
+        Reading the catalog never counts messages: ``message_count`` and
+        ``unread_count`` are ``None``. The counters are calculated once, on
+        first use, by :meth:`mailboxes_with_counters`.
+        """
         if self._mailboxes is None:
             self._load_mailboxes()
         return self._mailboxes
+
+    def mailboxes_with_counters(self) -> tuple[Mailbox, ...]:
+        """The folder catalog with ``total``/``unread`` recalculated once.
+
+        The counters come from :func:`_mailbox_counters` and are cached for the
+        life of the store, so a second request in the same process reads no
+        table again.
+        """
+        if self._counted_mailboxes is None:
+            counters = _mailbox_counters(self.connection)
+            self._counted_mailboxes = tuple(
+                replace(
+                    mailbox,
+                    message_count=counters.get(mailbox.rowid, (0, 0))[0],
+                    unread_count=counters.get(mailbox.rowid, (0, 0))[1],
+                )
+                for mailbox in self.mailboxes
+            )
+        return self._counted_mailboxes
 
     def mailbox(self, rowid: int) -> Mailbox:
         if self._mailboxes is None:
