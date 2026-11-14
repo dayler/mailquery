@@ -270,6 +270,26 @@ class SmokeTest(unittest.TestCase):
         """SMOKE-INSTALL.04: the user's real ~/.mailquery does not change."""
         self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
 
+    def test_smoke_install_05_css_inline_is_installed(self):
+        """SMOKE-INSTALL.05: pipx install . installs a css-inline patch of the allowed range."""
+        self.assertEqual(
+            self.install.returncode, 0, self.install.stdout + "\n" + self.install.stderr
+        )
+        result = subprocess.run(
+            ["pipx", "runpip", "mailquery", "show", "css-inline"],
+            cwd=str(self.tmp),
+            env=self.env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        match = re.search(r"^Version:\s+(\S+)$", result.stdout, re.MULTILINE)
+        self.assertIsNotNone(match, result.stdout)
+        self.assertRegex(match.group(1), r"^0\.23\.\d+$")
+
     # --- SMOKE-NEW -----------------------------------------------------------
 
     def test_smoke_new_01_mailboxes_json(self):
