@@ -17,7 +17,7 @@ jobs:
   unittest:
     name: unittest (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -28,18 +28,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install css-inline
+        run: python -m pip install "css-inline~=0.23.1"
+      - name: Install coverage
+        run: python -m pip install "coverage~=7.17"
       - name: Install pywin32 (Windows only)
         if: runner.os == 'Windows'
         run: python -m pip install pywin32
       - name: Run unit, contract, integration and read-only tests
         # tests/test_readonly.py is blocking: it fails if any store file
-        # changes or if the tool writes outside ~/.mailquery.
-        run: python -m unittest discover -s tests -t . -v
+        # changes or if the tool writes outside ~/.mailquery. The suite runs
+        # under coverage so the next step can gate the total.
+        run: python -B -m coverage run -m unittest discover -s tests -t . -v
+      - name: Check coverage
+        # Fails (exit 2) below the 85 % combined line and branch threshold.
+        run: python -m coverage report
 
   install-scripts:
     name: install scripts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +60,20 @@ jobs:
             kind: ps1
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check css-inline wheels
+        # Every supported platform must have a prebuilt wheel of the allowed
+        # patch range, so installing never compiles it and never reaches 0.24.
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -e
+          for platform in macosx_11_0_arm64 macosx_10_12_x86_64 win_amd64 win32 manylinux_2_17_x86_64; do
+            dest="$RUNNER_TEMP/css-inline-$platform"
+            python3 -m pip download "css-inline~=0.23.1" --only-binary=:all: --no-deps \
+              --platform "$platform" --python-version 3.11 --implementation cp --dest "$dest"
+            ls "$dest" | grep -E '^css_inline-0\.23\.[0-9]+-.+\.whl$'
+          done
 
       - name: Validate and dry-run scripts/install.sh
         if: matrix.kind == 'sh'
