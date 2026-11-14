@@ -67,7 +67,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | 🟢 |
 | M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | 🟢 |
 | M12 | `mailboxes` agrupado por cuenta y `--fields` | I4 | W7 | M10 (lote I3 mergeado) | AC-O14, AC-O15 | [M12](M12-mailboxes-grouped.md) | 🟢 |
-| M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | 🟡 |
+| M13 | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | I4 | W8 | M12 (orden de archivos) | AC-O10, AC-O11, AC-O12, AC-O16, AC-O17 | [M13](M13-doctor-failures-plugins.md) | 🟢 |
 | M14 | SMOKE en equipos reales, auditoría documental y cierre | I4 | W9 | M01–M13 | AC-H15, AC-O15 (p95) y verificación final de todos | [M14](M14-smoke-closure.md) | ⚪ |
 
 "Orden de archivos" significa que la dependencia no es funcional sino de propiedad de archivos (`cli.py`, `search.py`, README, skill): los dos milestones no pueden correr a la vez.
@@ -230,7 +230,7 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-O07 | `--count` | M11 | UT-GRP-05 | ⚪ |
 | AC-O08 | `new --fields`; `new --group-by`/`--count` rechazados | M10, M11 | UT-FLD-06, UT-GRP-06 | 🟢 |
 | AC-O09 | Warnings según lo entregado | M10, M11 | UT-FLD-05, UT-GRP-09 | 🟢 |
-| AC-O10 | Ayudas, skill, README y recetas (RF-75); `doctor --help` | M10, M11, M13 | DOC-10, DOC-11, DOC-12 | 🟡 |
+| AC-O10 | Ayudas, skill, README y recetas (RF-75); `doctor --help` | M10, M11, M13 | DOC-10, DOC-11, DOC-12 | 🟢 |
 | AC-O11 | `doctor --failures` (también tras un timeout COM, D-25) | M13, M14 | UT-DR-01–UT-DR-04, UT-DR-10, SMOKE-NEW.10 | ⚪ |
 | AC-O12 | Sin *preflight* en skill, ayuda y README | M13 | DOC-12 | ⚪ |
 | AC-O13 | `hint` de `search` sin resultados | M11 | UT-GRP-08 | ⚪ |
@@ -568,3 +568,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-14 | I3 (defecto en CI) | — | `Ran 1373` con los 2 fallos ambientales SMOKE-NEW.07 tras la corrección; 75 ejecuciones de UT-RMT-05.01 en Python 3.11/3.12/3.13 OK | `docs/plan/evidence/M09.md` (sección Reapertura) | PR #9, corrida https://github.com/dayler/mailquery/actions/runs/43571189546: 2 jobs macOS (3.11 y 3.13) rojos por `UT-RMT-05.01` flaky (exit 2 en vez de 3): `time.sleep(0.1)` frente a un tope de 0,05 s podía no vencer bajo carga. Corregido con bloqueo determinista por `threading.Event` en el doble y el caso; sin cambio de producto. M09 no vuelve a 🟡 porque el lote I3 no estaba mergeado; la corrección va al mismo PR (regla 9). |
 | 2026-11-14 | Lote I3 | 🟡 → 🟢 | Rama `integration/i3-attachments-rows` con `Ran 1373`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07 de la línea base) y cobertura 91,0 %; matriz CI verde (15/15 jobs) tras corregir un test flaky de M09 | PR https://github.com/dayler/mailquery/pull/9; run del PR (verde) https://github.com/dayler/mailquery/actions/runs/43572383761; run rojo inicial https://github.com/dayler/mailquery/actions/runs/43571189546; run de `develop` https://github.com/dayler/mailquery/actions/runs/43572836705 | Merge `--no-ff` `b95ac06`. Cobertura CI 91,0 %. La corrida de `develop` posterior al merge quedó verde (HITL-09). M09–M11 integrados; AC-H12, AC-D01–AC-D06, AC-H14, AC-O04–AC-O09 y AC-O13 completos. El run inicial del PR tuvo 2 jobs macOS rojos por `UT-RMT-05.01` flaky (ver fila del 2026-11-14 "I3 (defecto en CI)"); la corrección fue al mismo PR y el segundo run quedó 15/15. |
 | 2026-11-14 | M12 | 🟡 → 🟢 | `b1d3bff` (merge en `integration/i4-mailboxes-doctor-close`): `Ran 1395`, `OK (skipped=7)` en la rama del milestone (los 2 fallos ambientales de SMOKE-NEW.07 no aparecieron; +22 tests) | `docs/plan/evidence/M12.md` | `mailboxes` agrupado, `--fields` y recuento diferido; 2 goldens actualizados; cobertura total 91,1 % |
+| 2026-11-14 | M13 | 🟡 → 🟢 | `43587ae` (merge en `integration/i4-mailboxes-doctor-close`): `Ran 1425`, `OK (skipped=7)` en la rama del milestone; +30 tests | `docs/plan/evidence/M13.md` | `doctor --failures`, sección `plugins`, diagnóstico sin *preflight*; 2 goldens con `plugins: []`; cobertura 91,3 % |

@@ -615,11 +615,28 @@ protocolo v1: no está en la ABC ni en `plugin_api`.
 | `parse_native_id(native_id)` | valida la parte nativa de un uid prefijado y devuelve el uid legado; puro y sin abrir cliente/store |
 | `attachments(uid)` | `list[AttachmentMetadataRow]` ordenada por `index` 1..N (la implementan los backends internos; los plugins deben) |
 | `attachment_stream(uid, index)` | iterador de bytes **decodificados** del adjunto `index`; el plugin no escribe en la caché |
-| `doctor_checks()` | chequeos propios del backend (los comunes los añade `cli.py`) |
+| `doctor_checks()` | `list[dict]`: chequeos propios del plugin, cada uno `{name, ok, detail}`; el `config` del plugin y los chequeos comunes los añade `cli.py` (ver más abajo) |
 | `close()` | libera la conexión SQLite o las referencias COM |
 
 `parse_uid` y `parse_native_id` de los adaptadores son `@staticmethod` puros: el
 núcleo puede validar antes de crear el home, leer la config o abrir el store.
+
+**`doctor_checks()` y la sección `plugins` de `doctor` (RF-81).** Un plugin declarado en
+`[scope."<driver>:…"]` aparece en `doctor --json` dentro de `plugins[]`, con `driver` y `checks[]`;
+`checks[]` lleva primero lo que devuelve `doctor_checks()` y después el chequeo `config` que calcula el
+núcleo. `doctor_checks()` devuelve una lista de objetos `{"name", "ok", "detail"}`: `name` es un
+string único dentro del plugin y distinto de `config` y `plugin` (reservados para el núcleo); `ok` es
+booleano; `detail` es una línea (sin `\n` ni `\r`). Un valor que no cumple esa forma, un `name`
+repetido o reservado o un `detail` multilínea ⇒ chequeo `plugin` con `ok: false` y
+`E_PLUGIN_FAILED: …`; una excepción ⇒ ídem; al vencer el corte duro de `METADATA_TIMEOUT_SECONDS` ⇒
+`timeout after 30 s: plugin '<driver>' did not respond`. La llamada pasa por
+`call_driver("doctor_checks", …)`, así que un `PluginError` se mapea al código del núcleo; el detalle
+del chequeo `plugin` conserva el prefijo `E_PLUGIN_FAILED`. El `config` del plugin se resuelve con
+`accounts()`, `mailboxes()` y `resolve_mailbox()` a través de `wrap_driver` (cada llamada con su
+propio corte duro) y usa el mismo formato de detalle y de errores que el `config` del backend nativo.
+Un fallo al abrir el plugin deja `plugin` con `E_PLUGIN_FAILED` y `config` como
+`not evaluated: plugin failed`. El `config` de primer nivel ya no lista los bloques de plugins; si todos
+los bloques son de plugins, informa `0 account block(s) declared for driver <nativo>` con `ok=true`.
 
 ### `backends/__init__.py`
 `get_backend(*, platform=None, outlook_app=None, registry=None,
@@ -1371,11 +1388,11 @@ su traceback (solo los frames y el tipo: el mensaje ya va saneado en la línea
 `event=error`), el resto de códigos sin traceback (PRD §14); `doctor` devuelve exit 0 y muestra un **informe de texto
 human-readable** por defecto (`--json` para el payload máquina) aunque algún
 chequeo falle (decisión del usuario).
-Internos de `doctor` (no son API pública): `_DoctorRun(home_path)` guarda el
-progreso de una corrida (chequeos comunes terminados, `backend_checks` y la
-config ya leída) y lo comparte con el gancho de timeout; `.ordered()` los
-devuelve en el orden de PRD §12.8 y `.after_timeout(backend, backend_checks,
-detail)` completa el informe sin volver a llamar al cliente de correo.
+Internos de `doctor` (no son API pública): `_DoctorRun(home_path)` guarda el progreso de una corrida
+(chequeos comunes terminados, `backend_checks`, la config ya leída, `driver_ok` por driver y las
+secciones `plugins` ya calculadas) y lo comparte con el gancho de timeout; `.ordered()` los devuelve
+en el orden de PRD §12.8 y `.after_timeout(backend, backend_checks, detail)` completa el informe sin
+volver a llamar al cliente de correo.
 `--version`/`-v` conserva el prefijo del PRD.md §12.9 y añade
 `; drivers: <driver> <versión>, ...` dentro del paréntesis, alfabético: los
 backends internos se filtran por plataforma (DP-02) y los plugins externos se
@@ -1383,9 +1400,9 @@ listan siempre; la línea usa `BackendRegistry.versions()` (metadata de
 distribución, sin importar plugins) y no lee config ni escribe log. El
 chequeo `driver` de `doctor` (orden y detalle) está en `### doctor`.
 `_collect_doctor_checks(home_path, backend, run=None, *, registry=None)` evalúa
-en este orden (`python`, `home`, sintaxis de `config`, `driver`,
-`state`, `lock`, los chequeos del backend y al final la resolución de
-`config`); `registry` es el `BackendRegistry` del `driver` check, de la
+en este orden (`python`, `home`, sintaxis de `config`, `driver`, `state`,
+`lock`, las secciones de los plugins declarados, los chequeos del backend y al
+final la resolución de `config`); `registry` es el `BackendRegistry` del `driver` check, de la
 validación de prefijos de `[scope]` y de `is_installed` del chequeo `state`
 (`_run_doctor` crea uno y lo comparte). El chequeo `state` usa
 `StateStore(home, registry.is_installed)` y el detalle conserva el de 2.0.1 con
@@ -1398,16 +1415,19 @@ uids). Un cursor de un driver no instalado deja el chequeo `ok=false` con
 `E_STATE_CORRUPT`. `doctor` no escribe estado.
 `_record_driver_check` valida el driver nativo (el backend en
 diagnóstico) y cada driver declarado; el detalle y los sufijos son el contrato
-de §12.8 (ver `### doctor`). `_record_config_check` resuelve cada bloque (o
-`not evaluated: <chequeo> failed` si falló su dependencia: primero `driver`,
-luego `store` en Apple Mail y `stores` en Outlook; los bloques de un driver
-distinto del nativo solo se reportan como declarados, sin resolver sus
-cuentas) y añade `W_STORE_EXCLUDED` al `detail`
-con `ok=true` (PRD §15.3). `_bind_doctor_timeout` registra en el backend (si
-tiene `bind_doctor_timeout`) un `finish` que escribe el informe con
-`_emit_doctor_report(checks, json_output, logger, client)` (JSON o texto, más
-la línea `event=end` del log), hace `flush` de `stdout`, `stderr` y el log y
-termina con `os._exit(0)`.
+de §12.8 (ver `### doctor`). `_record_config_check` resuelve cada bloque del driver nativo (o `not evaluated: <chequeo> failed` si
+falló su dependencia: primero `driver`, luego `store` en Apple Mail y `stores` en Outlook; los bloques
+de un driver distinto del nativo los resuelve la sección de ese plugin, y un config con solo bloques
+de plugins informa `0 account block(s) declared for driver <nativo>` con `ok=true`) y añade
+`W_STORE_EXCLUDED` al `detail` con `ok=true` (PRD §15.3). `_collect_plugin_sections` y `_plugin_checks`
+calculan cada plugin con `registry.open_drivers([driver], context=...)`,
+`call_driver("doctor_checks", …)` y `_plugin_config_check` (que resuelve sus bloques con
+`wrap_driver`), y cierran el plugin sin enmascarar el resultado; `_valid_doctor_checks` valida la forma
+de retorno y los nombres reservados. `_bind_doctor_timeout` registra en el backend (si tiene
+`bind_doctor_timeout`) un `finish` que escribe el informe con
+`_emit_doctor_report(checks, plugins, json_output, logger, client, failures=...)` (JSON o texto, más la
+línea `event=end` del log), aplica el mismo filtrado de `--failures` y hace `flush` de `stdout`,
+`stderr` y el log y termina con `os._exit(0)`.
 
 ### `attachments/`
 
@@ -2002,53 +2022,76 @@ Apple Mail. En Outlook lista los stores excluidos en el orden del perfil (p. ej.
 "shared_mailbox"}`); `accounts[]` y sus `mailboxes[]` solo traen candidatos.
 
 ### `doctor`
-Por defecto: **informe de texto human-readable** en `stdout` (mismo estilo que
-`--help`: cabecera, `Checks:` alineado, `Result:` y `Notes:`, sin colores),
-siempre exit 0 si puede diagnosticar. Con `--json`, payload máquina:
+Por defecto: **informe de texto human-readable** en `stdout` (mismo estilo que `--help`: cabecera,
+`Checks:`, `Plugins:` si hay plugins declarados, `Result:` y `Notes:`, sin colores), siempre exit 0 si
+puede diagnosticar. Es la verificación tras instalar o actualizar y el diagnóstico tras un fallo; no
+hace falta antes de cada comando. Con `--json`, payload máquina:
 
 ```json
-{"checks": [{"name": "store", "ok": true, "detail": "V10 ..."}]}
+{"checks": [{"name": "store", "ok": true, "detail": "V10 ..."}], "plugins": []}
 ```
 
-Chequeos comunes (los añade `cli.py`): `python`, `home`, `driver`, `config`,
-`state`, `lock`. Los del backend (`MailBackend.doctor_checks()`) en Apple Mail
-son `store`, `envelope_index`, `schema`, `readonly_strategy`, `accounts_db`; en
-Outlook, `pywin32`, `outlook`, `stores`, `readonly_strategy` y
-`object_model_guard` (PRD §12.8; con Outlook cerrado, `outlook` falla
-con `E_OUTLOOK_NOT_RUNNING` y su hint, sus dependientes salen `not evaluated`
-y el exit sigue siendo 0). Orden de la lista (PRD §12.8):
+Con `--failures`, `checks` conserva solo los chequeos evaluados con `ok: false` (también los
+`not evaluated: <causa concreta>`), `not_evaluated` va justo después de `checks` con los nombres de
+los que no se evaluaron porque dependían de otro que falló (detalle exactamente `not evaluated:
+<chequeo> failed`), y `plugins` se filtra igual: solo los plugins con algún chequeo que falla o sin
+evaluar, cada uno con `driver`, sus `checks` que fallan y su `not_evaluated`. Sin fallos:
+`{"checks": [], "not_evaluated": [], "plugins": []}`. En texto, cada sección muestra solo sus filas
+que fallan y, si hay alguno sin evaluar, la línea `not evaluated: <nombres>`; una sección sin fallos
+no se muestra y, si no falla nada, bajo `Checks:` sale `all checks passed`. El exit sigue siendo 0 y
+`ok` no cambia.
 
-- macOS: `python`, `home`, `driver`, `store`, `envelope_index`, `schema`,
-  `readonly_strategy`, `accounts_db`, `config`, `state`, `lock`.
-- Windows: `python`, `home`, `driver`, `pywin32`, `outlook`, `stores`,
-  `readonly_strategy`, `object_model_guard`, `config`, `state`, `lock`.
+Chequeos comunes (los añade `cli.py`): `python`, `home`, `driver`, `config`, `state`, `lock`. Los del
+backend (`MailBackend.doctor_checks()`) en Apple Mail son `store`, `envelope_index`, `schema`,
+`readonly_strategy`, `accounts_db`; en Outlook, `pywin32`, `outlook`, `stores`, `readonly_strategy` y
+`object_model_guard` (PRD §12.8; con Outlook cerrado, `outlook` falla con `E_OUTLOOK_NOT_RUNNING` y su
+hint, sus dependientes salen `not evaluated` y el exit sigue siendo 0). Orden de la lista (PRD §12.8):
 
-El chequeo `driver` (común y con nombre estable) valida que todo driver
-declarado en `[scope."<driver>:<cuenta>"]` (más el nativo cuando hay bloques
-sin prefijo) esté instalado, declare `driver` válido/único y `plugin_api = 1` y
-tenga capacidades válidas. Es la única comprobación que lista la metadata de
-los drivers; `config` depende primero de ella (`not evaluated: driver failed`)
-y después de `schema` (macOS) / `stores` (Windows) como hasta ahora.
-`detail`: por cada driver, en orden de declaración (nativo
-primero si hay bloques sin prefijo),
-`<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>; body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`,
-unidos por `; `; la versión es la de la distribución (`package_version()`,
-`3.0.0a0` en `develop`) y el nativo se obtiene del backend seleccionado (así el
-fake de Outlook sobre `platform="win32"` reporta `outlook` en cualquier host).
-Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒
-`; no declared drivers` (valida solo el nativo); config que no parsea ⇒
-`; declared drivers: unknown (config failed)` (valida solo el nativo y el error
-lo reporta `config`); un driver que no valida añade
-`; <driver>: <CODE>: <message> (hint: <hint>)` y `driver` queda `ok=false`
-(exit 0 siempre). Un plugin externo no añade chequeos propios.
-El chequeo `config` valida el TOML y **la resolución de cada bloque `[scope]` y
-su `mailbox_list`** del driver nativo contra el store y las etiquetas de cuenta
-(por entrada, con el `code`/`hint` de cada error); un bloque de otro driver
-declarado se reporta como `<clave> → declared for driver <driver>` sin
-resolver sus cuentas. Distingue config ausente de
-config presente sin `[scope]` y, cuando no hay cuentas declaradas, lista las
-disponibles con el formato `0 account block(s) declared; available: <label>, ...`
-sin activarlas.
+- macOS: `python`, `home`, `driver`, `store`, `envelope_index`, `schema`, `readonly_strategy`,
+  `accounts_db`, `config`, `state`, `lock`.
+- Windows: `python`, `home`, `driver`, `pywin32`, `outlook`, `stores`, `readonly_strategy`,
+  `object_model_guard`, `config`, `state`, `lock`.
+
+El chequeo `driver` (común y con nombre estable) valida que todo driver declarado en
+`[scope."<driver>:<cuenta>"]` (más el nativo cuando hay bloques sin prefijo) esté instalado, declare
+`driver` válido/único y `plugin_api = 1` y tenga capacidades válidas. Es la única comprobación que
+lista la metadata de los drivers; `config` depende primero de ella (`not evaluated: driver failed`) y
+después de `schema` (macOS) / `stores` (Windows) como hasta ahora. `detail`: por cada driver, en orden
+de declaración (nativo primero si hay bloques sin prefijo),
+`<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>;
+body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`, unidos por
+`; `; la versión es la de la distribución (`package_version()`, `3.0.0a0` en `develop`) y el nativo se
+obtiene del backend seleccionado (así el fake de Outlook sobre `platform="win32"` reporta `outlook` en
+cualquier host). Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒ `; no declared drivers`
+(valida solo el nativo); config que no parsea ⇒ `; declared drivers: unknown (config failed)` (valida
+solo el nativo y el error lo reporta `config`); un driver que no valida añade
+`; <driver>: <CODE>: <message> (hint: <hint>)` y `driver` queda `ok=false` (exit 0 siempre).
+
+La sección `plugins` se calcula antes que los chequeos del backend nativo (cada llamada al plugin
+tiene su propio corte de 30 s); el orden de la salida es `checks` y después `plugins`. Un elemento por
+cada driver externo declarado en `[scope."<driver>:…"]`, en el orden de su primer bloque, con `driver`
+y `checks[]`: primero los chequeos que devuelve su `doctor_checks()` sin cambios (cada uno
+`{name, ok, detail}` con `name` único dentro del plugin y distinto de `config` y `plugin`, `ok`
+booleano y `detail` de una línea) y después `config`, que el núcleo calcula resolviendo los bloques
+`[scope]` y la `mailbox_list` de ese driver con `accounts()` y `resolve_mailbox()` del plugin envuelto,
+con el mismo formato de detalle y de errores que el `config` nativo
+(`<clave> → <etiqueta> (<uuid>): INBOX, …` o `<clave>: <código>: <mensaje> (hint: …)`). Si el plugin
+no pasa el chequeo `driver`, no se carga ni se llama a `doctor_checks()` y sus `checks` son solo
+`config` con `not evaluated: driver failed`; si no se puede abrir, `plugin` sale con `ok: false` y
+`E_PLUGIN_FAILED: …` y `config` con `not evaluated: plugin failed`; si `doctor_checks()` lanza o
+devuelve algo inválido, `plugin` sale con `ok: false` y `E_PLUGIN_FAILED: …`; al vencer el corte,
+`plugin` sale con `ok: false` y `timeout after 30 s: plugin '<driver>' did not respond`. El plugin se
+cierra al terminar sin enmascarar el resultado. En texto, después de `Checks:` sale `Plugins:` con el
+nombre de cada driver y sus filas debajo, con el formato de `Checks:`; sin plugins declarados no se
+muestra. `Result:` cuenta todos los chequeos, también los de los plugins.
+
+El chequeo `config` valida el TOML y **la resolución de cada bloque `[scope]` y su `mailbox_list`**
+del driver nativo contra el store y las etiquetas de cuenta (por entrada, con el `code`/`hint` de cada
+error); los bloques de otro driver declarado los resuelve la sección de ese plugin y no se listan
+aquí. Si todos los bloques son de plugins, el detalle es
+`0 account block(s) declared for driver <nativo>` con `ok=true`. Distingue config ausente de config
+presente sin `[scope]` y, cuando no hay cuentas declaradas, lista las disponibles con el formato
+`0 account block(s) declared; available: <label>, ...` sin activarlas.
 
 ### Error
 ```json
