@@ -299,26 +299,6 @@ def _outlook_ok(case, home, fake, backend, argv) -> dict:
     return payload
 
 
-class _OutlookCase(unittest.TestCase):
-    """``cli.main`` over a custom in-memory Outlook double (read-only)."""
-
-    def setUp(self) -> None:
-        tmp = tempfile.TemporaryDirectory(prefix="mailquery-cw-ol-")
-        self.addCleanup(tmp.cleanup)
-        self.home = Path(tmp.name) / "home"
-        self.home.mkdir()
-        write_config(self.home, '[scope."ana@example.com"]\n')
-
-    def backend_with(self, build):
-        return _outlook_backend(self, self.home, build)
-
-    def run_cli(self, argv, fake, backend):
-        return _outlook_cli(self, self.home, fake, backend, argv)
-
-    def run_ok(self, argv, fake, backend) -> dict:
-        return _outlook_ok(self, self.home, fake, backend, argv)
-
-
 class _CliCase(unittest.TestCase):
     """Plugin-backed ``cli.main`` runs with a temporary application home."""
 
