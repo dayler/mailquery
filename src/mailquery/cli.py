@@ -44,7 +44,13 @@ from mailquery.config import (
 )
 from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
-from mailquery.output import configure_streams, now_iso, write_json
+from mailquery.output import (
+    CONTENT_NOTICE,
+    configure_streams,
+    now_iso,
+    sanitize_text,
+    write_json,
+)
 from mailquery.plugins import (
     EXTRACTION_TIMEOUT_SECONDS,
     PluginContext,
@@ -75,6 +81,8 @@ _CLIENT_NAMES = {"apple_mail": "Apple Mail", "outlook": "Outlook"}
 
 _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
+#: Commands whose successful response carries the fixed untrusted-content notice.
+_CONTENT_NOTICE_COMMANDS = frozenset({"search", "new", "show", "attachment"})
 
 _ROOT_EPILOG = """\
 Examples:
@@ -1180,7 +1188,7 @@ def _run_attachment(
     payload_entries = [
         {
             "index": int(record["index"]),
-            "original_name": str(record["original_name"]),
+            "original_name": sanitize_text(str(record["original_name"])),
             "sanitized_name": str(record["sanitized_name"]),
             "saved": bool(record["saved"]),
             "cached": bool(record["cached"]),
@@ -1285,16 +1293,28 @@ def _with_count(payload: dict) -> dict:
 
 
 def _success_payload(command: str, payload: dict) -> dict:
+    """Wrap a command payload with the success keys, the notice and sanitized warnings.
+
+    The fixed content notice follows ``generated_at`` for the commands that
+    return message content. Every warning string loses terminal escapes and
+    invisible characters; warnings never carry content beyond the identifier
+    they cite.
+    """
     merged: dict[str, Any] = {
         "ok": True,
         "command": command,
         "generated_at": now_iso(),
     }
+    if command in _CONTENT_NOTICE_COMMANDS:
+        merged["content_notice"] = CONTENT_NOTICE
     for key, value in payload.items():
         if key in _PAYLOAD_RESERVED_KEYS:
             continue
         merged[key] = value
     merged.setdefault("warnings", [])
+    merged["warnings"] = [
+        sanitize_text(str(warning)) for warning in (merged.get("warnings") or ())
+    ]
     return merged
 
 
@@ -1370,13 +1390,7 @@ def _emit_doctor_report(
     checks: list[dict], json_output: bool, logger: Any, client: str
 ) -> None:
     """Write the doctor payload (JSON or text report) and log the end line."""
-    payload = {
-        "ok": True,
-        "command": "doctor",
-        "generated_at": now_iso(),
-        "checks": checks,
-        "warnings": [],
-    }
+    payload = _success_payload("doctor", {"checks": checks, "warnings": []})
     if json_output:
         write_json(payload)
     else:
@@ -1818,10 +1832,14 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
 
 
 def _report_error(error: MailqueryError, command: str | None) -> int:
-    write_json(error.to_payload(command or "-"))
-    sys.stderr.write(f"mailquery: {error.code}: {error.message}\n")
-    if error.hint:
-        sys.stderr.write(f"mailquery: hint: {error.hint}\n")
+    """Write the error JSON and the human summary, both with the sanitized texts."""
+    payload = error.to_payload(command or "-")
+    write_json(payload)
+    message = payload["error"]["message"]
+    hint = payload["error"]["hint"]
+    sys.stderr.write(f"mailquery: {error.code}: {message}\n")
+    if hint:
+        sys.stderr.write(f"mailquery: hint: {hint}\n")
     sys.stderr.flush()
     return error.exit_code
 
