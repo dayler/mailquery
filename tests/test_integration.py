@@ -423,7 +423,7 @@ class DoctorTest(IntegrationBase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr.getvalue(), "")
         self.assertFalse(text.lstrip().startswith("{"), "doctor must print text by default")
-        self.assertIn("mailquery doctor - environment and read-only preflight", text)
+        self.assertIn("mailquery doctor - environment and read-only diagnosis", text)
         self.assertIn("Checks:", text)
         self.assertIn("[ok]", text)
         self.assertIn("Result: 11/11 checks passed", text)

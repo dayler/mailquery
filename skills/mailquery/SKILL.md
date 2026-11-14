@@ -31,9 +31,15 @@ Mail/Outlook. The client's own store is the only source of truth.
 4. **External backend plugins** are installed explicitly with
    `pipx inject mailquery <plugin-package>`; each plugin declares a unique `driver`
    (`[a-z0-9_]{1,64}`), `plugin_api = 1` and its capabilities. `mailquery doctor` shows
-   the `driver` check and `mailquery -v` lists the installed drivers.
-5. **Preflight once per session:** run `mailquery doctor` (text; `--json` for JSON) and
-   `mailquery mailboxes` before trusting results.
+   the `driver` check, each declared plugin's checks in its own `plugins` section and
+   `mailquery -v` lists the installed drivers.
+5. **No preparation step is needed: run the commands directly.** Every failure returns
+   `code` and `hint`. Run `mailquery doctor --json --failures` only after an exit 3 or 6,
+   after installing or updating `mailquery`, a plugin or the app that launches the
+   harness, or when a result does not add up. Run `mailquery mailboxes` only to see the
+   account and folder labels when editing `config.toml`, or when `search` returns 0
+   messages and the mail may be in another folder (repeat the search with
+   `--include-mailbox`). A typical request is a `search` and at most one `show`.
 
 ## Output contract
 
@@ -59,7 +65,7 @@ Mail/Outlook. The client's own store is the only source of truth.
 
 | Command | Purpose |
 | --- | --- |
-| `mailquery doctor [--json]` | environment, drivers and read-only preflight (always exits 0) |
+| `mailquery doctor [--json] [--failures]` | environment, drivers and read-only diagnosis (always exits 0) |
 | `mailquery mailboxes [--fields LIST]` | accounts and their folders, with included flags and excluded stores (counters with `--fields`) |
 | `mailquery search [filters] [--fields LIST] [--group-by KEYS] [--count] [--strip-links]` | search metadata and body |
 | `mailquery new [--peek] [--limit N] [--fields LIST] [--strip-links]` | messages since the last run (persistent cursor) |
@@ -144,19 +150,22 @@ shown by `mailquery mailboxes` (or the name/URL shown by `--fields name,url`).
 ## Examples
 
 ```bash
-mailquery doctor --json
-mailquery mailboxes
-mailquery mailboxes --fields total,unread   # counters, only when needed
-mailquery new                          # new mail since the last cursor run
-mailquery new --peek                   # look without advancing the cursor
 mailquery search --since 1w --unread
 mailquery search --from "*@bank.com*" --since 2mo --has-attachments
 mailquery search --text "*invoice*" --since 1mo
 mailquery search --subject invoice --since 6mo --group-by domain,month --limit 1
 mailquery search --unread --count
 mailquery show apple_mail:2714         # uid exactly as returned by search/new
+mailquery new                          # new mail since the last cursor run
+mailquery new --peek                   # look without advancing the cursor
 mailquery attachment apple_mail:2714 --index 1
 mailquery attachment apple_mail:2714 --all
+
+# Diagnosis only, never before a request: after an exit 3 or 6, after installing
+# or updating, or when a result does not add up.
+mailquery doctor --json --failures
+mailquery mailboxes                    # labels to edit config.toml, or after a search with 0 messages
+mailquery mailboxes --fields total,unread   # counters, only when needed
 ```
 
 ## Rules for the agent

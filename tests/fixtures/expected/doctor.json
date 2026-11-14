@@ -58,5 +58,6 @@
       "detail": "available: <ROOT>/home/locks/mailquery.lock"
     }
   ],
+  "plugins": [],
   "warnings": []
 }

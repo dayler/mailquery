@@ -274,7 +274,7 @@ if ($NoConfig) {
     }
 }
 
-Write-Log "running 'mailquery doctor' (preflight)..."
+Write-Log "running 'mailquery doctor' (post-install check)..."
 & mailquery doctor | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Log "warning: 'mailquery doctor' reported problems; run it without redirection to see the details"

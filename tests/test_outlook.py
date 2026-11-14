@@ -972,7 +972,9 @@ class OutlookComErrorTests(_OutlookCliCase):
 # --------------------------------------------------------------------------- #
 
 
-class OutlookTimeoutTests(unittest.TestCase):
+class _HungCommandCase:
+    """Helper for the subprocess runs that need ``cli`` in its own process."""
+
     def run_hung_search(
         self, *argv: str, prepare=None, hang: str = "first"
     ) -> tuple[subprocess.CompletedProcess, Path, float]:
@@ -1004,6 +1006,8 @@ class OutlookTimeoutTests(unittest.TestCase):
         )
         return result, home, time.monotonic() - started
 
+
+class OutlookTimeoutTests(_HungCommandCase, unittest.TestCase):
     def test_ol_04_01_hung_search_is_client_timeout_exit_3(self) -> None:
         """OL-04.01: search hung in the first COM call ⇒ E_CLIENT_TIMEOUT, exit 3, full JSON."""
         result, _home, elapsed = self.run_hung_search()
@@ -1146,6 +1150,104 @@ class OutlookTimeoutTests(unittest.TestCase):
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         log = (home / "logs" / "mailquery.log").read_text(encoding="utf-8")
         self.assertIn("event=error command=search code=E_CLIENT_TIMEOUT", log)
+
+
+# --------------------------------------------------------------------------- #
+# UT-DR-10 — COM timeout with --failures (RF-76, RF-81, D-25)
+# --------------------------------------------------------------------------- #
+
+
+def _write_plugin_distribution(root: Path) -> Path:
+    """A ``mailquery.backends`` distribution the ``doctor`` subprocess can discover."""
+    plugins = root / "plugins"
+    dist_info = plugins / "graph-0.1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: graph\nVersion: 0.1.0\n", encoding="utf-8"
+    )
+    (dist_info / "entry_points.txt").write_text(
+        "[mailquery.backends]\ngraph = tests.fakes.plugin:FakePluginBackend\n",
+        encoding="utf-8",
+    )
+    return plugins
+
+
+class OutlookDoctorFailuresTests(_HungCommandCase, unittest.TestCase):
+    """UT-DR-10: a hung COM call still reports the plugins section and filters it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory(prefix="mailquery-dr10-")
+        self.addCleanup(tmp.cleanup)
+        self.plugin_path = _write_plugin_distribution(Path(tmp.name))
+
+    def run_hung_doctor_with_plugin(
+        self, hang: str, *extra: str
+    ) -> tuple[subprocess.CompletedProcess, Path]:
+        """Like ``run_hung_doctor`` but with the config also declaring one plugin."""
+
+        def declared(home: Path) -> None:
+            home.mkdir(parents=True)
+            (home / "config.toml").write_text(
+                '[scope."ana.perez@example.com"]\n'
+                '[scope."graph:No Such Account"]\n',
+                encoding="utf-8",
+            )
+
+        result, home, elapsed = self.run_hung_search(
+            "doctor", *extra, prepare=declared, hang=hang
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertLess(elapsed, 45.0)
+        return result, home
+
+    def test_ut_dr_10_01_doctor_failures_after_a_com_timeout(self) -> None:
+        """UT-DR-10.01: the timeout report filters ``checks`` and keeps the failing plugin."""
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(self.plugin_path)}):
+            result, _home = self.run_hung_doctor_with_plugin(
+                "first", "--json", "--failures"
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual([check["name"] for check in payload["checks"]], ["outlook"])
+            self.assertIn("timeout after 30 s", payload["checks"][0]["detail"])
+            self.assertEqual(
+                payload["not_evaluated"],
+                ["stores", "readonly_strategy", "config"],
+            )
+            self.assertEqual(
+                [section["driver"] for section in payload["plugins"]], ["graph"]
+            )
+            plugin = payload["plugins"][0]
+            self.assertEqual([check["name"] for check in plugin["checks"]], ["config"])
+            self.assertFalse(plugin["checks"][0]["ok"])
+            self.assertIn("E_CONFIG_ACCOUNT_UNKNOWN", plugin["checks"][0]["detail"])
+            self.assertEqual(plugin["not_evaluated"], [])
+
+            text, _home = self.run_hung_doctor_with_plugin("first", "--failures")
+        flat = " ".join(text.stdout.split())
+        self.assertIn("[FAIL] outlook", flat)
+        self.assertIn(
+            "not evaluated: stores, readonly_strategy, config", flat
+        )
+        self.assertIn("Plugins:", text.stdout)
+        self.assertIn("[FAIL] config", flat)
+        self.assertIn("E_CONFIG_ACCOUNT_UNKNOWN", flat)
+
+    def test_ut_dr_10_02_full_report_includes_the_plugins_after_checks(self) -> None:
+        """UT-DR-10.02: without ``--failures`` the complete plugins section follows checks."""
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(self.plugin_path)}):
+            result, _home = self.run_hung_doctor_with_plugin("first", "--json")
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            [check["name"] for check in payload["checks"]],
+            list(_OUTLOOK_DOCTOR_CHECKS),
+        )
+        self.assertEqual(list(payload), ["ok", "command", "generated_at", "checks", "plugins", "warnings"])
+        self.assertEqual([section["driver"] for section in payload["plugins"]], ["graph"])
+        plugin = payload["plugins"][0]
+        self.assertEqual([check["name"] for check in plugin["checks"]], ["config"])
+        self.assertFalse(plugin["checks"][0]["ok"])
 
 
 # --------------------------------------------------------------------------- #
@@ -3380,7 +3482,7 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
         ("--limit", "2"),
         (),
     )
-    _DOCTORS = (("--json",), ())
+    _DOCTORS = (("--json",), (), ("--json", "--failures"), ("--failures",))
     #: Exit codes a read-only run may end with, and the error codes of each
     #: (including the attachment protocol codes; a read-only run never mutates).
     _ERRORS = {
@@ -3445,7 +3547,14 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             runs += [("attachment", "ab12", "--index", "1")]
             runs += [("doctor", *flags) for flags in self._DOCTORS]
             outcomes = [
-                (argv, *(self.run_report(*argv) if argv == ("doctor",) else self.run_any(*argv)))
+                (
+                    argv,
+                    *(
+                        self.run_report(*argv)
+                        if argv[0] == "doctor" and "--json" not in argv
+                        else self.run_any(*argv)
+                    ),
+                )
                 for argv in runs
             ]
             results.append((fake, outcomes))
