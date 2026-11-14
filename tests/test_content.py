@@ -558,6 +558,8 @@ class UrlModeTests(unittest.TestCase):
         self.assertTrue(render_urls(text, "strip").endswith(" fin"))
         self.assertEqual(render_urls("Sin enlaces.", "strip"), "Sin enlaces.")
         self.assertEqual(render_urls("Sin enlaces.", "neutralize"), "Sin enlaces.")
+        self.assertEqual(render_urls("㍿ ﬁ", "neutralize"), "㍿ ﬁ")
+        self.assertEqual(find_urls("㍿ ﬁ"), [])
         with self.assertRaises(ValueError):
             render_urls("x", "otro")
 
