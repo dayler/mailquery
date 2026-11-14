@@ -48,6 +48,50 @@ SEARCH_MAX_LIMIT = 200
 NEW_MAX_LIMIT = 500
 MAX_SCAN_HARD_LIMIT = 50_000
 
+#: Canonical key order of every ``search``/``new`` row of ``messages[]``.
+SEARCH_ROW_FIELDS = (
+    "uid",
+    "message_id",
+    "duplicate_count",
+    "subject",
+    "from",
+    "to",
+    "cc",
+    "date_sent",
+    "date_received",
+    "mailbox",
+    "is_read",
+    "is_flagged",
+    "has_attachments",
+    "size_bytes",
+    "snippet",
+    "body",
+)
+
+#: Canonical key order of the ``show`` ``message`` object.
+SHOW_FIELDS = (
+    "uid",
+    "message_id",
+    "subject",
+    "from",
+    "to",
+    "cc",
+    "date_sent",
+    "date_received",
+    "mailbox",
+    "is_read",
+    "is_flagged",
+    "has_attachments",
+    "size_bytes",
+    "headers",
+    "body_text",
+    "body_truncated",
+    "attachments",
+    "partial",
+    "readable",
+    "source",
+)
+
 # Stable warning strings ("warnings[]").
 NO_ACCOUNTS_WARNING = (
     "W_NO_ACCOUNTS: no accounts are declared in config.toml; nothing is observed"
@@ -757,14 +801,14 @@ def run_show(
     recipients = target_backend.recipients([uid])
     to_list, cc_list = _recipient_lists(recipients, uid)
 
-    body = target_backend.load_body(row)
-    warnings = _activation_warnings([target_backend], excluded) + list(body["warnings"])
+    body = _load_body(target_backend, row, with_details=True)
+    warnings = _activation_warnings([target_backend], excluded)
+    warnings.extend(_flatten_warnings([body.warnings]))
 
-    body_readable = bool(body["readable"])
     body_text = ""
     body_truncated = False
-    if body_readable:
-        cleaned = output.sanitize_text(body["body_text"] or "")
+    if body.readable:
+        cleaned = output.sanitize_text(body.text)
         body_truncated = len(cleaned) > output.SHOW_BODY_MAX_CHARS
         body_text = cleaned[: output.SHOW_BODY_MAX_CHARS]
         if body_truncated:
@@ -781,42 +825,26 @@ def run_show(
         target,
         row,
         body,
-        body_readable,
         warnings,
     )
 
-    partial = bool(body["partial"])
-    headers = _show_headers(body["headers"], row, to_list, cc_list)
-
-    message = {
-        "uid": _prefixed_uid(target_backend, row["uid"]),
-        "message_id": row.get("message_id") or "",
-        "subject": row.get("subject") or "",
-        "from": {
-            "name": row.get("sender_name") or "",
-            "address": row.get("sender_address") or "",
-        },
-        "to": to_list,
-        "cc": cc_list,
-        "date_sent": output.iso_timestamp(row.get("date_sent")),
-        "date_received": output.iso_timestamp(row.get("date_received")),
-        "mailbox": _mailbox_payload(accounts, mailbox),
-        "is_read": bool(row.get("read")),
-        "is_flagged": bool(row.get("flagged")),
-        "has_attachments": bool(row.get("has_attachments")),
-        "size_bytes": int(row.get("size") or 0),
-        "headers": headers,
-        "body_text": body_text,
-        "body_truncated": body_truncated,
-        "attachments": attachments,
-        "partial": partial,
-        "readable": body_readable,
-        "source": {
-            "emlx_path": body["source"]["emlx_path"],
-            "partial": bool(body["source"]["partial"]),
-        },
-    }
-    return {"message": message, "warnings": warnings}
+    headers = _show_headers(body.headers, row, to_list, cc_list)
+    message = _message_metadata(accounts, row, mailbox, to_list, cc_list, target)
+    message.update(
+        {
+            "headers": headers,
+            "body_text": body_text,
+            "body_truncated": body_truncated,
+            "attachments": attachments,
+            "partial": body.partial,
+            "readable": body.readable,
+            "source": {
+                "emlx_path": body.source["emlx_path"],
+                "partial": bool(body.source["partial"]),
+            },
+        }
+    )
+    return {"message": _ordered_fields(message, SHOW_FIELDS), "warnings": warnings}
 
 
 def run_mailboxes(
@@ -1362,25 +1390,24 @@ def _scan_bodies(
     for row in rows:
         if any(recipient_terms) and not _filter_recipients([row], *recipient_terms, backend):
             continue
-        body = load(row)
-        warnings.extend(body["warnings"])
+        body = _received_body(load(row))
+        warnings.extend(body.warnings)
         if _was_read(body):
             messages_read += 1
-        if not body["available"] or not body["readable"]:
+        if not body.available or not body.readable:
             continue
-        body_text = body["body_text"] or ""
-        if not _matches_all_terms(terms, body_text):
+        if not _matches_all_terms(terms, body.text):
             continue
         matched_row = dict(row)
-        matched_row["_body_text"] = body_text
-        matched_row["_body_partial"] = bool(body["partial"])
+        matched_row["_body_text"] = body.text
+        matched_row["_body_partial"] = body.partial
         matched.append(matched_row)
     return matched, warnings, messages_read
 
 
-def _was_read(body: "BodyRow") -> bool:
+def _was_read(body: "_LoadedBody") -> bool:
     """Whether loading the body touched a message (a located file or a read item)."""
-    return body["source"]["emlx_path"] is not None or bool(body["available"])
+    return body.source.get("emlx_path") is not None or bool(body.available)
 
 
 def _dedupe(
@@ -1476,12 +1503,13 @@ def _build_messages(
 
     The body always comes from the message's physical mailbox (a Gmail message
     labelled INBOX is stored under ``[Gmail]/All Mail``), while the reported
-    ``mailbox`` is the effective in-scope one (INBOX). ``messages_read`` is
+    ``mailbox`` is the effective in-scope one (INBOX). The body warnings are
+    accumulated per message and flattened in message order. ``messages_read`` is
     returned per driver so the caller can combine it with the ``items_opened``
     hook of a driver that opens items instead of bodies (Outlook).
     """
     messages: list[dict] = []
-    warnings: list[str] = []
+    warnings: list[list[str]] = []
     messages_read: dict[str, int] = {driver: 0 for driver in runs}
     for row in page:
         driver = str(row["_mq_driver"])
@@ -1491,12 +1519,12 @@ def _build_messages(
         )
         to_list, cc_list = _recipient_lists(recipients.get(driver, {}), row["uid"])
         if cached_bodies and "_body_text" in row:
-            snippet, body_fields = _body_from_cached(row)
+            body = _cached_body(row)
         else:
-            snippet, body_fields, body = _body_fields(run.backend, row)
-            warnings.extend(body["warnings"])
+            body = _load_body(run.backend, row)
             if _was_read(body):
                 messages_read[driver] += 1
+        warnings.append(list(body.warnings))
         messages.append(
             _message_payload(
                 run.accounts,
@@ -1504,12 +1532,16 @@ def _build_messages(
                 display_mailbox,
                 to_list,
                 cc_list,
-                snippet,
-                body_fields,
+                body,
                 driver,
             )
         )
-    return messages, warnings, messages_read
+    return messages, _flatten_warnings(warnings), messages_read
+
+
+def _flatten_warnings(groups: Iterable[Sequence[str]]) -> list[str]:
+    """Warnings of every message, flattened in message order."""
+    return [warning for group in groups for warning in group]
 
 
 def _config_for_driver(config: "Config", driver: str, native: str) -> "Config":
@@ -1529,8 +1561,7 @@ def _show_attachments(
     native_uid: Any,
     driver: str,
     row: dict,
-    body: dict,
-    body_readable: bool,
+    body: "_LoadedBody",
     warnings: list[str],
 ) -> list[dict]:
     """``show.attachments``: one entry per attachment of the message.
@@ -1553,10 +1584,10 @@ def _show_attachments(
     if str(capabilities.get("attachments", "local")) == "none":
         return []
     entries = _driver_attachments(backend, native_uid)
-    smime = (not body_readable) and _is_smime_body(body)
-    if not body_readable and smime:
+    smime = (not body.readable) and _is_smime_body(body)
+    if not body.readable and smime:
         names: list[tuple[int, str]] = []
-    elif body_readable:
+    elif body.readable:
         names = (
             _metadata_pairs(entries)
             if entries is not None
@@ -1606,11 +1637,11 @@ def _metadata_pairs(
     return sorted(pairs, key=lambda pair: pair[0])
 
 
-def _body_pairs(body: dict) -> list[tuple[int, str]]:
+def _body_pairs(body: "_LoadedBody") -> list[tuple[int, str]]:
     """``(index, name)`` pairs from the MIME names of a readable body (2.0.1)."""
     return [
         (index, str(entry.get("name") or ""))
-        for index, entry in enumerate(body.get("attachments") or (), start=1)
+        for index, entry in enumerate(body.attachments, start=1)
     ]
 
 
@@ -1649,11 +1680,9 @@ def _unreadable_names(
     ]
 
 
-def _is_smime_body(body: dict) -> bool:
+def _is_smime_body(body: "_LoadedBody") -> bool:
     """Whether the 2.0.1 body warnings mark the message as S/MIME."""
-    return any(
-        "S/MIME" in str(warning) for warning in (body.get("warnings") or ())
-    )
+    return any("S/MIME" in str(warning) for warning in body.warnings)
 
 
 def _show_cached_path(
@@ -1675,14 +1704,29 @@ def _message_payload(
     mailbox: "MailboxRow | None",
     to_list: list[dict],
     cc_list: list[dict],
-    snippet: str,
-    body_fields: dict,
+    body: "_LoadedBody",
     driver: str,
 ) -> dict:
+    """The ``search``/``new`` row of one message, in ``SEARCH_ROW_FIELDS`` order."""
+    message = _message_metadata(accounts, row, mailbox, to_list, cc_list, driver)
+    message["duplicate_count"] = int(row.get("duplicate_count", 1))
+    message["snippet"] = _body_snippet(body.text)
+    message["body"] = _body_payload(body)
+    return _ordered_fields(message, SEARCH_ROW_FIELDS)
+
+
+def _message_metadata(
+    accounts: "dict[str, AccountRow]",
+    row: dict,
+    mailbox: "MailboxRow | None",
+    to_list: list[dict],
+    cc_list: list[dict],
+    driver: str,
+) -> dict:
+    """Metadata fields shared by the ``search``/``new`` row and the ``show`` message."""
     return {
         "uid": uid_module.format_uid(driver, str(row["uid"])),
         "message_id": row.get("message_id") or "",
-        "duplicate_count": int(row.get("duplicate_count", 1)),
         "subject": row.get("subject") or "",
         "from": {
             "name": row.get("sender_name") or "",
@@ -1697,9 +1741,12 @@ def _message_payload(
         "is_flagged": bool(row.get("flagged")),
         "has_attachments": bool(row.get("has_attachments")),
         "size_bytes": int(row.get("size") or 0),
-        "snippet": snippet,
-        "body": body_fields,
     }
+
+
+def _ordered_fields(values: Mapping[str, Any], order: Sequence[str]) -> dict:
+    """The message fields in the canonical key order of the command."""
+    return {name: values[name] for name in order}
 
 
 def _display_mailbox(
@@ -1791,20 +1838,65 @@ def _labels_warnings(backend: "MailBackend") -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
-def _body_fields(
-    backend: "MailBackend", row: dict
-) -> tuple[str, dict, "BodyRow"]:
-    """Return ``(snippet, body, loaded)`` for a message."""
-    loaded = _body_loader(backend)(row)
-    body_text = loaded["body_text"] or ""
-    snippet = output.make_snippet(body_text) if body_text else ""
-    fields = {
-        "available": bool(loaded["available"]),
-        "readable": bool(loaded["readable"]),
-        "partial": bool(loaded["partial"]),
-        "truncated": _snippet_truncated(body_text),
-    }
-    return snippet, fields, loaded
+@dataclass(frozen=True)
+class _LoadedBody:
+    """Body of one message as read by the core.
+
+    ``headers`` and ``attachments`` are filled by the full ``load_body``
+    (``show``); the body-only loader leaves them empty. ``warnings`` belongs to
+    this message and the caller flattens the warnings of the page in message
+    order.
+    """
+
+    text: str
+    available: bool
+    readable: bool
+    partial: bool
+    headers: dict
+    attachments: tuple
+    source: dict
+    warnings: tuple[str, ...]
+
+
+def _load_body(
+    backend: "MailBackend", row: dict, *, with_details: bool = False
+) -> _LoadedBody:
+    """Read the body of one message and keep its per-message warnings.
+
+    ``with_details`` uses the full ``load_body`` (headers and attachment names,
+    as ``show`` needs them); without it the body-only loader is used.
+    """
+    loader = backend.load_body if with_details else _body_loader(backend)
+    return _received_body(loader(row))
+
+
+def _received_body(loaded: "BodyRow") -> _LoadedBody:
+    """Normalize the body row a driver returns into :class:`_LoadedBody`."""
+    return _LoadedBody(
+        text=loaded.get("body_text") or "",
+        available=bool(loaded.get("available")),
+        readable=bool(loaded.get("readable")),
+        partial=bool(loaded.get("partial")),
+        headers=dict(loaded.get("headers") or {}),
+        attachments=tuple(loaded.get("attachments") or ()),
+        source=dict(loaded.get("source") or {}),
+        warnings=tuple(str(warning) for warning in (loaded.get("warnings") or ())),
+    )
+
+
+def _cached_body(row: dict) -> _LoadedBody:
+    """Body of a row already read by the ``--text`` scan, without new warnings."""
+    partial = bool(row.get("_body_partial", False))
+    return _LoadedBody(
+        text=str(row.get("_body_text") or ""),
+        available=True,
+        readable=True,
+        partial=partial,
+        headers={},
+        attachments=(),
+        source={"emlx_path": None, "partial": partial},
+        warnings=(),
+    )
 
 
 def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
@@ -1817,14 +1909,18 @@ def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
     return loader if callable(loader) else backend.load_body
 
 
-def _body_from_cached(row: dict) -> tuple[str, dict]:
-    body_text = str(row.get("_body_text") or "")
-    snippet = output.make_snippet(body_text) if body_text else ""
-    return snippet, {
-        "available": True,
-        "readable": True,
-        "partial": bool(row.get("_body_partial", False)),
-        "truncated": _snippet_truncated(body_text),
+def _body_snippet(body_text: str) -> str:
+    """One-line snippet of the body text for the ``search``/``new`` row."""
+    return output.make_snippet(body_text) if body_text else ""
+
+
+def _body_payload(body: _LoadedBody) -> dict:
+    """The ``body`` object of the ``search``/``new`` row."""
+    return {
+        "available": body.available,
+        "readable": body.readable,
+        "partial": body.partial,
+        "truncated": _snippet_truncated(body.text),
     }
 
 
