@@ -28,7 +28,7 @@ Quién actualiza cada indicador y cuándo: sección 9.4.
 | Fase | Contenido | Milestones / lotes | Gate de cierre | Estado |
 |---|---|---|---|---|
 | P0 — Preparación | Aprobación del PRD, commit del plan, entorno local, línea base, registro de conciliación | — | Sección 2.1 | 🟢 |
-| P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | ⚪ |
+| P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | 🟡 |
 | P2 — Implementación | F1 completo, F2, F3 | Lotes I2, I3, I4 (M05–M13) | Todos los milestones de código en 🟢 | ⚪ |
 | P3 — Integración | Un PR por lote, matriz completa, merge `--no-ff` | I1–I4 | Cuatro PR mergeados, URL de cada run en el registro de ejecución | ⚪ |
 | P4 — Documentación y cierre | SMOKE en equipos reales, auditoría de documentos consumidores, registro de conciliación final | M14 (lote I4) | Gate de cierre de fase (sección 8.4) | ⚪ |
@@ -55,12 +55,12 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 
 | ID | Milestone | Lote | Oleada | Depende de | ACs (total o parcial) | Archivo | Estado |
 |---|---|---|---|---|---|---|---|
-| M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | ⚪ |
-| M02 | Refactor: armado único de mensajes en `search.py` | I1 | W1 | — | — (preserva comportamiento) | [M02](M02-message-assembly-refactor.md) | ⚪ |
-| M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | ⚪ |
-| M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | ⚪ |
-| M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | ⚪ |
-| M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | ⚪ |
+| M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | 🟡 |
+| M02 | Refactor: armado único de mensajes en `search.py` | I1 | W1 | — | — (preserva comportamiento) | [M02](M02-message-assembly-refactor.md) | 🟡 |
+| M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | 🟡 |
+| M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | 🟡 |
+| M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟡 |
+| M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟡 |
 | M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | ⚪ |
 | M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | ⚪ |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
