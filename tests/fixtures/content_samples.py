@@ -131,6 +131,7 @@ HIDING_STYLES: tuple[str, ...] = (
 #: ``style`` values that must not hide an element.
 NON_HIDING_STYLES: tuple[str, ...] = (
     "font-size:0.8em",
+    "font-size:inherit",
     "opacity:0.5",
     "xdisplay:none",
     "min-font-size:0",
@@ -177,6 +178,7 @@ HTML_PARSER_BRANCHES: dict[str, tuple[str, str, int]] = {
         "",
         4,
     ),
+    "orphan_skip_end_tag": ("</script><p>x</p>", "x", 0),
 }
 
 #: Typical message body of several kilobytes, without hidden content.
