@@ -36,7 +36,7 @@ Example:
 
 ## Plans and permanent documents
 
-Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/` and are deleted when the work is done.
+Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/`. They are deleted only after the whole plan has been verified (its work, tests and evidence), reviewed and approved by a human reviewer, and the PRD has been reconciled with the incremental PRD (`docs/PRD-v2.2.md` into `docs/PRD.md`). Until all three conditions hold, `docs/plan/` stays in the repository: deleting it is an explicit final step, never automatic and never a side effect of the implementation work finishing.
 
 Nothing outside `docs/plan/` cites them: not the code, not the tests, not `docs/` (PRD, interfaces, test catalog, roadmap, backlogs, known defects), not the READMEs. Permanent documents describe the product as it is. Anything a plan produces that must outlive it is moved into the permanent document it belongs to before the plan is deleted:
 
