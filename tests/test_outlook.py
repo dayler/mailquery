@@ -2224,7 +2224,8 @@ class _OutlookCommandCase(_OutlookCliCase):
         return self.assert_error(self.run_main(list(argv), backend), exit_code, code)
 
     def search(self, *extra: str) -> dict:  # type: ignore[override]
-        return self.run_json("search", *_SINCE_ALL, *extra)
+        # The inherited F1 assertions read the full row; ``--fields all`` asks for it.
+        return self.run_json("search", *_SINCE_ALL, *extra, "--fields", "all")
 
     def message_of(self, payload: dict, key: str) -> dict:
         uid = _uid(self.fake.item(key).entry_id)
@@ -2650,7 +2651,7 @@ class OutlookCandidateStoreTests(_CommandScenarioCase):
     def assert_candidate(self, key: str) -> None:
         label, email, _local = _MATRIX_CANDIDATES[key]
         fake = self.use(fk.FakeOutlook.store_matrix(), _scope_toml(label))
-        payload = self.run_json("search")
+        payload = self.run_json("search", "--fields", "all")
         self.assertEqual(payload["count"], 1, payload)
         message = payload["messages"][0]
         self.assertEqual(message["uid"], _uid(fake.item(f"{key}_message").entry_id))
@@ -3351,10 +3352,12 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             "--flagged", "--has-attachments", "--include-mailbox", "INBOX", "--limit", "5",
         ),
         ("--to", "*example*"),  # unbounded on Windows: E_UNBOUNDED_SCAN (exit 4)
+        ("--since", "2026-01-01", "--fields", "all"),
     )
     _NEWS = (
         ("--peek",),
         ("--peek", "--limit", "1"),
+        ("--peek", "--fields", "all"),
         (),
         ("--limit", "2"),
         (),
@@ -3395,6 +3398,9 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
                 ("show", spec.entry_id, "--strip-links")
                 for spec in fake.items.values()
             ]
+            if fake.items:
+                first_uid = next(iter(fake.items.values())).entry_id
+                runs += [("show", first_uid, "--fields", "attachments")]
             runs += [
                 ("show", "00AB", "--strip-links"),
                 ("show", "ab12", "--strip-links"),
@@ -3527,7 +3533,7 @@ class _NewCase(_CommandScenarioCase):
     """`new` through ``cli.main`` over the fake; one fresh backend per run."""
 
     def new(self, *extra: str) -> dict:
-        return self.run_json("new", *extra)
+        return self.run_json("new", *extra, "--fields", "all")
 
     def state(self) -> dict:
         return json.loads((self.home / "state.json").read_text(encoding="utf-8"))
@@ -3827,7 +3833,7 @@ class OutlookContentScanTests(_CommandScenarioCase):
         self.assertNotIn("--cc", error["hint"])
         self.assertEqual(self.opened(), [])
         # Narrowed by --subject (which does narrow) below max_scan, the same query runs.
-        payload = self.run_json("search", "--to", "bea", "--since", "1y", "--subject", "m1*")
+        payload = self.run_json("search", "--to", "bea", "--since", "1y", "--subject", "m1*", "--fields", "all")
         self.assertEqual(payload["scan"]["candidates"], 12)  # m1, m10..m19, m100
 
     def test_ol_24_05_to_runs_in_metadata_mode_counting_opened_items(self) -> None:
@@ -3841,14 +3847,14 @@ class OutlookContentScanTests(_CommandScenarioCase):
         recent = [key for key in fake.items if key != "old_to_bea"]
         self.assertCountEqual(self.opened(), [fake.item(key).entry_id for key in recent])
         self.assertEqual(payload["scan"]["messages_read"], 5)
-        # Only the returned item with a readable body reads its transport headers.
-        self.assertEqual(self.header_reads(), 1)
+        # Every returned item except the S/MIME one reads its transport headers.
+        self.assertEqual(self.header_reads(), 2)
         self.assert_read_only()
 
     def test_ol_24_06_bounded_text_matches_bodies(self) -> None:
         """OL-24.06: bounded --text ⇒ matches in the body; scan.mode text; skipped bodies warn."""
         fake = self.recent()
-        payload = self.run_json("search", "--text", "presupuesto", "--since", "1d")
+        payload = self.run_json("search", "--text", "presupuesto", "--since", "1d", "--fields", "all")
         self.assertEqual(self.keys(payload), ["to_bea", "cc_bea"])
         self.assertEqual(payload["scan"]["mode"], "text")
         self.assertEqual(payload["scan"]["candidates"], 6)

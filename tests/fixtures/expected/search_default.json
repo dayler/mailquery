@@ -8,497 +8,141 @@
   "messages": [
     {
       "uid": "apple_mail:83170",
-      "message_id": "<missing-83170@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Missing body",
       "from": {
         "name": "Ghost",
         "address": "ghost@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "",
-      "body": {
-        "available": false,
-        "readable": false,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83160",
-      "message_id": "<gmail-83160@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Gmail labelled",
       "from": {
         "name": "Gmail Sender",
         "address": "gmail@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
-          "label": "Gmail (fixture@gmail.com)",
-          "email": "fixture@gmail.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Label membership comes from the labels table.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83150",
-      "message_id": "<flagged-83150@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Flagged reminder",
       "from": {
         "name": "Reminders",
         "address": "reminders@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": false,
-      "is_flagged": true,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Remember this.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83143",
-      "message_id": "<duplicate-4@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Shared duplicate",
       "from": {
         "name": "Shared Sender",
         "address": "shared@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Duplicate body from the inbox.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83210",
-      "message_id": "<photo-83210@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Gmail unread with photo",
       "from": {
         "name": "Photo Sender",
         "address": "photo@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "BBBBBBBB-0000-4000-8000-000000000002",
-          "label": "Gmail (fixture@gmail.com)",
-          "email": "fixture@gmail.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://BBBBBBBB-0000-4000-8000-000000000002/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": true,
-      "size_bytes": 4096,
-      "snippet": "Photo attached.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": true
     },
     {
       "uid": "apple_mail:2714",
-      "message_id": "<invoice-2714@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Invoice 2026-10",
       "from": {
         "name": "Billing Team",
         "address": "billing@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [
-        {
-          "name": "Finance",
-          "address": "finance@fixture.example"
-        }
-      ],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": false,
-      "is_flagged": false,
-      "has_attachments": true,
-      "size_bytes": 123456,
-      "snippet": "Please find the invoice attached.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": true
     },
     {
       "uid": "apple_mail:83220",
-      "message_id": "",
-      "duplicate_count": 1,
       "subject": "No global header",
       "from": {
         "name": "Headerless",
         "address": "headerless@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "No Message-ID header is available for this message.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83200",
-      "message_id": "<html-83200@fixture.example>",
-      "duplicate_count": 1,
       "subject": "HTML only",
       "from": {
         "name": "Html Sender",
         "address": "html@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "HTML only There is no plain text part.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:79658",
-      "message_id": "<factura-79658@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Factura septiembre",
       "from": {
         "name": "Contabilidad",
         "address": "facturas@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "Facturas",
-        "path": "Facturas",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/Facturas"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": true,
-      "size_bytes": 4096,
-      "snippet": "Adjuntamos la factura de septiembre.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": true,
-        "truncated": false
-      }
+      "has_attachments": true
     },
     {
       "uid": "apple_mail:83180",
-      "message_id": "<corrupt-83180@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Corrupt body",
       "from": {
         "name": "Broken",
         "address": "broken@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "Archivo",
-        "path": "Archivo",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/Archivo"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "",
-      "body": {
-        "available": true,
-        "readable": false,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:830",
-      "message_id": "<annual-830@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Annual report 2025",
       "from": {
         "name": "Archive Service",
         "address": "reports@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Your annual report for 2025 is ready to download.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     },
     {
       "uid": "apple_mail:83190",
-      "message_id": "<old-83190@fixture.example>",
-      "duplicate_count": 1,
       "subject": "Very old mail",
       "from": {
         "name": "Old Timer",
         "address": "old@fixture.example"
       },
-      "to": [
-        {
-          "name": "Fixture User",
-          "address": "me@fixture.example"
-        }
-      ],
-      "cc": [],
-      "date_sent": "<ISO>",
       "date_received": "<ISO>",
-      "mailbox": {
-        "account": {
-          "uuid": "AAAAAAAA-0000-4000-8000-000000000001",
-          "label": "iCloud (fixture@icloud.com)",
-          "email": "fixture@icloud.com"
-        },
-        "name": "INBOX",
-        "path": "INBOX",
-        "url": "imap://AAAAAAAA-0000-4000-8000-000000000001/INBOX"
-      },
       "is_read": true,
-      "is_flagged": false,
-      "has_attachments": false,
-      "size_bytes": 4096,
-      "snippet": "Ancient message from years ago.",
-      "body": {
-        "available": true,
-        "readable": true,
-        "partial": false,
-        "truncated": false
-      }
+      "has_attachments": false
     }
   ],
   "scan": {
     "mode": "metadata",
     "candidates": 12,
-    "messages_read": 11
+    "messages_read": 10
   },
-  "warnings": [
-    "W_EMLX_MISSING: no .emlx file for uid 83170",
-    "W_EMLX_CORRUPT: malformed .emlx length line; recovered the MIME block best effort"
-  ]
+  "warnings": []
 }

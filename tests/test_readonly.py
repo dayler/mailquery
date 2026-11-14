@@ -186,10 +186,13 @@ class ReadOnlyStoreTest(unittest.TestCase):
             (("search", "--include-mailbox", "Archivo", "--strip-links"), "search"),
             (("search", "--unread", "--limit", "1", "--strip-links"), "search"),
             (("search", "--since", "7d", "--flagged", "--strip-links"), "search"),
+            (("search", "--fields", "all"), "search"),
+            (("new", "--fields", "all"), "new"),
             (("new", "--strip-links"), "new"),
             (("new", "--strip-links"), "new"),
             (("new", "--peek", "--strip-links"), "new"),
             (("show", "2714", "--strip-links"), "show"),
+            (("show", "2714", "--fields", "attachments"), "show"),
             (("show", "79658", "--strip-links"), "show"),
             (("show", "83170", "--strip-links"), "show"),
             (("show", "83180", "--strip-links"), "show"),
@@ -208,7 +211,7 @@ class ReadOnlyStoreTest(unittest.TestCase):
         self.assertIn("checks", payloads["doctor"][0])
         self.assertIn("mailboxes", payloads["mailboxes"][0])
         self.assertEqual(payloads["show"][0]["message"]["uid"], prefixed_uid(2714))
-        self.assertEqual(payloads["show"][2]["message"]["uid"], prefixed_uid(83170))
+        self.assertEqual(payloads["show"][3]["message"]["uid"], prefixed_uid(83170))
         # First run: emits the window and writes only the state; then nothing new.
         self.assertTrue(payloads["new"][0]["messages"])
         self.assertTrue(
@@ -217,6 +220,7 @@ class ReadOnlyStoreTest(unittest.TestCase):
         )
         self.assertEqual(payloads["new"][1]["count"], 0)
         self.assertEqual(payloads["new"][2]["count"], 0)
+        self.assertEqual(payloads["new"][3]["count"], 0)
         # S/MIME messages are listed but their body is never read.
         for result in payloads["show"][-2:]:
             self.assertIs(result["message"]["readable"], False)
@@ -303,9 +307,12 @@ class ReadOnlyStoreTest(unittest.TestCase):
             ("doctor", "--json"),
             ("mailboxes",),
             ("search",),
+            ("search", "--fields", "all"),
             ("new",),
+            ("new", "--fields", "all"),
             ("new", "--peek"),
             ("show", "83170"),
+            ("show", "83170", "--fields", "attachments"),
         ):
             self.run_cli(*argv)
         self.assert_store_unchanged()

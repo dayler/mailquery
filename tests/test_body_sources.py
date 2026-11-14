@@ -852,7 +852,8 @@ class BodySourceCommandTests(unittest.TestCase):
         output._css_inline = output._CSS_INLINE_UNSET
         with mock.patch("builtins.__import__", side_effect=fake_import):
             searched = self.payload(
-                "search", "--subject", "Hidden html body", "--since", "1y"
+                "search", "--subject", "Hidden html body", "--since", "1y",
+                "--fields", "snippet",
             )
         self.assertEqual(searched["count"], 1)
         self.assertEqual(searched["messages"][0]["snippet"], "Factura adjunta.")
@@ -861,7 +862,9 @@ class BodySourceCommandTests(unittest.TestCase):
         self.seed_cursor()
         output._css_inline = output._CSS_INLINE_UNSET
         with mock.patch("builtins.__import__", side_effect=fake_import):
-            new_payload = self.payload("new", "--limit", "500")
+            new_payload = self.payload(
+                "new", "--limit", "500", "--fields", "snippet"
+            )
         sample = next(
             message
             for message in new_payload["messages"]

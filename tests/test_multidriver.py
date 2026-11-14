@@ -222,6 +222,7 @@ class MultiDriverCase(unittest.TestCase):
             self.config,
             search.Filters(**filters),
             drivers={PLUGIN_DRIVER: plugin},
+            fields=("all",),
         )
 
     def run_new(
@@ -247,6 +248,7 @@ class MultiDriverCase(unittest.TestCase):
             peek=peek,
             limit=limit,
             clock=lambda: self.fx.now.timestamp(),
+            fields=("all",),
         )
 
     def run_mailboxes(self, plugin: FakePluginBackend):
@@ -664,7 +666,7 @@ class LimitsMergeTest(MultiDriverCase):
 
         self.use_config(DEFAULT_CONFIG)
         native = search.run_search(
-            self.backend, self.config, search.Filters(), drivers={}
+            self.backend, self.config, search.Filters(), drivers={}, fields=("all",)
         )
         self.use_config(PLUGIN_ONLY_CONFIG)
         only_plugin = search.run_search(
@@ -673,6 +675,7 @@ class LimitsMergeTest(MultiDriverCase):
             search.Filters(),
             drivers={PLUGIN_DRIVER: plugin},
             native="apple_mail",
+            fields=("all",),
         )
         self.assertEqual(
             multi["scan"]["candidates"],
@@ -876,6 +879,7 @@ class ShowPluginTest(MultiDriverCase):
             search.Filters(),
             drivers={PLUGIN_DRIVER: plugin},
             native="apple_mail",
+            fields=("all",),
         )
         self.assertEqual(
             self.uids(payload),

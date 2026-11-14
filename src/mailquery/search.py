@@ -20,7 +20,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from functools import cmp_to_key
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Collection, Iterable, Mapping, NamedTuple, Sequence
 
 from mailquery import config as config_module
 from mailquery import output
@@ -68,6 +68,16 @@ SEARCH_ROW_FIELDS = (
     "body",
 )
 
+#: Keys of every ``search``/``new`` row when no ``--fields`` is given.
+DEFAULT_ROW_FIELDS = (
+    "uid",
+    "subject",
+    "from",
+    "date_received",
+    "is_read",
+    "has_attachments",
+)
+
 #: Canonical key order of the ``show`` ``message`` object.
 SHOW_FIELDS = (
     "uid",
@@ -92,6 +102,19 @@ SHOW_FIELDS = (
     "source",
 )
 
+#: Row fields that require reading the body of the message.
+_SEARCH_BODY_FIELDS = frozenset({"snippet", "body"})
+
+#: ``show`` fields that require reading the body, with and without delivering it.
+_SHOW_BODY_READ_FIELDS = frozenset(
+    {"body_text", "body_truncated", "attachments", "partial", "readable", "source"}
+)
+_SHOW_BODY_DELIVERED_FIELDS = _SHOW_BODY_READ_FIELDS - {"attachments"}
+
+#: Fields whose delivery counts the body in the content signals and warnings.
+_BODY_DELIVERED_FIELDS = _SEARCH_BODY_FIELDS | _SHOW_BODY_DELIVERED_FIELDS
+
+
 # Stable warning strings ("warnings[]").
 NO_ACCOUNTS_WARNING = (
     "W_NO_ACCOUNTS: no accounts are declared in config.toml; nothing is observed"
@@ -107,6 +130,38 @@ FIRST_RUN_WARNING_TEMPLATE = (
     "W_FIRST_RUN: first run: emitted the messages received in the last "
     "{lookback} before the newest message"
 )
+
+
+# --------------------------------------------------------------------------- #
+# Field selection
+# --------------------------------------------------------------------------- #
+
+
+def search_row_fields(requested: Sequence[str] | None) -> tuple[str, ...]:
+    """Delivered row fields of ``search``/``new`` in their canonical order.
+
+    Without a selection the default row is delivered; otherwise the default row
+    is extended with the requested fields, and ``all`` delivers the full row.
+    """
+    names = tuple(requested or ())
+    if "all" in names:
+        return SEARCH_ROW_FIELDS
+    wanted = set(DEFAULT_ROW_FIELDS) | set(names)
+    return tuple(name for name in SEARCH_ROW_FIELDS if name in wanted)
+
+
+def show_message_fields(requested: Sequence[str] | None) -> tuple[str, ...]:
+    """Delivered message fields of ``show`` in their canonical order.
+
+    Without a selection, or with ``all``, the whole message is delivered;
+    otherwise ``uid`` plus the requested fields.
+    """
+    names = tuple(requested or ())
+    if requested is None or "all" in names:
+        return SHOW_FIELDS
+    wanted = {"uid"} | set(names)
+    return tuple(name for name in SHOW_FIELDS if name in wanted)
+
 
 # Relative-time parsing.
 _RELATIVE_UNITS = {
@@ -453,6 +508,7 @@ def run_search(
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
     url_mode: str = "neutralize",
+    fields: Sequence[str] | None = None,
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "warnings"}``.
 
@@ -463,10 +519,15 @@ def run_search(
     merged with the total order ``(date_received DESC, driver ASC,
     native_order_key DESC)`` and paginated after the merge.
 
-    ``url_mode`` renders the URLs of the content fields (``neutralize``,
-    ``keep`` or ``strip``); the link and sender signals do not depend on it.
+    ``fields`` extends the default row with the requested fields (``all``
+    delivers the full row); the body is read only when the row delivers
+    ``snippet`` or ``body`` or when ``--text`` filters on it. ``url_mode``
+    renders the URLs of the content fields (``neutralize``, ``keep`` or
+    ``strip``); the link and sender signals do not depend on it.
     """
     started = time.perf_counter()
+    delivered = search_row_fields(fields)
+    loads_body = bool(_SEARCH_BODY_FIELDS & set(delivered))
     native_name, pool = _driver_pool(backend, drivers, native)
 
     excluded: list[dict] = []
@@ -549,7 +610,9 @@ def run_search(
             rows, scan_warnings, scan_reads[run.driver] = _scan_bodies(
                 driver_backend, rows, text_terms, recipient_terms
             )
-            warnings.extend(scan_warnings)
+            # A body read only to filter --text is not delivered.
+            if loads_body:
+                warnings.extend(scan_warnings)
         elif any(recipient_terms):
             rows = _filter_recipients(rows, *recipient_terms, driver_backend)
         run.label_map = driver_backend.membership([row["uid"] for row in rows])
@@ -565,11 +628,17 @@ def run_search(
     if truncated:
         warnings.append(_truncated_warning(len(merged) - limit))
 
-    recipients = _page_recipients(page, runs)
+    recipients = (
+        _page_recipients(page, runs)
+        if "to" in delivered or "cc" in delivered
+        else {}
+    )
     messages, body_warnings, reads = _build_messages(
         page,
         runs,
         recipients,
+        fields=delivered,
+        loads_body=loads_body,
         cached_bodies=bool(text_terms),
         url_mode=url_mode,
     )
@@ -603,6 +672,7 @@ def run_new(
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
     url_mode: str = "neutralize",
+    fields: Sequence[str] | None = None,
 ) -> dict:
     """Return ``{"count", "messages", "truncated", "scan", "cursor", "warnings"}``.
 
@@ -618,9 +688,12 @@ def run_new(
     (``D`` = newest valid date of the merged set, the newest ``limit`` of them)
     and reports ``W_FIRST_RUN`` last. Later runs emit, in arrival order, the
     messages received since ``cursor - lookback`` whose prefixed uid is not in
-    the ring. ``peek`` never writes state.
+    the ring. ``peek`` never writes state. ``fields`` extends the default row;
+    the cursor advances the same way with any selection.
     """
     started = time.perf_counter()
+    delivered = search_row_fields(fields)
+    loads_body = bool(_SEARCH_BODY_FIELDS & set(delivered))
     now = float(clock()) if clock is not None else time.time()
     native_name, pool = _driver_pool(backend, drivers, native)
 
@@ -711,9 +784,19 @@ def run_new(
     if truncated:
         warnings.append(_truncated_warning(len(merged) - limit_value))
 
-    recipients = _page_recipients(page, runs)
+    recipients = (
+        _page_recipients(page, runs)
+        if "to" in delivered or "cc" in delivered
+        else {}
+    )
     messages, body_warnings, reads = _build_messages(
-        page, runs, recipients, cached_bodies=False, url_mode=url_mode
+        page,
+        runs,
+        recipients,
+        fields=delivered,
+        loads_body=loads_body,
+        cached_bodies=False,
+        url_mode=url_mode,
     )
     warnings.extend(body_warnings)
     warnings.extend(first_run_warnings)
@@ -765,6 +848,7 @@ def run_show(
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
     url_mode: str = "neutralize",
+    fields: Sequence[str] | None = None,
 ) -> dict:
     """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
@@ -777,9 +861,19 @@ def run_show(
     raises ``E_USAGE`` with an actionable hint. A uid whose store is excluded
     (Outlook) raises ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
 
-    ``url_mode`` renders the URLs of the subject, the names, the headers and the
-    body before the body is truncated.
+    ``fields`` selects the delivered message fields (``uid`` is always
+    delivered; without ``fields`` the whole message is). The body is read only
+    when a body field or ``attachments`` is selected, and the attachments are
+    queried only when ``attachments`` is delivered. ``url_mode`` renders the
+    URLs of the subject, the names, the headers and the body before the body is
+    truncated.
     """
+    delivered = show_message_fields(fields)
+    delivered_set = set(delivered)
+    reads_body = bool(_SHOW_BODY_READ_FIELDS & delivered_set)
+    delivers_body = bool(_SHOW_BODY_DELIVERED_FIELDS & delivered_set)
+    needs_attachments = "attachments" in delivered_set
+    needs_headers = "headers" in delivered_set
     native_name, pool = _driver_pool(backend, drivers, native)
     target = str(driver or (backend is not None and _driver(backend)) or native_name)
     target_backend = pool.get(target)
@@ -814,55 +908,66 @@ def run_show(
             "declare the account in ~/.mailquery/config.toml",
             "the message belongs to an account that is not declared",
         )
-    recipients = target_backend.recipients([uid])
-    to_list, cc_list = _recipient_lists(recipients, uid)
+    if "to" in delivered_set or "cc" in delivered_set or needs_headers:
+        recipients = target_backend.recipients([uid])
+        to_list, cc_list = _recipient_lists(recipients, uid)
+    else:
+        to_list, cc_list = [], []
 
-    body = _load_body(target_backend, row, with_details=True)
     warnings = _activation_warnings([target_backend], excluded)
-    warnings.extend(_flatten_warnings([body.warnings]))
-    fields = _content_fields(row, to_list, cc_list, body)
+    if reads_body:
+        body = _load_body(target_backend, row, with_details=True)
+        if delivers_body:
+            warnings.extend(_flatten_warnings([body.warnings]))
+    else:
+        body, _read = _headers_body(target_backend, row)
+    fields = _content_fields(row, to_list, cc_list, body, delivered_set)
 
     body_text = ""
     body_truncated = False
-    if body.readable:
+    if reads_body and body.readable:
         rendered = _rendered_body(fields.body_text, url_mode)
         body_truncated = len(rendered) > output.SHOW_BODY_MAX_CHARS
         body_text = rendered[: output.SHOW_BODY_MAX_CHARS]
-        if body_truncated:
+        if body_truncated and delivers_body:
             warnings.append(
                 "W_BODY_TRUNCATED: the body was truncated to "
                 f"{output.SHOW_BODY_MAX_CHARS} characters"
             )
 
-    attachments = _show_attachments(
-        target_backend,
-        config,
-        show_uid,
-        uid,
-        target,
-        row,
-        body,
-        warnings,
-    )
+    attachments: list[dict] = []
+    if needs_attachments:
+        attachments = _show_attachments(
+            target_backend,
+            config,
+            show_uid,
+            uid,
+            target,
+            row,
+            body,
+            warnings,
+        )
 
-    headers = _show_headers(body.headers, row, fields, url_mode)
     message = _message_metadata(accounts, row, mailbox, target, fields, url_mode)
-    message.update(
-        {
-            "headers": headers,
-            "body_text": body_text,
-            "body_truncated": body_truncated,
-            "attachments": attachments,
-            "partial": body.partial,
-            "readable": body.readable,
-            "source": {
-                "emlx_path": body.source["emlx_path"],
-                "partial": bool(body.source["partial"]),
-            },
-        }
-    )
+    if needs_headers:
+        message["headers"] = _show_headers(body.headers, row, fields, url_mode)
+    if reads_body:
+        message.update(
+            {
+                "body_text": body_text,
+                "body_truncated": body_truncated,
+                "partial": body.partial,
+                "readable": body.readable,
+                "source": {
+                    "emlx_path": body.source.get("emlx_path"),
+                    "partial": bool(body.source.get("partial")),
+                },
+            }
+        )
+    if needs_attachments:
+        message["attachments"] = attachments
     warnings.extend(_content_warnings(show_uid, fields))
-    return {"message": _ordered_fields(message, SHOW_FIELDS), "warnings": warnings}
+    return {"message": _ordered_fields(message, delivered), "warnings": warnings}
 
 
 def run_mailboxes(
@@ -1552,38 +1657,47 @@ def _content_fields(
     to_list: list[dict],
     cc_list: list[dict],
     body: "_LoadedBody",
+    delivered: Collection[str],
 ) -> _ContentFields:
     """Sanitize the content fields and count the signals of one message.
 
     The subject, the sender name, the recipient names and the whole body lose
-    terminal escapes and invisible characters. The link signals count those
-    fields plus the addresses, before the URL display mode is applied and before
-    the snippet or the body truncation. An unreadable body contributes no text.
+    terminal escapes and invisible characters. The link signals count only the
+    fields this response delivers, plus the addresses of the delivered sender
+    and recipient fields, before the URL display mode is applied and before the
+    snippet or the body truncation. An unreadable body contributes no text.
     """
     subject = output.sanitize_text(str(row.get("subject") or ""))
     sender_name = output.sanitize_text(str(row.get("sender_name") or ""))
     to_list = _sanitized_recipients(to_list)
     cc_list = _sanitized_recipients(cc_list)
     body_text = output.sanitize_text(body.text) if body.readable else ""
-    texts = [
-        subject,
-        sender_name,
-        *(str(entry.get("name") or "") for entry in to_list),
-        *(str(entry.get("name") or "") for entry in cc_list),
-        body_text,
-    ]
-    addresses = [
-        str(row.get("sender_address") or ""),
-        *(str(entry.get("address") or "") for entry in to_list),
-        *(str(entry.get("address") or "") for entry in cc_list),
-    ]
+    texts: list[str] = []
+    if "subject" in delivered:
+        texts.append(subject)
+    if "from" in delivered:
+        texts.append(sender_name)
+    if "to" in delivered:
+        texts.extend(str(entry.get("name") or "") for entry in to_list)
+    if "cc" in delivered:
+        texts.extend(str(entry.get("name") or "") for entry in cc_list)
+    delivers_body = bool(_BODY_DELIVERED_FIELDS & set(delivered))
+    if delivers_body:
+        texts.append(body_text)
+    addresses: list[str] = []
+    if "from" in delivered:
+        addresses.append(str(row.get("sender_address") or ""))
+    if "to" in delivered:
+        addresses.extend(str(entry.get("address") or "") for entry in to_list)
+    if "cc" in delivered:
+        addresses.extend(str(entry.get("address") or "") for entry in cc_list)
     return _ContentFields(
         subject=subject,
         sender_name=sender_name,
         to_list=to_list,
         cc_list=cc_list,
         body_text=body_text,
-        hidden_chars=int(body.hidden_chars),
+        hidden_chars=int(body.hidden_chars) if delivers_body else 0,
         signals=output.count_url_signals(texts, addresses),
         auth_failure=output.sender_auth_failure(body.authentication_results),
         reply_mismatch=output.reply_to_mismatch(
@@ -1624,6 +1738,8 @@ def _build_messages(
     runs: "Mapping[str, _DriverRun]",
     recipients: "Mapping[str, dict[Any, Any]]",
     *,
+    fields: Sequence[str],
+    loads_body: bool,
     cached_bodies: bool,
     url_mode: str,
 ) -> tuple[list[dict], list[str], "dict[str, int]"]:
@@ -1631,11 +1747,15 @@ def _build_messages(
 
     The body always comes from the message's physical mailbox (a Gmail message
     labelled INBOX is stored under ``[Gmail]/All Mail``), while the reported
-    ``mailbox`` is the effective in-scope one (INBOX). The body warnings are
-    accumulated per message and flattened in message order, followed by the
-    content warnings of that message. ``messages_read`` is returned per driver
-    so the caller can combine it with the ``items_opened`` hook of a driver that
-    opens items instead of bodies (Outlook).
+    ``mailbox`` is the effective in-scope one (INBOX). Without ``loads_body``
+    the body is never read: the sender headers come from the ``load_headers``
+    hook of the driver when it has one, and only a message whose header block
+    was read counts in ``messages_read``. The body warnings are accumulated per
+    message and flattened in message order, followed by the content warnings of
+    that message; a body read only to filter ``--text`` delivers no body
+    warnings. ``messages_read`` is returned per driver so the caller can combine
+    it with the ``items_opened`` hook of a driver that opens items instead of
+    bodies (Outlook).
     """
     messages: list[dict] = []
     warnings: list[list[str]] = []
@@ -1647,24 +1767,36 @@ def _build_messages(
             row, run.mailbox_map, run.allowed_ids, run.label_map
         )
         to_list, cc_list = _recipient_lists(recipients.get(driver, {}), row["uid"])
-        if cached_bodies and "_body_text" in row:
+        body: _LoadedBody
+        if loads_body and (not cached_bodies or "_body_text" in row):
+            if cached_bodies and "_body_text" in row:
+                body = _cached_body(row)
+            else:
+                body = _load_body(run.backend, row)
+                if _was_read(body):
+                    messages_read[driver] += 1
+        elif cached_bodies and "_body_text" in row:
             body = _cached_body(row)
         else:
-            body = _load_body(run.backend, row)
-            if _was_read(body):
+            body, header_read = _headers_body(run.backend, row)
+            if header_read:
                 messages_read[driver] += 1
-        fields = _content_fields(row, to_list, cc_list, body)
+        fields_content = _content_fields(row, to_list, cc_list, body, fields)
         message = _message_payload(
             run.accounts,
             row,
             display_mailbox,
             driver,
             body,
-            fields,
+            fields_content,
             url_mode,
+            fields,
         )
         warnings.append(
-            [*body.warnings, *_content_warnings(message["uid"], fields)]
+            [
+                *(body.warnings if loads_body else ()),
+                *_content_warnings(message["uid"], fields_content),
+            ]
         )
         messages.append(message)
     return messages, _flatten_warnings(warnings), messages_read
@@ -1839,13 +1971,20 @@ def _message_payload(
     body: "_LoadedBody",
     fields: _ContentFields,
     url_mode: str,
+    delivered: Sequence[str],
 ) -> dict:
-    """The ``search``/``new`` row of one message, in ``SEARCH_ROW_FIELDS`` order."""
+    """The ``search``/``new`` row of one message, with the delivered fields only.
+
+    ``duplicate_count`` is computed for every row (the dedupe already needs it)
+    even when it is not delivered.
+    """
     message = _message_metadata(accounts, row, mailbox, driver, fields, url_mode)
     message["duplicate_count"] = int(row.get("duplicate_count", 1))
-    message["snippet"] = _body_snippet(fields.body_text, url_mode)
-    message["body"] = _body_payload(body, fields.body_text, url_mode)
-    return _ordered_fields(message, SEARCH_ROW_FIELDS)
+    if "snippet" in delivered:
+        message["snippet"] = _body_snippet(fields.body_text, url_mode)
+    if "body" in delivered:
+        message["body"] = _body_payload(body, fields.body_text, url_mode)
+    return _ordered_fields(message, delivered)
 
 
 def _message_metadata(
@@ -2057,6 +2196,47 @@ def _body_loader(backend: "MailBackend") -> Callable[[dict], "BodyRow"]:
     """
     loader = getattr(backend, "load_snippet", None)
     return loader if callable(loader) else backend.load_body
+
+
+#: Body of a message whose body was not read: no text, no headers, no warnings.
+_EMPTY_BODY = _LoadedBody(
+    text="",
+    available=False,
+    readable=False,
+    partial=False,
+    headers={},
+    attachments=(),
+    source={},
+    warnings=(),
+)
+
+
+def _headers_body(backend: "MailBackend", row: dict) -> tuple[_LoadedBody, bool]:
+    """Sender headers of one message read without its body.
+
+    Uses the optional ``load_headers`` hook of a native driver; a driver that
+    does not have it (any plugin) yields no sender headers. The returned flag
+    tells whether the header block was read, so the caller can count it in
+    ``messages_read``.
+    """
+    hook = getattr(backend, "load_headers", None)
+    if not callable(hook):
+        return _EMPTY_BODY, False
+    loaded = hook(row)
+    read = bool(loaded.get("read"))
+    body = _LoadedBody(
+        text="",
+        available=False,
+        readable=False,
+        partial=False,
+        headers=dict(loaded.get("headers") or {}),
+        attachments=(),
+        source={},
+        warnings=(),
+        authentication_results=loaded.get("authentication_results"),
+        reply_to=loaded.get("reply_to"),
+    )
+    return body, read
 
 
 def _body_snippet(body_text: str, url_mode: str) -> str:
