@@ -28,8 +28,8 @@ Quién actualiza cada indicador y cuándo: sección 9.4.
 | Fase | Contenido | Milestones / lotes | Gate de cierre | Estado |
 |---|---|---|---|---|
 | P0 — Preparación | Aprobación del PRD, commit del plan, entorno local, línea base, registro de conciliación | — | Sección 2.1 | 🟢 |
-| P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | 🟡 |
-| P2 — Implementación | F1 completo, F2, F3 | Lotes I2, I3, I4 (M05–M13) | Todos los milestones de código en 🟢 | ⚪ |
+| P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | 🟢 |
+| P2 — Implementación | F1 completo, F2, F3 | Lotes I2, I3, I4 (M05–M13) | Todos los milestones de código en 🟢 | 🟡 |
 | P3 — Integración | Un PR por lote, matriz completa, merge `--no-ff` | I1–I4 | Cuatro PR mergeados, URL de cada run en el registro de ejecución | ⚪ |
 | P4 — Documentación y cierre | SMOKE en equipos reales, auditoría de documentos consumidores, registro de conciliación final | M14 (lote I4) | Gate de cierre de fase (sección 8.4) | ⚪ |
 
@@ -61,7 +61,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | 🟢 |
 | M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟡 |
 | M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟡 |
-| M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | ⚪ |
+| M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | 🟡 |
 | M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | ⚪ |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | ⚪ |
@@ -553,3 +553,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-13 | M04 | 🟡 → 🟢 | `645fe09` (merge en `integration/i1-prep`): `Ran 1087`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +23 tests UT-ACT) | `docs/plan/evidence/M04.md` | Detector `attachments/active_content.py` al 100 %; UT-ACT-05 y DOC-09 se difieren a M09 (conexión con `attachment`) |
 | 2026-11-13 | M01 | 🟡 → 🟢 | `3ebe4c7` (merge en `integration/i1-prep`): `Ran 1072` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +8 tests) | `docs/plan/evidence/M01.md` | `css-inline~=0.23.1` + `coverage` en CI y READMEs; configuración `[tool.coverage.*]`; los wheels se comprueban en CI (resultado se anota en el cierre de I1); commits con `--no-verify` por el hook local roto |
 | 2026-11-13 | M03 | 🟡 → 🟢 | `4d8654c` (merge en `integration/i1-prep`): `Ran 1102` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +38 tests) | `docs/plan/evidence/M03.md` | A2/A3 en `output.py`; `output.py` 99 %; NFR-20 informativo 35,9 µs; sin pragmas nuevos |
+| 2026-11-14 | Lote I1 | 🟡 → 🟢 | Rama `integration/i1-prep` con `Ran 1135`, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07 de la línea base) y cobertura 89,8 %; matriz CI verde (15/15 jobs) | PR https://github.com/dayler/mailquery/pull/7; run https://github.com/dayler/mailquery/actions/runs/43554743805 | Merge `--no-ff` `0cb5c46`. Cobertura CI 89,8 % (ubuntu-latest, Python 3.12). Paso "Check css-inline wheels" verde: las 5 etiquetas (`macosx_11_0_arm64`, `macosx_10_12_x86_64`, `win_amd64`, `win32`, `manylinux_2_17_x86_64`) descargaron `css_inline-0.23.1-cp310-abi3-*.whl` sin compilar y sin saltar a `0.24`. |
