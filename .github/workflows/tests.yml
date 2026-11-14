@@ -17,8 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unittest:
-    name: unittest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+  test-suite:
+    name: test suite (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -38,10 +38,11 @@ jobs:
       - name: Install pywin32 (Windows only)
         if: runner.os == 'Windows'
         run: python -m pip install pywin32
-      - name: Run unit, contract, integration and read-only tests
+      - name: Run UTs and automated TCs under coverage
         # tests/test_readonly.py is blocking: it fails if any store file
         # changes or if the tool writes outside ~/.mailquery. The suite runs
-        # under coverage so the next step can gate the total.
+        # every UT, automated TC, contract and integration test under coverage
+        # so the next step can gate the total.
         run: python -B -m coverage run -m unittest discover -s tests -t . -v
       - name: Check coverage
         # Fails (exit 2) below the 85 % combined line and branch threshold.

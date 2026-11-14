@@ -124,7 +124,7 @@ python -B -m coverage report
 - [ ] Todos los AC con evidencia (o la lista de faltantes devuelta al orquestador).
 - [ ] TC-03.01 y OL-30 recorren todas las opciones nuevas.
 - [ ] Ninguna desviación de `PRD-v2.2.md` sin registrar; decisiones del plan con destino permanente (sección 2, punto 5).
-- [ ] Cobertura (D-21, HITL-07): total ≥ 85 % en el host de referencia y en los 12 jobs `unittest` del PR del lote I4.
+- [ ] Cobertura (D-21, HITL-07): total ≥ 85 % en el host de referencia y en los 12 jobs `test-suite` del PR del lote I4.
 - [ ] Suite completa sin fallos nuevos frente a la línea base del lote; `tests/test_readonly.py` y OL-30 verdes.
 - [ ] Informe final con los datos de la sección 11 y los bloques.
 
