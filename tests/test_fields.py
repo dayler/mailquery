@@ -766,16 +766,23 @@ class NewFieldsTests(_AppleCase):
         for message in payload["messages"]:
             self.assertEqual(list(message), [*DEFAULT_ROW_FIELDS, "snippet"])
 
+    def _state_after_new(self, *extra: str) -> dict:
+        """Run ``new`` from the seeded state and return it with the run timestamps masked."""
+        self._seed_state()
+        self.run_ok("new", "--limit", "2", *extra)
+        state = json.loads((self.fx.home / "state.json").read_text(encoding="utf-8"))
+        # The run timestamps use the wall clock, so two runs can land on
+        # different seconds; the cursor and the emitted uids are what must match.
+        state["updated_at"] = "<ISO>"
+        if state.get("last_run"):
+            state["last_run"]["at"] = "<ISO>"
+        return state
+
     def test_ut_fld_06_02_cursor_advances_the_same(self) -> None:
         """UT-FLD-06.02: the state after ``new --fields snippet`` equals the plain ``new`` state."""
-        self._seed_state()
-        self.run_ok("new", "--limit", "2", "--fields", "snippet")
-        with_fields = (self.fx.home / "state.json").read_text(encoding="utf-8")
-
-        self._seed_state()
-        self.run_ok("new", "--limit", "2")
-        plain = (self.fx.home / "state.json").read_text(encoding="utf-8")
-        self.assertEqual(json.loads(with_fields), json.loads(plain))
+        with_fields = self._state_after_new("--fields", "snippet")
+        plain = self._state_after_new()
+        self.assertEqual(with_fields, plain)
 
 
 # --------------------------------------------------------------------------- #
