@@ -14,13 +14,14 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 - **Aislamiento.** Ningún test usa el `HOME`, el `~/.mailquery` ni el `config.toml` del usuario. Todo subproceso fija `HOME` y, en Windows, `USERPROFILE` a un directorio temporal.
 - **Independencia.** Cada caso crea sus datos temporales y no depende del orden. Un fixture compartido en `setUpClass` solo se permite si es de solo lectura.
 - **Plataforma.** Una diferencia de plataforma va dentro del test como aserción condicional. Los únicos saltos permitidos son los de la sección 5.
-- **Red y herramientas.** Sin red, salvo `pipx install` en las SMOKE. Solo `unittest`, sin otros frameworks de test.
+- **Red y herramientas.** Sin red externa, salvo `pipx install` en las SMOKE; UT-CNT-03.05 y UT-CNT-03.11 usan un servidor HTTP en `127.0.0.1` dentro del propio test. Solo `unittest`, sin otros frameworks de test.
 
 ## 2. Prefijos y archivos
 
 | Prefijo | Qué cubre | Archivo |
 |---|---|---|
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
+| UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible y hojas `<style>` | `tests/test_content.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -35,13 +36,14 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-MD | Ejecución multi-driver | `tests/test_multidriver.py` |
 | UT-ERR | Errores y timeouts de plugin | `tests/test_plugins.py`, `tests/test_multidriver.py` |
 | UT-ATT | Motor de adjuntos: bloqueo, sanitización, caché y límites | `tests/test_attachments.py` |
+| UT-ACT | Contenido activo en adjuntos: PDF, OLE y ZIP | `tests/test_active_content.py` |
 | UT-ATC | Comando `attachment` y `show.attachments` | `tests/test_cli.py` |
 | UT-AM | Adjuntos de Apple Mail | `tests/test_backends.py`, `tests/test_integration.py` |
 | UT-OL-ATT | Adjuntos de Outlook | `tests/test_outlook.py` |
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py` |
+| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py` |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` |
 
@@ -67,10 +69,12 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 - `tests/fakes/attachment_driver.py`: driver de adjuntos para los tests del motor; entrega bytes y motivos y nunca escribe en caché.
 - `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`).
 - `tests/fixtures/attachment_samples.py`: contenidos de muestra para el bloqueo por *magic bytes*.
+- `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>` y un cuerpo típico de 6 KB para la medición informativa del paso a línea.
+- `tests/fixtures/active_content_samples.py`: PDF, OLE y ZIP de muestra para el detector de contenido activo (con y sin marcadores, con `vbaProject.bin`, con ejecutables, con entradas `.bin` propias de Office y con un ZIP cuyo directorio central no se puede leer). El ZIP cifrado se fabrica activando el bit 0 de *general purpose flag* en las cabeceras local y central.
 
 ## 5. CI y saltos
 
-`.github/workflows/tests.yml` corre la suite completa en cada pull request a `develop` y `main`: `ubuntu-latest`, `macos-latest` y `windows-latest` × Python 3.11–3.14, sin `fail-fast`, con `pywin32` solo en Windows, más los jobs de `install-scripts`. La matriz no instala el paquete: los casos de entry points usan metadatos inyectados o se saltan con motivo. `tests/test_readonly.py` es bloqueante.
+`.github/workflows/tests.yml` corre la suite completa en cada pull request a `develop` y `main`: `ubuntu-latest`, `macos-latest` y `windows-latest` × Python 3.11–3.14, sin `fail-fast`, más los jobs de `install-scripts`. La matriz instala `css-inline` en los tres sistemas, `coverage` y, en Windows, `pywin32`; no instala el paquete: los casos de entry points usan metadatos inyectados o se saltan con motivo. La suite corre bajo `coverage` y un paso `Check coverage` falla por debajo del 85 % de cobertura total combinada de líneas y ramas. El job `install-scripts` de Ubuntu comprueba con `pip download --only-binary=:all:` que las etiquetas `macosx_11_0_arm64`, `macosx_10_12_x86_64`, `win_amd64`, `win32` y `manylinux_2_17_x86_64` tienen wheel de `css-inline` `0.23.x`, sin compilar y sin saltar a `0.24`. `tests/test_readonly.py` es bloqueante.
 
 Saltos permitidos (los únicos):
 
@@ -121,6 +125,14 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin datos personales | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | — |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
+| AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
+| AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
+| AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
+| AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
+| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01 (parcial; completa con UT-CNT-06, UT-CW-13) | — |
+| AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea | UT-CNT-02 (parcial; completa con UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09) | — |
+| AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS | UT-CNT-03 (parcial; completa con UT-CW-07) | — |
+| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice` | UT-CNT-04 (parcial; completa con UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08) | — |
 
 ## 8. Casos
 
@@ -298,6 +310,71 @@ Archivo: `tests/test_output.py`
 |---|---|---|
 | .01 | P | Caracteres de control en `snippet` ⇒ eliminados. |
 | .02 | P | Secuencias ANSI en `body_text` de `show` ⇒ eliminadas. |
+
+#### UT-CNT-01 — Saneado del texto
+
+Requisitos: RF-52 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Quita secuencias ANSI CSI (`\x1b[31m…\x1b[0m`). |
+| .02 | P | `\r\n` y `\r` → `\n`. |
+| .03 | P | Elimina C0 salvo `\n` y `\t`, y DEL; conserva `\n` y `\t`. |
+| .04 | P | Elimina C1 `U+0080..U+009F` (extremos y uno intermedio). |
+| .05 | P | Elimina `Cf`: `U+200B`, `U+200D`, `U+202E`, `U+2066`, `U+FEFF`, `U+00AD` y un *tag character* `U+E0041`. |
+| .06 | P | Elimina `U+FE00`, `U+FE0D`, `U+E0100`, `U+E01EF`; conserva `U+FE0E` y `U+FE0F` (`"❤️"` sale igual). |
+| .07 | P | Elimina los rellenos Hangul `U+115F`, `U+1160`, `U+3164` y `U+FFA0`. |
+| .08 | B | Idempotente: `sanitize_text(sanitize_text(x)) == sanitize_text(x)` para cada muestra. |
+| .09 | B | Sin normalización: `"é"` (e + acento combinante) y `"ｆ"` (ancho completo) no cambian. |
+| .10 | B | El resto del texto no cambia (acentos, CJK, emoji sin `Cf`); el ejemplo de saneado de la sección 8 del PRD da sus tres salidas. |
+| .11 | B | `max_chars` recorta como hoy y no recorta más allá. |
+| .12 | P | Quita secuencias OSC terminadas en `ST` y en `BEL`; el texto visible se conserva. |
+| .13 | B | `sanitize_text("")` devuelve `""`. |
+
+#### UT-CNT-02 — HTML → texto con omisión en línea
+
+Requisitos: RF-53, RF-56 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `hidden`, `hidden=""` y `hidden="hidden"` omiten el elemento y sus descendientes. |
+| .02 | P | `style` con `display:none`, `visibility:hidden`, `mso-hide:all`, `font-size:0` u `opacity:0` omite; también con mayúsculas, espacios, `!important`, `0.0`, `.0`, `0px`, `0%`, `0em` y tras otra declaración (`color:red; display:none`). |
+| .03 | N | No omiten: `font-size:0.8em`, `font-size:inherit`, `opacity:0.5`, `xdisplay:none`, `min-font-size:0` ni `display:none` dentro de un valor de otra propiedad. |
+| .04 | N | `aria-hidden="true"` conserva el texto. |
+| .05 | B | `<br hidden>`, `<img hidden>` e `<input style="display:none">` no omiten el texto siguiente. |
+| .06 | B | Elemento oculto sin cierre por la vía de fallo del paso a línea: se omite hasta el final. |
+| .07 | B | Anidación de la misma etiqueta: `<div hidden><div>a</div>b</div>c` da `c`. |
+| .08 | P | El texto visible alrededor no cambia (ejemplo A3 «HTML oculto» de la sección 8 del PRD → `Factura adjunta.`). |
+| .09 | B | Todo oculto → `text == ""` y `hidden_chars > 0`. |
+| .10 | P | Conteo: el ejemplo de la hoja `<style>` da 30; un texto oculto con un `U+200B` cuenta sin él (el saneado va antes de contar). |
+| .11 | B | Conteo con entidades y comentarios dentro del oculto: `<div hidden>a&nbsp;&amp;<!-- c -->b</div>` cuenta los caracteres ya decodificados y no cuenta el comentario. |
+| .12 | B | Ramas del analizador: `<div hidden><span>x</div>y` da `y`; `<div hidden/>z` no omite `z`; `<script>` dentro de un oculto no aporta texto a ningún flujo; `style` mal formado (`display`, `;;`, sin `:`) no omite; un `</script>` huérfano no rompe la conversión. |
+
+#### UT-CNT-03 — Hojas `<style>` y `css-inline`
+
+Requisitos: RF-53, RNF-18 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Una regla de clase con `display:none` en `<style>` oculta el elemento (ejemplo A3 de la sección 8 del PRD). |
+| .02 | P | Reglas por id, por etiqueta y con selector compuesto también ocultan. |
+| .03 | N | Una regla dentro de `@media` no oculta nada. |
+| .04 | N | `<link rel="stylesheet" href="file:///<tmp>/hide.css">` a un archivo local con `.x{display:none}`: el texto sigue presente. |
+| .05 | N | `<link rel="stylesheet" href="http://127.0.0.1:<puerto>/hide.css">` con un `http.server` en un hilo de este test: el servidor recibe 0 peticiones y el texto sigue presente. |
+| .06 | P | `import css_inline` falla (simulado): se convierte el HTML original sin excepción y la omisión en línea sigue funcionando; una segunda llamada no reintenta la importación. |
+| .07 | P | `inline()` lanza una excepción (simulada): se convierte el HTML original sin excepción. |
+| .08 | B | El inliner se construye con `load_remote_stylesheets=False` y sin `base_url` (espía sobre el constructor). |
+| .09 | B | Determinismo: la misma entrada dos veces da el mismo `HtmlText`. |
+| .10 | B | Regla de `<style>` con `display:none !important` y estilo en línea que la contradice: se omite (riesgo aceptado del PRD) y se cuenta. |
+| .11 | N | `<style>@import url("http://127.0.0.1:<puerto>/hide.css");</style>` y `@import` a un `file:///<tmp>/hide.css` local con `.x{display:none}`: el servidor de .05 recibe 0 peticiones y el texto sigue presente. El fallo real de CSS se cubre en .07 porque ningún CSS probado hace lanzar a `css-inline` 0.23.1. |
+
+#### UT-CNT-04 — Texto de `content_notice`
+
+Requisitos: RF-66 · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `CONTENT_NOTICE` es literalmente el texto de RF-66. |
 
 ### Estado, búsqueda y store
 
@@ -526,6 +603,15 @@ Archivo: `tests/test_search.py`
 | .02 | P | `--include-mailbox` se resuelve en el orden de los bloques: `INBOX` con dos cuentas declaradas ⇒ la de la primera. |
 | .03 | P | Path o URL exactos que coinciden con el nombre de otra carpeta ⇒ gana el path o la URL, cada uno. |
 | .04 | P | Dos carpetas con el mismo nombre en paths distintos ⇒ la primera de `mailboxes`. |
+
+#### UT-SR-17 — Orden canónico de campos
+
+Archivo: `tests/test_search.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Las claves de cada fila de `search` sobre el store sintético son exactamente `SEARCH_ROW_FIELDS`, en ese orden. |
+| .02 | P | Las claves de `message` de `show` son exactamente `SHOW_FIELDS`, en ese orden, sobre el store sintético y sobre el doble de Outlook. |
 
 #### UT-ST-01 — Lock
 
@@ -1218,6 +1304,57 @@ Requisitos: RF-45, RF-51 · Archivo: `tests/test_attachments.py`
 | .14 | B | Un archivo publicado cuya entrada no se pudo escribir se vuelve a extraer en la siguiente corrida (manifiesto best-effort). |
 | .15 | P | `cached_path` de `show` no lee el archivo ni el manifiesto: solo comprueba que el archivo existe y es regular. |
 
+#### UT-ACT-01 — `pdf-javascript`
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un PDF con `/JavaScript`, `/JS` o `/Launch` seguido de espacio, `<<`, `(` o del final del archivo ⇒ `("pdf-javascript",)`. |
+| .02 | P | Nombres con `#xx` (`/J#61vaScript`, `/#4A#53`, `/L#61unch`) ⇒ detectado. |
+| .03 | N | `/JavaScriptX`, `/JSON`, `/Launcher` y `/javascript` (minúsculas) no cuentan. |
+| .04 | N | `%PDF-` después del byte 1.024 ⇒ no es PDF y no se detecta. |
+| .05 | N | Un PDF sin esos nombres ⇒ `()`. |
+| .06 | B | `%PDF-` cuyo último byte es exactamente el byte 1.024 del archivo (empieza en el desplazamiento 1.019) ⇒ es PDF y se detecta. |
+| .07 | B | Un `#xx` con hexadecimal inválido (`/J#zzavaScript`) no se decodifica ni cuenta; `/JS` justo al final del archivo, sin delimitador, cuenta. |
+
+#### UT-ACT-02 — `office-macros`
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `.doc` y `.xls` OLE con `_VBA_PROJECT` en UTF-16LE ⇒ detectado. |
+| .02 | N | OLE sin `_VBA_PROJECT`; `_VBA_PROJECT` en ASCII dentro de un OLE; la cadena UTF-16LE en un archivo que no empieza por la firma OLE ⇒ no detectado. |
+| .03 | P | ZIP con `xl/vbaProject.bin` y con `vbaProject.bin` en la raíz ⇒ detectado. |
+| .04 | N | `.docx`, `.xlsx` y `.pptx` sin macros, con carpetas y entradas `.bin` propias del formato (`word/embeddings/oleObject1.bin`) ⇒ `()`. |
+
+#### UT-ACT-03 — `archive-executable`
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | ZIP con `docs/factura.pdf.exe` (extensión encadenada) y ZIP con `run.bat` ⇒ detectado. |
+| .02 | P | ZIP cifrado con una entrada `.exe` ⇒ detectado; el bit de cifrado está activo en las cabeceras local y central y `zipfile` sigue listando el nombre. |
+| .03 | P | Separador `\` en el nombre (`dir\x.scr`) ⇒ se toma el último segmento y se detecta. |
+| .04 | N | ZIP con solo PDF, con solo `.bin` o con `..`/`:` en nombres inocuos ⇒ `()`. |
+| .05 | N | Archivo que empieza por `PK\x03\x04` con el directorio central ilegible ⇒ `()`. |
+| .06 | P | Entrada `RUN.EXE` (mayúsculas) ⇒ detectado, porque la extensión se compara sin distinguir mayúsculas. |
+| .07 | N | Entrada de directorio terminada en `/` (`payload.exe/`): el último segmento está vacío; un ZIP solo con esa entrada ⇒ `()`. |
+| .08 | N | `zipfile.ZipFile` lanza una excepción distinta de `BadZipFile` (`ValueError` u `OSError`, simulada con `mock.patch`) ⇒ `()` sin excepción. |
+
+#### UT-ACT-04 — Propiedades del detector
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un ZIP con `vbaProject.bin` y un `.exe` da los dos tipos en el orden de `ACTIVE_CONTENT_TYPES`. |
+| .02 | B | Nunca descomprime: con `ZipFile.open`, `read` y `extract` parcheados para fallar, todos los casos dan el mismo resultado y ninguna de las tres se llama. |
+| .03 | B | Archivo vacío y archivo inexistente ⇒ `()` sin excepción. |
+| .04 | B | Determinismo: dos llamadas sobre el mismo archivo dan el mismo resultado. |
+
 #### UT-OL-ATT-01 — Metadatos, índice y disponibilidad
 
 Requisitos: AC-07/AC-15 · Archivo: `tests/test_outlook.py`
@@ -1690,7 +1827,7 @@ Requisitos: AC-01, AC-18 · Archivo: `tests/test_packaging.py`
 |---|---|---|
 | .01 | P | `pyproject.toml` declara la versión vigente (sin bump), el console script y el grupo `mailquery.backends` con los dos backends internos. |
 | .02 | P | `mailquery.__version__` coincide con la metadata del paquete; entry points resolubles con metadata inyectada. |
-| .03 | N | Sin dependencias de runtime nuevas (`pywin32` solo en Windows). |
+| .03 | P | Las dependencias de ejecución son exactamente `css-inline~=0.23.1` (sin marcador de plataforma) y `pywin32; sys_platform == "win32"`. |
 
 #### TC-07 — Documentación y ayudas
 
@@ -1802,6 +1939,17 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
 
+#### DOC-07 — Actualización de seguridad de `css-inline` en los README
+
+Requisitos: AC-H17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `README.md`: dentro de "Install, upgrade and uninstall" hay una subsección "Security update of `css-inline`" con `pipx runpip mailquery show css-inline`, `pipx runpip mailquery install --upgrade "css-inline~=0.23.1"`, `pipx reinstall mailquery`, `pipx runpip mailquery install "css-inline==` y la URL de los avisos. |
+| .02 | P | `README.es.md`: lo mismo dentro de "Instalar, actualizar y desinstalar", subsección "Actualización de seguridad de `css-inline`". |
+| .03 | P | Los dos README nombran `css-inline` en la introducción, en los requisitos y en las instrucciones de tests, y estas incluyen `coverage run` y `coverage report`. |
+| .04 | N | Ningún README conserva "standard library only" / "solo biblioteca estándar". |
+
 #### INS-SMOKE-01 — Instaladores
 
 Archivo: `tests/test_install_scripts.py`
@@ -1831,6 +1979,16 @@ Archivo: `tests/test_install_scripts.py`, `tests/test_packaging.py`
 | .01 | P | `pyproject.toml` y `__version__` coinciden y siguen en la versión vigente (`2.0.1`, sin bump); grupo `mailquery.backends` con `apple_mail` y `outlook`; console script intacto. |
 | .02 | P | Los tests de instaladores construyen `GOOD_VERSION` con `mailquery.__version__` pero como línea completa de `-v` (`mailquery <v> (backend outlook; Python 3.14.0; Windows 10.0.26200 AMD64)`), no solo la versión. |
 | .03 | P | `SMOKE-INSTALL.02` acepta la salida de `-v` de la versión actual sin fijar un literal (se deriva de `__version__`). |
+
+#### PKG-03 — Dependencia `css-inline`
+
+Requisitos: AC-H15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | La entrada de `css-inline` es literalmente `css-inline~=0.23.1`: rango de parches `0.23.x` desde `0.23.1`, sin `==`, sin `>=` abierto y sin marcador de plataforma. |
+| .02 | N | `pywin32` es la única dependencia con marcador `sys_platform == "win32"`. |
+| .03 | P | `[tool.coverage.report].fail_under = 85` y `[tool.coverage.run].branch = true`; `coverage` no está en `[project].dependencies`. |
 
 ### SMOKE contra el cliente de correo real
 
@@ -1865,6 +2023,7 @@ Archivo: `tests/test_smoke.py`
 | .02 | P | `mailquery -v` ⇒ el backend de la plataforma. |
 | .03 | P | Con `HOME`/`USERPROFILE` temporales (en macOS, `Library/Mail` y `Library/Accounts` del HOME temporal enlazan a los reales) y la primera cuenta de `mailquery mailboxes` declarada: `mailquery doctor --json` ⇒ todos los chequeos `ok=true`. |
 | .04 | N | El `~/.mailquery` real del usuario no cambia. |
+| .05 | P | Tras `pipx install .`, `pipx runpip mailquery show css-inline` con el mismo `PIPX_HOME` temporal ⇒ `Version: 0.23.<n>`. |
 
 #### SMOKE-NEW — Comandos de lectura contra el cliente real
 

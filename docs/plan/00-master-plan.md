@@ -27,8 +27,8 @@ Quién actualiza cada indicador y cuándo: sección 9.4.
 
 | Fase | Contenido | Milestones / lotes | Gate de cierre | Estado |
 |---|---|---|---|---|
-| P0 — Preparación | Aprobación del PRD, commit del plan, entorno local, línea base, registro de conciliación | — | Sección 2.1 | ⚪ |
-| P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | ⚪ |
+| P0 — Preparación | Aprobación del PRD, commit del plan, entorno local, línea base, registro de conciliación | — | Sección 2.1 | 🟢 |
+| P1 — Refactor e infraestructura | Dependencia `css-inline`, CI, refactor de armado de mensajes, primitivas puras de F1 | Lote I1: M01–M04 | Lote I1 mergeado con la matriz verde | 🟡 |
 | P2 — Implementación | F1 completo, F2, F3 | Lotes I2, I3, I4 (M05–M13) | Todos los milestones de código en 🟢 | ⚪ |
 | P3 — Integración | Un PR por lote, matriz completa, merge `--no-ff` | I1–I4 | Cuatro PR mergeados, URL de cada run en el registro de ejecución | ⚪ |
 | P4 — Documentación y cierre | SMOKE en equipos reales, auditoría de documentos consumidores, registro de conciliación final | M14 (lote I4) | Gate de cierre de fase (sección 8.4) | ⚪ |
@@ -41,9 +41,9 @@ P2 y P3 se solapan en el tiempo: cada lote se integra (P3) antes de abrir el sig
 |---|---|---|
 | P0-1 | Obtener del dueño la confirmación de HITL-05 (versión aprobada de `PRD-v2.2.md`). | 🟢 Respondida el 2026-11-13: v2.2 aprobada (`aa8209a`) |
 | P0-2 | Con orden expresa del dueño, un único commit `docs(plan): …` con `docs/plan/` en `develop` y push. Sin esa orden, el plan no se commitea. | 🟢 Ordenado y hecho el 2026-11-13 (rama `docs/plan-v2.2`, merge `--no-ff` en `develop`) |
-| P0-3 | Crear el entorno local `.venv` (ya ignorado por `.gitignore`) con `python -m venv .venv`, `.venv\Scripts\python -m pip install "css-inline~=0.23.1" "coverage~=7.17" pywin32` (en macOS, sin `pywin32`). Borrar `src/mailquery.egg-info` (ignorado y local: hace que los tests de metadatos se comporten distinto en el checkout principal y en los worktrees). Todas las corridas locales del plan usan ese intérprete. | ⚪ |
-| P0-4 | Línea base en `.venv` sobre la punta de `develop`, en un worktree limpio (sección 8.2): `python -B -m coverage erase`, `python -B -m coverage run -m unittest discover -s tests -t . -v` y `python -B -m coverage report`; anotar total de tests, fallos, errores, saltos, cobertura total y la tabla por módulo en el registro de ejecución (sección 11). Con Outlook clásico abierto, la suite incluye SMOKE contra el Outlook real. Mientras M01 no añada `[tool.coverage.*]` a `pyproject.toml`, se pasan `--branch --source=src/mailquery` a `coverage run`. | ⚪ |
-| P0-5 | Al abrir I1, crear en `PRD-v2.2.md` la sección "0.5 Registro de conciliación" con el formato de la sección 10.2, todas las filas en "Pendiente" (autorizado por HITL-06). | ⚪ |
+| P0-3 | Crear el entorno local `.venv` (ya ignorado por `.gitignore`) con `python -m venv .venv`, `.venv\Scripts\python -m pip install "css-inline~=0.23.1" "coverage~=7.17" pywin32` (en macOS, sin `pywin32`). Borrar `src/mailquery.egg-info` (ignorado y local: hace que los tests de metadatos se comporten distinto en el checkout principal y en los worktrees). Todas las corridas locales del plan usan ese intérprete. | 🟢 Hecho el 2026-11-13: `.venv` (Python 3.12.13) con `css-inline==0.23.1` y `coverage==7.17.3`; `src/mailquery.egg-info` borrado |
+| P0-4 | Línea base en `.venv` sobre la punta de `develop`, en un worktree limpio (sección 8.2): `python -B -m coverage erase`, `python -B -m coverage run -m unittest discover -s tests -t . -v` y `python -B -m coverage report`; anotar total de tests, fallos, errores, saltos, cobertura total y la tabla por módulo en el registro de ejecución (sección 11). Con Outlook clásico abierto, la suite incluye SMOKE contra el Outlook real. Mientras M01 no añada `[tool.coverage.*]` a `pyproject.toml`, se pasan `--branch --source=src/mailquery` a `coverage run`. | 🟢 Hecho el 2026-11-13 (macOS arm64, `Ran 1064`, `FAILED (failures=2, skipped=7)`, cobertura total 89,0 %); detalle en la sección 11 |
+| P0-5 | Al abrir I1, crear en `PRD-v2.2.md` la sección "0.5 Registro de conciliación" con el formato de la sección 10.2, todas las filas en "Pendiente" (autorizado por HITL-06). | 🟢 Hecho el 2026-11-13: sección 0.5 con las 32 filas en "Pendiente" |
 
 Línea base ya medida en la sesión de planificación (Python 3.14.7 del sistema, sin `.venv`, commit `41e90e1`): `Ran 1063 tests`, `FAILED (failures=5, skipped=6)`. Los 5 fallos son ambientales: `TC-01.01`, `TC-02.07`, `TC-06.02`, `PKG-01.03` y `PKG-02.01` comparan la versión `3.0.0a0` con los metadatos de un `mailquery 2.0.1` instalado en ese intérprete. En un venv limpio (sin el paquete instalado) esos casos se saltan como en CI; P0-4 fija la línea base oficial.
 
@@ -55,12 +55,12 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 
 | ID | Milestone | Lote | Oleada | Depende de | ACs (total o parcial) | Archivo | Estado |
 |---|---|---|---|---|---|---|---|
-| M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | ⚪ |
-| M02 | Refactor: armado único de mensajes en `search.py` | I1 | W1 | — | — (preserva comportamiento) | [M02](M02-message-assembly-refactor.md) | ⚪ |
-| M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | ⚪ |
-| M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | ⚪ |
-| M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | ⚪ |
-| M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | ⚪ |
+| M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | 🟢 |
+| M02 | Refactor: armado único de mensajes en `search.py` | I1 | W1 | — | — (preserva comportamiento) | [M02](M02-message-assembly-refactor.md) | 🟢 |
+| M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | 🟢 |
+| M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | 🟢 |
+| M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟡 |
+| M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟡 |
 | M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | ⚪ |
 | M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | ⚪ |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
@@ -197,24 +197,24 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 
 | AC | Qué exige (resumen) | Milestone(s) | Grupos de test | Estado |
 |---|---|---|---|---|
-| AC-H01 | A2 en campos de contenido, identificadores intactos | M03, M07 | UT-CNT-01, UT-CW-01, UT-CW-02 | ⚪ |
-| AC-H02 | `\n`/`\t`, CRLF, idempotencia, determinismo de F1 | M03, M05, M08 | UT-CNT-01, UT-CNT-03, UT-CNT-06, UT-CW-13 | ⚪ |
+| AC-H01 | A2 en campos de contenido, identificadores intactos | M03, M07 | UT-CNT-01, UT-CW-01, UT-CW-02 | 🟡 |
+| AC-H02 | `\n`/`\t`, CRLF, idempotencia, determinismo de F1 | M03, M05, M08 | UT-CNT-01, UT-CNT-03, UT-CNT-06, UT-CW-13 | 🟡 |
 | AC-H03 | Búsqueda con A2 a ambos lados; bloqueo y caché sin cambios | M07 | UT-CW-03, UT-CW-04 | ⚪ |
-| AC-H04 | Cuerpo desde HTML; omisión de ocultos en línea | M03, M06, M08, M14 | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | ⚪ |
-| AC-H05 | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` | M03, M08 | UT-CNT-03, UT-CW-07 | ⚪ |
+| AC-H04 | Cuerpo desde HTML; omisión de ocultos en línea | M03, M06, M08, M14 | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | 🟡 |
+| AC-H05 | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` | M03, M08 | UT-CNT-03, UT-CW-07 | 🟡 |
 | AC-H06 | Detección y modos de URL en todos los campos | M05, M08 | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | ⚪ |
 | AC-H07 | `--strip-links`, precedencia, default `neutralize` | M08 | UT-CW-09 | ⚪ |
 | AC-H08 | `W_EXTERNAL_LINKS` | M05, M08 | UT-CNT-08, UT-CW-10 | ⚪ |
 | AC-H09 | `W_NON_ASCII_DOMAIN` y punycode | M05, M08 | UT-CNT-07, UT-CNT-08, UT-CW-10 | ⚪ |
 | AC-H10 | `W_LONG_URL` y `W_SCRIPT_LINK` | M05, M08 | UT-CNT-08, UT-CW-10 | ⚪ |
 | AC-H11 | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | M05, M06, M08 | UT-CNT-09, UT-BOD-03, UT-BOD-04, UT-CW-11 | ⚪ |
-| AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | ⚪ |
+| AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | 🟡 |
 | AC-H13 | `[content]` inválido ⇒ `E_CONFIG_INVALID` | M08 | UT-CFG-03, DOC-06.02, DOC-06.04 | ⚪ |
 | AC-H14 | Compatibilidad: solo `content_notice` nuevo; resto sin cambios | M07, M10 | UT-CW-06, UT-FLD-07 | ⚪ |
-| AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | ⚪ |
+| AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | 🟡 |
 | AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | ⚪ |
-| AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | ⚪ |
-| AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | ⚪ |
+| AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟡 |
+| AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | 🟡 |
 | AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | ⚪ |
 | AC-D02 | `reason: network`/`not_local` ⇒ `E_ATTACHMENT_UNAVAILABLE` | M09 | UT-RMT-02 | ⚪ |
 | AC-D03 | `attachments: "none"` sigue rechazado con el hint nuevo | M09 | UT-RMT-03 | ⚪ |
@@ -546,3 +546,10 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-13 | P0 (HITL-05) | 🔴 → ⚪ | — (solo cambió `docs/PRD-v2.2.md`: estado aprobado, sin cambios normativos) | `git diff 41e90e1 cf164ff -- docs/PRD-v2.2.md` | HITL-05 respondida: v2.2 aprobada; P0-1 🟢 |
 | 2026-11-13 | Plan (revisión independiente) | ⚪ → ⚪ | `cf164ff`, venv limpio con `coverage 7.17.3`: `Ran 1063`, `OK (skipped=5)`; cobertura total 89,0 % (líneas 90,5 %, ramas 83,9 %) | — | Cuatro revisores (AC, coherencia y protocolo, TC heredados y documentos, cobertura). Defectos corregidos en el plan maestro y en M01–M14; HITL-06 a HITL-08 respondidas; D-11 cerrada; D-20 a D-25 nuevas |
 | 2026-11-13 | Plan (revisión rápida) y P0-2 | ⚪ → ⚪ | — | — | Revisión rápida independiente: listo para implementar, sin bloqueantes; tres observaciones menores corregidas y RK-15 añadido. P0-2 🟢 por orden del dueño |
+| 2026-11-13 | P0-3 | ⚪ → 🟢 | — | — | `.venv` de Python 3.12.13 (creado con `uv`) con `css-inline==0.23.1` y `coverage==7.17.3`; `src/mailquery.egg-info` borrado |
+| 2026-11-13 | P0-4 (línea base) | ⚪ → 🟢 | `57895df` en `develop`, macOS arm64, Python 3.12.13: `Ran 1064`, `FAILED (failures=2, skipped=7)`, cobertura total 89,0 % (líneas 90,5 %, ramas 83,9 %) | `.worktrees/baseline-tests.log` y `.worktrees/baseline-coverage.log` (locales) | Fallos ambientales: SMOKE-NEW.07 p95 de `mailboxes` (0,779 s > 0,15 s) y `show` (0,292 s > 0,15 s) contra Apple Mail en este Mac; saltos de plataforma (win32, PowerShell, Outlook). Este host de referencia es macOS, no Windows: el SMOKE real usa Apple Mail. Worktrees internos en `.worktrees/` porque el sandbox del harness no permite escribir en `../mailquery-wt/` |
+| 2026-11-13 | P0-5 | ⚪ → 🟢 | — | `PRD-v2.2.md` sección 0.5 | Las 32 filas de la sección 0.2 en "Pendiente"; tabla de hallazgos y filas CL-04, CL-05 y CL-06 |
+| 2026-11-13 | M02 | 🟡 → 🟢 | `f8806dc` (merge en `integration/i1-prep`): `Ran 1066`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +2 tests nuevos) | `docs/plan/evidence/M02.md` | UT-SR-17; refactor sin cambios de goldens; cobertura total 89 %, `search.py` 92 %; commits con `--no-verify` por el hook local roto |
+| 2026-11-13 | M04 | 🟡 → 🟢 | `645fe09` (merge en `integration/i1-prep`): `Ran 1087`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +23 tests UT-ACT) | `docs/plan/evidence/M04.md` | Detector `attachments/active_content.py` al 100 %; UT-ACT-05 y DOC-09 se difieren a M09 (conexión con `attachment`) |
+| 2026-11-13 | M01 | 🟡 → 🟢 | `3ebe4c7` (merge en `integration/i1-prep`): `Ran 1072` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +8 tests) | `docs/plan/evidence/M01.md` | `css-inline~=0.23.1` + `coverage` en CI y READMEs; configuración `[tool.coverage.*]`; los wheels se comprueban en CI (resultado se anota en el cierre de I1); commits con `--no-verify` por el hook local roto |
+| 2026-11-13 | M03 | 🟡 → 🟢 | `4d8654c` (merge en `integration/i1-prep`): `Ran 1102` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +38 tests) | `docs/plan/evidence/M03.md` | A2/A3 en `output.py`; `output.py` 99 %; NFR-20 informativo 35,9 µs; sin pragmas nuevos |

@@ -1732,14 +1732,14 @@ class SearchBodyTest(SearchFixtureTest):
     def test_ut_sr_05_03_message_without_mailbox_is_unavailable_and_unreadable(self) -> None:
         """UT-SR-05.03: a message without a folder gives false/false/false."""
         row = {"uid": 83143, "mailbox_id": 0}
-        snippet, body, loaded = search._body_fields(self.backend, row)
-        self.assertEqual(snippet, "")
+        body = search._load_body(self.backend, row)
+        self.assertEqual(search._body_snippet(body.text), "")
         self.assertEqual(
-            body,
+            search._body_payload(body),
             {"available": False, "readable": False, "partial": False, "truncated": False},
         )
-        self.assertIsNone(loaded["source"]["emlx_path"])
-        self.assertEqual(warning_codes(loaded["warnings"]), ["W_BODY_UNREADABLE"])
+        self.assertIsNone(body.source["emlx_path"])
+        self.assertEqual(warning_codes(body.warnings), ["W_BODY_UNREADABLE"])
 
     def test_ut_sr_05_04_recoverable_corrupt_emlx_is_readable_with_corrupt_warning(self) -> None:
         """UT-SR-05.04: a recoverable corrupt .emlx gives true/true/false + W_EMLX_CORRUPT."""
@@ -2097,6 +2097,56 @@ class FolderReferenceTest(ExtendedSearchFixtureTest):
         self.assertEqual(
             self.store.resolve_mailbox(ACCOUNT_ICLOUD, "Facturas").rowid, 22
         )
+
+
+class CanonicalFieldOrderTest(SearchFixtureTest):
+    """UT-SR-17: canonical key order of the assembled message objects."""
+
+    def test_ut_sr_17_01_search_row_keys_follow_the_canonical_order(self) -> None:
+        """UT-SR-17.01: every ``search`` row has ``SEARCH_ROW_FIELDS`` keys in order."""
+        result = search.run_search(self.backend, self.config, search.Filters())
+        self.assertEqual(len(result["messages"]), len(DEFAULT_UIDS))
+        for message in result["messages"]:
+            with self.subTest(uid=message["uid"]):
+                self.assertEqual(list(message), list(search.SEARCH_ROW_FIELDS))
+
+    def test_ut_sr_17_02_show_keys_follow_the_canonical_order(self) -> None:
+        """UT-SR-17.02: the ``show`` message has ``SHOW_FIELDS`` keys in order."""
+        synthetic = search.run_show(self.backend, self.config, 83143)["message"]
+        self.assertEqual(list(synthetic), list(search.SHOW_FIELDS))
+        self.assertEqual(list(self.outlook_show()), list(search.SHOW_FIELDS))
+
+    def outlook_show(self) -> dict:
+        """The ``show`` message over the in-memory Outlook double."""
+        import tempfile
+        from pathlib import Path
+
+        from mailquery.backends import get_backend, outlook_com
+        from tests.fakes import outlook as fk
+
+        fake = fk.FakeOutlook.default()
+        patcher = mock.patch.object(outlook_com, "get_drive_type", fake.drive_type)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        home = Path(temporary.name)
+        write_config(home, '[scope."ana.perez@example.com"]\n')
+        backend = get_backend(
+            platform="win32",
+            outlook_app=fake,
+            registry=fake.registry,
+            security_center=fake.security_center,
+            pywin32=None,
+            tmp_root=home / "tmp",
+        )
+        self.addCleanup(backend.close)
+        return search.run_show(
+            backend,
+            load_config(home),
+            fake.item("normal").entry_id,
+            driver=backend.driver,
+        )["message"]
 
 
 def search_attachments_warning() -> str:

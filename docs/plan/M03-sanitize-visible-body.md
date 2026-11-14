@@ -2,7 +2,7 @@
 
 **Lote:** I1 · rama del lote `integration/i1-prep` · **Oleada:** W1 (en paralelo con M01, M02 y M04)
 **Rama:** `feature/m03-sanitize-visible-body`, creada desde la punta de `integration/i1-prep` · **Worktree:** `../mailquery-wt/m03`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F4 cerradas; pendiente de integración)
 
 ## 1. Objetivo
 
@@ -48,10 +48,10 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — A2 | `sanitize_text` según RF-52; `CONTENT_NOTICE`; UT-CNT-01, UT-CNT-04; ajustar UT-OUT si hace falta | ⚪ |
-| F2 — Conversión con omisión | Dos flujos, reglas de RF-53, conteo D-03; UT-CNT-02 | ⚪ |
-| F3 — Paso a línea | `css-inline` perezoso, opciones, fallback; UT-CNT-03 (incluye servidor loopback) | ⚪ |
-| F4 — Cierre | Suite completa, medición informativa de RNF-20 (D-15), evidencia cruda, bloques | ⚪ |
+| F1 — A2 | `sanitize_text` según RF-52; `CONTENT_NOTICE`; UT-CNT-01, UT-CNT-04; ajustar UT-OUT si hace falta | 🟢 |
+| F2 — Conversión con omisión | Dos flujos, reglas de RF-53, conteo D-03; UT-CNT-02 | 🟢 |
+| F3 — Paso a línea | `css-inline` perezoso, opciones, fallback; UT-CNT-03 (incluye servidor loopback) | 🟢 |
+| F4 — Cierre | Suite completa, medición informativa de RNF-20 (D-15), evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -162,4 +162,7 @@ python -B -m coverage report --include=src/mailquery/output.py --fail-under=85
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-13 | F1 | A2 en `sanitize_text` (ANSI CSI/OSC, C0/DEL/C1/`Cf`, selectores de variación y rellenos Hangul; atajo ASCII y memoización por carácter); `CONTENT_NOTICE`; UT-CNT-01 (13 casos) y UT-CNT-04 verdes solos. UT-OUT sin cambios: ninguno fijaba C1 ni `Cf`. |
+| 2026-11-13 | F2 | `HtmlText`, `html_body_to_text` y `html_to_text` como atajo; flujos visible y omitido; omisión por `hidden` y por `style` de RF-53, fin por etiqueta de cierre y conteo D-03; UT-CNT-02 (12 casos) verde solo. |
+| 2026-11-13 | F3 | Importación perezosa de `css-inline` 0.23.1 en `output._css_inline` (centinela «no intentado»/«no disponible»), constructor con `load_remote_stylesheets=False` y sin `base_url`, fallback ante cualquier excepción; UT-CNT-03 (11 casos, servidor loopback en `127.0.0.1`) verde solo. |
+| 2026-11-13 | F4 | Suite completa sin fallos nuevos frente a la línea base del lote; cobertura de `output.py` sobre el umbral; medición informativa del paso a línea; semáforos y bloques entregados al orquestador. |

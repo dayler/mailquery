@@ -55,9 +55,9 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Fixtures | `active_content_samples.py`: PDF con y sin marcadores, OLE con y sin `_VBA_PROJECT`, ZIP con `vbaProject.bin`, `.docx` sin macros con entradas `.bin` propias, ZIP con `factura.pdf.exe`, ZIP con solo PDF, ZIP cifrado (bytes fabricados con el bit 0 de *general purpose flag* en las cabeceras local y central), archivo con `PK\x03\x04` y directorio central roto | ⚪ |
-| F2 — Detector | `active_content_types` según la sección 2 | ⚪ |
-| F3 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Fixtures | `active_content_samples.py`: PDF con y sin marcadores, OLE con y sin `_VBA_PROJECT`, ZIP con `vbaProject.bin`, `.docx` sin macros con entradas `.bin` propias, ZIP con `factura.pdf.exe`, ZIP con solo PDF, ZIP cifrado (bytes fabricados con el bit 0 de *general purpose flag* en las cabeceras local y central), archivo con `PK\x03\x04` y directorio central roto | 🟢 |
+| F2 — Detector | `active_content_types` según la sección 2 | 🟢 |
+| F3 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -148,4 +148,6 @@ Ninguno.
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-13 | F1 | `tests/fixtures/active_content_samples.py` con PDF, OLE y ZIP de prueba; el ZIP cifrado activa el bit 0 en las cabeceras local y central y el ZIP roto conserva la firma local sin directorio central legible. |
+| 2026-11-13 | F2 | `src/mailquery/attachments/active_content.py` con `ACTIVE_CONTENT_TYPES` y `active_content_types`; lectura con `mmap` de solo lectura y sin descomprimir. |
+| 2026-11-13 | F3 | UT-ACT-01–04 verdes solos, suite completa y cobertura medidas; informe con evidencia y bloques entregado al orquestador. |
