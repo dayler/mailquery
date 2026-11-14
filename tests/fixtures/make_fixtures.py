@@ -30,6 +30,8 @@ from email.policy import SMTP
 from email.utils import format_datetime, formataddr
 from pathlib import Path
 
+from tests.fixtures.content_samples import HTML_HIDDEN_INLINE_AND_SHEET
+
 VERSION = "V10"
 VERSION_UUID = "11111111-2222-4333-8444-555555555555"
 
@@ -314,6 +316,8 @@ UID_BODY_HIDDEN = 83301
 UID_BODY_NO_HTML_TEXT = 83302
 UID_BODY_ALL_HIDDEN = 83303
 UID_BODY_SENDER_HEADERS = 83304
+UID_BODY_STYLE_HIDDEN = 83305
+UID_BODY_SMIME_AUTH = 83306
 
 BODY_SOURCE_MESSAGES: tuple[FixtureMessage, ...] = (
     FixtureMessage(
@@ -369,8 +373,8 @@ BODY_SOURCE_MESSAGES: tuple[FixtureMessage, ...] = (
         mailbox=MAILBOX_ICLOUD_INBOX,
         subject="Sender headers",
         sender=("Sender Headers", "headers@fixture.example"),
-        age=timedelta(hours=6),
-        body="A message with sender headers.",
+        age=timedelta(minutes=3),
+        body="A message with sender headers. Revisa https://evil.example/pay.",
         global_id=205,
         message_id_header="<headers-83304@fixture.example>",
         extra_headers=(
@@ -381,6 +385,34 @@ BODY_SOURCE_MESSAGES: tuple[FixtureMessage, ...] = (
             ("Authentication-Results", "mx.second.example; spf=softfail; dkim=none"),
             ("ARC-Authentication-Results", "i=1; mx.arc.example; spf=fail; dkim=fail"),
             ("Reply-To", "Soporte <soporte@other.example>"),
+        ),
+    ),
+    FixtureMessage(
+        uid=UID_BODY_STYLE_HIDDEN,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Sheet hidden text",
+        sender=("Sheet Sender", "sheet-body@fixture.example"),
+        age=timedelta(minutes=1),
+        body="Texto plano alternativo.",
+        html=HTML_HIDDEN_INLINE_AND_SHEET,
+        global_id=206,
+        message_id_header="<sheet-hidden-83305@fixture.example>",
+    ),
+    FixtureMessage(
+        uid=UID_BODY_SMIME_AUTH,
+        mailbox=MAILBOX_ICLOUD_INBOX,
+        subject="Signed S/MIME with auth results",
+        sender=("Signed Sender", "signed-headers@fixture.example"),
+        age=timedelta(minutes=8),
+        body="Signed body.",
+        smime="signed",
+        global_id=207,
+        message_id_header="<smime-auth-83306@fixture.example>",
+        extra_headers=(
+            (
+                "Authentication-Results",
+                "mx.first.example; spf=pass; dkim=none; dmarc=fail header.from=example",
+            ),
         ),
     ),
 )

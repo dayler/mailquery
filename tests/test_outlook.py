@@ -3389,10 +3389,16 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
             fake = self.use(fk.SCENARIOS[name](), scope)
             (self.home / "state.json").unlink(missing_ok=True)  # each scenario starts afresh
             runs: list[tuple[str, ...]] = [("mailboxes",)]
-            runs += [("search", *flags) for flags in self._SEARCHES]
-            runs += [("new", *flags) for flags in self._NEWS]
-            runs += [("show", spec.entry_id) for spec in fake.items.values()]
-            runs += [("show", "00AB"), ("show", "ab12")]
+            runs += [("search", *flags, "--strip-links") for flags in self._SEARCHES]
+            runs += [("new", *flags, "--strip-links") for flags in self._NEWS]
+            runs += [
+                ("show", spec.entry_id, "--strip-links")
+                for spec in fake.items.values()
+            ]
+            runs += [
+                ("show", "00AB", "--strip-links"),
+                ("show", "ab12", "--strip-links"),
+            ]
             attachment_items = [
                 spec for spec in fake.items.values() if spec.attachments
             ] or list(fake.items.values())

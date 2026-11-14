@@ -2132,7 +2132,21 @@ class ConfigExampleTest(_DocumentationCase):
         self.assertRegex(template, r'\[scope\."(?!<driver>|apple_mail:|outlook:|graph:)[^"]+"\]')
         self.assertEqual(tomllib.loads(template), {}, "the template must keep all sections commented")
         documented = set(re.findall(r"(?m)^#\s*\[([a-z][a-z0-9_-]*)", template))
-        self.assertTrue(documented <= {"logging", "search", "new", "attachments", "scope"})
+        self.assertTrue(
+            documented <= {"logging", "search", "new", "attachments", "content", "scope"}
+        )
+
+    def test_doc_06_04_example_documents_content_url_display(self) -> None:
+        """DOC-06.04: the example carries the commented [content] block and it loads as neutralize."""
+        template = _read(CONFIG_EXAMPLE)
+        self.assertIn("# [content]", template)
+        self.assertIn('# url_display = "neutralize"', template)
+        explicit = (
+            "[content]\n"
+            'url_display = "neutralize"   # neutralize | keep | strip (--strip-links forces strip)\n'
+        )
+        parsed = self._load(explicit)
+        self.assertEqual(parsed.content.url_display, "neutralize")
 
     def test_doc_06_03_no_previous_version_keys(self) -> None:
         """DOC-06.03: the example keeps no keys retired by previous versions."""

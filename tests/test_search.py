@@ -1733,9 +1733,9 @@ class SearchBodyTest(SearchFixtureTest):
         """UT-SR-05.03: a message without a folder gives false/false/false."""
         row = {"uid": 83143, "mailbox_id": 0}
         body = search._load_body(self.backend, row)
-        self.assertEqual(search._body_snippet(body.text), "")
+        self.assertEqual(search._body_snippet(body.text, "neutralize"), "")
         self.assertEqual(
-            search._body_payload(body),
+            search._body_payload(body, body.text, "neutralize"),
             {"available": False, "readable": False, "partial": False, "truncated": False},
         )
         self.assertIsNone(body.source["emlx_path"])

@@ -9,12 +9,16 @@ synthetic fixture store.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import os
 import stat
 import tempfile
 import unittest
 from pathlib import Path
 
+from mailquery import cli
 from mailquery.accounts import AccountLabel
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import INTERNAL_CAPABILITIES, package_version
@@ -22,6 +26,7 @@ from mailquery.config import (
     APP_HOME_SUBDIRS,
     AttachmentsConfig,
     Config,
+    ContentConfig,
     LoggingConfig,
     NewConfig,
     ScopeEntry,
@@ -1261,6 +1266,65 @@ class AttachmentsConfigTests(_DriverConfigCase):
         ):
             with self.subTest(content=content):
                 self._load_error(content, "E_CONFIG_INVALID")
+
+
+class ContentConfigTests(_DriverConfigCase):
+    """UT-CFG-03 — ``[content]`` defaults, URL display modes and closed schema."""
+
+    def _content(self, content: str) -> ContentConfig:
+        return self._load(content).content
+
+    def test_ut_cfg_03_01_absent_table_defaults_to_neutralize_and_modes_are_valid(self) -> None:
+        """UT-CFG-03.01: no [content] table ⇒ neutralize; neutralize, keep and strip are valid."""
+        self.assertEqual(self._content("# no content table\n").url_display, "neutralize")
+        for mode in ("neutralize", "keep", "strip"):
+            with self.subTest(mode=mode):
+                config = self._content(f'[content]\nurl_display = "{mode}"\n')
+                self.assertEqual(config.url_display, mode)
+
+    def test_ut_cfg_03_02_invalid_url_display_is_config_invalid_with_the_modes_in_the_hint(self) -> None:
+        """UT-CFG-03.02: an unknown or non-string value ⇒ E_CONFIG_INVALID with the valid modes."""
+        for content, got in (
+            ('[content]\nurl_display = "raw"\n', "raw"),
+            ("[content]\nurl_display = 1\n", "1"),
+        ):
+            with self.subTest(content=content):
+                error = self._load_error(content, "E_CONFIG_INVALID")
+                self.assertEqual(error.exit_code, 2)
+                self.assertIn("neutralize", error.hint)
+                self.assertIn("keep", error.hint)
+                self.assertIn("strip", error.hint)
+                self.assertIn(got, error.message)
+                self._assert_error_before_the_store(content)
+
+    def test_ut_cfg_03_03_unknown_key_in_content_is_config_invalid(self) -> None:
+        """UT-CFG-03.03: an unknown key in [content] ⇒ E_CONFIG_INVALID (exit 2)."""
+        error = self._load_error(
+            '[content]\nurl_display = "keep"\nurl_display_extra = true\n',
+            "E_CONFIG_INVALID",
+        )
+        self.assertEqual(error.exit_code, 2)
+        self.assertIn("url_display_extra", error.message)
+
+    def test_ut_cfg_03_04_non_table_content_is_config_invalid_before_the_store(self) -> None:
+        """UT-CFG-03.04: content = 1 ⇒ E_CONFIG_INVALID (exit 2) before the store is opened."""
+        error = self._load_error("content = 1\n", "E_CONFIG_INVALID")
+        self.assertEqual(error.exit_code, 2)
+        self._assert_error_before_the_store("content = 1\n")
+
+    def _assert_error_before_the_store(self, content: str) -> None:
+        """The CLI reports the config error instead of a missing-store error."""
+        write_config(self.home, content)
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_mail_root = Path(tmp) / "missing-mail"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = cli.main(
+                    ["search"], home=self.home, mail_root=missing_mail_root
+                )
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["error"]["code"], "E_CONFIG_INVALID")
 
 
 # --------------------------------------------------------------------------- #

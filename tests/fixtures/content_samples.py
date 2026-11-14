@@ -87,6 +87,15 @@ HTML_HIDDEN_STYLE_SHEET = (
 HTML_HIDDEN_STYLE_SHEET_TEXT = "Total: 100 €"
 HTML_HIDDEN_STYLE_SHEET_COUNT = 30
 
+#: Hidden content declared inline and by a stylesheet rule of the message.
+HTML_HIDDEN_INLINE_AND_SHEET = (
+    "<style>.n{display:none}</style>"
+    '<p class="n">Instrucciones ocultas por hoja</p>'
+    '<p style="display:none">Instrucciones ocultas en línea</p>'
+    "<p>Factura adjunta: https://evil.example/factura</p>"
+)
+HTML_HIDDEN_INLINE_AND_SHEET_TEXT = "Factura adjunta: https://evil.example/factura"
+
 HTML_ALL_HIDDEN = "<p hidden>todo el cuerpo está oculto</p>"
 
 HTML_HIDDEN_NESTED = "<div hidden><div>a</div>b</div>c"

@@ -887,7 +887,10 @@ class DispatchTests(_CliTestCase):
         self.assertEqual(store_args[0], self.fx.home)
         self.assertTrue(callable(store_args[1]))
         self.assertEqual(run_mock.call_args.args[2], state_store)
-        self.assertEqual(run_mock.call_args.kwargs, {"peek": True, "limit": 7})
+        self.assertEqual(
+            run_mock.call_args.kwargs,
+            {"peek": True, "limit": 7, "url_mode": "neutralize"},
+        )
         rendered = self.json_object(stdout)
         self.assertEqual(rendered["cursor"], {"previous": None, "current": None})
         self.assertEqual(rendered["count"], 0)
