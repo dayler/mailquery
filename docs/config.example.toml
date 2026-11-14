@@ -106,9 +106,10 @@
 #   [scope."<account uuid>"]                          # by full UUID (`mailboxes` shows it)
 #   [scope."<first 8+ chars of the uuid>"]            # by unique prefix (>= 8)
 #
-# Each mailbox_list item is a name, path or folder URL as shown by
-# `mailquery mailboxes`. It must exist in that account; otherwise the command
-# fails with E_MAILBOX_NOT_FOUND.
+# Each mailbox_list item is the path shown by `mailquery mailboxes`; the name
+# or the URL shown by `mailquery mailboxes --fields name,url` also work. It
+# must exist in that account; otherwise the command fails with
+# E_MAILBOX_NOT_FOUND.
 #
 # `[attachments]` accepts only `enabled`, `max_file_size_mb`,
 # `max_total_size_mb`, `max_count` and `timeout_seconds`; a value out of range

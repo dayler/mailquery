@@ -12,6 +12,7 @@ import argparse
 from dataclasses import replace
 import logging
 import os
+import re
 import stat
 import sys
 import textwrap
@@ -62,6 +63,7 @@ from mailquery.search import (
     GROUP_KEYS,
     GROUP_MAX_KEYS,
     GROUP_MAX_LIMIT,
+    MAILBOX_FIELDS,
     SEARCH_ROW_FIELDS,
     SHOW_FIELDS,
     Filters,
@@ -84,6 +86,10 @@ COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
 _RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
 #: Mail client named by the doctor text report, by backend name.
 _CLIENT_NAMES = {"apple_mail": "Apple Mail", "outlook": "Outlook"}
+#: Check names the core owns in the ``plugins`` section of ``doctor``.
+_DOCTOR_PLUGIN_RESERVED_CHECKS = frozenset({"config", "plugin"})
+#: ``detail`` of a check skipped because a check it depends on failed.
+_NOT_EVALUATED_DETAIL = re.compile(r"^not evaluated: .+ failed$")
 
 _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
@@ -94,6 +100,9 @@ _SEARCH_FIELDS = (*SEARCH_ROW_FIELDS, "all")
 _SHOW_FIELDS = (*SHOW_FIELDS, "all")
 _SEARCH_FIELDS_TEXT = ", ".join(_SEARCH_FIELDS)
 _SHOW_FIELDS_TEXT = ", ".join(_SHOW_FIELDS)
+#: Field names accepted by ``--fields`` in ``mailboxes`` (no ``all``).
+_MAILBOX_FIELDS = MAILBOX_FIELDS
+_MAILBOX_FIELDS_TEXT = ", ".join(_MAILBOX_FIELDS)
 _SEARCH_FIELDS_BLOCK = textwrap.fill(
     "Valid fields: " + _SEARCH_FIELDS_TEXT,
     width=92,
@@ -111,7 +120,7 @@ _SEARCH_GROUP_KEYS_TEXT = ", ".join(GROUP_KEYS)
 
 _ROOT_EPILOG = """\
 Examples:
-  mailquery doctor                     environment and read-only preflight
+  mailquery doctor                     environment and read-only diagnosis
   mailquery mailboxes                  accounts, folders and included flags
   mailquery search --since 1w --unread
   mailquery search --text "*invoice*" --since 1mo
@@ -150,22 +159,30 @@ _DOCTOR_EPILOG = """\
 Examples:
   mailquery doctor
   mailquery doctor --json
+  mailquery doctor --json --failures
   mailquery --log-level debug doctor
 
 Notes:
   Prints a human-readable report by default; --json emits the machine-readable
   payload. Always exits 0 when the diagnosis can run; failures are reported as
-  checks with ok = false, plus a Result line with the failed count.
+  checks with ok = false, plus a Result line with the failed count. With
+  --failures only the checks that fail (and the ones not evaluated) are shown.
+  Declared external plugins add their own checks under a Plugins section.
 """
 
 _MAILBOXES_EPILOG = """\
 Examples:
   mailquery mailboxes
+  mailquery mailboxes --fields name,url
+  mailquery mailboxes --fields total,unread
 
 Notes:
-  A folder is included when its account is declared in ~/.mailquery/config.toml
-  and the folder is INBOX or listed in mailbox_list. Counters are recalculated
-  from the mail store because the mail client's own counters are not reliable.
+  Each account lists its folders once, and a folder is included when its account
+  is declared in ~/.mailquery/config.toml and the folder is INBOX or listed in
+  mailbox_list. Every folder shows its path and whether it is included; name, url,
+  total and unread are added only when requested with --fields. Counters are
+  calculated from the mail store only with --fields total or unread, because the
+  mail client's own counters are not reliable.
 """
 
 _SEARCH_EPILOG = """\
@@ -403,17 +420,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the machine-readable JSON payload instead of the human report",
     )
+    diagnosis.add_argument(
+        "--failures",
+        action="store_true",
+        help="show only the checks that fail and the ones not evaluated",
+    )
 
     mailboxes_parser = subparsers.add_parser(
         "mailboxes",
-        help="list accounts, folders, counters and included folders",
-        description="List accounts, folders, counters and whether they are included "
-        "in the configured scope.",
+        help="list accounts and their folders (counters with --fields)",
+        description="List accounts and their folders, and whether they are included\n"
+        "in the configured scope. Counters are calculated only with --fields total\n"
+        "or unread.",
         epilog=_MAILBOXES_EPILOG,
         formatter_class=_HelpFormatter,
     )
     mailboxes_parser.set_defaults(command="mailboxes")
     _style_parser(mailboxes_parser, root=False)
+    mailboxes_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="adds name, url, total and unread to every folder; comma-separated "
+        f"or repeatable: {_MAILBOX_FIELDS_TEXT}",
+    )
 
     search_parser = subparsers.add_parser(
         "search",
@@ -668,7 +698,7 @@ def _main(
         return _report_error(exc, _guess_command(raw_argv))
 
     command = str(args.command)
-    if command in ("search", "new", "show"):
+    if command in ("search", "new", "show", "mailboxes"):
         # Before the home exists, the config is read or the store is opened.
         try:
             args.fields_selection = _fields_selection(args, command)
@@ -717,6 +747,7 @@ def _main(
             backend,
             args.log_level,
             json_output=bool(getattr(args, "json", False)),
+            failures=bool(getattr(args, "failures", False)),
         )
     return _run_command(
         args, home_path, mail_root, accounts_db, backend, registry
@@ -1111,7 +1142,7 @@ def _execute(
             args, config, home_path, backend, mapping, native
         )
     elif command == "mailboxes":
-        payload = run_mailboxes(backend, config, **extra)
+        payload = run_mailboxes(backend, config, fields=fields, **extra)
     elif command == "search":
         payload = run_search(
             backend,
@@ -1188,7 +1219,10 @@ def _fields_selection(
     raw = getattr(args, "fields", None)
     if raw is None:
         return None
-    valid = _SEARCH_FIELDS if command in ("search", "new") else _SHOW_FIELDS
+    if command == "mailboxes":
+        valid = _MAILBOX_FIELDS
+    else:
+        valid = _SEARCH_FIELDS if command in ("search", "new") else _SHOW_FIELDS
     selected: list[str] = []
     for value in raw:
         for item in str(value).split(","):
@@ -1613,36 +1647,46 @@ def _run_doctor(
     log_level: str | None,
     *,
     json_output: bool = False,
+    failures: bool = False,
 ) -> int:
     level, max_size_mb = _doctor_log_settings(home_path, log_level)
     logger = _best_effort_logger(home_path, level, max_size_mb)
     selected = None
     run = _DoctorRun(home_path)
     client = _CLIENT_NAMES["apple_mail"]
+    checks: list[dict] = []
     try:
         selected = _make_backend(home_path, mail_root, accounts_db, backend)
         client = _CLIENT_NAMES.get(str(getattr(selected, "driver", "")), client)
         _bind_command(selected, "doctor")
-        _bind_doctor_timeout(selected, run, json_output, logger, client)
+        _bind_doctor_timeout(selected, run, json_output, logger, client, failures)
         registry = BackendRegistry()
         checks = _collect_doctor_checks(home_path, selected, run, registry=registry)
     except Exception as exc:  # noqa: BLE001 - doctor never raises
         checks = [{"name": "doctor", "ok": False, "detail": error_detail(exc)}]
     finally:
         _close_backend(selected)
-    _emit_doctor_report(checks, json_output, logger, client)
+    _emit_doctor_report(
+        checks, list(run.plugins), json_output, logger, client, failures=failures
+    )
     return 0
 
 
 def _bind_doctor_timeout(
-    backend: Any, run: "_DoctorRun", json_output: bool, logger: Any, client: str
+    backend: Any,
+    run: "_DoctorRun",
+    json_output: bool,
+    logger: Any,
+    client: str,
+    failures: bool = False,
 ) -> None:
     """``doctor`` (Outlook): on a COM timeout, complete the report and exit 0.
 
     The hook runs in the watchdog thread while the main thread is blocked in
     COM: it completes the checks (the running check with the
     timeout text, its dependents ``not evaluated``), writes the report in the
-    ``checks[]`` order, flushes and ends the process with ``os._exit(0)``.
+    ``checks[]`` order, flushes and ends the process with ``os._exit(0)``. The
+    plugin sections were already calculated, so the report keeps them whole.
     """
     bind = getattr(backend, "bind_doctor_timeout", None)
     if not callable(bind):
@@ -1651,7 +1695,14 @@ def _bind_doctor_timeout(
     def finish(backend_checks: list[dict] | None, detail: str) -> None:
         try:
             checks = run.after_timeout(backend, backend_checks, detail)
-            _emit_doctor_report(checks, json_output, logger, client)
+            _emit_doctor_report(
+                checks,
+                list(run.plugins),
+                json_output,
+                logger,
+                client,
+                failures=failures,
+            )
         finally:
             for stream in (sys.stdout, sys.stderr):
                 try:
@@ -1669,51 +1720,163 @@ def _bind_doctor_timeout(
 
 
 def _emit_doctor_report(
-    checks: list[dict], json_output: bool, logger: Any, client: str
+    checks: list[dict],
+    plugins: list[dict],
+    json_output: bool,
+    logger: Any,
+    client: str,
+    *,
+    failures: bool = False,
 ) -> None:
-    """Write the doctor payload (JSON or text report) and log the end line."""
-    payload = _success_payload("doctor", {"checks": checks, "warnings": []})
+    """Write the doctor payload (JSON or text report) and log the end line.
+
+    With ``failures`` the payload keeps only the checks that fail and the ones
+    not evaluated, plus the ``not_evaluated`` names after ``checks``; the same
+    filtering applies to every plugin section. Checks and plugins are always
+    calculated whole, so ``failures`` only changes what is shown.
+    """
+    total_checks, passed_checks = _doctor_totals(checks, plugins)
+    if failures:
+        kept_checks, not_evaluated = _filter_doctor_checks(checks)
+        kept_plugins = _filter_doctor_plugins(plugins)
+        payload = _success_payload(
+            "doctor",
+            {
+                "checks": kept_checks,
+                "not_evaluated": not_evaluated,
+                "plugins": kept_plugins,
+                "warnings": [],
+            },
+        )
+    else:
+        payload = _success_payload(
+            "doctor", {"checks": checks, "plugins": plugins, "warnings": []}
+        )
     if json_output:
         write_json(payload)
     else:
-        sys.stdout.write(_render_doctor_report(payload, client=client) + "\n")
+        sys.stdout.write(
+            _render_doctor_report(
+                payload,
+                client=client,
+                failures=failures,
+                totals=(passed_checks, total_checks),
+            )
+            + "\n"
+        )
         sys.stdout.flush()
     if logger is not None:
-        passed = sum(1 for check in checks if check.get("ok"))
         logger.info(
             "event=end command=doctor exit_code=0 checks=%d/%d",
-            passed,
-            len(checks),
+            passed_checks,
+            total_checks,
         )
 
 
-def _render_doctor_report(payload: dict, *, client: str = "Apple Mail") -> str:
+def _doctor_totals(checks: list[dict], plugins: list[dict]) -> tuple[int, int]:
+    """Total and passed checks of the whole report, plugin checks included."""
+    every = list(checks) + [
+        check
+        for plugin in plugins
+        for check in (plugin.get("checks") or [])
+        if isinstance(check, dict)
+    ]
+    return len(every), sum(1 for check in every if check.get("ok"))
+
+
+def _filter_doctor_checks(checks: list[dict]) -> tuple[list[dict], list[str]]:
+    """Split ``checks`` into the failing ones and the names of the not evaluated.
+
+    A check whose ``detail`` is exactly ``not evaluated: <check> failed`` was
+    skipped because a check it depends on failed; any other ``ok: false`` check
+    (a real failure or ``not evaluated: <concrete cause>``) is kept.
+    """
+    failing: list[dict] = []
+    not_evaluated: list[str] = []
+    for check in checks:
+        if check.get("ok"):
+            continue
+        detail = str(check.get("detail", ""))
+        if _NOT_EVALUATED_DETAIL.match(detail):
+            not_evaluated.append(str(check.get("name", "")))
+        else:
+            failing.append(check)
+    return failing, not_evaluated
+
+
+def _filter_doctor_plugins(plugins: list[dict]) -> list[dict]:
+    """Keep the plugins with a failing check or with a check not evaluated."""
+    kept: list[dict] = []
+    for plugin in plugins:
+        failing, not_evaluated = _filter_doctor_checks(plugin.get("checks") or [])
+        if not failing and not not_evaluated:
+            continue
+        kept.append(
+            {
+                "driver": plugin.get("driver", ""),
+                "checks": failing,
+                "not_evaluated": not_evaluated,
+            }
+        )
+    return kept
+
+
+def _render_doctor_report(
+    payload: dict,
+    *,
+    client: str = "Apple Mail",
+    failures: bool = False,
+    totals: tuple[int, int] | None = None,
+) -> str:
     """Render the doctor payload as a human-readable report in help style."""
     checks = [check for check in payload.get("checks") or [] if isinstance(check, dict)]
+    plugins = [
+        plugin for plugin in payload.get("plugins") or [] if isinstance(plugin, dict)
+    ]
     warnings = [str(warning) for warning in payload.get("warnings") or []]
     width = _help_width()
-    name_width = min(20, max((len(str(check.get("name", ""))) for check in checks), default=0))
+    every_check = list(checks) + [
+        check
+        for plugin in plugins
+        for check in (plugin.get("checks") or [])
+        if isinstance(check, dict)
+    ]
+    name_width = min(
+        20, max((len(str(check.get("name", ""))) for check in every_check), default=0)
+    )
 
     lines = [
-        "mailquery doctor - environment and read-only preflight",
+        "mailquery doctor - environment and read-only diagnosis",
         f"Generated at: {payload.get('generated_at', now_iso())}",
         "",
-        "Checks:",
     ]
-    passed = 0
-    for check in checks:
-        ok = bool(check.get("ok"))
-        passed += 1 if ok else 0
-        status = "[ok]  " if ok else "[FAIL]"
-        name = str(check.get("name", ""))
-        detail = str(check.get("detail", "")).replace("\n", " ").strip()
-        prefix = f"  {status} {name.ljust(name_width)}  "
-        wrapped = textwrap.wrap(detail, width=max(20, width - len(prefix))) or [""]
-        lines.append(prefix + wrapped[0])
-        for extra in wrapped[1:]:
-            lines.append(" " * len(prefix) + extra)
+    if failures:
+        lines.extend(
+            _render_failure_sections(
+                payload, checks, plugins, name_width=name_width, width=width
+            )
+        )
+    else:
+        lines.append("Checks:")
+        lines.extend(_render_check_rows(checks, name_width=name_width, width=width))
+        for plugin in plugins:
+            lines.append("")
+            lines.append("Plugins:")
+            lines.append(f"  {plugin.get('driver', '')}")
+            lines.extend(
+                _render_check_rows(
+                    plugin.get("checks") or [],
+                    name_width=name_width,
+                    width=width,
+                    indent="    ",
+                )
+            )
 
-    total = len(checks)
+    if totals is None:
+        passed = sum(1 for check in every_check if check.get("ok"))
+        total = len(every_check)
+    else:
+        passed, total = totals
     failed = total - passed
     result = f"{passed}/{total} checks passed"
     if failed:
@@ -1734,11 +1897,73 @@ def _render_doctor_report(payload: dict, *, client: str = "Apple Mail") -> str:
     return "\n".join(lines)
 
 
+def _render_failure_sections(
+    payload: dict,
+    checks: list[dict],
+    plugins: list[dict],
+    *,
+    name_width: int,
+    width: int,
+) -> list[str]:
+    """Sections of ``doctor --failures``: only failures and the not evaluated line."""
+    sections: list[list[str]] = []
+    top_rows = _render_check_rows(checks, name_width=name_width, width=width)
+    top_not_evaluated = [str(name) for name in payload.get("not_evaluated") or []]
+    if top_not_evaluated:
+        top_rows.append(f"not evaluated: {', '.join(top_not_evaluated)}")
+    if top_rows:
+        sections.append(["Checks:", *top_rows])
+    for plugin in plugins:
+        rows = _render_check_rows(
+            plugin.get("checks") or [], name_width=name_width, width=width, indent="    "
+        )
+        names = [str(name) for name in plugin.get("not_evaluated") or []]
+        if names:
+            rows.append(f"    not evaluated: {', '.join(names)}")
+        if rows:
+            sections.append(["Plugins:", f"  {plugin.get('driver', '')}", *rows])
+    if not sections:
+        return ["Checks:", "all checks passed"]
+    joined: list[str] = []
+    for index, section in enumerate(sections):
+        if index:
+            joined.append("")
+        joined.extend(section)
+    return joined
+
+
+def _render_check_rows(
+    checks: list[dict],
+    *,
+    name_width: int,
+    width: int,
+    indent: str = "  ",
+) -> list[str]:
+    """One aligned row per check, wrapping ``detail`` to the help width."""
+    rows: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        ok = bool(check.get("ok"))
+        status = "[ok]  " if ok else "[FAIL]"
+        name = str(check.get("name", ""))
+        detail = str(check.get("detail", "")).replace("\n", " ").strip()
+        prefix = f"{indent}{status} {name.ljust(name_width)}  "
+        wrapped = textwrap.wrap(detail, width=max(20, width - len(prefix))) or [""]
+        rows.append(prefix + wrapped[0])
+        for extra in wrapped[1:]:
+            rows.append(" " * len(prefix) + extra)
+    return rows
+
+
 class _DoctorRun:
     """Progress of one ``doctor`` run, shared with the COM timeout hook.
 
     ``checks`` holds the finished common checks by name, ``backend_checks`` the
-    backend's once they are done and ``config`` the parsed ``config.toml``.
+    backend's once they are done, ``config`` the parsed ``config.toml``,
+    ``driver_ok`` the outcome of the ``driver`` check per declared driver and
+    ``plugins`` the plugin sections, calculated before the backend checks so a
+    COM timeout still reports them whole.
     """
 
     def __init__(self, home_path: Path) -> None:
@@ -1747,6 +1972,8 @@ class _DoctorRun:
         self.backend_checks: list[dict] | None = None
         self.config: Config | None = None
         self.config_error: Exception | None = None
+        self.driver_ok: dict[str, bool] = {}
+        self.plugins: list[dict] = []
 
     def record(self, name: str, ok: bool, detail: str) -> None:
         self.checks[name] = {"name": name, "ok": bool(ok), "detail": str(detail)}
@@ -1790,7 +2017,8 @@ def _collect_doctor_checks(
 
     Evaluation order: the checks that never call the mail client first
     (``python``, ``home``, ``config`` syntax, ``driver``, ``state``, ``lock``),
-    then the backend checks and last the ``config`` resolution.
+    then the plugin sections (each plugin call has its own deadline) and last
+    the backend checks and the ``config`` resolution.
     """
     run = run if run is not None else _DoctorRun(home_path)
     registry = registry if registry is not None else BackendRegistry()
@@ -1895,6 +2123,9 @@ def _collect_doctor_checks(
     except Exception as exc:  # noqa: BLE001 - diagnostics only
         run.record("lock", False, error_detail(exc))
 
+    # plugins (before the backend checks: each plugin call has its own deadline)
+    run.plugins = _collect_plugin_sections(run, backend, registry)
+
     # backend checks (store/pywin32, ..., accounts_db/object_model_guard) ------
     try:
         backend_checks = [dict(check) for check in backend.doctor_checks()]
@@ -1905,6 +2136,168 @@ def _collect_doctor_checks(
     # config resolution --------------------------------------------------------
     _record_config_check(run, backend)
     return run.ordered()
+
+
+def _collect_plugin_sections(
+    run: _DoctorRun, backend: Any, registry: BackendRegistry
+) -> list[dict]:
+    """One ``{"driver", "checks"}`` section per external driver declared in ``[scope]``.
+
+    The order is the first block of each driver. A plugin that did not pass the
+    common ``driver`` check is not opened: its only check is ``config`` with
+    ``not evaluated: driver failed``. A plugin that cannot be opened, whose
+    ``doctor_checks()`` fails (exception, invalid result or timeout) or whose
+    ``config`` blocks do not resolve reports ``ok: false`` and the rest of the
+    report is unchanged. Every plugin is closed when its section is done.
+    """
+    if run.config is None:
+        return []
+    native = _backend_driver_name(backend)
+    sections: list[dict] = []
+    for driver in declared_drivers(run.config, native=native or None):
+        if driver == native:
+            continue
+        if not run.driver_ok.get(driver, True):
+            checks = [
+                {"name": "config", "ok": False, "detail": "not evaluated: driver failed"}
+            ]
+        else:
+            checks = _plugin_checks(run.home_path, run.config, driver, registry)
+        sections.append({"driver": driver, "checks": checks})
+    return sections
+
+
+def _plugin_checks(
+    home_path: Path, config: Config, driver: str, registry: BackendRegistry
+) -> list[dict]:
+    """Checks of one declared plugin: its ``doctor_checks()``, then ``config``."""
+    checks: list[dict] = []
+    instance: Any = None
+    context = PluginContext(home=home_path, tmp_dir=home_path / "tmp")
+    try:
+        instance = registry.open_drivers([driver], context=context)[driver]
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        checks.append(
+            {"name": "plugin", "ok": False, "detail": _plugin_failure_detail(driver, exc)}
+        )
+        checks.append(
+            {"name": "config", "ok": False, "detail": "not evaluated: plugin failed"}
+        )
+        return checks
+    try:
+        returned = call_driver(
+            "doctor_checks", lambda: instance.doctor_checks(), driver=driver
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        checks.append(
+            {"name": "plugin", "ok": False, "detail": _plugin_failure_detail(driver, exc)}
+        )
+    else:
+        if _valid_doctor_checks(returned):
+            checks.extend(
+                {
+                    "name": item["name"],
+                    "ok": item["ok"],
+                    "detail": item["detail"],
+                }
+                for item in returned
+            )
+        else:
+            checks.append(
+                {
+                    "name": "plugin",
+                    "ok": False,
+                    "detail": (
+                        f"E_PLUGIN_FAILED: driver '{driver}' returned an invalid "
+                        "result for doctor_checks"
+                    ),
+                }
+            )
+    try:
+        checks.append(_plugin_config_check(config, driver, instance))
+    finally:
+        _close_backend(instance)
+    return checks
+
+
+def _valid_doctor_checks(value: Any) -> bool:
+    """Whether ``doctor_checks()`` returned a list of valid plugin checks.
+
+    Every item is a mapping with exactly ``name``, ``ok`` and ``detail``; the
+    name is unique in the plugin, is not one of the names the core owns and the
+    detail is one line.
+    """
+    if not isinstance(value, (list, tuple)):
+        return False
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {"name", "ok", "detail"}:
+            return False
+        name = item["name"]
+        if not isinstance(name, str) or name in _DOCTOR_PLUGIN_RESERVED_CHECKS:
+            return False
+        if name in seen:
+            return False
+        seen.add(name)
+        if not isinstance(item["ok"], bool):
+            return False
+        detail = item["detail"]
+        if not isinstance(detail, str) or "\n" in detail or "\r" in detail:
+            return False
+    return True
+
+
+def _plugin_failure_detail(driver: str, exc: Exception) -> str:
+    """One-line detail of a failing plugin check: ``E_PLUGIN_FAILED: …`` or the timeout."""
+    if isinstance(exc, MailqueryError):
+        if exc.code == "E_CLIENT_TIMEOUT":
+            return f"timeout after 30 s: plugin '{driver}' did not respond"
+        hint = f" (hint: {exc.hint})" if exc.hint else ""
+        return f"E_PLUGIN_FAILED: {exc.message}{hint}"
+    return f"E_PLUGIN_FAILED: {error_detail(exc)}"
+
+
+def _plugin_config_check(config: Config, driver: str, instance: Any) -> dict:
+    """``config`` of one plugin: resolve its ``[scope]`` blocks with its own API.
+
+    The detail and the errors use the format of the native ``config`` check
+    (``<key> → <label> (<uuid>): INBOX, …`` or ``<key>: <code>: <message>
+    (hint: …)``). The ``accounts``/``mailboxes``/``resolve_mailbox`` calls go
+    through the driver wrapper, so each one has the plugin deadline.
+    """
+    try:
+        wrapped = wrap_driver(instance, driver=driver)
+        filtered = _config_for_driver(config, driver, driver)
+        problems: list[str] = []
+        lines: list[str] = []
+        for entry in filtered.scopes:
+            try:
+                resolved = resolve_scope(
+                    replace(filtered, scopes=(entry,)), wrapped, native=driver
+                )
+            except MailqueryError as exc:
+                hint = f" (hint: {exc.hint})" if exc.hint else ""
+                problems.append(f"{entry.key}: {exc.code}: {exc.message}{hint}")
+                continue
+            except Exception as exc:  # noqa: BLE001 - diagnostics only
+                problems.append(f"{entry.key}: {error_detail(exc)}")
+                continue
+            for scope in resolved:
+                folders = [
+                    mailbox["path"]
+                    for mailbox in scope.mailboxes
+                    if not mailbox["is_inbox"]
+                ]
+                lines.append(
+                    f"{entry.key} → {scope.account_label} ({scope.account_uuid}): "
+                    + ", ".join(["INBOX"] + folders)
+                )
+        if problems:
+            return {"name": "config", "ok": False, "detail": "; ".join(problems)}
+        detail = "; ".join(lines) or f"0 account block(s) declared for driver {driver}"
+        return {"name": "config", "ok": True, "detail": detail}
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        return {"name": "config", "ok": False, "detail": error_detail(exc)}
 
 
 def _backend_driver_name(backend: Any) -> str:
@@ -1988,16 +2381,19 @@ def _record_driver_check(run: _DoctorRun, backend: Any, registry: BackendRegistr
         else:
             suffix = ""
     for driver in drivers:
+        driver_ok = True
         try:
             if driver == native:
                 metadata = _native_driver_metadata(backend, registry)
             else:
                 metadata = registry.info(driver)
         except Exception as exc:  # noqa: BLE001 - diagnostics only
+            driver_ok = False
             ok = False
             details.append(_driver_failure_detail(driver, exc))
         else:
             details.append(_format_driver_metadata(metadata))
+        run.driver_ok[driver] = driver_ok
     if suffix:
         details.append(suffix)
     run.record("driver", ok, "; ".join(details) or "no declared drivers")
@@ -2009,9 +2405,10 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
     The resolution depends first on the ``driver`` check and then on a
     check of the backend; when one failed, the mail client is
     not called and the detail says ``not evaluated: <check> failed``. Blocks of
-    a driver other than the native one are not resolved here, so they are only
-    reported as declared. A declared
-    account that resolves to an excluded store (Outlook) adds
+    a driver other than the native one are not resolved here (their plugin
+    section resolves them), so a config with only plugin blocks reports
+    ``0 account block(s) declared for driver <native>`` with ``ok=true``. A
+    declared account that resolves to an excluded store (Outlook) adds
     ``W_STORE_EXCLUDED`` to the detail, which keeps ``ok=true``.
     """
     by_name = {str(check.get("name")): check for check in run.backend_checks or []}
@@ -2073,9 +2470,8 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
             else:
                 for entry in config.scopes:
                     if entry.driver is not None and entry.driver != native:
-                        # Accounts of a non-native driver are not resolved here; the
-                        # ``driver`` check already validated that driver.
-                        lines.append(f"{entry.key} → declared for driver {entry.driver}")
+                        # Blocks of another driver are resolved by that plugin's
+                        # own ``config`` check; the native check never lists them.
                         continue
                     try:
                         resolved = resolve_scope(
@@ -2102,8 +2498,14 @@ def _record_config_check(run: _DoctorRun, backend: Any) -> None:
             lines.extend(_store_excluded_warning(entry) for entry in excluded)
             if problems:
                 run.record("config", False, "; ".join(problems))
-            else:
+            elif lines:
                 run.record("config", True, "; ".join(lines))
+            else:
+                # Every block belongs to another driver: the native check
+                # declares none and the plugin sections resolve them.
+                run.record(
+                    "config", True, f"0 account block(s) declared for driver {native}"
+                )
     except Exception as exc:  # noqa: BLE001 - diagnostics only
         run.record("config", False, error_detail(exc))
 

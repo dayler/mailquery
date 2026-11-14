@@ -26,6 +26,8 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
 | UT-FLD | Fila por defecto de `search`/`new` y `--fields` en `search`, `new` y `show` | `tests/test_fields.py` |
 | UT-GRP | `--group-by`, `--count` y `hint` de `search` sin resultados | `tests/test_group_count.py` |
+| UT-MBX | Salida de `mailboxes` agrupada por cuenta, su `--fields` y el recuento diferido | `tests/test_mailboxes.py` |
+| UT-DR | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | `tests/test_doctor.py`, `tests/test_outlook.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -75,6 +77,12 @@ defecto de seis campos (`uid`, `subject`, `from`, `date_received`, `is_read` y
 `has_attachments`); la fila completa se valida en una segunda corrida con
 `--fields all` dentro de los casos TC-01.03–.06, TC-02.02 y TC-10.01–.02. En el
 resto de goldens, una actualización conserva los valores ya fijados.
+Los goldens `mailboxes` y `outlook/mailboxes` comparan la forma agrupada por
+cuenta sin contadores; los contadores, `name` y `url` se validan en una segunda
+corrida con `--fields name,url,total,unread` dentro de TC-01.02 y TC-02.01.
+Los goldens `doctor` (TC-01.01) y `outlook/doctor` (TC-02.07) llevan `plugins: []` después de
+`checks`; sin plugins declarados el campo existe y queda vacío, y cada plugin declarado añade un
+elemento con `driver` y `checks[]`.
 
 ## 4. Dobles y fixtures
 
@@ -106,9 +114,9 @@ Fuera de esos saltos, el número de tests es el mismo en los tres sistemas opera
 
 Son las únicas pruebas que leen el Apple Mail o el Outlook instalado; el resto usa dobles. Son de solo lectura, usan `HOME`/`USERPROFILE` temporales y no tocan el `~/.mailquery` real. Detectan el entorno y se saltan, sin fallar, donde no aplican: en Linux, en Windows sin Outlook clásico abierto, en macOS sin `~/Library/Mail` y en los runners de CI.
 
-- SMOKE-INSTALL y SMOKE-NEW: instalación con `pipx` y comandos de lectura contra el cliente real.
+- SMOKE-INSTALL y SMOKE-NEW: instalación con `pipx` y comandos de lectura contra el cliente real. SMOKE-NEW.08–.10 cubren `content_notice` y las opciones de salida, el cuerpo desde el HTML y `doctor --failures` sin plugins.
 - SMOKE-ATT-AM (macOS) y SMOKE-ATT-OL (Windows): recuperación real de un adjunto local. No imponen umbrales de tiempo.
-- Los presupuestos de rendimiento de §19 se miden en los equipos del dueño (SMOKE-NEW.07); los resultados y la deuda abierta están en [`PERFORMANCE-BACKLOG.md`](PERFORMANCE-BACKLOG.md).
+- Los presupuestos de rendimiento de §19 se miden en los equipos del dueño (SMOKE-NEW.07): `doctor`, `mailboxes` sin contadores, `search` con la fila mínima, `search --fields snippet`, `new`, `show` y `search --text`; `mailboxes --fields total,unread` se mide de forma informativa, sin aserción. Los resultados y la deuda abierta están en [`PERFORMANCE-BACKLOG.md`](PERFORMANCE-BACKLOG.md).
 - La materialización COM de Outlook (`Attachment.SaveAsFile`) solo se verifica en un equipo Windows real; en CI se usa el doble.
 
 ## 7. Matriz de criterios de aceptación
@@ -173,8 +181,14 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-O07 (delta `PRD-v2.2.md`) | `search --count` devuelve solo `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`, `warnings` y `scan`, con el total después de deduplicar y sin el límite de 200 y `hint: null`; cero resultados ⇒ `count: 0`, el hint de RF-78 y exit 0; con `--fields`, `--group-by` o `--limit` ⇒ `E_USAGE`; con `--text` aplica `PRD.md` RF-17 | UT-GRP-05 | — |
 | AC-O08 (delta `PRD-v2.2.md`) | `new --fields snippet` añade `snippet` y el cursor avanza igual que sin `--fields`; `new --group-by from` y `new --count` ⇒ `E_USAGE` (exit 2) sin tocar el cursor | UT-FLD-06 (parcial; completa con UT-GRP-06) | — |
 | AC-O09 (delta `PRD-v2.2.md`) | Un mensaje con texto oculto y URLs en el cuerpo da `W_HIDDEN_CONTENT` y cuenta esas URLs solo con `--fields snippet`, `body` o `all` en `search`/`new`, y con los campos de cuerpo de RF-74 (regla 2) en `show`; `W_SENDER_AUTH_FAILED` aparece con y sin `--fields`; con `--count` solo hay warnings de alcance. Los criterios de F1 sobre el cuerpo y los destinatarios (AC-H01–AC-H18) aplican en `search` y `new` cuando esos campos se entregan (RF-74) | UT-FLD-05 (parcial; completa con UT-GRP-09) | — |
-| AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10 (parcial; completa con DOC-11 y DOC-12) | — |
+| AC-O10 (delta `PRD-v2.2.md`) | La ayuda de `search`, `new` y `show`, la skill, `README.md`, `README.es.md` y las recetas cumplen RF-75, y `doctor --help` describe `--failures` (RF-76) | DOC-10, DOC-11, DOC-12 | — |
+| AC-O11 (delta `PRD-v2.2.md`) | `doctor --json --failures` con todo correcto devuelve `ok: true`, `checks: []`, `not_evaluated: []` y `plugins: []`, con `not_evaluated` justo después de `checks`; con un chequeo que falla devuelve solo los evaluados que fallan, con su `detail`, y en `not_evaluated` los que dependían de ellos; un `not evaluated: <causa concreta>` que no es `<chequeo> failed` se lista en `checks`; en texto, `all checks passed` o una fila por fallo más la línea `not evaluated: <nombres>`, sin secciones sin fallos; el exit es 0 y `ok` no cambia en todos los casos; sin `--failures`, `doctor` es igual que hoy salvo el título de RF-77 y la sección de plugins de RF-81; tras un timeout COM el informe aplica el mismo filtrado e incluye `plugins`. | UT-DR-01, UT-DR-02, UT-DR-03, UT-DR-04, UT-DR-10, SMOKE-NEW.10 | — |
+| AC-O12 (delta `PRD-v2.2.md`) | La skill no contiene la regla de *preflight*: los comandos se ejecutan directamente y `doctor --json --failures` se indica solo tras un exit 3 o 6, tras instalar o actualizar o cuando un resultado no cuadra; `mailboxes` solo para editar `config.toml` o tras un `search` sin resultados; sus ejemplos empiezan por `search`; la ayuda general y el título del informe de texto dicen `environment and read-only diagnosis`; `README.md` y `README.es.md` describen `doctor` como verificación tras instalar o actualizar y como diagnóstico de un fallo. | DOC-12 | — |
 | AC-O13 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, un `search` sin resultados devuelve `count: 0`, exit 0 y el hint de RF-78 con el número correcto de carpetas y cuentas (INBOX, `mailbox_list` y `--include-mailbox`), también con `--group-by` y con `--count`; una cuenta excluida no cuenta en el número de cuentas; sin cuentas leídas (ninguna declarada o todas excluidas), `hint` es `null` y aparece `W_NO_ACCOUNTS`; con resultados, `hint` no cambia; `new` sin correo nuevo da `hint: null`; el hint no contiene nombres de carpetas ni de cuentas, y calcularlo no añade llamadas al driver | UT-GRP-08 | — |
+| AC-O14 (delta `PRD-v2.2.md`) | En macOS, en Windows y con un plugin, `mailboxes` sin `--fields` devuelve solo `ok`, `command`, `generated_at`, `accounts`, `excluded_stores` y `warnings`; cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes[]` con sus carpetas, cada una solo con `path` e `included`, y con los mismos valores e igual orden que la lista plana anterior; ninguna carpeta lleva `account`; una cuenta sin carpetas tiene `mailboxes: []`; con varios drivers se respeta el orden de `PRD.md` §11.3; un `path` copiado resuelve en `mailbox_list` y en `--include-mailbox`, y el nombre y la URL de `--fields name,url` siguen resolviendo. | UT-MBX-01, UT-MBX-02, DOC-13 | `mailboxes`, `outlook/mailboxes` |
+| AC-O15 (delta `PRD-v2.2.md`) | `mailboxes --fields name,url,total,unread` y la opción repetida añaden esos campos a cada carpeta, en el orden `name`, `path`, `url`, `total`, `unread`, `included` y con los valores de hoy; `--fields path,included` da la salida por defecto; `--fields all`, un campo desconocido o vacío ⇒ `E_USAGE` (exit 2) antes de crear el home y de abrir el store, con el mensaje y el hint de RF-80; sin `total` ni `unread` no se cuenta ningún mensaje (Apple Mail no recontar, Outlook no lee tablas de carpeta, plugin sin contadores pedidos) y el recuento se reutiliza dentro del proceso; `mailboxes --help` y la ayuda general cumplen RF-80. | UT-MBX-03, UT-MBX-04, UT-MBX-05, DOC-13, SMOKE-NEW.07 | — |
+| AC-O16 (delta `PRD-v2.2.md`) | Con un plugin falso declarado, `doctor --json` da `plugins` con su `driver`, los chequeos de su `doctor_checks()` sin cambios y después `config` con la resolución de sus bloques `[scope]` (un bloque que no resuelve da el código y el hint del error); `checks[]` de primer nivel no cambia salvo el detalle de `driver` y que `config` ya no lista sus bloques (con solo bloques de plugins: `0 account block(s) declared for driver <nativo>` y `ok: true`); sin plugins declarados, `plugins: []` y el texto no muestra `Plugins:`; un plugin que no pasa `driver` solo da `config` con `not evaluated: driver failed`; un plugin que no se puede abrir da `plugin` con `E_PLUGIN_FAILED` y `config` `not evaluated: plugin failed`; un `doctor_checks()` que lanza una excepción o devuelve algo inválido da el chequeo `plugin` con `ok: false` y `E_PLUGIN_FAILED`; si no responde en 30 s, `timeout after 30 s: plugin '<driver>' did not respond`; el texto muestra la sección `Plugins:`, `Result:` cuenta todos los chequeos y el exit es 0. | UT-DR-05, UT-DR-06, UT-DR-07, UT-DR-08, UT-DR-10 | — |
+| AC-O17 (delta `PRD-v2.2.md`) | Con `--failures`, solo salen los plugins con algún chequeo que falla o sin evaluar, con sus `checks` que fallan y su `not_evaluated`; si solo falla un plugin, el texto muestra solo `Plugins:` y el JSON da `checks: []` y `not_evaluated: []`; si no falla nada, `plugins: []` y el texto `all checks passed`. | UT-DR-09, UT-DR-10 | — |
 
 ## 8. Casos
 
@@ -521,7 +535,7 @@ Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
 | .02 | P | `show` del mismo mensaje: `subject`, nombres, cada valor de `headers`, `body_text` y `attachments[].name` saneados. |
 | .03 | P | `attachment`: `original_name` saneado; `sanitized_name` y `path` iguales a los del mismo nombre original (calculados con `sanitize_name` y la ruta de caché). |
 | .04 | N | `uid`, `message_id`, `from.address`, `to[].address`, `mailbox.*`, `account.*`, `source.emlx_path` y `cached_path` salen sin cambios aunque contengan caracteres invisibles. |
-| .05 | P | Una etiqueta de cuenta y un nombre de carpeta con `U+200B` copiados de `mailboxes` resuelven en `config.toml` y en `--include-mailbox`. |
+| .05 | P | Una etiqueta de cuenta y un nombre de carpeta con `U+200B` copiados de `accounts[]` y de `accounts[].mailboxes[]` de `mailboxes` (con `--fields name,url`) resuelven en `config.toml` y en `--include-mailbox`. |
 
 #### UT-CW-02 — A2 en warnings y errores
 
@@ -858,6 +872,167 @@ Requisitos: AC-O10 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 | .01 | P | `search --help` describe `--group-by` con sus siete claves y `--count`. |
 | .02 | P | Los dos README documentan `--group-by` y `--count` con ejemplos (`domain,month`) y el `hint` de cero resultados. |
 | .03 | P | La skill explica `--group-by` y `--count` y que `new` no los admite. |
+
+#### UT-MBX-01 — Forma por defecto
+
+Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin `--fields`: claves de primer nivel exactamente `ok`, `command`, `generated_at`, `accounts`, `excluded_stores`, `warnings`, con el store sintético, el doble de Outlook y un plugin falso. |
+| .02 | P | Cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes`, en ese orden; cada carpeta solo `path` e `included`, con los mismos valores e igual orden que el catálogo plano anterior. |
+| .03 | N | Ninguna carpeta lleva `account`; no hay `mailboxes` de primer nivel. |
+| .04 | B | Una cuenta declarada sin carpetas tiene `mailboxes: []`; con dos drivers declarados, el orden de cuentas es el de `PRD.md` §11.3; una carpeta sin cuenta se agrupa en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`. |
+
+#### UT-MBX-02 — Referencias copiadas
+
+Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un `path` copiado de la salida resuelve en `mailbox_list` y en `--include-mailbox`. |
+| .02 | P | El `name` y la `url` de `--fields name,url` siguen resolviendo en `mailbox_list` y en `--include-mailbox`. |
+
+#### UT-MBX-03 — `--fields`
+
+Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `--fields name,url,total,unread` y `--fields total --fields name,url,unread` añaden esos campos en el orden `name`, `path`, `url`, `total`, `unread`, `included`, con los valores del catálogo anterior. |
+| .02 | P | `--fields path,included` da exactamente la salida por defecto. |
+| .03 | N | `--fields all`, `--fields carpeta` y `--fields ""` ⇒ `E_USAGE`, exit 2, con `unknown field '<nombre>' in --fields` y `valid fields: name, path, url, total, unread, included`, antes de crear el home y sin ejecutar el comando. |
+
+#### UT-MBX-04 — Sin recuento sin `total` ni `unread`
+
+Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Apple Mail: sin `total`/`unread`, `_mailbox_counters` no se ejecuta (espía); con `--fields unread`, una vez. |
+| .02 | P | Outlook (doble): sin contadores no se leen tablas de carpeta (`Folder.GetTable` no aparece); con `--fields total`, sí. |
+| .03 | P | Plugin falso que entrega contadores: sin `--fields`, la salida no los incluye. |
+| .04 | B | `search`, `new` y `show` en Apple Mail ya no ejecutan el recuento de carpetas (espía), con la misma salida que antes. |
+| .05 | B | Apple Mail, mismo proceso: dos peticiones de contadores reutilizan el recuento (la consulta se ejecuta una vez). |
+| .06 | N | Apple Mail: un error de SQLite durante el recuento diferido de `mailboxes --fields total` da el mismo error que el recuento al cargar el catálogo (`E_INTERNAL`, exit 1); sin contadores el comando no falla. |
+| .07 | B | Plugin falso cuyas filas no traen contadores: `mailboxes --fields total` no falla y emite `null`; con contadores, los valores del plugin. |
+
+#### UT-MBX-05 — Ayudas
+
+Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `mailboxes --help` describe `--fields` con `name, path, url, total, unread, included` y que los contadores solo se calculan con `--fields total` o `unread`. |
+| .02 | P | La ayuda general muestra `list accounts and their folders (counters with --fields)` para `mailboxes`. |
+
+#### DOC-13 — Documentación de `mailboxes`
+
+Requisitos: AC-O14, AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Los dos README muestran la salida agrupada (ejemplo de PRD-v2.2 sección 8) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
+| .02 | P | La skill usa `mailboxes` sin `--fields` para ver carpetas y `--fields total,unread` solo cuando hacen falta los contadores. |
+| .03 | P | `docs/config.example.toml` explica que `mailbox_list` acepta el `path` que muestra `mailboxes` (y el nombre o la URL de `--fields name,url`). |
+
+#### UT-DR-01 — `--failures` con todo correcto
+
+Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `doctor --json --failures` ⇒ `{"ok": true, "command": "doctor", "generated_at": …, "checks": [], "not_evaluated": [], "plugins": [], "warnings": []}`, en ese orden de claves; exit 0. |
+
+#### UT-DR-02 — `--failures` con un chequeo que falla
+
+Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | Apple Mail con `store` fallido (mock de TCC): `checks` solo con los que fallan (con su `detail`) y `not_evaluated` con `envelope_index`, `schema`, `readonly_strategy` y, con bloques declarados, `config`, en el orden habitual. |
+| .02 | N | Outlook cerrado (doble): `checks` con `outlook` y `not_evaluated` con `stores`, `readonly_strategy` y `config`. |
+| .03 | B | Un chequeo con `not evaluated: <causa concreta>` que no es `<chequeo> failed` se lista en `checks`, no en `not_evaluated` (D-05). |
+| .04 | P | Exit 0 y `ok: true` en todos los casos. |
+
+#### UT-DR-03 — `--failures` en texto
+
+Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Todo bien ⇒ título, `Generated at`, `Checks:` y `all checks passed`, sin filas `[ok]` ni `Plugins:`. |
+| .02 | N | Con fallos ⇒ una fila por chequeo que falla y la línea `not evaluated: <nombres>`; las secciones sin fallos se ocultan. |
+
+#### UT-DR-04 — `doctor` sin `--failures`
+
+Requisitos: AC-O11, AC-O12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | JSON igual que antes salvo `plugins` (vacío sin plugins) y sin `not_evaluated`; texto igual salvo el título `mailquery doctor - environment and read-only diagnosis` y sin sección `Plugins:` cuando no hay plugins. |
+
+#### UT-DR-05 — Sección de plugins
+
+Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Plugin falso declarado con `doctor_checks()` válido: `plugins` con su `driver`, sus chequeos sin cambios y después `config` con la resolución de sus bloques. |
+| .02 | N | Un bloque del plugin que no resuelve ⇒ `config` del plugin `ok: false` con `<clave>: <código>: <mensaje> (hint: …)`. |
+| .03 | P | `checks[]` de primer nivel igual que sin el plugin salvo el detalle de `driver` y que `config` ya no lista sus bloques; con solo bloques de plugins, `config` de primer nivel `0 account block(s) declared for driver <nativo>` y `ok: true`. |
+| .04 | P | Varios plugins en el orden de su primer bloque. |
+| .05 | B | `close()` del plugin lanza una excepción: el resultado del plugin y el resto del informe no cambian; exit 0. |
+
+#### UT-DR-06 — Plugin que no pasa `driver` o no se abre
+
+Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | Plugin declarado no instalado o incompatible: sus `checks` son solo `config` con `not evaluated: driver failed` y `doctor_checks()` no se llama. |
+| .02 | N | El chequeo `driver` pasa pero `registry.open_drivers` falla al abrir el plugin: chequeo `plugin` `ok: false` con `E_PLUGIN_FAILED: …` y `config` con `not evaluated: plugin failed`; el resto del informe igual; exit 0. |
+
+#### UT-DR-07 — `doctor_checks()` inválido o colgado
+
+Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | Lanza una excepción ⇒ chequeo `plugin` `ok: false` con `E_PLUGIN_FAILED: …`, seguido de `config`; el detalle del caso no mapeado es `E_PLUGIN_FAILED: <tipo>: <texto>`. |
+| .02 | N | Devuelve algo que no es lista; un elemento que no es un dict; un elemento sin la forma; `ok` que no es booleano; `detail` que no es texto; un `name` repetido; un `name` `config` o `plugin`; un `detail` con `\n` o solo con `\r` ⇒ ídem. |
+| .03 | N | No responde (plazo inyectado con `mock.patch("mailquery.plugins.api.METADATA_TIMEOUT_SECONDS", 0.05)`) ⇒ `plugin` `ok: false` con `timeout after 30 s: plugin '<driver>' did not respond`; el resto de `doctor` se muestra igual. |
+| .04 | N | `accounts()` o `resolve_mailbox()` del plugin lanzan una excepción o no responden (mismo plazo inyectado) ⇒ `config` del plugin `ok: false` con el formato de error de RF-81; una cuenta malformada y un fallo del wrapper también se reportan; exit 0 y el resto del informe intacto. |
+
+#### UT-DR-08 — Texto y `Result:`
+
+Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | El texto muestra `Plugins:`, el driver y sus filas con el formato de `Checks:`, con líneas de hasta 100 caracteres. |
+| .02 | P | `Result:` cuenta los chequeos de primer nivel y los de los plugins; exit 0. |
+
+#### UT-DR-09 — `--failures` con plugins
+
+Requisitos: AC-O17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Solo salen los plugins con algún chequeo que falla o sin evaluar, con sus `checks` que fallan y su `not_evaluated`; el texto pinta también la línea de no evaluados de un plugin. |
+| .02 | P | Si solo falla un plugin (pasa el chequeo `driver` común y falla en su `doctor_checks()`): el texto muestra solo `Plugins:` (sin `Checks:`) y el JSON da `checks: []`, `not_evaluated: []` y el plugin. |
+| .03 | P | Si no falla nada: `plugins: []` y en texto `all checks passed`. |
+
+#### DOC-12 — Diagnóstico sin *preflight*
+
+Requisitos: AC-O10, AC-O12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `doctor --help` describe `--failures` y el ejemplo `mailquery doctor --json --failures`; la ayuda general muestra `environment and read-only diagnosis`. |
+| .02 | N | La skill, los README y la ayuda general no contienen "Preflight once per session", `# 1. preflight` ni `read-only preflight`, ni piden `doctor`/`mailboxes` antes de cada uso. |
+| .03 | P | La skill indica `mailquery doctor --json --failures` en los casos de RF-77, `mailboxes` solo para editar la configuración o tras un `search` sin resultados, y su primer ejemplo es un `search`. |
+| .04 | P | Los dos README describen `doctor` como verificación tras instalar o actualizar y como diagnóstico de un fallo, con `--failures` y la sección de plugins. |
 
 ### Estado, búsqueda y store
 
@@ -1235,7 +1410,7 @@ Requisitos: AC-02, AC-18 · Archivo: `tests/test_cli.py`
 | .03 | N | Un driver declarado incompatible ⇒ `driver` `ok=false` con motivo/hint; `config` `not evaluated: driver failed`; exit 0. |
 | .04 | N | `config.toml` inválido ⇒ `driver` valida solo el nativo con `declared drivers: unknown (config failed)`; el error lo reporta `config`. |
 | .05 | P | Sin config o sin bloques ⇒ `driver` valida el nativo con `no declared drivers`. |
-| .06 | N | Varios drivers declarados (nativo + plugin) ⇒ `detail` los lista todos; si uno falla, `driver` falla y `config` no se evalúa; los chequeos del nativo siguen su curso salvo dependencia. |
+| .06 | N | Varios drivers declarados (nativo + plugin) ⇒ `detail` los lista todos; si uno falla, `driver` falla y `config` no se evalúa; la sección del plugin resuelve sus propios bloques. |
 | .07 | N | `driver` y `schema`/`stores` fallan a la vez ⇒ `config` informa `not evaluated: driver failed` (el driver se evalúa primero); `schema`/`stores` conservan su dependencia del backend nativo. |
 | .08 | P | `driver` aparece exactamente en la posición 3 de la lista ordenada, tanto en macOS como en Windows (plataforma parcheada). |
 
@@ -1277,7 +1452,7 @@ Requisitos: AC-16 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.p
 
 #### UT-ERR-04 — Timeout de metadatos
 
-Requisitos: AC-17, RNF-16 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.py`
+Requisitos: AC-17, RNF-22 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -1317,8 +1492,8 @@ Requisitos: AC-04 · Archivo: `tests/test_multidriver.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `accounts[]`, `mailboxes[]` y `excluded_stores[]` concatenados en el orden de los bloques `[scope]`. |
-| .02 | P | Un plugin devuelve `excluded_stores: []` y `accounts[]` con `label`/`uuid` opacos. |
+| .01 | P | `accounts[]` (cada uno con su `mailboxes[]`) y `excluded_stores[]` concatenados en el orden de los bloques `[scope]`. |
+| .02 | P | Un plugin devuelve `excluded_stores: []` y `accounts[]` con `label`/`uuid` opacos y sus carpetas en `mailboxes[]`. |
 | .03 | B | Un driver sin cuentas declaradas no aporta bloques y no rompe el comando. |
 
 #### UT-MD-04 — Cursor y lookback
@@ -2012,10 +2187,22 @@ Plazo de 0,2 s, en subprocess con `run_cli.py`.
 |---|---|---|
 | .01 | N | `search` colgado en la primera llamada COM ⇒ `E_CLIENT_TIMEOUT`, exit 3, hint que remite a `doctor`, JSON completo en `stdout`. |
 | .02 | N | `new` colgado ⇒ ídem y el estado no se escribe. |
-| .03 | N | `doctor` colgado en `outlook` ⇒ `outlook` `ok=false` con `timeout after 30 s: Outlook did not respond (possible security prompt)` literal; `stores`, `readonly_strategy` y la resolución de `config` `not evaluated`; el resto evaluado; exit 0. |
-| .04 | N | `doctor` colgado en `stores` ⇒ `stores` con ese texto; resolución de `config` `not evaluated`; el resto evaluado; exit 0. |
+| .03 | N | `doctor` colgado en `outlook` ⇒ `outlook` `ok=false` con `timeout after 30 s: Outlook did not respond (possible security prompt)` literal; `stores`, `readonly_strategy` y la resolución de `config` `not evaluated`; el resto evaluado; exit 0; el JSON lleva `plugins: []` (o la sección de los plugins declarados). |
+| .04 | N | `doctor` colgado en `stores` ⇒ `stores` con ese texto; resolución de `config` `not evaluated`; el resto evaluado; exit 0; el JSON lleva `plugins: []`. |
 | .05 | B | Trabajo de Python entre llamadas más largo que el plazo, sin llamada COM en curso ⇒ sin timeout. |
 | .06 | P | El error queda en el log. |
+
+#### UT-DR-10 — Timeout COM con `--failures`
+
+Requisitos: AC-O11, AC-O16, AC-O17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_outlook.py`
+
+Plazo de 0,2 s, en subproceso con `run_cli.py`; el plugin se descubre por una distribución
+`graph-0.1.0.dist-info` temporal en `PYTHONPATH`.
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | N | Doble de Outlook colgado en el chequeo `outlook` y un plugin falso declarado que no resuelve su cuenta: `doctor --json --failures` da exit 0, `checks` con `outlook` (timeout), `not_evaluated` con `stores`, `readonly_strategy` y `config`, y `plugins` con el plugin, su `config` que falla y `not_evaluated: []`; el texto con `--failures` muestra lo mismo. |
+| .02 | P | Mismo cuelgue sin `--failures`: el JSON incluye `checks` completos y `plugins` completo después; exit 0. |
 
 #### OL-05 — Caché de `pywin32`
 
@@ -2297,7 +2484,7 @@ Requisitos: RNF-07 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
-Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, y `search --group-by from,month` y `search --count`— sobre el fake de Outlook; bloqueante.
+Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, `search --group-by from,month`, `search --count`, `mailboxes`, `mailboxes --fields total,unread` y `mailboxes --fields name,url`, y `doctor`, `doctor --json`, `doctor --failures` y `doctor --json --failures`— sobre el fake de Outlook; bloqueante.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -2380,8 +2567,8 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `doctor` informa todos los chequeos documentados ⇒ golden `doctor`. |
-| .02 | P | `mailboxes`: cuentas, contadores e `included` ⇒ golden `mailboxes`. |
+| .01 | P | `doctor` informa todos los chequeos documentados y el campo `plugins` vacío ⇒ golden `doctor`. |
+| .02 | P | `mailboxes` con la forma agrupada por cuenta (cada cuenta con `uuid`, `label`, `email`, `declared` y `mailboxes[]`, cada carpeta solo con `path` e `included`) ⇒ golden `mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida nombre, URL y contadores de cada carpeta. |
 | .03 | P | `search` por defecto devuelve todos los mensajes distintos con la fila de seis campos ⇒ golden `search_default`; una segunda corrida con `--fields all` valida los campos fuera de la fila y los warnings de cuerpo. |
 | .04 | P | `search` con All Mail deduplica al canónico de INBOX con la fila de seis campos ⇒ golden `search_all_mail`; `duplicate_count`, `snippet` y `mailbox` se comprueban con `--fields all`. |
 | .05 | P | Primera corrida de `new` emite la ventana `[D - lookback, D]` con la fila de seis campos ⇒ golden `new_first_run`. |
@@ -2400,13 +2587,13 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `mailboxes` |
+| .01 | P | `mailboxes` con la forma agrupada sin contadores ⇒ golden `outlook/mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida `name`, `url` y los contadores (INBOX 3/2). |
 | .02 | P | `search` con la fila de seis campos ⇒ golden `outlook/search`; `date_sent` y las señales de contenido se comprueban con `--fields all`. |
 | .03 | P | `show` |
 | .04 | N | `show_header_only` |
 | .05 | N | `show_smime` |
 | .06 | P | `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
-| .07 | P | `doctor` |
+| .07 | P | `doctor` con los chequeos del perfil y `plugins: []` ⇒ golden `outlook/doctor`. |
 
 #### TC-03 — Gate de solo lectura de Apple Mail
 
@@ -2414,7 +2601,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `search --group-by from,month`, `search --count`, `new --fields all` y `show <uid> --fields attachments`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, `--strip-links` en cada `search`, `new` y `show`, `search --fields all`, `search --group-by from,month`, `search --count`, `new --fields all`, `show <uid> --fields attachments`, `mailboxes`, `mailboxes --fields total,unread` y `--fields name,url`, `doctor --json`, `doctor --json --failures` y `doctor --failures`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
@@ -2455,7 +2642,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 |---|---|---|
 | .01 | P | Recorre la ayuda raíz + 6 subcomandos (7 invocaciones) y todas parsean. |
 | .02 | P | `attachment --help` coincide con §12.7. |
-| .03 | N | Ninguna ayuda/documento dice `cinco comandos`/`five commands`, muestra uid entero o promete escritura fuera de `~/.mailquery`. |
+| .03 | N | Ninguna ayuda o documento contiene las marcas retiradas de la guardia (cinco comandos, uid entero, `preflight`, `list accounts, folders, counters`, `standard library only`/`solo biblioteca estándar`, `--out`, entre otras) ni promete escritura fuera de `~/.mailquery`; las recetas cubren los exits 3, 5 y 6. |
 | .04 | N | Ninguna ayuda ni documento muestra un uid entero ni promete escrituras fuera de `~/.mailquery`. |
 
 #### TC-08 — Goldens de adjuntos Apple Mail
@@ -2503,7 +2690,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .01 | P | Contiene los seis comandos y ningún texto con “cinco comandos”/“five commands”. |
 | .02 | P | Describe el `uid` como string prefijado y la aceptación del uid legado; no hay ejemplos con uid entero. |
 | .03 | P | Documenta `[scope."<driver>:<cuenta>"]`, `[attachments]`, `attachment`, `show.attachments`, `doctor driver`, `--version drivers` y los exit codes/errores nuevos. |
-| .04 | N | No contiene marcas obsoletas: `five commands`, `baseline` como concepto vigente, `retention_days`, uid entero en JSON, `attachments` solo con `name`, ni presenta `3.0.0` como versión publicada. |
+| .04 | N | No contiene marcas obsoletas: `five commands`, `baseline` como concepto vigente, `retention_days`, uid entero en JSON, `attachments` solo con `name`, `preflight`, `list accounts, folders, counters`, `standard library only`, ni presenta `3.0.0` como versión publicada. |
 | .05 | P | Los bloques de ejemplo de JSON y comandos coinciden con el contrato implementado (uid string, `cached_path`, `drivers:`). |
 
 #### DOC-02 — `README.es.md`
@@ -2513,7 +2700,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Misma estructura y mismo conjunto de comandos, flags, rutas y exit codes que `README.md`. |
-| .02 | N | No contiene las mismas marcas obsoletas que DOC-01.04. |
+| .02 | N | No contiene las mismas marcas obsoletas que DOC-01.04, incluidas `solo biblioteca estándar` y `list accounts, folders, counters`. |
 | .03 | P | Los ejemplos de uid y de `attachment` usan el formato prefijado. |
 
 #### DOC-03 — Coherencia entre documentos
@@ -2542,10 +2729,10 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | La ayuda raíz lista los seis comandos y la línea de exits de §12.7. |
+| .01 | P | La ayuda raíz lista los seis comandos, la línea de exits de §12.7 y la línea `environment and read-only diagnosis` de `doctor`. |
 | .02 | P | `attachment --help` coincide con §12.7 (usage, positional, options, examples, notes). |
 | .03 | P | La ayuda raíz y las seis ayudas de subcomando (7 invocaciones) pasan `parse_args` (sin invocar el store). |
-| .04 | N | Ninguna ayuda menciona cinco comandos ni un formato de uid entero. |
+| .04 | N | Ninguna ayuda menciona cinco comandos, un formato de uid entero, `preflight`, `list accounts, folders, counters` ni `standard library only`. |
 
 #### DOC-06 — `config.example.toml`
 
@@ -2653,7 +2840,7 @@ Archivo: `tests/test_smoke.py`
 |---|---|---|
 | .01 | P | `show <uid>` de un mensaje con adjunto local ⇒ `attachments[]` con `index`/`name`. |
 | .02 | P | `attachment <uid> --index 1` ⇒ exit 0, archivo bajo `~/.mailquery/attachments`, tamaño/hash coherentes, store y no leídos sin cambios. |
-| .03 | B | Sin Outlook o sin adjunto local ⇒ skip documentado; la clase declara el skip por plataforma. |
+| .03 | P | `attachment` no cambia los contadores de las carpetas incluidas (`mailboxes --fields url,total,unread`) ni el store; la clase se salta por plataforma en `setUpClass` fuera de Windows. |
 
 #### SMOKE-INSTALL — Instalación real con `pipx`
 
@@ -2675,13 +2862,16 @@ Con la instalación y la config de SMOKE-INSTALL.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `mailboxes` ⇒ exit 0 y JSON del contrato de salida (§12.5). |
+| .01 | P | `mailboxes` ⇒ exit 0 y JSON del contrato de salida (§12.5): seis claves de primer nivel, cada cuenta con sus `mailboxes[]`, cada carpeta con `path` e `included` y ninguna clave `mailboxes` de primer nivel. |
 | .02 | P | `new --peek --fields all` valida la fila completa; `new` valida la fila por defecto de seis campos y el contrato de salida; `cursor` no cambia con `--fields`. |
 | .03 | P | `search --since 1w` valida la fila por defecto; la misma consulta con `--fields all` valida la fila completa. |
 | .04 | P | `search --text "*e*" --since 1d` valida la fila por defecto y `scan.mode: text`; con `--fields all`, la fila completa. |
-| .05 | P | `show <messages[0].uid del search>` ⇒ ídem. |
-| .06 | N | `unread` de cada carpeta incluida, antes y después ⇒ sin cambios. |
-| .07 | P | `doctor` y cada comando anterior dentro del presupuesto de §19 de su plataforma (`search --text` solo si `scan.candidates ≤ 500`). |
+| .05 | P | `show <messages[0].uid del search>` ⇒ exit 0 y el contrato de salida del mensaje. |
+| .06 | N | `unread` de cada carpeta incluida (`mailboxes --fields url,total,unread`, sobre `accounts[].mailboxes[]`), antes y después ⇒ sin cambios. |
+| .07 | B | `doctor`, `mailboxes` sin contadores, `search` con la fila mínima, `search --fields snippet`, `new`, `show` y `search --text` (si `scan.candidates ≤ 500`) dentro del presupuesto de §19 de su plataforma; `mailboxes --fields total,unread` se mide sin aserción; se informa del tamaño del store (mensajes y carpetas, solo recuentos). |
+| .08 | P | `search`, `new`, `show` y, si hay un adjunto local recuperable, `attachment` llevan `content_notice` justo después de `generated_at`; las filas de `search`/`new` tienen los seis campos; `search --count` y `search --group-by from --limit 1` salen con exit 0; los contadores de no leídos no cambian. |
+| .09 | P | `show` de un mensaje con una parte HTML en el `.emlx` devuelve `body_text` no vacío y `readable: true` sin error; repetir la lectura no cambia los contadores de no leídos. |
+| .10 | P | `doctor --json --failures` con todo correcto ⇒ exit 0, `checks: []`, `not_evaluated: []` y `plugins: []`; el informe de texto dice `all checks passed`; no lleva `content_notice`. |
 
 ## 9. IDs retirados
 

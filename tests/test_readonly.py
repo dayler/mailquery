@@ -179,7 +179,10 @@ class ReadOnlyStoreTest(unittest.TestCase):
         """TC-03.01: every command (new first run, out-of-scope show, S/MIME) leaves the store untouched."""
         scenarios = [
             (("doctor", "--json"), "doctor"),
+            (("doctor", "--json", "--failures"), "doctor"),
             (("mailboxes",), "mailboxes"),
+            (("mailboxes", "--fields", "total,unread"), "mailboxes"),
+            (("mailboxes", "--fields", "name,url"), "mailboxes"),
             (("search", "--strip-links"), "search"),
             (("search", "--subject", "Invoice", "--strip-links"), "search"),
             (("search", "--text", "factura", "--strip-links"), "search"),
@@ -201,6 +204,21 @@ class ReadOnlyStoreTest(unittest.TestCase):
             (("show", str(UID_SMIME_ENCRYPTED), "--strip-links"), "show"),
             (("show", str(UID_SMIME_SIGNED), "--strip-links"), "show"),
         ]
+        # The filtered text report is read-only too (it prints no JSON).
+        with self.subTest(argv=("doctor", "--failures")):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = cli.main(
+                    ["doctor", "--failures"],
+                    home=self.fx.home,
+                    mail_root=self.fx.mail_root,
+                    accounts_db=self.fx.accounts_db,
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertIn("all checks passed", stdout.getvalue())
+            self.assert_store_unchanged()
+
         payloads: dict[str, list[dict]] = {}
         for argv, command in scenarios:
             with self.subTest(argv=argv):
@@ -211,7 +229,16 @@ class ReadOnlyStoreTest(unittest.TestCase):
 
         self.assertGreaterEqual(payloads["search"][0]["count"], 12)
         self.assertIn("checks", payloads["doctor"][0])
-        self.assertIn("mailboxes", payloads["mailboxes"][0])
+        self.assertIn("not_evaluated", payloads["doctor"][1])
+        self.assertEqual(payloads["doctor"][1]["checks"], [])
+        self.assertEqual(payloads["doctor"][1]["plugins"], [])
+        self.assertTrue(payloads["mailboxes"][0]["accounts"])
+        self.assertTrue(
+            all(
+                "mailboxes" in account
+                for account in payloads["mailboxes"][0]["accounts"]
+            )
+        )
         self.assertEqual(payloads["show"][0]["message"]["uid"], prefixed_uid(2714))
         self.assertEqual(payloads["show"][3]["message"]["uid"], prefixed_uid(83170))
         # First run: emits the window and writes only the state; then nothing new.

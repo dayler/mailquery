@@ -313,7 +313,7 @@ class HelpContractTests(_CliTestCase):
 
         expected_flags = {
             "doctor": ("--json",),
-            "mailboxes": (),
+            "mailboxes": ("--fields",),
             "search": (
                 "--subject",
                 "--text",
@@ -1089,7 +1089,7 @@ class DoctorTests(_CliTestCase):
         self.assertFalse(
             stdout.lstrip().startswith("{"), "default doctor output must be text"
         )
-        self.assertIn("mailquery doctor - environment and read-only preflight", stdout)
+        self.assertIn("mailquery doctor - environment and read-only diagnosis", stdout)
         self.assertIn("Checks:", stdout)
         self.assertIn("[ok]", stdout)
         self.assertIn("Result: 11/11 checks passed", stdout)

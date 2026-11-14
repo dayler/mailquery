@@ -423,7 +423,7 @@ class DoctorTest(IntegrationBase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr.getvalue(), "")
         self.assertFalse(text.lstrip().startswith("{"), "doctor must print text by default")
-        self.assertIn("mailquery doctor - environment and read-only preflight", text)
+        self.assertIn("mailquery doctor - environment and read-only diagnosis", text)
         self.assertIn("Checks:", text)
         self.assertIn("[ok]", text)
         self.assertIn("Result: 11/11 checks passed", text)
@@ -436,7 +436,17 @@ class MailboxesTest(IntegrationBase):
         """TC-01.02: mailboxes, accounts, counters and included flags (golden)."""
         payload = self.run_ok("mailboxes")
         self.assertEqual(payload["command"], "mailboxes")
-        self.assertTrue({"accounts", "mailboxes"} <= set(payload))
+        self.assertEqual(
+            set(payload),
+            {
+                "ok",
+                "command",
+                "generated_at",
+                "accounts",
+                "excluded_stores",
+                "warnings",
+            },
+        )
 
         accounts = {account["uuid"]: account for account in payload["accounts"]}
         self.assertEqual(set(accounts), {ACCOUNT_ICLOUD, ACCOUNT_GMAIL, ACCOUNT_LOCAL})
@@ -446,14 +456,24 @@ class MailboxesTest(IntegrationBase):
         self.assertEqual(accounts[ACCOUNT_GMAIL]["email"], "fixture@gmail.com")
         self.assertEqual(accounts[ACCOUNT_LOCAL]["label"], LOCAL_LABEL)
         for account in accounts.values():
-            self.assertTrue(ACCOUNT_FIELDS | {"declared"} <= set(account))
+            self.assertTrue(ACCOUNT_FIELDS | {"declared", "mailboxes"} <= set(account))
             self.assertIs(account["declared"], True)
+        for account in accounts.values():
+            for entry in account["mailboxes"]:
+                self.assertEqual(set(entry), {"path", "included"})
+                self.assertIsInstance(entry["included"], bool)
 
-        mailboxes = payload["mailboxes"]
-        self.assertTrue(mailboxes)
-        by_key = {(entry["account"]["uuid"], entry["path"]): entry for entry in mailboxes}
-        for entry in mailboxes:
-            self.assertTrue(MAILBOX_FIELDS | {"total", "unread", "included"} <= set(entry))
+        full = self.run_ok("mailboxes", "--fields", "name,url,total,unread")
+        by_key = {
+            (account["uuid"], entry["path"]): entry
+            for account in full["accounts"]
+            for entry in account["mailboxes"]
+        }
+        self.assertEqual(len(by_key), 7)
+        for entry in by_key.values():
+            self.assertTrue(
+                {"name", "path", "url", "total", "unread", "included"} <= set(entry)
+            )
             self.assertIsInstance(entry["total"], int)
             self.assertIsInstance(entry["unread"], int)
             self.assertIsInstance(entry["included"], bool)
@@ -1371,11 +1391,21 @@ class OutlookGoldenTest(unittest.TestCase):
             [{"label": "Exchange shared (Soporte)", "path": None, "reason": "shared_mailbox"}],
         )
         self.assertEqual(payload["warnings"], [OUTLOOK_STORE_EXCLUDED])
-        inbox = payload["mailboxes"][0]
+        (account,) = payload["accounts"]
+        self.assertEqual(account["label"], "Exchange (ana.perez@example.com)")
+        self.assertEqual(
+            [entry["path"] for entry in account["mailboxes"]],
+            ["INBOX", "Deleted Items", "Sent Items"],
+        )
+        self.assertTrue(all(set(entry) == {"path", "included"} for entry in account["mailboxes"]))
+        full = self.run_ok("mailboxes", "--fields", "name,url,total,unread")
+        inbox = full["accounts"][0]["mailboxes"][0]
         self.assertEqual(
             (inbox["path"], inbox["total"], inbox["unread"], inbox["included"]),
             ("INBOX", 3, 2, True),
         )
+        self.assertEqual(inbox["name"], "INBOX")
+        self.assertTrue(inbox["url"].startswith("outlook://"))
         _assert_golden(self, "outlook/mailboxes.json", payload, self.root)
 
     def test_tc_02_02_search(self) -> None:
@@ -1808,6 +1838,14 @@ _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
     "baseline": re.compile(r"\bbaseline\b", re.IGNORECASE),
     "retention_days": re.compile(r"retention_days(?! was replaced by max_size_mb)"),
     "--out": re.compile(r"--out\b"),
+    "list accounts, folders, counters": re.compile(
+        r"list accounts, folders, counters", re.IGNORECASE
+    ),
+    "standard library only": re.compile(r"standard library\s+only", re.IGNORECASE),
+    "solo biblioteca estándar": re.compile(
+        r"solo biblioteca\s+estándar", re.IGNORECASE
+    ),
+    "preflight": re.compile(r"\bpreflight\b", re.IGNORECASE),
 }
 
 #: Text the README must document (DOC-01.03/05, AC-21).

@@ -47,7 +47,9 @@ from tests.fakes.plugin import (
     plugin_factory,
 )
 from tests.fixtures.make_fixtures import (
+    ACCOUNT_GMAIL,
     ACCOUNT_ICLOUD,
+    ACCOUNT_LOCAL,
     DEFAULT_CONFIG,
     GMAIL_LABEL,
     ICLOUD_LABEL,
@@ -251,9 +253,12 @@ class MultiDriverCase(unittest.TestCase):
             fields=("all",),
         )
 
-    def run_mailboxes(self, plugin: FakePluginBackend):
+    def run_mailboxes(self, plugin: FakePluginBackend, fields=None):
         return search.run_mailboxes(
-            self.backend, self.config, drivers={PLUGIN_DRIVER: plugin}
+            self.backend,
+            self.config,
+            drivers={PLUGIN_DRIVER: plugin},
+            fields=fields,
         )
 
     def run_cli(self, *argv: str, registry: BackendRegistry | None = None, backend=None):
@@ -510,7 +515,7 @@ class MergeOrderTest(MultiDriverCase):
 
 class MailboxesMergeTest(MultiDriverCase):
     def test_ut_md_03_01_lists_are_concatenated_in_scope_block_order(self) -> None:
-        """UT-MD-03.01: accounts/mailboxes/excluded_stores follow the [scope] block order."""
+        """UT-MD-03.01: accounts and their folders follow the [scope] block order."""
         self.use_config(
             f"{PLUGIN_ACCOUNT_BLOCK}\n\n[scope.\"{ICLOUD_LABEL}\"]\n"
         )
@@ -521,7 +526,11 @@ class MailboxesMergeTest(MultiDriverCase):
             [PLUGIN_ACCOUNT_UUID, ACCOUNT_ICLOUD],
         )
         self.assertEqual(
-            payload["mailboxes"][0]["account"]["uuid"], PLUGIN_ACCOUNT_UUID
+            payload["accounts"][0]["mailboxes"][0]["path"], "INBOX"
+        )
+        self.assertEqual(
+            [account["uuid"] for account in payload["accounts"]],
+            [PLUGIN_ACCOUNT_UUID, ACCOUNT_ICLOUD, ACCOUNT_GMAIL, ACCOUNT_LOCAL],
         )
         self.assertTrue(
             all(account["declared"] for account in payload["accounts"][:2])
@@ -540,6 +549,9 @@ class MailboxesMergeTest(MultiDriverCase):
         self.assertEqual(account["label"], PLUGIN_ACCOUNT_LABEL)
         self.assertIsNone(account["email"])
         self.assertIs(account["declared"], True)
+        self.assertEqual(
+            [folder["path"] for folder in account["mailboxes"]], ["INBOX"]
+        )
         self.assertEqual(payload["excluded_stores"], [])
 
     def test_ut_md_03_03_undeclared_driver_contributes_nothing(self) -> None:

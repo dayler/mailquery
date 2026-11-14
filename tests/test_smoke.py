@@ -23,12 +23,14 @@ import unittest
 from pathlib import Path
 
 import mailquery
+from mailquery.output import CONTENT_NOTICE
 
 ROOT = Path(__file__).resolve().parent.parent
 REAL_HOME = Path.home()
 EXE = "mailquery.exe" if sys.platform == "win32" else "mailquery"
 RUNS = 20  # runs per command for the p95 budget check (PRD 19)
 SLOW_RUNS = {"mailboxes": 10}  # slower command: fewer runs
+COUNTER_RUNS = 5  # informative only: counters are not part of the budget
 
 # PRD 19: p95 budgets in seconds, (macOS, Windows).
 BUDGET = {
@@ -137,6 +139,7 @@ class SmokeTest(unittest.TestCase):
     """One real pipx install per class; read-only commands against the real client."""
 
     timings: dict[str, list[float]] = {}
+    store_counts: tuple[int, int] | None = None
 
     @classmethod
     def setUpClass(cls):
@@ -184,6 +187,9 @@ class SmokeTest(unittest.TestCase):
         rc, out, _, _ = cls._run(["mailboxes"])
         if rc != 0:
             return  # leave first_account None: the SMOKE cases surface the CLI error
+        # Store size (counts only) with every account listed and before any [scope]
+        # block is written: the SMOKE cases scope the run to one usable account.
+        cls.store_counts = cls._store_counts()
         for account in json.loads(out)["accounts"]:
             cfg = cls.home / ".mailquery"
             cfg.mkdir(exist_ok=True)
@@ -192,7 +198,11 @@ class SmokeTest(unittest.TestCase):
             rc, out, _, _ = cls._run(["mailboxes"])
             if rc != 0:
                 return  # a scope that errors must surface, not be skipped
-            if any(m["included"] for m in json.loads(out)["mailboxes"]):
+            if any(
+                m["included"]
+                for account in json.loads(out)["accounts"]
+                for m in account["mailboxes"]
+            ):
                 cls.first_account = account["label"]
                 break
         else:
@@ -212,6 +222,26 @@ class SmokeTest(unittest.TestCase):
         if record:
             cls.timings.setdefault(record, []).append(dt)
         return p.returncode, p.stdout, p.stderr, dt
+
+    @classmethod
+    def _store_counts(cls) -> tuple[int, int] | None:
+        """``(messages, folders)`` of every listed account, or None when unreadable."""
+        rc, out, _err, _ = cls._run(["mailboxes", "--fields", "total,unread"])
+        if rc != 0:
+            return None
+        try:
+            data = json.loads(out)
+        except ValueError:
+            return None
+        messages = 0
+        folders = 0
+        for account in data.get("accounts") or ():
+            for mailbox in account.get("mailboxes") or ():
+                folders += 1
+                total = mailbox.get("total")
+                if isinstance(total, int):
+                    messages += total
+        return messages, folders
 
     def _json(self, args, command, record=None):
         rc, out, err, _ = self._run(args, record)
@@ -249,11 +279,83 @@ class SmokeTest(unittest.TestCase):
             )
 
     def _counters(self):
-        data = self._json(["mailboxes"], "mailboxes")
-        return {m["url"]: (m["total"], m["unread"]) for m in data["mailboxes"] if m["included"]}
+        data = self._json(
+            ["mailboxes", "--fields", "url,total,unread"], "mailboxes"
+        )
+        return {
+            m["url"]: (m["total"], m["unread"])
+            for account in data["accounts"]
+            for m in account["mailboxes"]
+            if m["included"]
+        }
 
     def _search(self, *args):
         return self._json(["search", *args], "search")
+
+    def _assert_content_notice(self, payload):
+        """The fixed notice is the fourth key, right after ``generated_at``."""
+        self.assertEqual(
+            list(payload)[:4], ["ok", "command", "generated_at", "content_notice"]
+        )
+        self.assertEqual(payload["content_notice"], CONTENT_NOTICE)
+
+    def _local_attachment_uid(self):
+        """Uid of a message whose first attachment can be recovered locally, or None."""
+        rc, out, _err, _ = self._run(
+            ["search", "--has-attachments", "--since", "1y", "--limit", "10"]
+        )
+        if rc != 0:
+            return None
+        try:
+            messages = json.loads(out).get("messages") or ()
+        except ValueError:
+            return None
+        for message in messages:
+            uid = message["uid"]
+            rc, shown, _err, _ = self._run(["show", uid])
+            if rc != 0:
+                continue
+            try:
+                entries = (json.loads(shown).get("message") or {}).get("attachments") or ()
+            except ValueError:
+                continue
+            if not entries:
+                continue
+            rc, _out, _err, _ = self._run(["attachment", uid, "--index", "1"])
+            if rc == 0:
+                return uid
+        return None
+
+    def _html_message(self):
+        """``(uid, show payload)`` of a message whose .emlx carries a text/html part."""
+        rc, out, _err, _ = self._run(["search", "--since", "1y", "--limit", "20"])
+        if rc != 0:
+            return None
+        try:
+            messages = json.loads(out).get("messages") or ()
+        except ValueError:
+            return None
+        for message in messages:
+            uid = message["uid"]
+            rc, shown, _err, _ = self._run(["show", uid])
+            if rc != 0:
+                continue
+            try:
+                payload = json.loads(shown)
+            except ValueError:
+                continue
+            entry = payload.get("message") or {}
+            source = (entry.get("source") or {}).get("emlx_path")
+            if not source or not entry.get("body_text"):
+                continue
+            try:
+                with open(source, "rb") as handle:
+                    head = handle.read(2 * 1024 * 1024)
+            except OSError:
+                continue
+            if b"text/html" in head.lower():
+                return uid, payload
+        return None
 
     # --- SMOKE-INSTALL -------------------------------------------------------
 
@@ -309,10 +411,18 @@ class SmokeTest(unittest.TestCase):
     def test_smoke_new_01_mailboxes_json(self):
         """SMOKE-NEW.01: mailboxes => exit 0 and PRD 12.5 JSON."""
         data = self._json(["mailboxes"], "mailboxes", record="mailboxes")
-        for key in ("accounts", "mailboxes", "excluded_stores", "warnings"):
+        for key in ("ok", "command", "generated_at", "accounts", "excluded_stores", "warnings"):
             self.assertIn(key, data)
-        self.assertTrue(any(m["included"] for m in data["mailboxes"]))
+        self.assertNotIn("mailboxes", data)
+        self.assertTrue(
+            any(
+                m["included"]
+                for account in data["accounts"]
+                for m in account["mailboxes"]
+            )
+        )
         self.assertTrue(any(a["declared"] for a in data["accounts"]))
+        self.assertTrue(all("mailboxes" in account for account in data["accounts"]))
 
     def test_smoke_new_02_new_json(self):
         """SMOKE-NEW.02: new => exit 0 and PRD 12.5 JSON."""
@@ -377,7 +487,7 @@ class SmokeTest(unittest.TestCase):
                 self.assertEqual(unread_after - unread_before, total_after - total_before)
 
     def test_smoke_new_07_within_p95_budget(self):
-        """SMOKE-NEW.07: doctor and every command within the PRD 19 budget of the platform."""
+        """SMOKE-NEW.07: the default 3.0.0 output stays within the PRD 19 budgets."""
         found = self._search("--since", "1w")
         self.assertTrue(found["messages"], "no message in the last week to show")
         uid = str(found["messages"][0]["uid"])
@@ -386,6 +496,7 @@ class SmokeTest(unittest.TestCase):
             "doctor": ["doctor", "--json"],
             "mailboxes": ["mailboxes"],
             "search": ["search", "--since", "1w"],
+            "search_snippet": ["search", "--since", "1w", "--fields", "snippet"],
             "new": ["new"],
             "show": ["show", uid],
         }
@@ -396,7 +507,8 @@ class SmokeTest(unittest.TestCase):
         # launcher. The asserted value is therefore the operation time the CLI logs as
         # ``duration_ms`` in the ``event=end`` line of the run (backend connection + work);
         # ``doctor`` logs no duration_ms, so its wall-time p95 is asserted. Wall-time
-        # min/median/p95 are printed for information only.
+        # min/median/p95 are printed for information only. ``--fields snippet`` shares
+        # the ``search`` budget; ``mailboxes`` with counters is informational.
         log_path = self.home / ".mailquery" / "logs" / "mailquery.log"
 
         def end_durations(command):
@@ -407,6 +519,9 @@ class SmokeTest(unittest.TestCase):
                 if f"event=end command={command} " in line and " duration_ms=" in line:
                     found.append(int(line.rsplit(" duration_ms=", 1)[1].split()[0]))
             return found
+
+        def budget(name):
+            return BUDGET["search"] if name == "search_snippet" else BUDGET[name]
 
         summary = {}
         rows = []
@@ -430,7 +545,7 @@ class SmokeTest(unittest.TestCase):
                 if op_times else "op p95=n/a (no duration_ms)"
             )
             rows.append(
-                f"  {name:<12} n={runs:<3} {op} budget<{BUDGET[name][BUDGET_COL]}s | "
+                f"  {name:<16} n={runs:<3} {op} budget<{budget(name)[BUDGET_COL]}s | "
                 f"wall min={min(wall):.3f}s median={statistics.median(wall):.3f}s "
                 f"p95={_p95(wall):.3f}s"
             )
@@ -438,10 +553,104 @@ class SmokeTest(unittest.TestCase):
             "\nSMOKE budgets (asserted: logged operation time duration_ms, nearest-rank "
             "p95, doctor = wall time; PRD 19):\n" + "\n".join(rows)
         )
+        if self.store_counts is not None:
+            messages, folders = self.store_counts
+            print(f"SMOKE store size: {messages} messages, {folders} folders")
         for name, t in summary.items():
             with self.subTest(command=name):
-                self.assertLess(t, BUDGET[name][BUDGET_COL])
+                self.assertLess(t, budget(name)[BUDGET_COL])
+
+        # Informational measurement: counting messages is outside the budget.
+        counter_times = []
+        for _ in range(COUNTER_RUNS):
+            before = len(end_durations("mailboxes"))
+            rc, out, err, _ = self._run(
+                ["mailboxes", "--fields", "total,unread"], record="mailboxes_counters"
+            )
+            self.assertEqual(rc, 0, f"mailboxes --fields total,unread: {out}\n{err}")
+            after = end_durations("mailboxes")
+            self.assertEqual(len(after), before + 1, "mailboxes: no new event=end line")
+            counter_times.append(after[-1] / 1000.0)
+        print(
+            "SMOKE mailboxes --fields total,unread (informational, no budget): "
+            f"n={COUNTER_RUNS} op p95={_p95(counter_times):.3f}s"
+        )
         self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
+
+    def test_smoke_new_08_content_notice_and_output_options(self):
+        """SMOKE-NEW.08: content_notice and the new output options against the real client."""
+        before = self._counters()
+        self.assertTrue(before)
+        found = self._search("--since", "1w")
+        self._check_list_shape(found)
+        self._assert_content_notice(found)
+        new = self._json(["new"], "new")
+        self._check_list_shape(new)
+        self._assert_content_notice(new)
+        self.assertTrue(found["messages"], "no message in the last week to show")
+        uid = str(found["messages"][0]["uid"])
+        self._assert_content_notice(self._json(["show", uid], "show"))
+        counted = self._json(["search", "--count"], "search")
+        self._assert_content_notice(counted)
+        self.assertIsInstance(counted["count"], int)
+        grouped = self._json(["search", "--group-by", "from", "--limit", "1"], "search")
+        self._assert_content_notice(grouped)
+        self.assertIn("groups", grouped)
+        attachment_uid = self._local_attachment_uid()
+        if attachment_uid is None:
+            print(
+                "\nSMOKE-NEW.08: no locally recoverable attachment; "
+                "attachment content_notice not measured"
+            )
+        else:
+            recovered = self._json(["attachment", attachment_uid, "--index", "1"], "attachment")
+            self._assert_content_notice(recovered)
+        after = self._counters()
+        self.assertTrue(set(after) == set(before), "the included folders changed")
+        for url, (total_before, unread_before) in before.items():
+            total_after, unread_after = after[url]
+            with self.subTest(folder=sorted(before).index(url)):
+                self.assertEqual(unread_after - unread_before, total_after - total_before)
+
+    def test_smoke_new_09_show_html_body(self):
+        """SMOKE-NEW.09: show returns the HTML-derived body_text and leaves counters unchanged."""
+        before = self._counters()
+        self.assertTrue(before)
+        found = self._html_message()
+        if found is None:
+            self.skipTest(
+                "no message with a text/html part and a readable body in the last year"
+            )
+        uid, shown = found
+        self.assertIs(shown["ok"], True)
+        self._assert_content_notice(shown)
+        message = shown["message"]
+        self.assertEqual(message["uid"], uid)
+        self.assertIs(message["readable"], True)
+        self.assertIsInstance(message["body_text"], str)
+        self.assertTrue(message["body_text"].strip())
+        again = self._json(["show", uid], "show")
+        self.assertEqual(again["message"]["body_text"], message["body_text"])
+        after = self._counters()
+        self.assertTrue(set(after) == set(before), "the included folders changed")
+        for url, (total_before, unread_before) in before.items():
+            total_after, unread_after = after[url]
+            with self.subTest(folder=sorted(before).index(url)):
+                self.assertEqual(unread_after - unread_before, total_after - total_before)
+
+    def test_smoke_new_10_doctor_failures(self):
+        """SMOKE-NEW.10: doctor --json --failures with nothing failing and no plugins."""
+        payload = self._json(["doctor", "--json", "--failures"], "doctor")
+        self.assertIs(payload["ok"], True)
+        self.assertEqual(payload["checks"], [])
+        self.assertEqual(payload["not_evaluated"], [])
+        self.assertEqual(payload["plugins"], [])
+        self.assertNotIn("content_notice", payload)
+        rc, out, err, _ = self._run(["doctor", "--failures"])
+        self.assertEqual(rc, 0, f"{out}\n{err}")
+        self.assertIn("all checks passed", out)
+        self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
+
 
 
 # --------------------------------------------------------------------------- #
@@ -533,7 +742,11 @@ class SmokeAttOutlook(unittest.TestCase):
             result = cls._run(["mailboxes"])
             if result.returncode != 0:
                 return None
-            if any(m["included"] for m in json.loads(result.stdout)["mailboxes"]):
+            if any(
+                m["included"]
+                for account in json.loads(result.stdout)["accounts"]
+                for m in account["mailboxes"]
+            ):
                 return account["label"]
         return None
 
@@ -551,6 +764,18 @@ class SmokeAttOutlook(unittest.TestCase):
         messages = self._json(["search", "--has-attachments", "--limit", "5"], "search")["messages"]
         self.assertTrue(messages, "no message with attachments in the declared scope")
         return messages[0]["uid"]
+
+    def _included_counters(self) -> dict:
+        """``{url: (total, unread)}`` of the included folders of the declared scope."""
+        payload = self._json(
+            ["mailboxes", "--fields", "url,total,unread"], "mailboxes"
+        )
+        return {
+            entry["url"]: (entry["total"], entry["unread"])
+            for account in payload["accounts"]
+            for entry in account["mailboxes"]
+            if entry["included"]
+        }
 
     def test_smoke_att_ol_01_recovers_a_local_attachment(self) -> None:
         """SMOKE-ATT-OL.01: attachment --index 1 => exit 0, JSON contract, file written."""
@@ -578,17 +803,9 @@ class SmokeAttOutlook(unittest.TestCase):
     def test_smoke_att_ol_03_store_counters_are_unchanged(self) -> None:
         """SMOKE-ATT-OL.03: recovering attachments leaves the included folders untouched."""
         uid = self._attachment_uid()
-        before = {
-            m["url"]: (m["total"], m["unread"])
-            for m in self._json(["mailboxes"], "mailboxes")["mailboxes"]
-            if m["included"]
-        }
+        before = self._included_counters()
         self._json(["attachment", uid, "--index", "1"], "attachment")
-        after = {
-            m["url"]: (m["total"], m["unread"])
-            for m in self._json(["mailboxes"], "mailboxes")["mailboxes"]
-            if m["included"]
-        }
+        after = self._included_counters()
         self.assertEqual(after, before)
         self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
 
@@ -684,7 +901,11 @@ class SmokeAttAppleMail(unittest.TestCase):
             rc, out, _err = cls._run(["mailboxes"])
             if rc != 0:
                 raise unittest.SkipTest("a declared account failed on the real store")
-            if any(mailbox["included"] for mailbox in json.loads(out)["mailboxes"]):
+            if any(
+                mailbox["included"]
+                for account in json.loads(out)["accounts"]
+                for mailbox in account["mailboxes"]
+            ):
                 account = candidate["label"]
                 break
         if account is None:

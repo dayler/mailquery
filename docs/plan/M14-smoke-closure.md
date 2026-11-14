@@ -2,7 +2,7 @@
 
 **Lote:** I4 · rama del lote `integration/i4-mailboxes-doctor-close` · **Oleada:** W9 (sola)
 **Rama:** `feature/m14-smoke-closure`, creada desde la punta de `integration/i4-mailboxes-doctor-close` (con M12 y M13 integrados) · **Worktree:** `../mailquery-wt/m14`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -56,12 +56,12 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — SMOKE | SMOKE-NEW.07 ampliado, SMOKE-NEW.08–10 | ⚪ |
-| F2 — Windows | Corrida en este equipo | ⚪ |
-| F3 — macOS | Corrida en el Mac del dueño (HITL-03) | ⚪ |
-| F4 — Rendimiento | `PERFORMANCE-BACKLOG.md` | ⚪ |
-| F5 — Auditoría | CL-05 en documentos consumidores; guardia `_STALE_TEXT_PATTERNS`; listas para `INTERFACES.md` y `TEST-CATALOG.md` | ⚪ |
-| F6 — Cierre | Suite completa, cobertura, trazabilidad, barridos de solo lectura, desviaciones, destino de las decisiones, evidencia cruda, bloques | ⚪ |
+| F1 — SMOKE | SMOKE-NEW.07 ampliado, SMOKE-NEW.08–10 | 🟢 |
+| F2 — Windows | Corrida en este equipo | 🟢 (saltada con motivo: host macOS sin Outlook clásico) |
+| F3 — macOS | Corrida en el Mac del dueño (HITL-03) | 🟢 |
+| F4 — Rendimiento | `PERFORMANCE-BACKLOG.md` | 🟢 |
+| F5 — Auditoría | CL-05 en documentos consumidores; guardia `_STALE_TEXT_PATTERNS`; listas para `INTERFACES.md` y `TEST-CATALOG.md` | 🟢 |
+| F6 — Cierre | Suite completa, cobertura, trazabilidad, barridos de solo lectura, desviaciones, destino de las decisiones, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -132,4 +132,9 @@ python -B -m coverage report
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 — SMOKE | SMOKE-NEW.07 ampliado (`search --fields snippet` y medición informativa de `mailboxes --fields total,unread`) y SMOKE-NEW.08–.10 escritos; los 15 casos de `SmokeTest` verdes solos contra Apple Mail. |
+| 2026-11-14 | F2 — Windows | Saltada con motivo: este host es macOS y no tiene Outlook clásico; la corrida de Windows y SMOKE-ATT-OL no aplican aquí. |
+| 2026-11-14 | F3 — macOS | `tests.test_smoke` completa verde en el Mac: 19 casos (INSTALL, NEW y ATT-AM), 0 fallos; p95 de `mailboxes` 0,096–0,130 s y de `show` 0,045–0,053 s, dentro de presupuesto. |
+| 2026-11-14 | F4 — Rendimiento | `PERFORMANCE-BACKLOG.md` con la medición de 3.0.0 (44 carpetas y 148.678 mensajes), la variante con contadores como deuda informativa y Windows pendiente de equipo. |
+| 2026-11-14 | F5 — Auditoría | Textos de CL-05 revisados en los documentos consumidores; corregidos `docs/ROADMAP.md` y `docs/PERFORMANCE-BACKLOG.md`; guardia con cuatro patrones nuevos y DOC-01.04, DOC-02.02, DOC-05.04 y TC-07.03 verdes. |
+| 2026-11-14 | F6 — Cierre | Suite completa `Ran 1428`, `OK (skipped=7)`; cobertura total 91,3 %; TC-03.01 y OL-30 verdes; informe con evidencia, auditoría, trazabilidad y bloques. |
