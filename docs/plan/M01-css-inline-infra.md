@@ -118,11 +118,11 @@ Antes de cerrar el milestone, el subagente ejecuta el mismo bucle en local (Git 
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Dependencia | 6.1 (dependencia y tablas de cobertura); actualizar TC-06.03; PKG-03 | ⚪ |
-| F2 — CI | 6.2 (instalación, suite bajo `coverage`, gate de cobertura, paso de wheels y timeouts); bucle de wheels en local | ⚪ |
-| F3 — README | 6.3 en los dos README; DOC-07 | ⚪ |
-| F4 — SMOKE | SMOKE-INSTALL.05 | ⚪ |
-| F5 — Cierre | Suite completa, grupos solos, evidencia cruda, bloques para el orquestador | ⚪ |
+| F1 — Dependencia | 6.1 (dependencia y tablas de cobertura); actualizar TC-06.03; PKG-03 | 🟢 |
+| F2 — CI | 6.2 (instalación, suite bajo `coverage`, gate de cobertura, paso de wheels y timeouts); bucle de wheels en local | 🟢 |
+| F3 — README | 6.3 en los dos README; DOC-07 | 🟢 |
+| F4 — SMOKE | SMOKE-INSTALL.05 | 🟢 |
+| F5 — Cierre | Suite completa, grupos solos, evidencia cruda, bloques para el orquestador | 🟢 |
 
 ## 8. Tests
 
@@ -205,4 +205,8 @@ python -B -m coverage report
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-13 | F1 — Dependencia | `css-inline~=0.23.1` en `[project].dependencies` y tablas `[tool.coverage.run]`/`[tool.coverage.report]`; TC-06.03 reescrito, PKG-03 y DOC-07 añadidos; grupos `test_tc_06_03_`, `test_pkg_03_` y `test_doc_07_` verdes. |
+| 2026-11-13 | F2 — CI | Job `unittest` instala `css-inline` y `coverage`, corre la suite bajo `coverage` con el paso `Check coverage`; job `install-scripts` con el paso de wheels en Ubuntu; timeouts 20/15. Bucle de wheels verde en local para las cinco etiquetas. |
+| 2026-11-13 | F3 — README | Introducción, requisitos, instrucciones de tests con entorno virtual y cobertura, y subsección de RF-65 en `README.md` y `README.es.md` con el mismo contenido; DOC-07 verde. |
+| 2026-11-13 | F4 — SMOKE | SMOKE-INSTALL.05 verde contra la instalación `pipx` real con `PIPX_HOME`/`PIPX_BIN_DIR` temporales. |
+| 2026-11-13 | F5 — Cierre | Suite completa `Ran 1072`, `FAILED (failures=2, skipped=7)`; los dos fallos son SMOKE-NEW.07 (`mailboxes` y `show`) de la línea base. Cobertura total 89,5 %. |
