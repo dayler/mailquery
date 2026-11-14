@@ -394,6 +394,20 @@ _SCHEME_STARTS = (
     ("vbscript:", "scheme", "vbscript"),
 )
 
+
+def _starts_by_first(
+    starts: tuple[tuple[str, str, str], ...],
+) -> dict[str, tuple[tuple[str, str, str], ...]]:
+    """Group scheme starts by their first letter, to skip the other ones."""
+    grouped: dict[str, list[tuple[str, str, str]]] = {}
+    for start in starts:
+        grouped.setdefault(start[0][0], []).append(start)
+    return {key: tuple(value) for key, value in grouped.items()}
+
+
+#: Scheme starts grouped by their first letter.
+_SCHEME_STARTS_BY_FIRST = _starts_by_first(_SCHEME_STARTS)
+
 #: Schemes whose URLs run code or embed data.
 _SCRIPT_SCHEMES = frozenset({"javascript", "vbscript", "data"})
 
@@ -436,6 +450,8 @@ class UrlMatch(NamedTuple):
 
 def _nfkc_char(char: str) -> str:
     """Return the single-character NFKC form of ``char``, or ``char`` itself."""
+    if char.isascii():
+        return char
     form = unicodedata.normalize("NFKC", char)
     return form if len(form) == 1 else char
 
@@ -450,9 +466,18 @@ def _match_start_prefix(text: str, start: int, prefix: str) -> bool:
     if start + len(prefix) > len(text):
         return False
     for offset, expected in enumerate(prefix):
-        if _nfkc_char(text[start + offset]).lower() != expected:
+        char = text[start + offset]
+        if char == expected or char.lower() == expected:
+            continue
+        if _nfkc_char(char).lower() != expected:
             return False
     return True
+
+
+def _match_ascii_start(text: str, start: int, prefix: str) -> bool:
+    """Return whether ``prefix`` starts at ``start``, ignoring ASCII case only."""
+    candidate = text[start : start + len(prefix)]
+    return candidate.isascii() and candidate.lower() == prefix
 
 
 def _url_end(text: str, start: int) -> int:
@@ -504,7 +529,8 @@ def _unc_url(text: str, start: int) -> UrlMatch | None:
 
 def _match_url_start(text: str, start: int) -> UrlMatch | None:
     """Return the URL that starts at ``start``, if a start pattern matches."""
-    for prefix, kind, scheme in _SCHEME_STARTS:
+    first = _nfkc_char(text[start]).lower()
+    for prefix, kind, scheme in _SCHEME_STARTS_BY_FIRST.get(first, ()):
         if not _match_start_prefix(text, start, prefix):
             continue
         after = start + len(prefix)
@@ -512,11 +538,11 @@ def _match_url_start(text: str, start: int) -> UrlMatch | None:
         if end == after:
             return None
         return UrlMatch(start, end, text[start:end], kind, scheme, scheme in _SCRIPT_SCHEMES)
-    if _match_start_prefix(text, start, _DATA_START):
+    if first == "d" and _match_ascii_start(text, start, _DATA_START):
         return _data_url(text, start)
-    if _match_start_prefix(text, start, _WWW_START):
+    if first == "w" and _match_ascii_start(text, start, _WWW_START):
         return _www_url(text, start)
-    if text.startswith(_UNC_START, start):
+    if first == "\\" and text.startswith(_UNC_START, start):
         return _unc_url(text, start)
     return None
 
