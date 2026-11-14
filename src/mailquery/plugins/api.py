@@ -17,7 +17,9 @@ a core failure stays ``E_INTERNAL`` (exit 1). Timeouts are tested with an
 injectable deadline (``METADATA_TIMEOUT_SECONDS``): external plugins run in a
 daemon worker thread, the built-in drivers run inline (their SQLite/COM objects
 are thread-affine) and their elapsed time is checked on return; Outlook keeps
-its COM watchdog.
+its COM watchdog. :class:`AttachmentStreamGuard` applies the same daemon-worker
+bound to the creation and every block of an external attachment stream, with
+the per-attachment deadline the extraction engine hands to it.
 
 An external plugin must import only this package from mailquery. It must not
 import the backends, the store or any other internal module. The backend
@@ -29,7 +31,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -68,8 +70,9 @@ NATIVE_ORDERS: Final[frozenset[str]] = frozenset({"numeric", "text"})
 #: can inject a short deadline with ``mock.patch`` and never wait 30 s.
 METADATA_TIMEOUT_SECONDS: Final[float] = 30.0
 
-#: Extraction deadline per attachment (enforced by the ``attachment`` command).
-EXTRACTION_TIMEOUT_SECONDS: Final[float] = 120.0
+#: Documented default of the per-attachment extraction budget. The effective
+#: value is ``[attachments].timeout_seconds`` in the configuration.
+EXTRACTION_TIMEOUT_SECONDS: Final[float] = 60.0
 
 #: UTF-8 byte limits of the plugin-owned error fields.
 HINT_MAX_BYTES: Final[int] = 300
@@ -465,6 +468,102 @@ def _check_elapsed(driver: str, started: float, deadline: float) -> None:
         raise _timeout_error(driver)
 
 
+#: Internal text of the attachment stream timeout; the extraction engine words
+#: the user-facing message and hint.
+_STREAM_DEADLINE_MESSAGE: Final[str] = (
+    "the attachment stream did not deliver its next block before the deadline"
+)
+
+
+class AttachmentStreamGuard:
+    """Bounds the plugin calls of one external attachment stream with its deadline.
+
+    The extraction engine opens the stream through this callable with the
+    factory that creates it and the absolute instant (in ``clock`` units) at
+    which the attachment budget expires, or ``None`` for no policy. The factory
+    call and every ``next()`` run in a daemon worker thread that waits at most
+    the remaining budget, so a plugin that is blocked fetching bytes cannot keep
+    the command alive past that instant: the guard raises :class:`TimeoutError`,
+    which the engine reports as the attachment timeout. Once the budget is
+    spent, the next block is never requested from the plugin. A plugin
+    ``PluginError`` keeps its ``reason`` for the engine to word the attachment
+    error; any other failure of the plugin becomes ``E_PLUGIN_FAILED``, never
+    ``E_INTERNAL``. The abandoned worker cannot be stopped (accepted
+    limitation) but it is a daemon, so the process can still exit.
+    """
+
+    def __init__(
+        self,
+        driver: str,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._driver = driver
+        self._clock = clock
+
+    def __call__(
+        self,
+        factory: Callable[[], Iterable[bytes]],
+        deadline: float | None,
+    ) -> Iterator[bytes]:
+        """Return the stream produced by ``factory``, bounded by ``deadline``."""
+        return self._bounded(factory, deadline)
+
+    def _bounded(
+        self,
+        factory: Callable[[], Iterable[bytes]],
+        deadline: float | None,
+    ) -> Iterator[bytes]:
+        iterator = iter(self._call(factory, deadline))
+        try:
+            while True:
+                try:
+                    chunk = self._call(lambda: next(iterator), deadline)
+                except StopIteration:
+                    return
+                yield chunk
+        finally:
+            close = getattr(iterator, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:  # a failing close must not mask the deadline
+                    pass
+
+    def _call(
+        self,
+        call: Callable[[], _T],
+        deadline: float | None,
+    ) -> _T:
+        """Wait for one plugin call and map its unexpected failures.
+
+        A :class:`PluginError` keeps its ``reason`` (the engine owns the
+        attachment message) and :class:`TimeoutError` marks the spent budget;
+        any other plugin failure is the core-owned ``E_PLUGIN_FAILED``.
+        """
+        try:
+            return self._wait(call, deadline)
+        except (PluginError, StopIteration, TimeoutError):
+            raise
+        except Exception as exc:
+            raise _plugin_failed(self._driver) from exc
+
+    def _wait(
+        self,
+        call: Callable[[], _T],
+        deadline: float | None,
+    ) -> _T:
+        """Run ``call`` inline without a policy, or in a worker with the remaining budget."""
+        if deadline is None:
+            return call()
+        remaining = deadline - self._clock()
+        if remaining <= 0.0:
+            raise TimeoutError(_STREAM_DEADLINE_MESSAGE)
+        try:
+            return _run_with_deadline(call, remaining)
+        except _DeadlineExceeded:
+            raise TimeoutError(_STREAM_DEADLINE_MESSAGE) from None
+
+
 def _valid_mapping(value: Any) -> bool:
     return isinstance(value, Mapping)
 
@@ -646,6 +745,12 @@ class _DriverCallProxy:
         driver = object.__getattribute__(self, "_driver_name")
         internal = object.__getattribute__(self, "_internal")
         timeout = object.__getattribute__(self, "_timeout")
+        if name == "attachment_stream" and not internal:
+            # Every block of an external attachment can block while the plugin
+            # fetches it: the extraction engine bounds the stream with the
+            # per-attachment deadline through its stream guard, never with the
+            # metadata deadline.
+            return value
 
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             return call_driver(
@@ -686,6 +791,7 @@ def wrap_driver(
 
 __all__ = [
     "ATTACHMENT_OPERATIONS",
+    "AttachmentStreamGuard",
     "ATTACHMENTS_MODES",
     "CAPABILITY_KEYS",
     "Capabilities",

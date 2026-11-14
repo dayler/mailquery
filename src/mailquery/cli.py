@@ -21,6 +21,7 @@ from typing import Any, Mapping, Sequence
 
 from mailquery import __version__
 from mailquery import uid as uid_module
+from mailquery.attachments import W_ATTACHMENT_ACTIVE_CONTENT, active_content_types
 from mailquery.attachments.engine import AttachmentsEngine
 from mailquery.attachments.paths import message_dir
 from mailquery.backends import backend_class, get_backend
@@ -52,11 +53,11 @@ from mailquery.output import (
     write_json,
 )
 from mailquery.plugins import (
-    EXTRACTION_TIMEOUT_SECONDS,
     PluginContext,
     call_driver,
     wrap_driver,
 )
+from mailquery.plugins.api import AttachmentStreamGuard, RESERVED_DRIVER_NAMES
 from mailquery.search import (
     Filters,
     _config_for_driver,
@@ -1113,15 +1114,32 @@ def _require_attachment_capabilities(instance: Any, driver: str) -> None:
     """Only a driver that can materialize attachments may continue."""
     capabilities = getattr(instance, "capabilities", None) or {}
     mode = str(capabilities.get("attachments", "local"))
-    if mode not in ("none", "remote"):
+    if mode != "none":
         return
     raise MailqueryError(
         "E_ATTACHMENT_UNAVAILABLE",
         f"attachment recovery is unsupported by driver {driver!r}",
-        'install or declare a driver with attachments = "local" in the [scope] '
-        "blocks of ~/.mailquery/config.toml",
+        'install or declare a driver with attachments = "local" or "remote" in the '
+        "[scope] blocks of ~/.mailquery/config.toml",
         "attachment recovery is unsupported by the driver",
     )
+
+
+def _attachment_timeout(config: Config) -> float:
+    """Per-attachment extraction budget in seconds (``[attachments].timeout_seconds``)."""
+    return float(config.attachments.timeout_seconds)
+
+
+def _attachment_stream_guard(driver: str) -> AttachmentStreamGuard | None:
+    """Bound the attachment stream of an external driver (``None`` for built-ins).
+
+    The built-in drivers keep their SQLite/COM objects in the calling thread and
+    are only checked between blocks; an external plugin is waited on in a
+    worker thread with the remaining per-attachment budget.
+    """
+    if driver in RESERVED_DRIVER_NAMES:
+        return None
+    return AttachmentStreamGuard(driver)
 
 
 def _attachment_not_found(uid: str) -> MailqueryError:
@@ -1170,10 +1188,12 @@ def _run_attachment(
     """Run the ``attachment`` command on the opened driver of the uid.
 
     The CLI resolves the account/scope, checks the message and its attachment
-    indexes and hands the extraction to ``AttachmentsEngine`` with the 120 s
-    ``EXTRACTION_TIMEOUT_SECONDS`` deadline. The success payload carries ``uid``,
-    ``output_dir``, ``count``, ``attachments`` and ``warnings``; the engine returns
-    one record per requested attachment.
+    indexes and hands the extraction to ``AttachmentsEngine`` with the
+    configured per-attachment budget (``[attachments].timeout_seconds``). The
+    success payload carries ``uid``, ``output_dir``, ``count``, ``attachments``
+    and ``warnings``; the engine returns one record per requested attachment and
+    every delivered file is scanned for active-content markers afterwards, so
+    the warning never consumes the extraction budget.
     """
     driver = str(getattr(args, "uid_driver", "") or "")
     native_uid = getattr(args, "uid", None)
@@ -1225,8 +1245,14 @@ def _run_attachment(
         for value in indices:
             if value not in available:
                 raise _attachment_out_of_range(show_uid, value, len(entries))
-    engine = AttachmentsEngine(home_path, config.attachments, wrapped)
-    deadline = lambda: time.monotonic() + EXTRACTION_TIMEOUT_SECONDS  # noqa: E731
+    engine = AttachmentsEngine(
+        home_path,
+        config.attachments,
+        wrapped,
+        stream_guard=_attachment_stream_guard(driver),
+    )
+    timeout = _attachment_timeout(config)
+    deadline = lambda: time.monotonic() + timeout  # noqa: E731
     records = engine.recover(
         show_uid,
         indices,
@@ -1247,12 +1273,19 @@ def _run_attachment(
         }
         for record in records
     ]
+    warnings = [
+        W_ATTACHMENT_ACTIVE_CONTENT.format(
+            index=int(record["index"]), kind=kind, uid=show_uid
+        )
+        for record in records
+        for kind in active_content_types(Path(str(record["path"])))
+    ]
     return {
         "uid": show_uid,
         "output_dir": str(message_dir(home_path, show_uid)),
         "count": len(payload_entries),
         "attachments": payload_entries,
-        "warnings": [],
+        "warnings": warnings,
     }
 
 
