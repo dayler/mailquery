@@ -79,8 +79,9 @@ soportan Outlook nuevo (`olk.exe`).
   de reintento, warnings tipados, cuerpos tratados como entrada no confiable,
   `new` con cursor idempotente.
 - Protección contra escaneos ilimitados (`E_UNBOUNDED_SCAN`, `max_scan`) y
-  preflight con `doctor`.
-- Sin dependencias salvo `pywin32` en Windows; tests con `unittest`.
+  diagnóstico con `doctor`.
+- Dependencias: `css-inline` en macOS y Windows y `pywin32` en Windows; tests
+  con `unittest`.
 - Privacidad: logs sin asuntos ni direcciones; cero telemetría.
 - **Cero tokens de sobrecarga por turno: el agente solo paga lo que consulta.**
   Un MCP server inyecta la definición de todas sus herramientas en cada turno
