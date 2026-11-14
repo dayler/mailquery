@@ -49,6 +49,10 @@
 # max_total_size_mb = 200        # 1..1024 (>= max_file_size_mb)
 # max_count = 50                 # 1..500
 
+# --- Untrusted content presentation ----------------------------------------
+# [content]
+# url_display = "neutralize"   # neutralize | keep | strip (--strip-links forces strip)
+
 # --- Observed accounts: macOS (Apple Mail) ----------------------------------
 # A block without a driver prefix uses the native driver of the OS
 # (`apple_mail` on macOS, `outlook` on Windows). Write the prefix explicitly to
@@ -108,4 +112,6 @@
 # `[attachments]` accepts only `enabled`, `max_file_size_mb`,
 # `max_total_size_mb` and `max_count`; a value out of range (or a total lower
 # than the per-file limit) fails with E_CONFIG_INVALID (exit 2).
+# `[content]` accepts only `url_display` (`neutralize`, `keep` or `strip`); any
+# other value or key fails with E_CONFIG_INVALID (exit 2).
 # ----------------------------------------------------------------------------
