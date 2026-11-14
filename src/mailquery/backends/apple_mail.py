@@ -21,6 +21,7 @@ from mailquery.accounts import AccountLabels
 from mailquery.backends.base import (
     AccountRow,
     BodyRow,
+    HeaderRow,
     MailBackend,
     MailboxRow,
     MessageRow,
@@ -280,6 +281,9 @@ class AppleMailBackend(MailBackend):
                     "partial": partial,
                 },
                 "warnings": warnings,
+                "hidden_chars": 0,
+                "authentication_results": None,
+                "reply_to": None,
             }
         partial = bool(getattr(parsed, "partial", False))
         readable = bool(getattr(parsed, "readable", True))
@@ -296,6 +300,33 @@ class AppleMailBackend(MailBackend):
             ),
             "source": {"emlx_path": str(path), "partial": partial},
             "warnings": warnings,
+            "hidden_chars": int(getattr(parsed, "hidden_chars", 0) or 0),
+            "authentication_results": getattr(parsed, "authentication_results", None),
+            "reply_to": getattr(parsed, "reply_to", None),
+        }
+
+    def load_headers(self, row: MessageRow) -> HeaderRow:
+        """Read only the header block of the message's ``.emlx``.
+
+        Resolves the file of the message's physical folder like :meth:`load_body`
+        and reads its headers without parsing the body. A file that cannot be
+        resolved or read yields empty headers with ``read=False``.
+        """
+        mailbox = self._physical_mailbox(row)
+        if mailbox is None:
+            return _missing_headers()
+        try:
+            path = emlx.resolve_path(self.store, mailbox, int(row["uid"]))
+        except Exception:
+            return _missing_headers()
+        if path is None:
+            return _missing_headers()
+        parsed = emlx.parse_emlx_headers(path)
+        return {
+            "headers": dict(parsed.headers),
+            "authentication_results": parsed.authentication_results,
+            "reply_to": parsed.reply_to,
+            "read": bool(parsed.read),
         }
 
     def attachments(self, uid: Any) -> list[dict[str, Any]]:
@@ -893,6 +924,16 @@ def _load_emlx(
     ):
         warnings.append(f"W_EMLX_CORRUPT: the .emlx for uid {uid} could not be parsed")
     return parsed, path, warnings
+
+
+def _missing_headers() -> HeaderRow:
+    """Header row of a message whose ``.emlx`` cannot be resolved."""
+    return {
+        "headers": {name: "" for name in emlx.HEADER_NAMES},
+        "authentication_results": None,
+        "reply_to": None,
+        "read": False,
+    }
 
 
 # --------------------------------------------------------------------------- #

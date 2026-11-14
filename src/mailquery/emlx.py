@@ -15,9 +15,12 @@ from email import message_from_bytes, policy
 from email.message import Message
 from pathlib import Path
 import plistlib
+import re
 from typing import TYPE_CHECKING, Iterable, Iterator
 
-from mailquery.output import html_to_text
+# ``html_to_text`` remains importable from this module for callers of the
+# conversion helper; the body extraction uses ``html_body_to_text``.
+from mailquery.output import html_body_to_text, html_to_text
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mailquery.store import EnvelopeStore, Mailbox
@@ -25,6 +28,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 #: Header names copied from the MIME block into :class:`EmlxMessage.headers`.
 HEADER_NAMES: tuple[str, ...] = ("From", "To", "Cc", "Subject", "Date", "Message-ID")
+
+#: Sender headers read for the sender signals (the first one of each is used).
+AUTHENTICATION_RESULTS_HEADER = "Authentication-Results"
+REPLY_TO_HEADER = "Reply-To"
+
+#: Bytes read at most from the start of a file to obtain its header block.
+HEADER_READ_LIMIT: int = 256 * 1024
+
+#: A folded header line: CRLF or LF followed by a space or a tab.
+_FOLDED_LINE = re.compile(r"\r?\n(?=[ \t])")
 
 #: Warning codes shared with the CLI JSON contract.
 W_EMLX_MISSING = "W_EMLX_MISSING"
@@ -50,6 +63,24 @@ class EmlxMessage:
     available: bool
     readable: bool
     warnings: tuple[str, ...] = ()
+    hidden_chars: int = 0
+    authentication_results: str | None = None
+    reply_to: str | None = None
+
+
+@dataclass(frozen=True)
+class EmlxHeaders:
+    """Header block of one ``.emlx`` file, read without its body.
+
+    ``read`` is ``False`` when the header block could not be obtained (a
+    missing or unreadable file, or a container length line that cannot be
+    parsed), so a caller can tell "no headers" from "not read".
+    """
+
+    headers: dict[str, str]
+    authentication_results: str | None
+    reply_to: str | None
+    read: bool
 
 
 def resolve_path(store: "EnvelopeStore", mailbox: "Mailbox", uid: int) -> Path | None:
@@ -125,6 +156,7 @@ def parse_emlx(path: Path) -> EmlxMessage:
         return _unparsed(path, partial, tuple(warnings))
 
     headers = _extract_headers(message)
+    authentication_results, reply_to = _sender_headers(message)
     attachments = _attachment_names(message)
 
     smime = _smime_kind(message)
@@ -143,6 +175,8 @@ def parse_emlx(path: Path) -> EmlxMessage:
             available=True,
             readable=False,
             warnings=tuple(warnings),
+            authentication_results=authentication_results,
+            reply_to=reply_to,
         )
 
     if not message.keys():
@@ -156,9 +190,11 @@ def parse_emlx(path: Path) -> EmlxMessage:
             available=True,
             readable=False,
             warnings=tuple(warnings),
+            authentication_results=authentication_results,
+            reply_to=reply_to,
         )
 
-    body_text = _extract_body_text(message, warnings)
+    body_text, hidden_chars = _extract_body_text(message, warnings)
     return EmlxMessage(
         path=path,
         partial=partial,
@@ -168,6 +204,47 @@ def parse_emlx(path: Path) -> EmlxMessage:
         available=True,
         readable=True,
         warnings=tuple(warnings),
+        hidden_chars=hidden_chars,
+        authentication_results=authentication_results,
+        reply_to=reply_to,
+    )
+
+
+def parse_emlx_headers(path: Path) -> EmlxHeaders:
+    """Read only the header block of an ``.emlx`` file.
+
+    The block starts after the container length line and ends at the first
+    empty line; at most :data:`HEADER_READ_LIMIT` bytes are read from the file,
+    so a large body is never loaded. Folded header lines are unfolded. This
+    never raises: a missing or unreadable file, or a length line that cannot be
+    parsed, yields empty headers with ``read=False``.
+    """
+    path = Path(path)
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(HEADER_READ_LIMIT)
+    except OSError:
+        return _unreadable_headers()
+    if not data:
+        return _unreadable_headers()
+    line_end = data.find(b"\n")
+    if line_end < 0:
+        return _unreadable_headers()
+    try:
+        declared_length = int(data[:line_end].strip())
+    except ValueError:
+        return _unreadable_headers()
+    if declared_length <= 0:
+        return _unreadable_headers()
+    message = _parse_header_block(_header_block(data[line_end + 1 :]))
+    if message is None:
+        return _unreadable_headers()
+    authentication_results, reply_to = _sender_headers(message)
+    return EmlxHeaders(
+        headers=_extract_headers(message),
+        authentication_results=authentication_results,
+        reply_to=reply_to,
+        read=True,
     )
 
 
@@ -301,6 +378,57 @@ def _parse_message(payload: bytes) -> Message | None:
         return None
 
 
+def _parse_header_block(block: bytes) -> Message | None:
+    """Parse a standalone header block; the same policy as a full message."""
+    try:
+        return message_from_bytes(block, policy=policy.default)
+    except Exception:  # pragma: no cover - defensive: corrupt headers never crash
+        return None
+
+
+def _header_block(payload: bytes) -> bytes:
+    """Bytes of ``payload`` up to the first empty line (the header block)."""
+    start = 0
+    while True:
+        end = payload.find(b"\n", start)
+        if end < 0:
+            return payload
+        if not payload[start:end].strip():
+            return payload[:start]
+        start = end + 1
+
+
+def _header_text(value: object) -> str:
+    """One header value: decoded and unfolded, with no surrounding whitespace."""
+    if value is None:
+        return ""
+    return _unfold(_clean_text(str(value))).strip()
+
+
+def _unfold(value: str) -> str:
+    """Drop the line breaks of folded header lines, keeping their whitespace."""
+    return _FOLDED_LINE.sub("", value)
+
+
+def _first_header(message: Message, name: str) -> str | None:
+    """Value of the first header called ``name``, or ``None`` when absent or empty."""
+    try:
+        values = message.get_all(name)
+    except Exception:  # pragma: no cover - corrupt header objects
+        return None
+    if not values:
+        return None
+    return _header_text(values[0]) or None
+
+
+def _sender_headers(message: Message) -> tuple[str | None, str | None]:
+    """The first ``Authentication-Results`` and ``Reply-To`` of one message."""
+    return (
+        _first_header(message, AUTHENTICATION_RESULTS_HEADER),
+        _first_header(message, REPLY_TO_HEADER),
+    )
+
+
 def _extract_headers(message: Message) -> dict[str, str]:
     headers: dict[str, str] = {}
     for name in HEADER_NAMES:
@@ -310,12 +438,20 @@ def _extract_headers(message: Message) -> dict[str, str]:
         except Exception:  # pragma: no cover - corrupt header objects
             header = None
         if header is not None:
-            value = _clean_text(str(header)).strip()
+            value = _header_text(header)
         headers[name] = value
     return headers
 
 
-def _extract_body_text(message: Message, warnings: list[str]) -> str:
+def _extract_body_text(message: Message, warnings: list[str]) -> tuple[str, int]:
+    """Visible body text and the count of characters its hidden elements omitted.
+
+    The body parts of the message are the ``text/html`` parts that are not
+    attachments; when there is at least one, their converted texts are joined
+    with a newline and the plain-text parts are ignored, even when the HTML
+    yields no text (then the body is empty and ``W_HTML_NO_TEXT`` is added).
+    Without HTML body parts the plain-text parts are joined as before.
+    """
     plain_parts: list[str] = []
     html_parts: list[str] = []
     for part in _iter_content_parts(message):
@@ -329,14 +465,17 @@ def _extract_body_text(message: Message, warnings: list[str]) -> str:
             if raw.strip():
                 html_parts.append(raw)
 
-    if plain_parts:
-        return "\n".join(plain_parts)
     if html_parts:
-        converted = [text for text in (html_to_text(raw) for raw in html_parts) if text]
-        if converted:
-            return "\n".join(converted)
+        converted = [html_body_to_text(raw) for raw in html_parts]
+        hidden_chars = sum(result.hidden_chars for result in converted)
+        texts = [result.text for result in converted if result.text]
+        if texts:
+            return "\n".join(texts), hidden_chars
         _add_warning(warnings, W_HTML_NO_TEXT, "HTML body produced no plain text")
-    return ""
+        return "", hidden_chars
+    if plain_parts:
+        return "\n".join(plain_parts), 0
+    return "", 0
 
 
 def _iter_content_parts(message: Message) -> Iterator[Message]:
@@ -755,6 +894,16 @@ def _clean_text(value: str) -> str:
 
 def _empty_headers() -> dict[str, str]:
     return {name: "" for name in HEADER_NAMES}
+
+
+def _unreadable_headers() -> EmlxHeaders:
+    """Header block that could not be obtained: empty and ``read=False``."""
+    return EmlxHeaders(
+        headers=_empty_headers(),
+        authentication_results=None,
+        reply_to=None,
+        read=False,
+    )
 
 
 def _unparsed(
