@@ -2,8 +2,8 @@
 
 > [English](README.md) · [Español](README.es.md)
 
-`mailquery` es una herramienta de línea de comandos (Python, solo biblioteca
-estándar salvo `pywin32` en Windows) que **lee y busca correo local sin
+`mailquery` es una herramienta de línea de comandos (Python, con `css-inline`
+en macOS y Windows y `pywin32` en Windows) que **lee y busca correo local sin
 modificar nada**: Apple Mail en macOS y Outlook clásico en Windows. Está pensada
 para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
 
@@ -44,7 +44,7 @@ pendiente) y [`skills/README.md`](skills/README.md) (skill para harnesses).
 | Sistema | macOS con Apple Mail (store `V9`/`V10`/`V11`) | Windows 10/11 x64 con Outlook **clásico** 16.0 **abierto** |
 | Python | ≥ 3.11 (el que use `pipx`) | ≥ 3.11 (el que use `pipx`) |
 | `pipx` | `brew install pipx && pipx ensurepath` | `python -m pip install --user pipx && python -m pipx ensurepath` |
-| Dependencias | Ninguna | `pywin32` (la instala `pipx`) |
+| Dependencias | `css-inline` (la instala `pipx`) | `css-inline` y `pywin32` (las instala `pipx`) |
 | Permisos | **Acceso total al disco** (FDA) | Misma sesión y mismo nivel de integridad que Outlook |
 
 No se soportan el nuevo Outlook (`olk`), Outlook en la web, Outlook para Mac ni
@@ -98,6 +98,55 @@ En Windows, el borrado opcional es `Remove-Item -Recurse -Force $HOME\.mailquery
 `~/.mailquery`. Para ejecutar sin instalar, ver
 [`docs/INTERFACES.md` §8](docs/INTERFACES.md).
 
+### Actualización de seguridad de `css-inline`
+
+`css-inline` se instala desde un wheel y los comandos son iguales en macOS y en
+Windows. Los avisos se publican en la página de
+[avisos de seguridad](https://github.com/Stranger6667/css-inline/security/advisories)
+del repositorio, y la versión corregida aparece en la sección "Security" del
+[changelog](https://github.com/Stranger6667/css-inline/blob/master/CHANGELOG.md):
+puede que un aviso no esté en PyPI ni en las bases de vulnerabilidades que
+consulta `pip-audit`, y puede que no indique la versión corregida.
+
+1. **Ver la versión instalada** (la línea `Version:`):
+
+   ```bash
+   pipx runpip mailquery show css-inline
+   ```
+
+2. **Compararla** con las versiones afectadas y la corregida que indica el
+   aviso. Si la instalada no está afectada, no hay que hacer nada.
+3. **Si la corrección es un parche dentro del rango de `mailquery`** (`0.23.x`),
+   instalarlo sin reinstalar `mailquery` y comprobar el resultado:
+
+   ```bash
+   pipx runpip mailquery install --upgrade "css-inline~=0.23.1"
+   pipx runpip mailquery show css-inline
+   mailquery show <uid>    # comprobar con un mensaje HTML
+   ```
+
+   `pipx reinstall mailquery` también instala el último parche permitido.
+4. **Si la corrección solo existe en una versión menor posterior** (`0.24` o
+   más), actualizar `mailquery` cuando una versión amplíe el rango (`git pull` y
+   después `pipx reinstall mailquery`). Si el aviso es crítico y no se puede
+   esperar, se puede forzar la versión corregida, sabiendo que esa combinación no
+   está probada y que `pip` muestra un aviso de conflicto de dependencias:
+
+   ```bash
+   pipx runpip mailquery install "css-inline==<versión corregida>"
+   mailquery show <uid>    # comprobar con un mensaje HTML
+   ```
+
+   Si `css-inline` falla, `mailquery` sigue funcionando: convierte el HTML sin
+   pasar las hojas `<style>` a línea, así que solo se pierde la omisión del texto
+   oculto por hojas de estilo. La próxima `pipx reinstall mailquery` vuelve a una
+   versión dentro del rango.
+5. **Volver atrás** si una versión nueva da problemas:
+
+   ```bash
+   pipx runpip mailquery install "css-inline==<versión anterior>"
+   ```
+
 ## Skill para harnesses de IA (`skills/`)
 
 El repositorio incluye un skill listo para harnesses (DeepSeek Harness, Claude
@@ -126,28 +175,58 @@ después de instalar: la suite importa el código de `src/` y **no usa** la copi
 instalada ni toca el `~/.mailquery` real (cada test usa un `HOME` temporal). Solo
 `unittest` de la biblioteca estándar; no hace falta `pytest`.
 
+La suite importa `css-inline`, así que crea un entorno virtual en la raíz del
+repositorio e instálalo dentro. Esto también cubre macOS, donde el `python3` de
+Homebrew rechaza `pip install --user` por PEP 668.
+
+**macOS / Linux** (desde la raíz del repositorio):
+
+```bash
+python3 -m venv .venv                                     # una vez
+.venv/bin/python -m pip install "css-inline~=0.23.1"      # una vez
+```
+
+**Windows** (PowerShell, desde la raíz del repositorio):
+
+```powershell
+python -m venv .venv                                      # una vez
+.venv\Scripts\python -m pip install "css-inline~=0.23.1" pywin32   # una vez
+```
+
+Ejecuta la suite con el intérprete de `.venv` (`.venv/bin/python` en macOS y
+Linux, `.venv\Scripts\python` en Windows):
+
 **Windows** (PowerShell, desde la raíz del repo):
 
 ```powershell
-python -m pip install --user pywin32                      # una vez, como en la CI
-python -B -m unittest discover -s tests -t . -v           # suite completa
-python -B -m unittest discover -s tests -t . -k ol_02_05  # un caso por ID
-python -B -m unittest tests.test_outlook -v               # un módulo
+.venv\Scripts\python -B -m unittest discover -s tests -t . -v           # suite completa
+.venv\Scripts\python -B -m unittest discover -s tests -t . -k ol_02_05  # un caso por ID
+.venv\Scripts\python -B -m unittest tests.test_outlook -v               # un módulo
 ```
 
-**macOS** (Terminal, desde la raíz del repo; el `python3` del sistema es anterior
-a 3.11, se usa el de Homebrew con `brew install python`):
+**macOS** (Terminal, desde la raíz del repo):
 
 ```bash
-python3 -B -m unittest discover -s tests -t . -v           # suite completa
-python3 -B -m unittest discover -s tests -t . -k st_03_01  # un caso por ID
-python3 -B -m unittest tests.test_store -v                 # un módulo
+.venv/bin/python -B -m unittest discover -s tests -t . -v           # suite completa
+.venv/bin/python -B -m unittest discover -s tests -t . -k st_03_01  # un caso por ID
+.venv/bin/python -B -m unittest tests.test_store -v                 # un módulo
 ```
 
-**Linux** (solo desarrollo y CI; mismos comandos que macOS con `python3` ≥ 3.11):
+**Linux** (solo desarrollo y CI; mismos comandos que macOS):
 
 ```bash
-python3 -B -m unittest discover -s tests -t . -v
+.venv/bin/python -B -m unittest discover -s tests -t . -v
+```
+
+La cobertura usa `coverage~=7.17`, instalado en el mismo entorno y ejecutado con
+el intérprete de la suite; el informe falla por debajo del 85 % de cobertura
+total combinada de líneas y ramas:
+
+```bash
+.venv/bin/python -m pip install "coverage~=7.17"
+.venv/bin/python -B -m coverage erase
+.venv/bin/python -B -m coverage run -m unittest discover -s tests -t .
+.venv/bin/python -B -m coverage report
 ```
 
 Resultado esperado: `OK`, con saltos (`skipped=N`) solo donde la prueba no aplica
@@ -168,7 +247,7 @@ app de terminal que las ejecuta necesita **Acceso total al disco**. Para correr
 solo las SMOKE:
 
 ```bash
-python -B -m unittest tests.test_smoke -v    # python3 en macOS
+.venv/bin/python -B -m unittest tests.test_smoke -v    # .venv\Scripts\python en Windows
 ```
 
 Convenciones (nombres por ID de caso, goldens, Outlook falso, CI): ver
