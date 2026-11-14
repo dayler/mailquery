@@ -1832,6 +1832,14 @@ python -B -m unittest discover -s tests -t . -k ol_02_05           # un caso por
 python -B -m unittest tests.test_store -v                          # un módulo
 ```
 
+Los tests importan `css-inline`, así que el entorno de tests instala `css-inline~=0.23.1` y, para medir la cobertura, `coverage~=7.17`:
+
+```bash
+python -m pip install "css-inline~=0.23.1" "coverage~=7.17"
+python -B -m coverage run -m unittest discover -s tests -t .
+python -B -m coverage report      # falla por debajo del 85 % total
+```
+
 - Solo `unittest` + `unittest.mock` (no hay `pytest`).
 - Flujo de trabajo: se corre la suite completa una vez; si algo falla, se
   itera solo sobre ese caso (`-k <grupo>_<caso>` o su ruta completa) y, antes
@@ -1958,16 +1966,24 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
 
 - Disparo **solo por PR** (`pull_request` a `develop`/`main`); no hay
   `push` ni tag. `concurrency` con `cancel-in-progress` (un push
-  nuevo al PR cancela el run anterior) y `timeout-minutes: 30` por job.
+  nuevo al PR cancela el run anterior) y `timeout-minutes: 20` en
+  `unittest` y 15 en `install-scripts`.
 - Job `unittest`: `ubuntu-latest`, `macos-latest` y `windows-latest` ×
-  Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`) = 12 jobs. Ejecuta
-  `python -m unittest discover -s tests -t . -v`; `pywin32` se instala solo en
-  Windows. La suite completa debe pasar en los 3 SO (RNF-10). La matriz **no**
-  instala el paquete: los casos de entry points usan metadata inyectada o se
-  saltan con motivo (PKG-01/02).
+  Python 3.11, 3.12, 3.13 y 3.14 (`fail-fast: false`) = 12 jobs. Instala
+  `css-inline` y `coverage` en los tres sistemas y `pywin32` solo en
+  Windows; ejecuta `python -B -m coverage run -m unittest discover -s
+  tests -t . -v` y un paso `Check coverage` con `python -m coverage
+  report` que falla por debajo del 85 % de cobertura total combinada de
+  líneas y ramas. La suite completa debe pasar en los 3
+  SO. La matriz **no** instala el paquete: los casos de entry points usan
+  metadata inyectada o se saltan con motivo (PKG-01/02).
 - Job `install-scripts` (3 OS): valida y ejecuta en seco los instaladores
   (`scripts/install.sh` y `skills/install.sh` en ubuntu/macOS, los `.ps1` en
-  Windows). Total: **15 jobs** por corrida.
+  Windows). En Ubuntu, un paso previo comprueba con `pip download
+  --only-binary=:all: --no-deps` que las etiquetas `macosx_11_0_arm64`,
+  `macosx_10_12_x86_64`, `win_amd64`, `win32` y `manylinux_2_17_x86_64`
+  tienen wheel de `css-inline` `0.23.x` (sin compilar y sin saltar a
+  `0.24`). Total: **15 jobs** por corrida.
 
 ### 8.7 Git
 

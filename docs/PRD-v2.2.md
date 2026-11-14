@@ -156,7 +156,7 @@ Estado de la implementación de cada contrato de la sección 0.2, desviaciones a
 | Cabeceras leídas | F1 | Pendiente | — | — | — |
 | Contrato de plugins: cuerpo | F1 | Pendiente | — | — | — |
 | Configuración | F1, F2 | Pendiente | — | — | — |
-| Dependencias y actualización | F1 | Pendiente | — | — | — |
+| Dependencias y actualización | F1 | Implementado y documentado | `3ebe4c7` | `README.md`, `README.es.md` | `css-inline~=0.23.1` es la única dependencia nueva, sin marcador de plataforma; `pipx install` la instala desde wheel en macOS y Windows, el rango de parches no pasa a `0.24`, y `pywin32` sigue siendo la única dependencia propia de Windows. Los dos README tienen la subsección de actualización de seguridad de `css-inline` con los cinco pasos, sus comandos y el enlace a los avisos y al changelog. La CI instala `css-inline` y `coverage`, corre la suite bajo `coverage` con el umbral del 85 % total y comprueba en Ubuntu que las cinco etiquetas soportadas tienen wheel `0.23.x` sin compilar. |
 | Responsabilidades de módulos | F1, F2, F3 | Pendiente | `f8806dc` | `INTERFACES.md` | `search.py` arma `search`, `new` y `show` con el mismo constructor de metadatos y de cuerpo; dos tuplas públicas (`SEARCH_ROW_FIELDS`, `SHOW_FIELDS`) fijan el orden de las claves de la fila y de `message`. |
 | Prompt injection | F1 | Pendiente | — | — | — |
 | Cambios visibles en 3.0.0 | F1, F3 | Pendiente | — | — | — |

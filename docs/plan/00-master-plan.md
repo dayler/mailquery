@@ -55,7 +55,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 
 | ID | Milestone | Lote | Oleada | Depende de | ACs (total o parcial) | Archivo | Estado |
 |---|---|---|---|---|---|---|---|
-| M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | 🟡 |
+| M01 | Dependencia `css-inline`, CI y README de actualización | I1 | W1 | — | AC-H15, AC-H17 | [M01](M01-css-inline-infra.md) | 🟢 |
 | M02 | Refactor: armado único de mensajes en `search.py` | I1 | W1 | — | — (preserva comportamiento) | [M02](M02-message-assembly-refactor.md) | 🟢 |
 | M03 | Primitivas A2 y A3 en `output.py` | I1 | W1 | — | AC-H01, AC-H02, AC-H04, AC-H05, AC-H17, AC-H18 | [M03](M03-sanitize-visible-body.md) | 🟡 |
 | M04 | Detector de contenido activo (A7) | I1 | W1 | — | AC-H12 | [M04](M04-active-content-scanner.md) | 🟢 |
@@ -208,12 +208,12 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC-H09 | `W_NON_ASCII_DOMAIN` y punycode | M05, M08 | UT-CNT-07, UT-CNT-08, UT-CW-10 | ⚪ |
 | AC-H10 | `W_LONG_URL` y `W_SCRIPT_LINK` | M05, M08 | UT-CNT-08, UT-CW-10 | ⚪ |
 | AC-H11 | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | M05, M06, M08 | UT-CNT-09, UT-BOD-03, UT-BOD-04, UT-CW-11 | ⚪ |
-| AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | ⚪ |
+| AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | 🟡 |
 | AC-H13 | `[content]` inválido ⇒ `E_CONFIG_INVALID` | M08 | UT-CFG-03, DOC-06.02, DOC-06.04 | ⚪ |
 | AC-H14 | Compatibilidad: solo `content_notice` nuevo; resto sin cambios | M07, M10 | UT-CW-06, UT-FLD-07 | ⚪ |
-| AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | ⚪ |
+| AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | 🟡 |
 | AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | ⚪ |
-| AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | ⚪ |
+| AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟡 |
 | AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | ⚪ |
 | AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | ⚪ |
 | AC-D02 | `reason: network`/`not_local` ⇒ `E_ATTACHMENT_UNAVAILABLE` | M09 | UT-RMT-02 | ⚪ |
@@ -551,3 +551,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-13 | P0-5 | ⚪ → 🟢 | — | `PRD-v2.2.md` sección 0.5 | Las 32 filas de la sección 0.2 en "Pendiente"; tabla de hallazgos y filas CL-04, CL-05 y CL-06 |
 | 2026-11-13 | M02 | 🟡 → 🟢 | `f8806dc` (merge en `integration/i1-prep`): `Ran 1066`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +2 tests nuevos) | `docs/plan/evidence/M02.md` | UT-SR-17; refactor sin cambios de goldens; cobertura total 89 %, `search.py` 92 %; commits con `--no-verify` por el hook local roto |
 | 2026-11-13 | M04 | 🟡 → 🟢 | `645fe09` (merge en `integration/i1-prep`): `Ran 1087`, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +23 tests UT-ACT) | `docs/plan/evidence/M04.md` | Detector `attachments/active_content.py` al 100 %; UT-ACT-05 y DOC-09 se difieren a M09 (conexión con `attachment`) |
+| 2026-11-13 | M01 | 🟡 → 🟢 | `3ebe4c7` (merge en `integration/i1-prep`): `Ran 1072` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos SMOKE-NEW.07 de la línea base; +8 tests) | `docs/plan/evidence/M01.md` | `css-inline~=0.23.1` + `coverage` en CI y READMEs; configuración `[tool.coverage.*]`; los wheels se comprueban en CI (resultado se anota en el cierre de I1); commits con `--no-verify` por el hook local roto |

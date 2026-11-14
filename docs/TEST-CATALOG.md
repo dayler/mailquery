@@ -42,7 +42,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py` |
+| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py` |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` |
 
@@ -72,7 +72,7 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 
 ## 5. CI y saltos
 
-`.github/workflows/tests.yml` corre la suite completa en cada pull request a `develop` y `main`: `ubuntu-latest`, `macos-latest` y `windows-latest` × Python 3.11–3.14, sin `fail-fast`, con `pywin32` solo en Windows, más los jobs de `install-scripts`. La matriz no instala el paquete: los casos de entry points usan metadatos inyectados o se saltan con motivo. `tests/test_readonly.py` es bloqueante.
+`.github/workflows/tests.yml` corre la suite completa en cada pull request a `develop` y `main`: `ubuntu-latest`, `macos-latest` y `windows-latest` × Python 3.11–3.14, sin `fail-fast`, más los jobs de `install-scripts`. La matriz instala `css-inline` en los tres sistemas, `coverage` y, en Windows, `pywin32`; no instala el paquete: los casos de entry points usan metadatos inyectados o se saltan con motivo. La suite corre bajo `coverage` y un paso `Check coverage` falla por debajo del 85 % de cobertura total combinada de líneas y ramas. El job `install-scripts` de Ubuntu comprueba con `pip download --only-binary=:all:` que las etiquetas `macosx_11_0_arm64`, `macosx_10_12_x86_64`, `win_amd64`, `win32` y `manylinux_2_17_x86_64` tienen wheel de `css-inline` `0.23.x`, sin compilar y sin saltar a `0.24`. `tests/test_readonly.py` es bloqueante.
 
 Saltos permitidos (los únicos):
 
@@ -124,6 +124,8 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
 | AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
+| AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
+| AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 
 ## 8. Casos
 
@@ -1753,7 +1755,7 @@ Requisitos: AC-01, AC-18 · Archivo: `tests/test_packaging.py`
 |---|---|---|
 | .01 | P | `pyproject.toml` declara la versión vigente (sin bump), el console script y el grupo `mailquery.backends` con los dos backends internos. |
 | .02 | P | `mailquery.__version__` coincide con la metadata del paquete; entry points resolubles con metadata inyectada. |
-| .03 | N | Sin dependencias de runtime nuevas (`pywin32` solo en Windows). |
+| .03 | P | Las dependencias de ejecución son exactamente `css-inline~=0.23.1` (sin marcador de plataforma) y `pywin32; sys_platform == "win32"`. |
 
 #### TC-07 — Documentación y ayudas
 
@@ -1865,6 +1867,17 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
 
+#### DOC-07 — Actualización de seguridad de `css-inline` en los README
+
+Requisitos: AC-H17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `README.md`: dentro de "Install, upgrade and uninstall" hay una subsección "Security update of `css-inline`" con `pipx runpip mailquery show css-inline`, `pipx runpip mailquery install --upgrade "css-inline~=0.23.1"`, `pipx reinstall mailquery`, `pipx runpip mailquery install "css-inline==` y la URL de los avisos. |
+| .02 | P | `README.es.md`: lo mismo dentro de "Instalar, actualizar y desinstalar", subsección "Actualización de seguridad de `css-inline`". |
+| .03 | P | Los dos README nombran `css-inline` en la introducción, en los requisitos y en las instrucciones de tests, y estas incluyen `coverage run` y `coverage report`. |
+| .04 | N | Ningún README conserva "standard library only" / "solo biblioteca estándar". |
+
 #### INS-SMOKE-01 — Instaladores
 
 Archivo: `tests/test_install_scripts.py`
@@ -1894,6 +1907,16 @@ Archivo: `tests/test_install_scripts.py`, `tests/test_packaging.py`
 | .01 | P | `pyproject.toml` y `__version__` coinciden y siguen en la versión vigente (`2.0.1`, sin bump); grupo `mailquery.backends` con `apple_mail` y `outlook`; console script intacto. |
 | .02 | P | Los tests de instaladores construyen `GOOD_VERSION` con `mailquery.__version__` pero como línea completa de `-v` (`mailquery <v> (backend outlook; Python 3.14.0; Windows 10.0.26200 AMD64)`), no solo la versión. |
 | .03 | P | `SMOKE-INSTALL.02` acepta la salida de `-v` de la versión actual sin fijar un literal (se deriva de `__version__`). |
+
+#### PKG-03 — Dependencia `css-inline`
+
+Requisitos: AC-H15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | La entrada de `css-inline` es literalmente `css-inline~=0.23.1`: rango de parches `0.23.x` desde `0.23.1`, sin `==`, sin `>=` abierto y sin marcador de plataforma. |
+| .02 | N | `pywin32` es la única dependencia con marcador `sys_platform == "win32"`. |
+| .03 | P | `[tool.coverage.report].fail_under = 85` y `[tool.coverage.run].branch = true`; `coverage` no está en `[project].dependencies`. |
 
 ### SMOKE contra el cliente de correo real
 
@@ -1928,6 +1951,7 @@ Archivo: `tests/test_smoke.py`
 | .02 | P | `mailquery -v` ⇒ el backend de la plataforma. |
 | .03 | P | Con `HOME`/`USERPROFILE` temporales (en macOS, `Library/Mail` y `Library/Accounts` del HOME temporal enlazan a los reales) y la primera cuenta de `mailquery mailboxes` declarada: `mailquery doctor --json` ⇒ todos los chequeos `ok=true`. |
 | .04 | N | El `~/.mailquery` real del usuario no cambia. |
+| .05 | P | Tras `pipx install .`, `pipx runpip mailquery show css-inline` con el mismo `PIPX_HOME` temporal ⇒ `Version: 0.23.<n>`. |
 
 #### SMOKE-NEW — Comandos de lectura contra el cliente real
 
