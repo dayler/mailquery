@@ -57,7 +57,7 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | F1 — SMOKE | SMOKE-NEW.07 ampliado, SMOKE-NEW.08–10 | 🟢 |
-| F2 — Windows | Corrida en este equipo | 🟢 (saltada con motivo: host macOS sin Outlook clásico) |
+| F2 — Windows | Corrida en este equipo | 🟢 (saltada con motivo: host macOS sin Outlook clásico; verificación pendiente en un equipo Windows: ver [`WINDOWS-VERIFICATION.md`](WINDOWS-VERIFICATION.md)) |
 | F3 — macOS | Corrida en el Mac del dueño (HITL-03) | 🟢 |
 | F4 — Rendimiento | `PERFORMANCE-BACKLOG.md` | 🟢 |
 | F5 — Auditoría | CL-05 en documentos consumidores; guardia `_STALE_TEXT_PATTERNS`; listas para `INTERFACES.md` y `TEST-CATALOG.md` | 🟢 |
