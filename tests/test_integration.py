@@ -1838,6 +1838,14 @@ _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
     "baseline": re.compile(r"\bbaseline\b", re.IGNORECASE),
     "retention_days": re.compile(r"retention_days(?! was replaced by max_size_mb)"),
     "--out": re.compile(r"--out\b"),
+    "list accounts, folders, counters": re.compile(
+        r"list accounts, folders, counters", re.IGNORECASE
+    ),
+    "standard library only": re.compile(r"standard library\s+only", re.IGNORECASE),
+    "solo biblioteca estándar": re.compile(
+        r"solo biblioteca\s+estándar", re.IGNORECASE
+    ),
+    "preflight": re.compile(r"\bpreflight\b", re.IGNORECASE),
 }
 
 #: Text the README must document (DOC-01.03/05, AC-21).
