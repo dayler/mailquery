@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W2 (en paralelo con M05 y M07)
 **Rama:** `feature/m06-body-source-sender-headers`, creada desde la punta de `integration/i2-content` · **Worktree:** `../mailquery-wt/m06`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F5 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -60,11 +60,11 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Contrato interno | `BodyRow` opcional, `HeaderRow`, `load_headers` en `METADATA_OPERATIONS` | ⚪ |
-| F2 — Apple Mail | HTML primero, `hidden_chars`, cabeceras A6, `parse_emlx_headers`, `load_headers`; fixtures opcionales; UT-BOD-01, UT-BOD-03 | ⚪ |
-| F3 — Outlook | `BodyFormat` en la lista blanca, HTML primero, cabeceras A6 en `load_snippet`/`load_body`, `load_headers`; doble; UT-BOD-02, UT-BOD-04 | ⚪ |
-| F4 — Punta a punta | UT-BOD-05 por `cli.main` | ⚪ |
-| F5 — Cierre | Suite completa, tests existentes ajustados, evidencia cruda, bloques | ⚪ |
+| F1 — Contrato interno | `BodyRow` opcional, `HeaderRow`, `load_headers` en `METADATA_OPERATIONS` | 🟢 |
+| F2 — Apple Mail | HTML primero, `hidden_chars`, cabeceras A6, `parse_emlx_headers`, `load_headers`; fixtures opcionales; UT-BOD-01, UT-BOD-03 | 🟢 |
+| F3 — Outlook | `BodyFormat` en la lista blanca, HTML primero, cabeceras A6 en `load_snippet`/`load_body`, `load_headers`; doble; UT-BOD-02, UT-BOD-04 | 🟢 |
+| F4 — Punta a punta | UT-BOD-05 por `cli.main` | 🟢 |
+| F5 — Cierre | Suite completa, tests existentes ajustados, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -176,4 +176,8 @@ Cada test ajustado se lista en la evidencia con el motivo.
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 | `BodyRow` admite `hidden_chars`, `authentication_results` y `reply_to`; nuevo `HeaderRow`; `load_headers` en `METADATA_OPERATIONS` (la validación del cuerpo de un plugin no cambia). |
+| 2026-11-14 | F2 | `_extract_body_text` toma el HTML de cuerpo (unión con `\n`, suma de `hidden_chars`, `W_HTML_NO_TEXT` sin recurrir al texto plano); `EmlxMessage` con las tres claves nuevas; `parse_emlx_headers` con tope de 256 KiB y despliegue de líneas de continuación; `AppleMailBackend.load_headers`; `make_fixtures` con `extra_headers` y `build_store(body_samples=True)`. UT-BOD-01 (6 casos) y UT-BOD-03 (7 casos) verdes solos. |
+| 2026-11-14 | F3 | `BodyFormat` en la lista blanca COM y en el doble; `_item_text` elige `HTMLBody` solo con `olFormatHTML`; `_load_body` lee `PR_TRANSPORT_MESSAGE_HEADERS` también sin `details`; `OutlookBackend.load_headers`; UT-BOD-02 (6 casos) y UT-BOD-04 (6 casos) verdes solos. |
+| 2026-11-14 | F4 | UT-BOD-05 (3 casos) por `cli.main` sobre Apple Mail y el doble de Outlook, incluido el arranque con `css-inline` ausente. |
+| 2026-11-14 | F5 | Suite completa `Ran 1163`, `FAILED (failures=3, skipped=7)` bajo carga del host y `FAILED (failures=2, skipped=7)` en la corrida con cobertura y en `tests.test_smoke` sola: los 2 fallos de la línea base del lote (SMOKE-NEW.07 de `mailboxes` y `show`) y, solo en la primera, el p95 de `search` (0,600 s > 0,5 s; 0,496 s sola). +28 casos UT-BOD; tests heredados ajustados (`test_outlook.py` OL-20.02 y OL-24.05–.07, comentario de `test_emlx.py`); cobertura total 89,8 % y 87,4 % en los módulos tocados; sin goldens; evidencia y bloques entregados al orquestador. |
