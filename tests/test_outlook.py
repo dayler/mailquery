@@ -2333,7 +2333,7 @@ class OutlookBodyTests(_OutlookCommandCase):
         )
         self.assertEqual(warnings, [])
         self.assertEqual(self.show("html_only")["message"]["body_text"], "Solo HTML")
-        # MeetingItem: HTMLBody raises AttributeError (host) ⇒ simply no HTML.
+        # MeetingItem: BodyFormat and HTMLBody raise AttributeError (host) ⇒ no HTML, plain Body.
         fake.store("exchange").inbox.add_message(
             "meeting_no_body", subject="Convocatoria sin cuerpo",
             message_class="IPM.Schedule.Meeting.Request", body="", html="",
@@ -2345,7 +2345,7 @@ class OutlookBodyTests(_OutlookCommandCase):
             message["body"], {"available": True, "readable": True, "partial": False, "truncated": False}
         )
         self.assertEqual(warnings, [])
-        self.assertIn(("Item", "HTMLBody"), fake.call_log.members())
+        self.assertIn(("Item", "BodyFormat"), fake.call_log.members())
 
     def test_ol_20_03_html_without_text_is_html_no_text(self) -> None:
         """OL-20.03: HTML that yields no text ⇒ available/readable true, snippet "" + W_HTML_NO_TEXT."""
@@ -3835,7 +3835,8 @@ class OutlookContentScanTests(_CommandScenarioCase):
         recent = [key for key in fake.items if key != "old_to_bea"]
         self.assertCountEqual(self.opened(), [fake.item(key).entry_id for key in recent])
         self.assertEqual(payload["scan"]["messages_read"], 5)
-        self.assertEqual(self.header_reads(), 0)
+        # Only the returned item with a readable body reads its transport headers.
+        self.assertEqual(self.header_reads(), 1)
         self.assert_read_only()
 
     def test_ol_24_06_bounded_text_matches_bodies(self) -> None:
@@ -3855,7 +3856,8 @@ class OutlookContentScanTests(_CommandScenarioCase):
         self.assertEqual(len(opened), len(set(opened)))
         self.assertEqual(len(opened), 5)
         self.assertEqual(payload["scan"]["messages_read"], 4)
-        self.assertEqual(self.header_reads(), 0)
+        # Every candidate whose body is read also reads its transport headers.
+        self.assertEqual(self.header_reads(), 3)
         self.assertNotIn(("Item", "Attachments"), fake.call_log.members())
         self.assert_read_only()
 
@@ -3870,7 +3872,8 @@ class OutlookContentScanTests(_CommandScenarioCase):
         self.assertEqual(len(opened), len(set(opened)))
         self.assertEqual(len(opened), 6)
         self.assertEqual(payload["scan"]["messages_read"], 5)
-        self.assertEqual(self.header_reads(), 0)
+        # The recipient filter opens every item; only the matching body is read.
+        self.assertEqual(self.header_reads(), 1)
         self.assert_read_only()
 
 
