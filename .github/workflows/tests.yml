@@ -1,14 +1,17 @@
 name: tests
 
 on:
-  # Runs only on pull requests to main and develop; pushes do not trigger it.
+  # Runs on every batch pull request to develop and again on develop after the
+  # batch is merged, so the merged result is validated too.
+  push:
+    branches: [develop]
   pull_request:
-    branches: [main, develop]
+    branches: [develop]
 
 permissions:
   contents: read
 
-# A new push to the PR branch cancels the previous run instead of queuing it.
+# A new push to the same ref cancels the previous run instead of queuing it.
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
