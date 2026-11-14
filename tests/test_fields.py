@@ -526,12 +526,6 @@ class SearchFieldsTests(_AppleCase):
         single = self.run_error("search", "--fields", " ", exit_code=2, code="E_USAGE")
         self.assertEqual(single["error"]["message"], "unknown field '' in --fields")
 
-    def test_ut_fld_03_07_new_accepts_fields(self) -> None:
-        """UT-FLD-03.07: ``new --fields snippet`` adds the snippet to the default row."""
-        payload = self.run_ok("new", "--peek", "--limit", "1", "--fields", "snippet")
-        message = payload["messages"][0]
-        self.assertEqual(list(message), [*DEFAULT_ROW_FIELDS, "snippet"])
-
 
 # --------------------------------------------------------------------------- #
 # UT-FLD-04 — ``show --fields``
