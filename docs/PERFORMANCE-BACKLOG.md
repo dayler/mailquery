@@ -4,6 +4,12 @@ Estado: **abierto**. Documento de seguimiento para futuras versiones. No cambia 
 PRD: el presupuesto p95 de macOS (§19 de [`PRD.md`](PRD.md)) sigue vigente y **hoy no se
 cumple** para `mailboxes` ni para `show` en equipos con un store grande.
 
+`mailboxes` ya solo cuenta mensajes cuando se piden los contadores con
+`--fields total` o `unread`; sin ellos el comando lista el catálogo de carpetas sin
+leer ningún mensaje. El pendiente de rendimiento de `mailboxes` queda por tanto
+limitado a esas dos variantes con contadores; la medición del presupuesto sin
+contadores se añade al cerrar la fase.
+
 Medición **histórica** del 2026-11-04, `develop` @ `11b81fa`, Mac del dueño, macOS
 27.0.1 arm64, Python 3.15.2 (venv de `pipx`), versión medida `mailquery 2.0.0`
 (`backend apple_mail`). Store: 3 cuentas, 44 carpetas, 148.054 mensajes (Gmail
@@ -52,10 +58,13 @@ que un solo pico hace fallar `mailboxes`; con n = 20 (`show`) es la segunda más
 
 ## Diagnóstico
 
-- `mailboxes` recorre **todas** las carpetas de **todas** las cuentas para publicar
-  contadores, incluidas las no declaradas (`included: false`), porque RF-03 lista cuentas
-  y carpetas aunque no estén en `[scope]` (`run_mailboxes`, `src/mailquery/search.py`).
-  Con 44 carpetas y 148.054 mensajes el costo ronda 170–200 ms.
+- `mailboxes --fields total` o `--fields unread` recorre **todas** las carpetas de
+  **todas** las cuentas para publicar contadores, incluidas las no declaradas
+  (`included: false`), porque el comando lista cuentas y carpetas aunque no estén en
+  `[scope]` (`run_mailboxes`, `src/mailquery/search.py`). Con 44 carpetas y 148.054
+  mensajes el costo ronda 170–200 ms. Sin `--fields total` ni `unread` no se cuenta
+  ningún mensaje: el catálogo se lee sin contadores y el coste de esa parte es el de
+  listar las carpetas.
 - `show` abre el mensaje: cabeceras + cuerpo `.emlx` + nombres de adjuntos. En Apple Mail,
   `attachments()` decodifica cada adjunto para calcular `size_bytes`
   (`emlx.parse_attachments`), así que un mensaje con adjuntos grandes alarga `show`.
@@ -97,9 +106,9 @@ contadores intactos.
 
 1. Medir sin sandbox en el Mac del dueño (10 corridas de `mailboxes`, 20 de `show`) y
    anotar aquí el resultado.
-2. Si sigue por encima: optimizar `mailboxes` (p. ej. contadores agregados en una sola
-   consulta, o lectura diferida de las carpetas no declaradas, sin romper RF-03) y/o
-   `show`; validar que no cambia la salida ni el gate de solo lectura.
+2. Si sigue por encima: optimizar el recuento de `mailboxes --fields total` o
+   `unread` (p. ej. contadores agregados en una sola consulta) y/o `show`; validar
+   que no cambia la salida ni el gate de solo lectura.
 3. Si el presupuesto no es realista para stores grandes, revisar §19 del PRD con
    aprobación del dueño (decisión de producto).
 4. Cerrar este documento cuando `SMOKE-NEW.07` pase en un Mac con un store comparable o

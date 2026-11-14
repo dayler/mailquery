@@ -60,7 +60,7 @@ Mail/Outlook. The client's own store is the only source of truth.
 | Command | Purpose |
 | --- | --- |
 | `mailquery doctor [--json]` | environment, drivers and read-only preflight (always exits 0) |
-| `mailquery mailboxes` | accounts, folders, counters, included folders, excluded stores |
+| `mailquery mailboxes [--fields LIST]` | accounts and their folders, with included flags and excluded stores (counters with `--fields`) |
 | `mailquery search [filters] [--fields LIST] [--group-by KEYS] [--count] [--strip-links]` | search metadata and body |
 | `mailquery new [--peek] [--limit N] [--fields LIST] [--strip-links]` | messages since the last run (persistent cursor) |
 | `mailquery show UID [--fields LIST] [--strip-links]` | one message (body truncated to 20,000 chars) + `attachments` |
@@ -107,6 +107,15 @@ limit. `--count` cannot be combined with `--fields`, `--group-by` or `--limit`;
 and offer `--include-mailbox` or `mailquery mailboxes` instead of guessing a
 folder.
 
+**Folders and counters.** Run `mailquery mailboxes` without `--fields` to see
+the folders of every account: each folder has only `path` and whether it is
+`included`, and no message is counted. Add `--fields total,unread` only when
+the user needs the counters, because counting is the expensive part; add
+`--fields name,url` only when the folder name or URL is needed. The fields come
+in the order `name`, `path`, `url`, `total`, `unread`, `included`, and there is
+no `--fields all`. `mailbox_list` and `--include-mailbox` accept the `path`
+shown by `mailquery mailboxes` (or the name/URL shown by `--fields name,url`).
+
 ## `show` and `attachment`
 
 - `show UID` returns `message.attachments[]` with `{index, name, cached_path}`.
@@ -137,6 +146,7 @@ folder.
 ```bash
 mailquery doctor --json
 mailquery mailboxes
+mailquery mailboxes --fields total,unread   # counters, only when needed
 mailquery new                          # new mail since the last cursor run
 mailquery new --peek                   # look without advancing the cursor
 mailquery search --since 1w --unread

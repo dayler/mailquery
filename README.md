@@ -270,7 +270,10 @@ Without declared accounts, `search` and `new` return `count: 0` with
 
 It is **optional** and its format is identical on both platforms. Only declared
 accounts are read; inside each one, `INBOX` is always included and
-`mailbox_list` adds extra folders. An unknown key gives `E_CONFIG_INVALID`
+`mailbox_list` adds extra folders. A `mailbox_list` item is the folder `path`
+shown by `mailquery mailboxes`; the folder `name` or `url` shown by
+`mailquery mailboxes --fields name,url` also work. An unknown key gives
+`E_CONFIG_INVALID`
 (exit 2). The account key may carry the driver prefix:
 `[scope."<driver>:<account>"]`; with no prefix the platform's native driver is
 used (`apple_mail` on macOS, `outlook` on Windows).
@@ -412,26 +415,40 @@ dependants report `not evaluated: driver failed`; `doctor` still exits 0.
 
 ### `mailquery mailboxes`
 
-Accounts, folders, counters and whether they are included in the scope
-(`included`). `excluded_stores` lists, on Windows only, the stores that are not
-read and the reason (`shared_mailbox`, `public_folders`, `online_mode`,
-`network_path`, `unsupported_account_type`, `unavailable`); on macOS it is `[]`.
+Accounts and their folders, with whether each folder is included in the scope
+(`included`). Each account lists its folders once; without `--fields` a folder
+has only its `path` and `included`. `--fields name,url` adds the folder name and
+URL, and `--fields total,unread` adds the counters: without `total` or `unread`
+no message is counted, so the command stays cheap. `excluded_stores` lists, on
+Windows only, the stores that are not read and the reason (`shared_mailbox`,
+`public_folders`, `online_mode`, `network_path`, `unsupported_account_type`,
+`unavailable`); on macOS it is `[]`.
 
 ```json
 {
   "ok": true,
   "command": "mailboxes",
-  "accounts": [{"uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10", "label": "Exchange (ana.perez@example.com)",
-                "email": "ana.perez@example.com", "declared": true}],
-  "mailboxes": [
-    {"account": {…}, "name": "INBOX", "path": "INBOX",
-     "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/INBOX", "total": 3, "unread": 2, "included": true},
-    …
+  "accounts": [
+    {"uuid": "D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10", "label": "Exchange (ana.perez@example.com)",
+     "email": "ana.perez@example.com", "declared": true,
+     "mailboxes": [
+       {"path": "Deleted Items", "included": false},
+       {"path": "INBOX", "included": true},
+       {"path": "Conversation History/Team Chat", "included": false}
+     ]}
   ],
   "excluded_stores": [{"label": "Exchange shared (Support)", "path": null, "reason": "shared_mailbox"}],
   "warnings": []
 }
 ```
+
+With `--fields total,unread` each folder adds its counters
+(`{"path": "INBOX", "total": 579, "unread": 0, "included": true}`); with
+`--fields name,url`,
+`{"name": "Team Chat", "path": "Conversation History/Team Chat", "url": "outlook://D70DBCF6-1C2A-4B6E-9A51-E0C3B2A49F10/Conversation%20History/Team%20Chat", "included": false}`.
+The fields always come in the order `name`, `path`, `url`, `total`, `unread`,
+`included`, and `--fields all` is not accepted: request each folder field by
+name.
 
 ### `mailquery search`
 
