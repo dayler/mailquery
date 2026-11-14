@@ -134,7 +134,14 @@ class BodySource(TypedDict):
 
 
 class BodyRow(TypedDict):
-    """Result of ``load_body``."""
+    """Result of ``load_body``.
+
+    The last three keys are optional: a driver that reads the HTML body reports
+    the characters its hidden elements omitted, and a driver that reads the
+    sender headers reports the first ``Authentication-Results`` and
+    ``Reply-To``. A driver that provides none of them (any plugin) omits the
+    keys, so the core reads them with ``.get``.
+    """
 
     available: bool
     readable: bool
@@ -144,6 +151,26 @@ class BodyRow(TypedDict):
     attachments: list[AttachmentRow]
     source: BodySource
     warnings: list[str]
+    hidden_chars: NotRequired[int]
+    authentication_results: NotRequired[str | None]
+    reply_to: NotRequired[str | None]
+
+
+class HeaderRow(TypedDict):
+    """Result of the optional ``load_headers`` hook of the built-in adapters.
+
+    ``headers`` carries the six header values ``show`` emits (empty strings when
+    the message has none), ``authentication_results`` is the unfolded value of
+    the first ``Authentication-Results`` header and ``reply_to`` the unfolded
+    ``Reply-To``; both are ``None`` when the header is absent. ``read`` is
+    ``False`` when the header block could not be read (missing file, S/MIME or
+    a failed COM read), so the core can tell "no headers" from "not read".
+    """
+
+    headers: dict[str, str]
+    authentication_results: str | None
+    reply_to: str | None
+    read: bool
 
 
 class MailBackend(ABC):
