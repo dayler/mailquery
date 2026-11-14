@@ -62,7 +62,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟢 |
 | M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟢 |
 | M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | 🟢 |
-| M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | 🟡 |
+| M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | 🟢 |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | ⚪ |
 | M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | ⚪ |
@@ -198,21 +198,21 @@ Los IDs de grupo de test son los que define cada milestone y que el orquestador 
 | AC | Qué exige (resumen) | Milestone(s) | Grupos de test | Estado |
 |---|---|---|---|---|
 | AC-H01 | A2 en campos de contenido, identificadores intactos | M03, M07 | UT-CNT-01, UT-CW-01, UT-CW-02 | 🟢 |
-| AC-H02 | `\n`/`\t`, CRLF, idempotencia, determinismo de F1 | M03, M05, M08 | UT-CNT-01, UT-CNT-03, UT-CNT-06, UT-CW-13 | 🟡 |
+| AC-H02 | `\n`/`\t`, CRLF, idempotencia, determinismo de F1 | M03, M05, M08 | UT-CNT-01, UT-CNT-03, UT-CNT-06, UT-CW-13 | 🟢 |
 | AC-H03 | Búsqueda con A2 a ambos lados; bloqueo y caché sin cambios | M07 | UT-CW-03, UT-CW-04 | 🟢 |
 | AC-H04 | Cuerpo desde HTML; omisión de ocultos en línea | M03, M06, M08, M14 | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | 🟡 |
-| AC-H05 | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` | M03, M08 | UT-CNT-03, UT-CW-07 | 🟡 |
-| AC-H06 | Detección y modos de URL en todos los campos | M05, M08 | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | 🟡 |
-| AC-H07 | `--strip-links`, precedencia, default `neutralize` | M08 | UT-CW-09 | ⚪ |
-| AC-H08 | `W_EXTERNAL_LINKS` | M05, M08 | UT-CNT-08, UT-CW-10 | 🟡 |
-| AC-H09 | `W_NON_ASCII_DOMAIN` y punycode | M05, M08 | UT-CNT-07, UT-CNT-08, UT-CW-10 | 🟡 |
-| AC-H10 | `W_LONG_URL` y `W_SCRIPT_LINK` | M05, M08 | UT-CNT-08, UT-CW-10 | 🟡 |
-| AC-H11 | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | M05, M06, M08 | UT-CNT-09, UT-BOD-03, UT-BOD-04, UT-CW-11 | 🟡 |
+| AC-H05 | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` | M03, M08 | UT-CNT-03, UT-CW-07 | 🟢 |
+| AC-H06 | Detección y modos de URL en todos los campos | M05, M08 | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | 🟢 |
+| AC-H07 | `--strip-links`, precedencia, default `neutralize` | M08 | UT-CW-09 | 🟢 |
+| AC-H08 | `W_EXTERNAL_LINKS` | M05, M08 | UT-CNT-08, UT-CW-10 | 🟢 |
+| AC-H09 | `W_NON_ASCII_DOMAIN` y punycode | M05, M08 | UT-CNT-07, UT-CNT-08, UT-CW-10 | 🟢 |
+| AC-H10 | `W_LONG_URL` y `W_SCRIPT_LINK` | M05, M08 | UT-CNT-08, UT-CW-10 | 🟢 |
+| AC-H11 | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | M05, M06, M08 | UT-CNT-09, UT-BOD-03, UT-BOD-04, UT-CW-11 | 🟢 |
 | AC-H12 | `W_ATTACHMENT_ACTIVE_CONTENT` | M04, M09 | UT-ACT-01–UT-ACT-04, UT-ACT-05, DOC-09 | 🟡 |
-| AC-H13 | `[content]` inválido ⇒ `E_CONFIG_INVALID` | M08 | UT-CFG-03, DOC-06.02, DOC-06.04 | ⚪ |
+| AC-H13 | `[content]` inválido ⇒ `E_CONFIG_INVALID` | M08 | UT-CFG-03, DOC-06.02, DOC-06.04 | 🟢 |
 | AC-H14 | Compatibilidad: solo `content_notice` nuevo; resto sin cambios | M07, M10 | UT-CW-06, UT-FLD-07 | 🟡 |
 | AC-H15 | `css-inline~=0.23.1`, wheels, parche, sin red, p95 | M01, M14 | TC-06.03, PKG-03, paso de CI "Check css-inline wheels", SMOKE-INSTALL.05, SMOKE-NEW.07 | 🟡 |
-| AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | ⚪ |
+| AC-H16 | Logs solo con códigos `W_*` | M08 | UT-CW-12 | 🟢 |
 | AC-H17 | README de RF-65; funciona sin `css-inline` | M01, M03, M06 | DOC-07, UT-CNT-03, UT-BOD-05 | 🟢 |
 | AC-H18 | `content_notice` en toda respuesta de éxito; reglas en skill y README | M03, M07, M08, M09, M10, M11, M14 | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | 🟡 |
 | AC-D01 | Extracción desde plugin `"remote"` igual que `"local"` | M09 | UT-RMT-01 | ⚪ |
@@ -559,3 +559,4 @@ Se completa al cerrar cada milestone y cada lote, y ante cada defecto o respuest
 | 2026-11-14 | M07 | 🟡 → 🟢 | `2529b7d` (merge en `integration/i2-content`): `Ran 1154` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +19 tests UT-CW) | `docs/plan/evidence/M07.md` | A2 en campos, filtros, warnings y errores; `content_notice` tras `generated_at`; 20 goldens de éxito +1 línea; cobertura total 89,9 % |
 | 2026-11-14 | M05 | 🟡 → 🟢 | `f699d42` (merge en `integration/i2-content`): `Ran 1172` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +37 tests UT-CNT) | `docs/plan/evidence/M05.md` | A4/A5/A6 en `output.py`; `output.py` 99,5 %; sin goldens ni pragmas nuevos; desviación propia corregida (inicios `data:`/`www.` en ancho completo) |
 | 2026-11-14 | M06 | 🟡 → 🟢 | `e70e63b` (merge en `integration/i2-content`): `Ran 1163` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +28 tests UT-BOD) | `docs/plan/evidence/M06.md` | Cuerpo HTML-first y cabeceras del remitente en los dos backends; `load_headers` como gancho interno; `BodyFormat` en la lista blanca COM; sin goldens ni pragmas nuevos |
+| 2026-11-14 | M08 | 🟡 → 🟢 | `a0695a9` (merge en `integration/i2-content`): `Ran 1259` en la rama del milestone, `FAILED (failures=2, skipped=7)` (los 2 fallos ambientales SMOKE-NEW.07; +40 tests) | `docs/plan/evidence/M08.md` | F1 conectado en `search`/`new`/`show`; `--strip-links` y `[content]`; siete warnings; README/skill/anexo; barridos TC-03 y OL-30 con `--strip-links`; sin goldens ni pragmas nuevos |

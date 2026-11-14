@@ -1000,13 +1000,17 @@ Esquema cerrado de `config.toml`, resolución de alcance por driver y
 Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
 `AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count)`,
-`ScopeEntry(key, mailbox_list, driver, account)`, `Config(home, logging,
-search, new, attachments, scopes)` y `ResolvedScope(account_uuid,
-account_label, account_email, mailboxes, driver)`.
+`ContentConfig(url_display)`, `ScopeEntry(key, mailbox_list, driver, account)`,
+`Config(home, logging, search, new, attachments, content, scopes)` y
+`ResolvedScope(account_uuid, account_label, account_email, mailboxes, driver)`.
 
 - `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`; rangos `1..500`,
   `1..1024` (`>= max_file_size_mb`) y `1..500`; una tabla ausente usa los
   defaults. MiB = 1.048.576 bytes (los límites los aplica el motor de adjuntos).
+- `ContentConfig`: `url_display` decide cómo se muestran las URLs en el asunto,
+  los nombres, `headers`, `body_text` y `snippet`; valores `neutralize` (default),
+  `keep` y `strip`. `cli._url_mode` aplica la precedencia `--strip-links` >
+  `[content].url_display` > `neutralize`.
 - `ScopeEntry`: `driver` es el prefijo explícito del bloque (`None` = driver
   nativo del SO) y `account` la referencia dentro de ese driver (`None` en un
   bloque sin prefijo); `key` conserva la clave escrita y `account_ref` devuelve
@@ -1042,18 +1046,27 @@ account_label, account_email, mailboxes, driver)`.
   `show`/`attachment`: un driver instalado sin bloque ⇒
   `E_ACCOUNT_NOT_IN_SCOPE` (exit 2) con el hint de declarar la cuenta, sin
   cargarlo. Los comandos de datos no consultan un driver no declarado.
-- Validación estricta: `[logging]`, `[search]`, `[new]`, `[attachments]` y
-  `[scope."<driver>:<cuenta>"]`; cualquier clave/sección desconocida ⇒
-  `E_CONFIG_INVALID` (exit 2). `parse_duration` min/h/d, 1 min–1 día.
+- Validación estricta: `[logging]`, `[search]`, `[new]`, `[attachments]`,
+  `[content]` y `[scope."<driver>:<cuenta>"]`; cualquier clave/sección
+  desconocida ⇒ `E_CONFIG_INVALID` (exit 2). En `[content]`, un `url_display`
+  fuera de `neutralize`/`keep`/`strip` o que no sea string ⇒
+  `E_CONFIG_INVALID` con el mensaje
+  `[content].url_display must be one of neutralize, keep, strip (got '<v>')` y
+  el hint `set [content].url_display = "neutralize", "keep" or "strip" in
+  ~/.mailquery/config.toml`; `content` que no es tabla ⇒
+  `E_CONFIG_INVALID` (`content must be a TOML table`). `parse_duration` min/h/d,
+  1 min–1 día.
 `[scope.**]` sin prefijo conserva el comportamiento de 2.0.1 (regresión).
 
 ### `search.py`
 `Filters(...)`, `ScanStats`, `parse_relative_time(value, now=None)`,
 `wildcard_to_regex(pattern)`, `matches(pattern, text)`,
-`run_search(backend, config, filters, *, drivers=None, native=None)`,
+`run_search(backend, config, filters, *, drivers=None, native=None,
+url_mode="neutralize")`,
 `run_new(backend, config, state_store, *, peek=False, limit=None, clock=None,
-drivers=None, native=None)`,
-`run_show(backend, config, uid, *, driver=None, drivers=None, native=None)`,
+drivers=None, native=None, url_mode="neutralize")`,
+`run_show(backend, config, uid, *, driver=None, drivers=None, native=None,
+url_mode="neutralize")`,
 `run_mailboxes(backend, config, *, drivers=None, native=None)`.
 Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
 `None` cuando la config no lo declara); `drivers` es el mapping
@@ -1075,6 +1088,23 @@ y `body`; `show` añade `headers`, `body_text`, `body_truncated`, `attachments`,
 `source`. El cuerpo se lee con un único cargador que devuelve el texto, las banderas
 `available`/`readable`/`partial`, las cabeceras, los adjuntos del cuerpo y los warnings de ese mensaje;
 `search`/`new` los aplanan en el orden de `messages[]` y `show` hace lo mismo con su único mensaje.
+
+**Procesamiento del contenido (F1, PRD-v2.2 §10).** Por mensaje, `_content_fields`
+sanea (`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y
+el cuerpo completo, y cuenta las señales sobre esos textos y las direcciones
+(`from`, `to`, `cc`), nunca sobre `headers`; un cuerpo ilegible no aporta texto.
+Después, el modo de URL (`url_mode`) se aplica con `output.render_urls` a esos
+campos y a los seis valores de `headers` de `show`, y el `snippet` (`search`/`new`)
+o el truncado a 20.000 caracteres (`show`, con `body_truncated` y
+`W_BODY_TRUNCATED`) se calculan sobre el texto ya transformado. Los filtros
+comparan el texto saneado (A2), nunca el transformado por A4, así que los
+resultados no dependen del modo. Los warnings por mensaje son los del estado del
+cuerpo seguidos de `output.content_warnings(...)`:
+`W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`,
+`W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH`. El
+`hidden_chars`, la primera `Authentication-Results` y `Reply-To` vienen del
+`BodyRow` (0/`None` si el driver no los entrega); las filas del escaneo `--text`
+los conservan. `body.truncated` se calcula sobre el texto transformado.
 
 **Motor multi-driver (PRD RF-37, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
@@ -1167,7 +1197,14 @@ instalado ⇒ `E_DRIVER_UNKNOWN`), y `backend.parse_native_id` del driver nativo
 disponible). Después de leer `config.toml` y antes de construir el backend,
 `show` exige que el driver del prefijo aparezca en `[scope]`
 (`driver_in_scope`/`require_driver_in_scope` de `config.py`): un driver
-instalado sin bloque ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo. **Ciclo de vida
+instalado sin bloque ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargarlo. `--strip-links` es una opción de `search`, `new` y `show` (`store_true`), con la
+ayuda `replace every URL with [link omitted] (overrides [content].url_display)`;
+ningún otro comando la acepta (argparse ⇒ `E_USAGE`, exit 2). `_url_mode(config,
+args)` calcula el modo efectivo (`--strip-links` > `[content].url_display` >
+`neutralize`) y `_execute` lo pasa como `url_mode=` a `run_search`, `run_new` y
+`run_show`.
+
+**Ciclo de vida
 multi-driver:** el comando crea **un** `BackendRegistry` y
 lo comparte con `load_config(registry=)`, abre los drivers declarados
 (`config.declared_drivers`, nativo primero) dentro del `RunLock` y antes de
@@ -1730,6 +1767,13 @@ diferencias).
 error, `doctor` y `mailboxes` no lo llevan. Los campos de contenido y los textos
 de error pasan por A2 (`output.sanitize_text`); `warnings[]` también se sanea en
 `cli._success_payload`, y los identificadores y rutas no se transforman.
+Las URLs de `subject`, `from.name`, `to[].name`, `cc[].name`, los valores de
+`headers`, `body_text` y `snippet` se renderizan según
+`[content].url_display` (`neutralize` por defecto: `hxxps://`, `[:]`,
+`www[.]`, `[\\]`, dominio no ASCII en punycode y URLs de más de 2.048
+caracteres acortadas) o `--strip-links` (`[link omitted]`). Los nombres de
+adjuntos, las direcciones, los identificadores, `warnings[]` y los errores no se
+transforman.
 
 ### `search`
 ```json
@@ -1874,6 +1918,27 @@ plugin saneado o el defecto del motivo/código.
 `message_id` = `message_global_data.message_id_header` (vacío `""` si falta).
 `body.available` = existe y se pudo abrir el `.emlx`; `body.partial` = es
 `.partial.emlx`; `body.truncated` = el snippet se recortó a 200.
+
+### Warnings de contenido (`search`, `new`, `show`)
+
+Por mensaje, después de los warnings del estado del cuerpo y en este orden:
+
+```text
+W_HIDDEN_CONTENT: <n> hidden character(s) omitted from the body of <uid>
+W_EXTERNAL_LINKS: <n> external link(s) in <uid>
+W_SCRIPT_LINK: <n> javascript/vbscript/data link(s) in <uid>
+W_LONG_URL: <n> URL(s) longer than 2048 characters in <uid>
+W_NON_ASCII_DOMAIN: <n> domain(s) with non-ASCII characters in <uid>
+W_SENDER_AUTH_FAILED: <spf=… dkim=… dmarc=…> in <uid>
+W_REPLY_TO_MISMATCH: reply-to domain differs from the sender domain in <uid>
+```
+
+Los conteos de enlaces cubren `subject`, los nombres y el cuerpo completo (no
+`headers`) y no dependen del modo de URL; `W_NON_ASCII_DOMAIN` cuenta además las
+direcciones de `from`, `to` y `cc`. Las dos señales del remitente salen aunque no
+se entregue `from`. El detalle no contiene URL, dominio, dirección ni texto del
+mensaje. `attachment`, `mailboxes` y `doctor` no emiten estos warnings. En `new`,
+`W_FIRST_RUN` sigue siendo el último.
 
 ## 5. Decisiones cerradas con el usuario (2026-11-02) — histórico
 

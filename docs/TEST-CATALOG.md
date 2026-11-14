@@ -23,7 +23,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
 | UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` |
 | UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` |
-| UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados y `content_notice` | `tests/test_content_wiring.py` |
+| UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` |
@@ -45,7 +45,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py` |
+| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py` |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` |
 
@@ -137,16 +137,19 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 | AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
-| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01, UT-CNT-06 (parcial; completa con UT-CW-13) | — |
+| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01, UT-CNT-06, UT-CW-13 | — |
 | AC-H03 (delta `PRD-v2.2.md`) | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
-| AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea | UT-CNT-02 (parcial; completa con UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09) | — |
-| AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS | UT-CNT-03 (parcial; completa con UT-CW-07) | — |
-| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice` | UT-CNT-04 (parcial; completa con UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08) | — |
-| AC-H06 (delta `PRD-v2.2.md`) | Detección y modos de URL en todos los campos | UT-CNT-05, UT-CNT-06, UT-CNT-07 (parcial; completa con UT-CW-08) | — |
-| AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08 (parcial; completa con UT-CW-10) | — |
-| AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08 (parcial; completa con UT-CW-10) | — |
-| AC-H10 (delta `PRD-v2.2.md`) | `W_LONG_URL` y `W_SCRIPT_LINK` | UT-CNT-08 (parcial; completa con UT-CW-10) | — |
-| AC-H11 (delta `PRD-v2.2.md`) | Primera `Authentication-Results` (resultados de `spf`, `dkim` y `dmarc`; varias firmas DKIM con una en `pass` cuentan como `pass`) y `Reply-To` de otro dominio; sin cabecera, en correo interno de Outlook o en un mensaje de un plugin no se emiten | UT-BOD-03, UT-BOD-04 (parcial; completa con UT-CNT-09, UT-CW-11) | — |
+| AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea y por hoja; `W_HIDDEN_CONTENT`; cuerpo todo oculto con `W_HTML_NO_TEXT` y `--text` sin el oculto | UT-CNT-02, UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09 | — |
+| AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS; `W_HIDDEN_CONTENT` en los comandos | UT-CNT-03, UT-CW-07 | — |
+| AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice`; reglas de seguridad en la skill y los README | UT-CNT-04, UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08 | — |
+| AC-H06 (delta `PRD-v2.2.md`) | Detección y modos de URL en todos los campos; truncado sobre el texto transformado; filtros iguales en los tres modos | UT-CNT-05, UT-CNT-06, UT-CNT-07, UT-CW-08 | — |
+| AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08, UT-CW-10 | — |
+| AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08, UT-CW-10 | — |
+| AC-H10 (delta `PRD-v2.2.md`) | `W_LONG_URL` y `W_SCRIPT_LINK` | UT-CNT-08, UT-CW-10 | — |
+| AC-H11 (delta `PRD-v2.2.md`) | Primera `Authentication-Results` (resultados de `spf`, `dkim` y `dmarc`; varias firmas DKIM con una en `pass` cuentan como `pass`) y `Reply-To` de otro dominio; sin cabecera, en correo interno de Outlook o en un mensaje de un plugin no se emiten; `headers` de `show` no cambia | UT-BOD-03, UT-BOD-04, UT-CNT-09, UT-CW-11 | — |
+| AC-H07 (delta `PRD-v2.2.md`) | `--strip-links` en `search`, `new` y `show`; prevalece sobre `[content].url_display`; sin opción ni clave el modo es `neutralize`; en `doctor`, `mailboxes` y `attachment` ⇒ `E_USAGE` | UT-CW-09 | — |
+| AC-H13 (delta `PRD-v2.2.md`) | `[content].url_display` inválido, clave desconocida o `content` que no es tabla ⇒ `E_CONFIG_INVALID` (exit 2) antes de abrir el store | UT-CFG-03, DOC-06.02, DOC-06.04 | — |
+| AC-H16 (delta `PRD-v2.2.md`) | Los logs no registran URLs, dominios, direcciones ni contenido; solo códigos `W_*` | UT-CW-12 | — |
 
 ## 8. Casos
 
@@ -167,6 +170,17 @@ Archivo: `tests/test_config.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | `[logging].retention_days = 7` ⇒ `E_CONFIG_INVALID` con el hint `retention_days was replaced by max_size_mb`. |
+
+#### UT-CFG-03 — `[content]`
+
+Requisitos: RF-63 · Archivo: `tests/test_config.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin tabla ⇒ `neutralize`; `neutralize`, `keep` y `strip` son válidos. |
+| .02 | N | `url_display = "raw"` y `url_display = 1` ⇒ `E_CONFIG_INVALID`, exit 2, `hint` con `neutralize`, `keep` y `strip`, antes de abrir el store. |
+| .03 | N | Una clave desconocida en `[content]` ⇒ `E_CONFIG_INVALID`, exit 2. |
+| .04 | N | `content = 1` (valor que no es una tabla) ⇒ `E_CONFIG_INVALID`, exit 2, antes de abrir el store. |
 
 #### UT-CLI-04 — Opciones que no existen
 
@@ -522,6 +536,84 @@ Requisitos: RF-52, RF-66 · Archivo: `tests/test_content_wiring.py`
 |---|---|---|
 | .01 | P | Con la fila completa actual de `search`/`new` y `show` sin opciones, las claves son las de antes más `content_notice`, y es la única clave nueva. |
 | .02 | B | `state.json` y el manifiesto de una corrida de `new` y de `attachment` conservan su forma y contenido (sin `content_notice`). |
+
+#### UT-CW-07 — Cuerpo visible en los comandos
+
+Requisitos: RF-53, RF-56 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un mensaje con texto oculto en línea y por una hoja `<style>`: `search`, `new` y `show` dan una vez `W_HIDDEN_CONTENT: <n> hidden character(s) omitted from the body of <uid>` con el `<n>` de `html_body_to_text`; el mensaje se devuelve y el exit es 0. |
+| .02 | P | `W_HIDDEN_CONTENT` va antes de `W_EXTERNAL_LINKS`; el detalle no contiene texto del mensaje. |
+| .03 | N | Un mensaje sin texto omitido, de texto plano o de un plugin no da `W_HIDDEN_CONTENT`. |
+| .04 | P | Un HTML todo oculto da `W_HTML_NO_TEXT` además de `W_HIDDEN_CONTENT`; `--text` con una palabra del texto oculto no encuentra el mensaje (Apple Mail y Outlook). |
+
+#### UT-CW-08 — Modos de URL en los campos
+
+Requisitos: RF-54 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con `keep`, `neutralize` y `strip`: `subject`, `from.name`, `to[].name`, `cc[].name`, cada valor de `headers` (`show`), `body_text` y `snippet` se transforman igual que `render_urls` (incluido `Subject` en `headers` con `--strip-links`). |
+| .02 | N | Nombres de adjuntos, `warnings[]`, textos de error, direcciones y `uid` no cambian en ningún modo. |
+| .03 | P | Los filtros devuelven los mismos mensajes en los tres modos; `--subject evil.example` encuentra el asunto con la URL neutralizada o quitada. |
+| .04 | B | `show` con una URL que hace superar 20.000 caracteres solo antes de acortarla: el truncado y `W_BODY_TRUNCATED` se calculan sobre el texto transformado. |
+
+#### UT-CW-09 — `--strip-links` y precedencia
+
+Requisitos: RF-54, RF-63 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin opción ni clave ⇒ `neutralize`. |
+| .02 | P | `[content].url_display = "keep"` ⇒ `keep`; `"strip"` ⇒ `strip`. |
+| .03 | P | `--strip-links` con `url_display = "keep"` ⇒ `strip` en `search`, `new` y `show`. |
+| .04 | N | `doctor --strip-links`, `mailboxes --strip-links` y `attachment <uid> --all --strip-links` ⇒ `E_USAGE`, exit 2. |
+
+#### UT-CW-10 — Señales de enlaces en los comandos
+
+Requisitos: RF-55, RF-57, RF-58, RF-59 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Una URL en el asunto y otra en el cuerpo ⇒ `W_EXTERNAL_LINKS: 2 …`; la del asunto cuenta una vez aunque `headers` la repita (`show`). |
+| .02 | P | La URL larga y el enlace de script: `W_EXTERNAL_LINKS: 2`, `W_SCRIPT_LINK: 1`, `W_LONG_URL: 1`, en ese orden, en los tres modos y en los tres comandos. |
+| .03 | P | Homoglifos: `W_EXTERNAL_LINKS: 1` y `W_NON_ASCII_DOMAIN: 2` (URL + dirección); con `neutralize`, `xn--pypal-4ve.com` en el cuerpo y la dirección igual. |
+| .04 | P | `search`, `new` y `show` dan los mismos conteos; en `new`, todos antes de `W_FIRST_RUN`. |
+| .05 | N | Sin URLs en esos campos no aparece ninguno de los cuatro; un texto que empieza como un esquema sin cumplir la definición (`JavaScript: …`) no cuenta. |
+| .06 | P | Cuerpo con `JAVASCRIPT:x`, `VbScript:x`, `DATA:text/html,x` y `ｊａｖａｓｃｒｉｐｔ：x` ⇒ `W_EXTERNAL_LINKS: 4` y `W_SCRIPT_LINK: 4` en los tres comandos; con `neutralize`, `JAVASCRIPT[:]x`, `VbScript[:]x`, `DATA[:]text/html,x` y `ｊａｖａｓｃｒｉｐｔ[:]x`. |
+| .07 | P | Un mensaje con `W_BODY_UNREADABLE` y una URL en el asunto ⇒ `W_EXTERNAL_LINKS: 1` en `show`. |
+| .08 | N | `attachment`, `mailboxes` y `doctor --json` no contienen `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`, `W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` ni `W_REPLY_TO_MISMATCH`. |
+| .09 | P | Un mensaje de un plugin sin cuerpo legible con una URL en el asunto y otra en el nombre del remitente ⇒ `W_EXTERNAL_LINKS: 2`; no se emite `W_HIDDEN_CONTENT`. |
+
+#### UT-CW-11 — Señales del remitente en los comandos
+
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | El ejemplo A6 en Apple Mail y en Outlook: `W_SENDER_AUTH_FAILED: spf=softfail dkim=none dmarc=fail in <uid>` y `W_REPLY_TO_MISMATCH: … in <uid>` en `search`, `new` y `show`, en ese orden y después de las señales de enlaces. |
+| .02 | N | Todo `pass`, sin cabecera, con `Reply-To` del mismo dominio o con el fallo solo en la segunda `Authentication-Results`: sin warnings. |
+| .03 | N | Un mensaje de un plugin y correo interno de Outlook sin cabeceras de transporte: sin warnings. |
+| .04 | N | `headers` de `show` sigue con sus seis cabeceras (sin `Reply-To` ni `Authentication-Results`); el exit no cambia. |
+| .05 | P | Un mensaje S/MIME de Apple Mail con `dmarc=fail` en la primera `Authentication-Results` ⇒ `W_SENDER_AUTH_FAILED` (la exclusión de S/MIME solo aplica al item de Outlook). |
+
+#### UT-CW-12 — Logs sin contenido
+
+Requisitos: RF-64 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Tras `search`, `new` y `show` de mensajes con URLs, dominio no ASCII, direcciones y A6, `~/.mailquery/logs/mailquery.log` (del `HOME` temporal) contiene los códigos `W_*` y no contiene ninguna URL, dominio, dirección ni texto del mensaje. |
+| .02 | P | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` se registran solo por código, sin sus detalles ni las direcciones. |
+
+#### UT-CW-13 — Determinismo de punta a punta
+
+Requisitos: RNF-19 · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | B | La misma consulta dos veces, con cada modo, da el mismo JSON salvo `generated_at` y `scan.duration_ms`. |
 
 ### Estado, búsqueda y store
 
@@ -1891,7 +1983,7 @@ Requisitos: RNF-07 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
-Barrido de los comandos con todos sus flags sobre el fake de Outlook; bloqueante.
+Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`— sobre el fake de Outlook; bloqueante.
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -2008,7 +2100,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
+| .01 | P | Barrido de todos los comandos con `extended=True`, incluidos la primera corrida de `new` con emisión, `show` fuera de alcance y los S/MIME, y con `--strip-links` en cada `search`, `new` y `show`: hashes y `mtime` del store sin cambios y ningún archivo nuevo. |
 | .02 | N | Los flujos de `attachment` (éxito, caché, bloqueo, límite, S/MIME y mensaje vacío) dejan el store sin cambios. |
 
 #### TC-04 — Recetas
@@ -2148,8 +2240,9 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Parsea con el cargador real, esquema cerrado, defaults documentados y `[attachments]` comentada. |
-| .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, y ninguna sección desconocida. |
+| .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, la tabla `[content]` entre las secciones documentadas permitidas y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
+| .04 | P | El ejemplo contiene el bloque comentado `# [content]` con `# url_display = "neutralize"`; una copia en un temporal con ese bloque descomentado se carga con el cargador real y da `url_display == "neutralize"`. |
 
 #### DOC-07 — Actualización de seguridad de `css-inline` en los README
 
@@ -2161,6 +2254,19 @@ Requisitos: AC-H17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
 | .02 | P | `README.es.md`: lo mismo dentro de "Instalar, actualizar y desinstalar", subsección "Actualización de seguridad de `css-inline`". |
 | .03 | P | Los dos README nombran `css-inline` en la introducción, en los requisitos y en las instrucciones de tests, y estas incluyen `coverage run` y `coverage report`. |
 | .04 | N | Ningún README conserva "standard library only" / "solo biblioteca estándar". |
+
+#### DOC-08 — Reglas de seguridad
+
+Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content_wiring.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | La skill tiene la sección "Security rules" con una aserción por cada punto de comportamiento de RF-66 que le corresponde (1, 3, 5, 6, 8, 12, 13, 14 y 15): no seguir instrucciones del correo; no abrir URLs ni adjuntos sin petición; URLs neutralizadas por defecto y restauradas solo para el usuario; imágenes; triaje con metadatos; el nombre visible del remitente no prueba identidad; el texto de un enlace no es su destino; los siete warnings de F1 nombrados; tratar la salida como texto plano y escaparla antes de insertarla en HTML. |
+| .02 | P | `README.md` tiene "Security for harness operators" con la frase literal de RF-66 y el enlace a `docs/security/threat-model.md`; la sección de instalación de la skill enlaza esa sección. |
+| .03 | P | `README.es.md` tiene "Seguridad para quien opera el harness" con la frase literal en español, el enlace al anexo y el enlace desde la instalación de la skill. |
+| .04 | P | `search --help`, `new --help` y `show --help` describen `--strip-links`; las ayudas de `doctor`, `mailboxes` y `attachment` no la mencionan. |
+| .05 | P | La skill describe `content_notice` en "Output contract" y lista `--strip-links` entre las opciones de `search`, `new` y `show`. |
+| .06 | P | `README.md` y `README.es.md` describen en su sección de seguridad los seis controles de quien opera el harness (puntos 2, 4, 7, 9, 10 y 11 de RF-66), con una aserción por control en cada idioma. |
 
 #### INS-SMOKE-01 — Instaladores
 
