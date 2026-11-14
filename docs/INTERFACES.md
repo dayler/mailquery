@@ -1101,8 +1101,9 @@ nombre/contenido, orden de evaluación, `sanitized_name` y rutas de caché.
 
 Módulos: `catalog.py` (catálogo + NFKC), `blocking.py` (bloqueo de nombre y
 *magic bytes*), `sanitize.py` (nombre sanitizado y nombre visible), `paths.py`
-(rutas de caché) y `screening.py` (pantalla del mensaje completo). Todo se
-reexporta desde `mailquery.attachments` (`__all__`).
+(rutas de caché) y `screening.py` (pantalla del mensaje completo). Todo lo
+anterior se reexporta desde `mailquery.attachments` (`__all__`);
+`active_content.py` se importa por su propio módulo.
 
 #### Catálogo (§10.3.2)
 
@@ -1234,6 +1235,34 @@ es el fragmento de mensaje del bloqueo. Códigos:
   propaga el motivo aunque la lista quede vacía) y “0 adjuntos” (fila 9) son del
   comando `attachment`; la pantalla solo mapea el `unavailable_reason` de cada fila de metadatos. Las
   funciones no escriben ni abren rutas de caché/staging (lo verifica UT-ATT-03.06).
+
+#### Contenido activo en adjuntos (RF-62)
+
+`active_content.py` detecta marcadores de contenido activo en los bytes de un
+adjunto ya extraído. No abre, ejecuta, descomprime ni extrae nada: busca de
+forma lineal sobre un `mmap` de solo lectura y, en un ZIP, solo lee los nombres
+del directorio central.
+
+- `ACTIVE_CONTENT_TYPES: tuple[str, ...]` =
+  `("pdf-javascript", "office-macros", "archive-executable")`.
+- `active_content_types(path: Path) -> tuple[str, ...]`: subconjunto ordenado de
+  `ACTIVE_CONTENT_TYPES` cuyos marcadores aparecen en el archivo. Devuelve `()`
+  si no hay ninguno, si el archivo está vacío o no existe, o si no se puede leer
+  o interpretar; nunca lanza por el contenido ni por E/S.
+- `pdf-javascript`: `%PDF-` en los primeros 1.024 bytes y algún nombre
+  `/JavaScript`, `/JS` o `/Launch` (también con caracteres escritos como `#xx`),
+  seguido de un delimitador PDF o del final del archivo; distingue mayúsculas.
+- `office-macros`: contenedor OLE (firma `D0 CF 11 E0 A1 B1 1A E1`) con
+  `_VBA_PROJECT` en UTF-16LE, o ZIP con una entrada `vbaProject.bin` en
+  cualquier carpeta (comparación exacta).
+- `archive-executable`: ZIP con al menos una entrada cuyo último segmento del
+  nombre (tras `/` o `\`) encadena una extensión del catálogo, comparada sin
+  distinguir mayúsculas y salvo `.bin`; no se aplican a las entradas las demás
+  reglas de nombre.
+- Un archivo es ZIP si empieza por `PK\x03\x04` y `zipfile` puede leer su
+  directorio central; si no puede (`BadZipFile` u otra excepción), no se señala
+  nada por ZIP. Un ZIP cifrado se lista igual. El detector nunca llama a
+  `ZipFile.open()`, `read()`, `extract()` ni `testzip()`.
 
 ### `attachments/engine.py` y `attachments/cache.py`
 

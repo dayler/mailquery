@@ -35,6 +35,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | UT-MD | Ejecución multi-driver | `tests/test_multidriver.py` |
 | UT-ERR | Errores y timeouts de plugin | `tests/test_plugins.py`, `tests/test_multidriver.py` |
 | UT-ATT | Motor de adjuntos: bloqueo, sanitización, caché y límites | `tests/test_attachments.py` |
+| UT-ACT | Contenido activo en adjuntos: PDF, OLE y ZIP | `tests/test_active_content.py` |
 | UT-ATC | Comando `attachment` y `show.attachments` | `tests/test_cli.py` |
 | UT-AM | Adjuntos de Apple Mail | `tests/test_backends.py`, `tests/test_integration.py` |
 | UT-OL-ATT | Adjuntos de Outlook | `tests/test_outlook.py` |
@@ -67,6 +68,7 @@ Viven en `tests/fixtures/expected/` (Apple Mail) y `tests/fixtures/expected/outl
 - `tests/fakes/attachment_driver.py`: driver de adjuntos para los tests del motor; entrega bytes y motivos y nunca escribe en caché.
 - `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`).
 - `tests/fixtures/attachment_samples.py`: contenidos de muestra para el bloqueo por *magic bytes*.
+- `tests/fixtures/active_content_samples.py`: PDF, OLE y ZIP de muestra para el detector de contenido activo (con y sin marcadores, con `vbaProject.bin`, con ejecutables, con entradas `.bin` propias de Office y con un ZIP cuyo directorio central no se puede leer). El ZIP cifrado se fabrica activando el bit 0 de *general purpose flag* en las cabeceras local y central.
 
 ## 5. CI y saltos
 
@@ -121,6 +123,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin datos personales | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | — |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
 | AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
+| AC-H12 (delta `PRD-v2.2.md`) | Aviso de contenido activo en PDF, OLE y ZIP sin descomprimir ni bloquear | UT-ACT-01, UT-ACT-02, UT-ACT-03, UT-ACT-04 | — |
 
 ## 8. Casos
 
@@ -1226,6 +1229,57 @@ Requisitos: RF-45, RF-51 · Archivo: `tests/test_attachments.py`
 | .13 | N | Un reemplazo que rechaza el sistema operativo (archivo abierto en Windows) ⇒ `E_IO`; el archivo no verificado nunca se sirve. |
 | .14 | B | Un archivo publicado cuya entrada no se pudo escribir se vuelve a extraer en la siguiente corrida (manifiesto best-effort). |
 | .15 | P | `cached_path` de `show` no lee el archivo ni el manifiesto: solo comprueba que el archivo existe y es regular. |
+
+#### UT-ACT-01 — `pdf-javascript`
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un PDF con `/JavaScript`, `/JS` o `/Launch` seguido de espacio, `<<`, `(` o del final del archivo ⇒ `("pdf-javascript",)`. |
+| .02 | P | Nombres con `#xx` (`/J#61vaScript`, `/#4A#53`, `/L#61unch`) ⇒ detectado. |
+| .03 | N | `/JavaScriptX`, `/JSON`, `/Launcher` y `/javascript` (minúsculas) no cuentan. |
+| .04 | N | `%PDF-` después del byte 1.024 ⇒ no es PDF y no se detecta. |
+| .05 | N | Un PDF sin esos nombres ⇒ `()`. |
+| .06 | B | `%PDF-` cuyo último byte es exactamente el byte 1.024 del archivo (empieza en el desplazamiento 1.019) ⇒ es PDF y se detecta. |
+| .07 | B | Un `#xx` con hexadecimal inválido (`/J#zzavaScript`) no se decodifica ni cuenta; `/JS` justo al final del archivo, sin delimitador, cuenta. |
+
+#### UT-ACT-02 — `office-macros`
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `.doc` y `.xls` OLE con `_VBA_PROJECT` en UTF-16LE ⇒ detectado. |
+| .02 | N | OLE sin `_VBA_PROJECT`; `_VBA_PROJECT` en ASCII dentro de un OLE; la cadena UTF-16LE en un archivo que no empieza por la firma OLE ⇒ no detectado. |
+| .03 | P | ZIP con `xl/vbaProject.bin` y con `vbaProject.bin` en la raíz ⇒ detectado. |
+| .04 | N | `.docx`, `.xlsx` y `.pptx` sin macros, con carpetas y entradas `.bin` propias del formato (`word/embeddings/oleObject1.bin`) ⇒ `()`. |
+
+#### UT-ACT-03 — `archive-executable`
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | ZIP con `docs/factura.pdf.exe` (extensión encadenada) y ZIP con `run.bat` ⇒ detectado. |
+| .02 | P | ZIP cifrado con una entrada `.exe` ⇒ detectado; el bit de cifrado está activo en las cabeceras local y central y `zipfile` sigue listando el nombre. |
+| .03 | P | Separador `\` en el nombre (`dir\x.scr`) ⇒ se toma el último segmento y se detecta. |
+| .04 | N | ZIP con solo PDF, con solo `.bin` o con `..`/`:` en nombres inocuos ⇒ `()`. |
+| .05 | N | Archivo que empieza por `PK\x03\x04` con el directorio central ilegible ⇒ `()`. |
+| .06 | P | Entrada `RUN.EXE` (mayúsculas) ⇒ detectado, porque la extensión se compara sin distinguir mayúsculas. |
+| .07 | N | Entrada de directorio terminada en `/` (`payload.exe/`): el último segmento está vacío; un ZIP solo con esa entrada ⇒ `()`. |
+| .08 | N | `zipfile.ZipFile` lanza una excepción distinta de `BadZipFile` (`ValueError` u `OSError`, simulada con `mock.patch`) ⇒ `()` sin excepción. |
+
+#### UT-ACT-04 — Propiedades del detector
+
+Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Un ZIP con `vbaProject.bin` y un `.exe` da los dos tipos en el orden de `ACTIVE_CONTENT_TYPES`. |
+| .02 | B | Nunca descomprime: con `ZipFile.open`, `read` y `extract` parcheados para fallar, todos los casos dan el mismo resultado y ninguna de las tres se llama. |
+| .03 | B | Archivo vacío y archivo inexistente ⇒ `()` sin excepción. |
+| .04 | B | Determinismo: dos llamadas sobre el mismo archivo dan el mismo resultado. |
 
 #### UT-OL-ATT-01 — Metadatos, índice y disponibilidad
 

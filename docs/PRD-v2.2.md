@@ -149,7 +149,7 @@ Estado de la implementación de cada contrato de la sección 0.2, desviaciones a
 | Opciones de `search`, `new` y `show` y su ayuda | F1 | Pendiente | — | — | — |
 | Catálogo de warnings | F1 | Pendiente | — | — | — |
 | Respuesta de `attachment` | F1 | Pendiente | — | — | — |
-| Inspección de adjuntos | F1 | Pendiente | — | — | — |
+| Inspección de adjuntos | F1 | Pendiente | `645fe09` | `TEST-CATALOG.md`, `INTERFACES.md` | Detector de marcadores implementado para PDF, OLE y ZIP (sin abrir, descomprimir ni bloquear); el aviso `W_ATTACHMENT_ACTIVE_CONTENT` en `attachment` queda pendiente de conectar. |
 | Contrato JSON único | F1, F3 | Pendiente | — | — | — |
 | Campos de la respuesta de `search`, `new`, `show` y `attachment` | F1 | Pendiente | — | — | — |
 | Skill y README | F1 | Pendiente | — | — | — |
