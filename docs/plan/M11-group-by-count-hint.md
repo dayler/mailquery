@@ -2,7 +2,7 @@
 
 **Lote:** I3 · rama del lote `integration/i3-attachments-rows` · **Oleada:** W6 (sola)
 **Rama:** `feature/m11-group-by-count-hint`, creada desde la punta de `integration/i3-attachments-rows` (con M09 y M10 integrados) · **Worktree:** `../mailquery-wt/m11`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -65,12 +65,12 @@ Ninguna (usa las constantes de M02 y la fila de M10).
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Opciones | Parser y validación temprana; UT-GRP-03, UT-GRP-06 | ⚪ |
-| F2 — Agrupación | Claves, orden, tope de 50, lecturas; UT-GRP-01, UT-GRP-02, UT-GRP-04, UT-GRP-07 | ⚪ |
-| F3 — Recuento | UT-GRP-05 | ⚪ |
-| F4 — Warnings y `hint` | RF-74 reglas 4–5, RF-78; UT-GRP-08, UT-GRP-09, UT-GRP-10 | ⚪ |
-| F5 — Documentación | Sección 9; DOC-11 | ⚪ |
-| F6 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Opciones | Parser y validación temprana; UT-GRP-03, UT-GRP-06 | 🟢 |
+| F2 — Agrupación | Claves, orden, tope de 50, lecturas; UT-GRP-01, UT-GRP-02, UT-GRP-04, UT-GRP-07 | 🟢 |
+| F3 — Recuento | UT-GRP-05 | 🟢 |
+| F4 — Warnings y `hint` | RF-74 reglas 4–5, RF-78; UT-GRP-08, UT-GRP-09, UT-GRP-10 | 🟢 |
+| F5 — Documentación | Sección 9; DOC-11 | 🟢 |
+| F6 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -228,4 +228,9 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 — Opciones | `--group-by` (dos claves como mucho, lista separada por comas) y `--count` en `search`, con la validación temprana y los textos literales de RF-72/RF-73; rechazo de `new` por argparse. |
+| 2026-11-14 | F2 — Agrupación | Siete claves, orden de grupos, tope de 50, `default_limit` ignorado, deduplicación previa y lecturas acotadas a las filas emitidas. |
+| 2026-11-14 | F3 — Recuento | Respuesta de `--count` con sus ocho claves, total sin el límite de 200 y solo warnings de alcance. |
+| 2026-11-14 | F4 — Warnings y `hint` | RF-74 reglas 4–5 y `hint` de RF-78 con el alcance ya resuelto, sin llamadas nuevas al driver. |
+| 2026-11-14 | F5 — Documentación | Ayuda y epílogo de `search`, ambos README (incluida la fila de Troubleshooting) y la skill. |
+| 2026-11-14 | F6 — Cierre | Suite completa `Ran 1373`, `FAILED (failures=2, skipped=7)` (los 2 SMOKE-NEW.07 ambientales); UT-GRP-01–10 y DOC-11 verdes solos; cobertura registrada en el informe. |
