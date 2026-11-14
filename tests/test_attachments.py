@@ -574,7 +574,7 @@ class AttachmentSanitizeAndPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = attachment_path(Path(tmp), "apple_mail:83143", first)
             self.assertEqual(path.name, first)
-            self.assertEqual(str(path).count("02_"), 1)
+            self.assertEqual(str(path.relative_to(tmp)).count("02_"), 1)
             self.assertEqual(truncate_utf8("123456789", 5), "12345")
             self.assertEqual(truncate_utf8("ééé", 3), "é")
             self.assertEqual(truncate_utf8("abc", 0), "")
