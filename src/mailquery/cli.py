@@ -59,6 +59,8 @@ from mailquery.plugins import (
 )
 from mailquery.plugins.api import AttachmentStreamGuard, RESERVED_DRIVER_NAMES
 from mailquery.search import (
+    SEARCH_ROW_FIELDS,
+    SHOW_FIELDS,
     Filters,
     _config_for_driver,
     _excluded_store_error,
@@ -84,6 +86,23 @@ _LOCK_FILENAME = "mailquery.lock"
 _PAYLOAD_RESERVED_KEYS = ("ok", "command", "generated_at")
 #: Commands whose successful response carries the fixed untrusted-content notice.
 _CONTENT_NOTICE_COMMANDS = frozenset({"search", "new", "show", "attachment"})
+#: Field names accepted by ``--fields`` in ``search``/``new`` and in ``show``.
+_SEARCH_FIELDS = (*SEARCH_ROW_FIELDS, "all")
+_SHOW_FIELDS = (*SHOW_FIELDS, "all")
+_SEARCH_FIELDS_TEXT = ", ".join(_SEARCH_FIELDS)
+_SHOW_FIELDS_TEXT = ", ".join(_SHOW_FIELDS)
+_SEARCH_FIELDS_BLOCK = textwrap.fill(
+    "Valid fields: " + _SEARCH_FIELDS_TEXT,
+    width=92,
+    initial_indent="  ",
+    subsequent_indent="  ",
+)
+_SHOW_FIELDS_BLOCK = textwrap.fill(
+    "Valid fields: " + _SHOW_FIELDS_TEXT,
+    width=92,
+    initial_indent="  ",
+    subsequent_indent="  ",
+)
 
 _ROOT_EPILOG = """\
 Examples:
@@ -172,6 +191,10 @@ Notes:
   default ([content].url_display = "keep" keeps the exact text); --strip-links
   replaces every URL with [link omitted]. The filters always compare the original
   text, so the results are the same in every mode.
+  --fields adds fields to the default row (uid, subject, from, date_received,
+  is_read, has_attachments), comma-separated or with the option repeated; --fields
+  all returns the full row.
+""" + _SEARCH_FIELDS_BLOCK + """
 """
 
 _NEW_EPILOG = """\
@@ -190,11 +213,16 @@ Notes:
   URLs and link signals follow the message processing of search: the URLs are
   neutralized by default ([content].url_display = "keep" keeps the exact text) and
   --strip-links replaces them with [link omitted].
+  --fields adds fields to the default row (uid, subject, from, date_received,
+  is_read, has_attachments), comma-separated or with the option repeated; --fields
+  all returns the full row.
+""" + _SEARCH_FIELDS_BLOCK + """
 """
 
 _SHOW_EPILOG = """\
 Examples:
   mailquery show 83143
+  mailquery show 83143 --fields attachments
 
 Notes:
   The body is truncated to 20,000 characters; headers and attachment names are
@@ -203,6 +231,10 @@ Notes:
   The URLs of the subject, the names, the headers and the body are neutralized by
   default ([content].url_display = "keep" keeps the exact text) and --strip-links
   replaces them with [link omitted].
+  --fields selects the fields of message (uid is always included), comma-separated
+  or with the option repeated; without it, or with --fields all, the whole message
+  is returned.
+""" + _SHOW_FIELDS_BLOCK + """
 """
 
 
@@ -448,6 +480,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace every URL with [link omitted] (overrides [content].url_display)",
     )
+    search_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="adds fields to the default row (uid, subject, from, date_received, "
+        "is_read, has_attachments); comma-separated or repeatable; all adds the full "
+        "row",
+    )
 
     new_parser = subparsers.add_parser(
         "new",
@@ -475,6 +515,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace every URL with [link omitted] (overrides [content].url_display)",
     )
+    new_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="adds fields to the default row (uid, subject, from, date_received, "
+        "is_read, has_attachments); comma-separated or repeatable; all adds the full "
+        "row",
+    )
 
     show_parser = subparsers.add_parser(
         "show",
@@ -489,6 +537,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--strip-links",
         action="store_true",
         help="replace every URL with [link omitted] (overrides [content].url_display)",
+    )
+    show_parser.add_argument(
+        "--fields",
+        action="append",
+        metavar="LIST",
+        help="selects the fields of message (uid is always included); "
+        "comma-separated or repeatable; all selects every field",
     )
     # The uid format is validated in main() by _parse_command_uid, not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
@@ -586,6 +641,12 @@ def _main(
         return _report_error(exc, _guess_command(raw_argv))
 
     command = str(args.command)
+    if command in ("search", "new", "show"):
+        # Before the home exists, the config is read or the store is opened.
+        try:
+            args.fields_selection = _fields_selection(args, command)
+        except MailqueryError as exc:
+            return _report_error(exc, command)
     registry = BackendRegistry()
     if command == "attachment":
         # Exactly one of --index/--all and a positive --index,
@@ -992,6 +1053,7 @@ def _execute(
     registry: BackendRegistry | None = None,
 ) -> dict:
     command = str(args.command)
+    fields = getattr(args, "fields_selection", None)
     filters: Filters | None = None
     new_limit: int | None = None
     if command == "search":
@@ -1022,6 +1084,7 @@ def _execute(
             config,
             filters,  # type: ignore[arg-type]
             url_mode=_url_mode(config, args),
+            fields=fields,
             **extra,
         )
     elif command == "new":
@@ -1033,6 +1096,7 @@ def _execute(
             peek=bool(args.peek),
             limit=new_limit,
             url_mode=_url_mode(config, args),
+            fields=fields,
             **extra,
         )
     elif command == "show":
@@ -1046,6 +1110,7 @@ def _execute(
                 drivers=mapping or None,
                 native=native,
                 url_mode=_url_mode(config, args),
+                fields=fields,
             )
         else:
             payload = run_show(
@@ -1053,6 +1118,7 @@ def _execute(
                 config,
                 args.uid,
                 url_mode=_url_mode(config, args),
+                fields=fields,
             )
     else:  # pragma: no cover - argparse prevents this
         raise MailqueryError(
@@ -1072,6 +1138,35 @@ def _url_mode(config: Config, args: argparse.Namespace) -> str:
     if bool(getattr(args, "strip_links", False)):
         return "strip"
     return config.content.url_display
+
+
+def _fields_selection(
+    args: argparse.Namespace, command: str
+) -> tuple[str, ...] | None:
+    """Validate ``--fields`` and return the selected names, or ``None``.
+
+    Each value is split on commas and the surrounding spaces of every name are
+    stripped; names are compared case-sensitively. An unknown or empty name is
+    ``E_USAGE`` with the valid field list of the command.
+    """
+    raw = getattr(args, "fields", None)
+    if raw is None:
+        return None
+    valid = _SEARCH_FIELDS if command in ("search", "new") else _SHOW_FIELDS
+    selected: list[str] = []
+    for value in raw:
+        for item in str(value).split(","):
+            name = item.strip()
+            if name not in valid:
+                raise MailqueryError(
+                    "E_USAGE",
+                    f"unknown field '{name}' in --fields",
+                    f"valid fields: {', '.join(valid)}",
+                    "invalid --fields value",
+                )
+            if name not in selected:
+                selected.append(name)
+    return tuple(selected)
 
 
 def _attachment_selection(args: argparse.Namespace) -> list[int] | None:
