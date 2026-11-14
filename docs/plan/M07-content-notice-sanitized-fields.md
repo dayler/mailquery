@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W2 (en paralelo con M05 y M06)
 **Rama:** `feature/m07-content-notice-sanitized-fields`, creada desde la punta de `integration/i2-content` · **Worktree:** `../mailquery-wt/m07`
-**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración)
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M07.md`](evidence/M07.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -156,15 +156,15 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 ## 12. Definition of Done
 
-- [ ] A2 en todos los campos de contenido de RF-52, en `warnings[]` y en los textos de error; identificadores y rutas sin cambios.
-- [ ] Filtros con A2 a ambos lados.
-- [ ] `content_notice` tras `generated_at` en los cuatro comandos de éxito y en ninguna otra respuesta.
-- [ ] Goldens actualizados solo con `content_notice`.
-- [ ] README actualizados.
-- [ ] UT-CW-01–UT-CW-06 y los goldens verdes solos.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] A2 en todos los campos de contenido de RF-52, en `warnings[]` y en los textos de error; identificadores y rutas sin cambios.
+- [x] Filtros con A2 a ambos lados.
+- [x] `content_notice` tras `generated_at` en los cuatro comandos de éxito y en ninguna otra respuesta.
+- [x] Goldens actualizados solo con `content_notice`.
+- [x] README actualizados.
+- [x] UT-CW-01–UT-CW-06 y los goldens verdes solos.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

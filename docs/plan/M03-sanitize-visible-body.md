@@ -2,7 +2,7 @@
 
 **Lote:** I1 · rama del lote `integration/i1-prep` · **Oleada:** W1 (en paralelo con M01, M02 y M04)
 **Rama:** `feature/m03-sanitize-visible-body`, creada desde la punta de `integration/i1-prep` · **Worktree:** `../mailquery-wt/m03`
-**Estado:** 🟡 (fases F1–F4 cerradas; pendiente de integración)
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M03.md`](evidence/M03.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -150,13 +150,13 @@ python -B -m coverage report --include=src/mailquery/output.py --fail-under=85
 
 ## 12. Definition of Done
 
-- [ ] `sanitize_text` cumple RF-52 y es idempotente; atajo ASCII.
-- [ ] `html_body_to_text` pasa a línea con `css-inline` sin cargar hojas enlazadas, omite y cuenta según RF-53 y D-03, y convierte el HTML original ante cualquier fallo de `css-inline`.
-- [ ] `CONTENT_NOTICE` con el texto exacto.
-- [ ] UT-CNT-01–UT-CNT-04 verdes solos; UT-OUT al día.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/output.py --fail-under=85` verde; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] `sanitize_text` cumple RF-52 y es idempotente; atajo ASCII.
+- [x] `html_body_to_text` pasa a línea con `css-inline` sin cargar hojas enlazadas, omite y cuenta según RF-53 y D-03, y convierte el HTML original ante cualquier fallo de `css-inline`.
+- [x] `CONTENT_NOTICE` con el texto exacto.
+- [x] UT-CNT-01–UT-CNT-04 verdes solos; UT-OUT al día.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/output.py --fail-under=85` verde; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

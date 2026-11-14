@@ -2,7 +2,7 @@
 
 **Lote:** I3 · rama del lote `integration/i3-attachments-rows` · **Oleada:** W6 (sola)
 **Rama:** `feature/m11-group-by-count-hint`, creada desde la punta de `integration/i3-attachments-rows` (con M09 y M10 integrados) · **Worktree:** `../mailquery-wt/m11`
-**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M11.md`](evidence/M11.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -215,14 +215,14 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 ## 12. Definition of Done
 
-- [ ] `--group-by` y `--count` solo en `search`, validados antes del home con los textos literales.
-- [ ] Grupos, orden, tope de 50, `count` total; recuento sin filas; lecturas según RNF-23.
-- [ ] Warnings según RF-74 reglas 4 y 5; `hint` de RF-78 con el alcance resuelto y sin llamadas nuevas.
-- [ ] Ayuda, README (incluida la fila de Troubleshooting) y skill actualizados.
-- [ ] UT-GRP-01–10 y DOC-11 verdes solos.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote; TC-03.01 y OL-30 recorren `--group-by` y `--count`.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] `--group-by` y `--count` solo en `search`, validados antes del home con los textos literales.
+- [x] Grupos, orden, tope de 50, `count` total; recuento sin filas; lecturas según RNF-23.
+- [x] Warnings según RF-74 reglas 4 y 5; `hint` de RF-78 con el alcance resuelto y sin llamadas nuevas.
+- [x] Ayuda, README (incluida la fila de Troubleshooting) y skill actualizados.
+- [x] UT-GRP-01–10 y DOC-11 verdes solos.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote; TC-03.01 y OL-30 recorren `--group-by` y `--count`.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

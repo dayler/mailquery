@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W2 (en paralelo con M06 y M07)
 **Rama:** `feature/m05-url-sender-signals`, creada desde la punta de `integration/i2-content` · **Worktree:** `../mailquery-wt/m05`
-**Estado:** 🟡 (fases F1–F5 cerradas; pendiente de integración)
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M05.md`](evidence/M05.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -174,12 +174,12 @@ Ninguno (solo se añaden funciones).
 
 ## 12. Definition of Done
 
-- [ ] Detección, dominios, modos, punycode, acortado, conteos, A6 y textos según RF-54–RF-61.
-- [ ] `neutralize` idempotente; todas las funciones deterministas.
-- [ ] UT-CNT-05–UT-CNT-09 verdes solos.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/output.py --fail-under=85` verde; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] Detección, dominios, modos, punycode, acortado, conteos, A6 y textos según RF-54–RF-61.
+- [x] `neutralize` idempotente; todas las funciones deterministas.
+- [x] UT-CNT-05–UT-CNT-09 verdes solos.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/output.py --fail-under=85` verde; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

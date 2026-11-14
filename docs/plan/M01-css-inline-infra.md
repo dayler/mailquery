@@ -2,7 +2,7 @@
 
 **Lote:** I1 · rama del lote `integration/i1-prep` · **Oleada:** W1 (en paralelo con M02, M03 y M04)
 **Rama:** `feature/m01-css-inline-infra`, creada desde la punta de `integration/i1-prep` · **Worktree:** `../mailquery-wt/m01`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M01.md`](evidence/M01.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -192,14 +192,14 @@ python -B -m coverage report
 
 ## 13. Definition of Done
 
-- [ ] `pyproject.toml` declara `css-inline~=0.23.1` sin marcador.
-- [ ] `pyproject.toml` tiene las tablas `[tool.coverage.*]` de D-21.
-- [ ] El workflow instala `css-inline` y `coverage` en `test-suite`, corre la suite bajo `coverage` con el paso `Check coverage` separado, tiene el paso de wheels en Ubuntu (probado antes en local) y los timeouts 20/15; sigue sin dispararse por push.
-- [ ] Los dos README tienen introducción, requisitos, instrucciones de tests (con cobertura) y la subsección de RF-65 con el mismo contenido.
-- [ ] TC-06.03, PKG-03, DOC-07 verdes solos; SMOKE-INSTALL.05 verde en este equipo o saltado con motivo.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 % (M01 no modifica archivos de `src/`); salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 12 y los bloques para el orquestador.
+- [x] `pyproject.toml` declara `css-inline~=0.23.1` sin marcador.
+- [x] `pyproject.toml` tiene las tablas `[tool.coverage.*]` de D-21.
+- [x] El workflow instala `css-inline` y `coverage` en `test-suite`, corre la suite bajo `coverage` con el paso `Check coverage` separado, tiene el paso de wheels en Ubuntu (probado antes en local) y los timeouts 20/15; se dispara por `pull_request` a `develop` y por `push` a `develop` (corrección del dueño del 2026-11-14), nunca por push a ramas de milestone.
+- [x] Los dos README tienen introducción, requisitos, instrucciones de tests (con cobertura) y la subsección de RF-65 con el mismo contenido.
+- [x] TC-06.03, PKG-03, DOC-07 verdes solos; SMOKE-INSTALL.05 verde en este equipo o saltado con motivo.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 % (M01 no modifica archivos de `src/`); salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 12 y los bloques para el orquestador.
 
 ## 14. Registro de progreso
 

@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W2 (en paralelo con M05 y M07)
 **Rama:** `feature/m06-body-source-sender-headers`, creada desde la punta de `integration/i2-content` · **Worktree:** `../mailquery-wt/m06`
-**Estado:** 🟡 (fases F1–F5 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M06.md`](evidence/M06.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -163,14 +163,14 @@ Cada test ajustado se lista en la evidencia con el motivo.
 
 ## 12. Definition of Done
 
-- [ ] Apple Mail y Outlook toman el cuerpo del HTML cuando existe, sin recurrir al texto plano si el HTML no da texto.
-- [ ] `hidden_chars`, `authentication_results` y `reply_to` llegan en `BodyRow`; `load_headers` entrega cabeceras sin leer el cuerpo; S/MIME no se abre.
-- [ ] `BodyFormat` en la lista blanca COM; el doble lo modela.
-- [ ] Store por defecto y goldens sin cambios (o cambios justificados).
-- [ ] UT-BOD-01–UT-BOD-05 verdes solos; tests existentes ajustados y listados.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] Apple Mail y Outlook toman el cuerpo del HTML cuando existe, sin recurrir al texto plano si el HTML no da texto.
+- [x] `hidden_chars`, `authentication_results` y `reply_to` llegan en `BodyRow`; `load_headers` entrega cabeceras sin leer el cuerpo; S/MIME no se abre.
+- [x] `BodyFormat` en la lista blanca COM; el doble lo modela.
+- [x] Store por defecto y goldens sin cambios (o cambios justificados).
+- [x] UT-BOD-01–UT-BOD-05 verdes solos; tests existentes ajustados y listados.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

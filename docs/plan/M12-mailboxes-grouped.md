@@ -2,7 +2,7 @@
 
 **Lote:** I4 · rama del lote `integration/i4-mailboxes-doctor-close` · **Oleada:** W7 (sola)
 **Rama:** `feature/m12-mailboxes-grouped`, creada desde la punta de `integration/i4-mailboxes-doctor-close` (abierta desde `develop` con el lote I3 mergeado) · **Worktree:** `../mailquery-wt/m12`
-**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M12.md`](evidence/M12.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -163,13 +163,13 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 ## 12. Definition of Done
 
-- [ ] Salida agrupada por cuenta con `path` e `included` por defecto; `--fields` añade `name`, `url`, `total`, `unread`; sin `all`.
-- [ ] Sin `total`/`unread` no se cuenta ningún mensaje en Apple Mail ni en Outlook; plugins sin contadores no pedidos.
-- [ ] Ayudas, README, skill, `config.example.toml`, `PERFORMANCE-BACKLOG.md` y recetas actualizados.
-- [ ] UT-MBX-01–05, DOC-13 y goldens verdes solos; `tests/test_readonly.py`, `tests/test_smoke.py` y `tests/test_content_wiring.py` ajustados a la forma agrupada.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote, incluidos SMOKE (en este Windows con Outlook clásico abierto), TC-03.01 y OL-30.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] Salida agrupada por cuenta con `path` e `included` por defecto; `--fields` añade `name`, `url`, `total`, `unread`; sin `all`.
+- [x] Sin `total`/`unread` no se cuenta ningún mensaje en Apple Mail ni en Outlook; plugins sin contadores no pedidos.
+- [x] Ayudas, README, skill, `config.example.toml`, `PERFORMANCE-BACKLOG.md` y recetas actualizados.
+- [x] UT-MBX-01–05, DOC-13 y goldens verdes solos; `tests/test_readonly.py`, `tests/test_smoke.py` y `tests/test_content_wiring.py` ajustados a la forma agrupada.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote, incluidos SMOKE-NEW contra Apple Mail real en el host de referencia, TC-03.01 y OL-30; SMOKE-ATT-OL se salta con motivo en macOS (RK-10).
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

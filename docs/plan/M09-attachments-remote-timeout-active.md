@@ -2,7 +2,7 @@
 
 **Lote:** I3 · rama del lote `integration/i3-attachments-rows` · **Oleada:** W4 (sola)
 **Rama:** `feature/m09-attachments-remote-timeout-active`, creada desde la punta de `integration/i3-attachments-rows` (abierta desde `develop` con el lote I2 mergeado) · **Worktree:** `../mailquery-wt/m09`
-**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M09.md`](evidence/M09.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -195,14 +195,14 @@ python -B -m coverage report --include="src/mailquery/cli.py,src/mailquery/confi
 
 ## 12. Definition of Done
 
-- [ ] `"remote"` extrae con el mismo motor; solo `"none"` se rechaza, con el hint nuevo.
-- [ ] `timeout_seconds` validado; corte duro en plugins externos; nativos entre bloques; COM y metadatos sin cambios; A7 y aciertos de caché fuera del tope.
-- [ ] `W_ATTACHMENT_ACTIVE_CONTENT` por adjunto y tipo, también desde la caché.
-- [ ] README (también "Troubleshooting"), skill, `config.example.toml`, recetas 01 y 02 y `KNOWN-DEFECTS.md` actualizados.
-- [ ] Grupos de la sección 7 verdes solos; UT-ATC-10.03 retirado.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] `"remote"` extrae con el mismo motor; solo `"none"` se rechaza, con el hint nuevo.
+- [x] `timeout_seconds` validado; corte duro en plugins externos; nativos entre bloques; COM y metadatos sin cambios; A7 y aciertos de caché fuera del tope.
+- [x] `W_ATTACHMENT_ACTIVE_CONTENT` por adjunto y tipo, también desde la caché.
+- [x] README (también "Troubleshooting"), skill, `config.example.toml`, recetas 01 y 02 y `KNOWN-DEFECTS.md` actualizados.
+- [x] Grupos de la sección 7 verdes solos; UT-ATC-10.03 retirado.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

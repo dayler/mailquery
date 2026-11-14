@@ -2,7 +2,7 @@
 
 **Lote:** I3 · rama del lote `integration/i3-attachments-rows` · **Oleada:** W5 (sola)
 **Rama:** `feature/m10-default-row-fields`, creada desde la punta de `integration/i3-attachments-rows` (con M09 integrado) · **Worktree:** `../mailquery-wt/m10`
-**Estado:** 🟡 (fases F1–F7 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M10.md`](evidence/M10.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 

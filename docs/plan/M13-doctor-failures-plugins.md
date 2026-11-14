@@ -2,7 +2,7 @@
 
 **Lote:** I4 · rama del lote `integration/i4-mailboxes-doctor-close` · **Oleada:** W8 (sola)
 **Rama:** `feature/m13-doctor-failures-plugins`, creada desde la punta de `integration/i4-mailboxes-doctor-close` (con M12 integrado) · **Worktree:** `../mailquery-wt/m13`
-**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M13.md`](evidence/M13.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -214,13 +214,13 @@ python -B -m coverage report --include="src/mailquery/cli.py,src/mailquery/plugi
 
 ## 12. Definition of Done
 
-- [ ] Sección `plugins` en JSON y texto, con validación de `doctor_checks()`, corte duro y `config` por plugin; `config` de primer nivel sin bloques de plugins.
-- [ ] `--failures` filtra JSON y texto según RF-76, también tras un timeout COM, con `plugins` presente (D-25); exit 0.
-- [ ] Título y ayuda general dicen `diagnosis`; skill, README e instaladores sin *preflight*; recetas actualizadas.
-- [ ] UT-DR-01–10, DOC-12 y goldens verdes solos; TC-03.01 y OL-30 recorren `doctor --failures`.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] Sección `plugins` en JSON y texto, con validación de `doctor_checks()`, corte duro y `config` por plugin; `config` de primer nivel sin bloques de plugins.
+- [x] `--failures` filtra JSON y texto según RF-76, también tras un timeout COM, con `plugins` presente (D-25); exit 0.
+- [x] Título y ayuda general dicen `diagnosis`; skill, README e instaladores sin *preflight*; recetas actualizadas.
+- [x] UT-DR-01–10, DOC-12 y goldens verdes solos; TC-03.01 y OL-30 recorren `doctor --failures`.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

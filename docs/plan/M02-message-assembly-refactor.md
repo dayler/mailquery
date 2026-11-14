@@ -2,7 +2,7 @@
 
 **Lote:** I1 · rama del lote `integration/i1-prep` · **Oleada:** W1 (en paralelo con M01, M03 y M04)
 **Rama:** `feature/m02-message-assembly-refactor`, creada desde la punta de `integration/i1-prep` · **Worktree:** `../mailquery-wt/m02`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M02.md`](evidence/M02.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -102,12 +102,12 @@ Ninguno debería cambiar. Si un test cambia, el cambio es solo de seam (nombre d
 
 ## 13. Definition of Done
 
-- [ ] Una sola función arma los campos comunes de `search`/`new` y `show`; un solo cargador de cuerpo con warnings por mensaje.
-- [ ] `SEARCH_ROW_FIELDS` y `SHOW_FIELDS` definidos y usados para ordenar.
-- [ ] Ningún golden ni test existente cambia de expectativa; UT-SR-17 verde.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/search.py --fail-under=85` verde y la cobertura de `search.py` no baja de la de la línea base del lote; ninguna rama muerta tras el refactor; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 12.
+- [x] Una sola función arma los campos comunes de `search`/`new` y `show`; un solo cargador de cuerpo con warnings por mensaje.
+- [x] `SEARCH_ROW_FIELDS` y `SHOW_FIELDS` definidos y usados para ordenar.
+- [x] Ningún golden ni test existente cambia de expectativa; UT-SR-17 verde.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/search.py --fail-under=85` verde y la cobertura de `search.py` no baja de la de la línea base del lote; ninguna rama muerta tras el refactor; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 12.
 
 ## 14. Registro de progreso
 

@@ -2,7 +2,7 @@
 
 **Lote:** I1 · rama del lote `integration/i1-prep` · **Oleada:** W1 (en paralelo con M01, M02 y M03)
 **Rama:** `feature/m04-active-content-scanner`, creada desde la punta de `integration/i1-prep` · **Worktree:** `../mailquery-wt/m04`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M04.md`](evidence/M04.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -138,11 +138,11 @@ Ninguno.
 
 ## 12. Definition of Done
 
-- [ ] `active_content_types` cumple RF-62, sin descomprimir y con lectura lineal.
-- [ ] UT-ACT-01–UT-ACT-04 verdes solos.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/attachments/active_content.py --fail-under=85` verde; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] `active_content_types` cumple RF-62, sin descomprimir y con lectura lineal.
+- [x] UT-ACT-01–UT-ACT-04 verdes solos.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=src/mailquery/attachments/active_content.py --fail-under=85` verde; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

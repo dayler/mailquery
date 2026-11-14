@@ -2,7 +2,7 @@
 
 **Lote:** I2 · rama del lote `integration/i2-content` · **Oleada:** W3 (sola)
 **Rama:** `feature/m08-url-modes-content-warnings`, creada desde la punta de `integration/i2-content` (con M05, M06 y M07 ya integrados) · **Worktree:** `../mailquery-wt/m08`
-**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M08.md`](evidence/M08.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -211,15 +211,15 @@ python -B -m coverage report --include="src/mailquery/search.py,src/mailquery/cl
 
 ## 12. Definition of Done
 
-- [ ] `[content]` validado; `--strip-links` solo en `search`, `new` y `show`; precedencia correcta.
-- [ ] Procesamiento en el orden de la sección 10 del PRD y warnings en el orden del punto 8; filtros iguales en los tres modos.
-- [ ] Logs solo con códigos.
-- [ ] README, skill, `config.example.toml`, anexo y recetas actualizados.
-- [ ] UT-CW-07–UT-CW-13, UT-CFG-03, DOC-06.04 y DOC-08 verdes solos.
-- [ ] Barridos de TC-03 y OL-30 con `--strip-links` verdes.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote.
-- [ ] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] `[content]` validado; `--strip-links` solo en `search`, `new` y `show`; precedencia correcta.
+- [x] Procesamiento en el orden de la sección 10 del PRD y warnings en el orden del punto 8; filtros iguales en los tres modos.
+- [x] Logs solo con códigos.
+- [x] README, skill, `config.example.toml`, anexo y recetas actualizados.
+- [x] UT-CW-07–UT-CW-13, UT-CFG-03, DOC-06.04 y DOC-08 verdes solos.
+- [x] Barridos de TC-03 y OL-30 con `--strip-links` verdes.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote.
+- [x] Cobertura (D-21): total ≥ 85 %; `python -B -m coverage report --include=<archivos de src/ de la sección 4> --fail-under=85` verde o, para un módulo por debajo del 85 % en la línea base del lote, sin bajar de ese valor y con las líneas nuevas cubiertas; salida en la evidencia (g).
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 

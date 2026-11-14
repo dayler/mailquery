@@ -2,7 +2,7 @@
 
 **Lote:** I4 · rama del lote `integration/i4-mailboxes-doctor-close` · **Oleada:** W9 (sola)
 **Rama:** `feature/m14-smoke-closure`, creada desde la punta de `integration/i4-mailboxes-doctor-close` (con M12 y M13 integrados) · **Worktree:** `../mailquery-wt/m14`
-**Estado:** 🟢 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟢 (integrado en `develop`; ver [`evidence/M14.md`](evidence/M14.md)) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -117,16 +117,16 @@ python -B -m coverage report
 
 ## 12. Definition of Done
 
-- [ ] SMOKE-NEW.07 ampliado y SMOKE-NEW.08–10 escritos.
-- [ ] SMOKE verde en este Windows; verde en el Mac del dueño o saltado con motivo registrado.
-- [ ] `PERFORMANCE-BACKLOG.md` con las mediciones de 3.0.0.
-- [ ] Ningún texto obsoleto de CL-05 en los documentos consumidores (salvo `PRD.md`).
-- [ ] Todos los AC con evidencia (o la lista de faltantes devuelta al orquestador).
-- [ ] TC-03.01 y OL-30 recorren todas las opciones nuevas.
-- [ ] Ninguna desviación de `PRD-v2.2.md` sin registrar; decisiones del plan con destino permanente (sección 2, punto 5).
-- [ ] Cobertura (D-21, HITL-07): total ≥ 85 % en el host de referencia y en los 12 jobs `test-suite` del PR del lote I4.
-- [ ] Suite completa sin fallos nuevos frente a la línea base del lote; `tests/test_readonly.py` y OL-30 verdes.
-- [ ] Informe final con los datos de la sección 11 y los bloques.
+- [x] SMOKE-NEW.07 ampliado y SMOKE-NEW.08–10 escritos.
+- [x] SMOKE verde en el Mac del dueño (19/19); Windows/Outlook saltado con motivo registrado (host macOS sin Outlook clásico, RK-10).
+- [x] `PERFORMANCE-BACKLOG.md` con la medición de 3.0.0 en macOS; la medición en Windows queda pendiente de un equipo real.
+- [x] Ningún texto obsoleto de CL-05 en los documentos consumidores (salvo `PRD.md`).
+- [x] Todos los AC con evidencia (o la lista de faltantes devuelta al orquestador).
+- [x] TC-03.01 y OL-30 recorren todas las opciones nuevas.
+- [x] Ninguna desviación de `PRD-v2.2.md` sin registrar; decisiones del plan con destino permanente (sección 2, punto 5).
+- [x] Cobertura (D-21, HITL-07): total ≥ 85 % en el host de referencia y en los 12 jobs `test-suite` del PR del lote I4.
+- [x] Suite completa sin fallos nuevos frente a la línea base del lote; `tests/test_readonly.py` y OL-30 verdes.
+- [x] Informe final con los datos de la sección 11 y los bloques.
 
 ## 13. Registro de progreso
 
