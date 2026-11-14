@@ -268,7 +268,7 @@ Ramas de milestone: `feature/m01-css-inline-infra`, `feature/m02-message-assembl
 
 ### 7.2 Presupuesto de integración
 
-Matriz completa por corrida: job `test-suite` (3 sistemas × Python 3.11, 3.12, 3.13 y 3.14 = 12 jobs) + job `install-scripts` (3 jobs; el de Ubuntu incluye el paso de wheels de `css-inline`) = **15 jobs por corrida**.
+Matriz completa por corrida: job `test-suite` (3 sistemas × Python 3.11, 3.12, 3.13 y 3.14 = 12 jobs) + job `install-scripts` (3 jobs; el de Ubuntu incluye el paso de wheels de `css-inline`) = **15 jobs por corrida**. Cada job `test-suite` incluye además un paso `integration-tests` que re-ejecuta los TCs (`-k test_tc_`) como paso visible; no añade jobs ni cambia el presupuesto.
 
 | Escenario | PRs | Corridas nominales | Jobs nominales | Corridas máximas (3 por PR + 1 por merge) | Jobs máximos |
 |---|---|---|---|---|---|

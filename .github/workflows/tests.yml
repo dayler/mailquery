@@ -47,6 +47,10 @@ jobs:
       - name: Check coverage
         # Fails (exit 2) below the 85 % combined line and branch threshold.
         run: python -m coverage report
+      - name: integration-tests
+        # Re-runs the automated TCs as their own visible step. The full suite
+        # above already runs them and gates the build on them.
+        run: python -B -m unittest discover -s tests -t . -v -k test_tc_
 
   install-scripts:
     name: install scripts (${{ matrix.os }})
