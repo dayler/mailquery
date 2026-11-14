@@ -1,6 +1,6 @@
 """TC-06, PKG-01, PKG-02, PKG-03 and DOC-07: packaging, dependencies and READMEs.
 
-``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a0),
+``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a1),
 not yet released: the tests derive every expected version from the package
 instead of pinning a literal (PKG-02).
 """

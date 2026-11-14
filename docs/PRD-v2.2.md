@@ -2,7 +2,7 @@
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes.
 **Versión del documento:** 2.2 — **delta** sobre [`PRD.md`](PRD.md) v2.1.
-**Versión del paquete que introduce:** `3.0.0` (en desarrollo `3.0.0a0`). Las features se acumulan en `develop` y no tienen release propio: se publican con el `3.0.0` (`PRD.md` §22.3).
+**Versión del paquete que introduce:** `3.0.0` (en desarrollo `3.0.0a1`). Las features se acumulan en `develop` y no tienen release propio: se publican con el `3.0.0` (`PRD.md` §22.3).
 **Fecha:** 2026-11-13.
 **Repositorio:** <https://github.com/dayler/mailquery>.
 **Estado:** **aprobado** por el dueño del producto el 2026-11-13. Implementado en `develop`, pendiente de conciliación.

@@ -2,7 +2,7 @@
 
 > **Estado del contrato:** implementado en `develop` (plugins de backend y
 > adjuntos; [`PRD.md`](PRD.md) v2.1) y **no publicado**. El paquete anuncia
-> `mailquery.__version__` = 3.0.0a0 (3.0.0-alpha, PEP 440) en `develop`, todavía sin tag de release ni
+> `mailquery.__version__` = 3.0.0a1 (3.0.0-alpha, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como está
 > implementado.
 
@@ -2060,7 +2060,7 @@ después de `schema` (macOS) / `stores` (Windows) como hasta ahora. `detail`: po
 de declaración (nativo primero si hay bloques sin prefijo),
 `<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>;
 body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`, unidos por
-`; `; la versión es la de la distribución (`package_version()`, `3.0.0a0` en `develop`) y el nativo se
+`; `; la versión es la de la distribución (`package_version()`, `3.0.0a1` en `develop`) y el nativo se
 obtiene del backend seleccionado (así el fake de Outlook sobre `platform="win32"` reporta `outlook` en
 cualquier host). Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒ `; no declared drivers`
 (valida solo el nativo); config que no parsea ⇒ `; declared drivers: unknown (config failed)` (valida

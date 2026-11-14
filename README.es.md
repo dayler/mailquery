@@ -27,7 +27,7 @@ para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
   plataforma.
 
 La recuperación de adjuntos y el motor multi-driver forman parte del futuro
-3.0.0, todavía no publicado. `develop` anuncia la pre-release `3.0.0a0`
+3.0.0, todavía no publicado. `develop` anuncia la pre-release `3.0.0a1`
 (3.0.0-alpha) en `--version`, pero no publica nada: sin tag, sin release y sin
 merge a `main`.
 
@@ -374,7 +374,7 @@ control. Los ejemplos JSON lo muestran tras `command`.
 
 ```text
 $ mailquery -v          # sin efectos: no crea ~/.mailquery ni abre el cliente
-mailquery 3.0.0a0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a0)
+mailquery 3.0.0a1 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a1)
 ```
 
 La línea conserva `backend <driver nativo>` y añade `; drivers: <driver>
@@ -403,7 +403,7 @@ mailquery doctor - environment and read-only diagnosis
 Checks:
   [ok]   python             3.14.7
   [ok]   home               …\.mailquery (writable)
-  [ok]   driver             outlook (api=1; pkg 3.0.0a0; network=false; readonly=structural;
+  [ok]   driver             outlook (api=1; pkg 3.0.0a1; network=false; readonly=structural;
                             body_local=true; attachments=local; native_order=text)
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)

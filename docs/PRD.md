@@ -2,7 +2,7 @@
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes (DeepSeek u otro similar): **Apple Mail en macOS** y **Outlook clásico en Windows**, ampliable con plugins de backend.
 **Versión del documento:** 2.1 (un solo documento para todas las plataformas; incorpora plugins de backend y la recuperación local de adjuntos).
-**Versión del paquete:** `3.0.0` (en `develop` se anuncia la pre-release `3.0.0a0`; sin publicar, §22.3).
+**Versión del paquete:** `3.0.0` (en `develop` se anuncia la pre-release `3.0.0a1`; sin publicar, §22.3).
 **Fecha:** 2026-11-12.
 **Repositorio:** <https://github.com/dayler/mailquery>.
 **Estado:** v0.13 aprobado e implementado (macOS + Apple Mail). v1.0 **aprobado** por el dueño del producto el 2026-11-03. v1.3 es un solo documento según el estándar de un PRD, con la arquitectura como única excepción porque no hay TRD. v2.1: plugins de backend y adjuntos aprobados por el dueño el 2026-11-11, implementados en `develop` y conciliados en este documento el 2026-11-12; sin publicar.
@@ -330,7 +330,7 @@ Prioridades: **M** = imprescindible. Numeración continuada respecto a §6.1–�
 | ADR-24 | **Caché efímera con limpieza externa (cron); la app no barre ni purga.** Los aciertos se validan con un manifiesto SHA-256 por mensaje (§10.3.4). Se tolera el borrado concurrente. | Daemon de limpieza; TTL configurable; validación al inicio | Sin daemon, sin tokens y sin coste en la ruta caliente; la corrección no depende de la caché (se re-extrae). |
 | ADR-25 | **Semántica multi-driver:** merge por driver, sin dedupe cross-driver, orden total `(date_received, driver, native_order_key)`, fail-fast ante fallo de driver y cursor global. | Dedupe cross-driver por `message_id`; resultados parciales con warning | Evita ocultar mensajes (dos drivers pueden ver el mismo correo), mantiene determinismo y una semántica única de cursor. |
 | ADR-26 | **Delta normativo con tabla de supersesión y checklist de conciliación; el `PRD.md` no se edita hasta el release.** Cumplido: el delta se concilió en este documento (v2.1). | Fusionar ahora en `PRD.md` v2.2; delta con nota simple | Permite revisar solo estas dos features sin sobrecargar al harness, sin dejar contradicciones en el documento central. |
-| ADR-27 | **Versión `3.0.0` por cambio incompatible de contrato, con migración automática de `state.json`.** En `develop` se anuncia la pre-release `3.0.0a0` (§22.3). | `2.1.0` con nota de compatibilidad | Aplica la regla semver que el propio `PRD.md` fijó al justificar `2.0.0`; la migración evita romper el cursor. |
+| ADR-27 | **Versión `3.0.0` por cambio incompatible de contrato, con migración automática de `state.json`.** En `develop` se anuncia la pre-release `3.0.0a1` (§22.3). | `2.1.0` con nota de compatibilidad | Aplica la regla semver que el propio `PRD.md` fijó al justificar `2.0.0`; la migración evita romper el cursor. |
 
 ---
 
@@ -1213,7 +1213,7 @@ $ mailquery -v          # en Windows con un plugin instalado
 mailquery 3.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0)
 ```
 
-Formato: `mailquery <versión> (backend <backend>; Python <x.y.z>; <plataforma>; drivers: <driver> <versión>, ...)`. En `develop`, `<versión>` es la pre-release `3.0.0a0` (§22.3).
+Formato: `mailquery <versión> (backend <backend>; Python <x.y.z>; <plataforma>; drivers: <driver> <versión>, ...)`. En `develop`, `<versión>` es la pre-release `3.0.0a1` (§22.3).
 
 | Campo | Origen |
 |-------|--------|
@@ -1856,7 +1856,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 
 `3.0.0` (mayor). El cambio de tipo y forma de `uid` (incluido `cursor.*.last_uid`), la forma de `show.attachments`, el esquema de `[scope]` y la semántica de errores son incompatibles para un harness que consume la 2.0.x. El formato de `--version` es aditivo. Se aplica la misma regla que justificó `2.0.0`, cuyos cambios (§22.2) eran incompatibles para un harness que ya consumía la 1.x en macOS.
 
-**Estado:** `develop` anuncia la pre-release `3.0.0a0` (`3.0.0-alpha` en su forma PEP 440 normalizada) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`; se usa la forma normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance del `3.0.0`.
+**Estado:** `develop` anuncia la pre-release `3.0.0a1` (`3.0.0-alpha` en su forma PEP 440 normalizada) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`; se usa la forma normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance del `3.0.0`.
 
 ### 22.4 Cambios visibles en 3.0.0 (amplían §22.2)
 
@@ -2063,7 +2063,7 @@ Herramientas existentes (p. ej. Fruitmail) confirman el camino técnico. `mailqu
 | **¿Código para fallos de E/S de caché y staging?** (2026-11-11, DP-01) | `E_IO` (exit 3); `E_PERMISSION` queda para permisos (§12.6). |
 | **¿Qué drivers lista `--version`?** (2026-11-11, DP-02) | Solo los disponibles en la plataforma: en macOS no `outlook`, en Windows no `apple_mail`; los plugins externos siempre (§12.9). |
 | **¿Qué pasa al desinstalar un plugin?** (2026-11-11, DP-03) | Sus bloques `[scope]` dan `E_DRIVER_UNKNOWN`, su cursor `E_STATE_CORRUPT`, el anillo se poda y la caché se conserva (§11.2, §13.3). |
-| **¿Versión en `develop`?** (2026-11-11, CR-02) | Pre-release `3.0.0a0` (`3.0.0-alpha` normalizada por PEP 440) hasta el release `3.0.0` (§22.3). |
+| **¿Versión en `develop`?** (2026-11-11, CR-02) | Pre-release `3.0.0a1` (`3.0.0-alpha` normalizada por PEP 440) hasta el release `3.0.0` (§22.3). |
 | **¿Cómo se valida un acierto de caché?** (2026-11-12, CR-01) | Con un manifiesto SHA-256 por mensaje; se elimina la comparación con el tamaño esperado del driver, que en Outlook nunca coincidía (§10.3.4). |
 | **¿Código cuando falla la re-extracción de un archivo borrado durante la ejecución?** (2026-11-12) | El código de ese fallo, como en cualquier extracción (§10.4). |
 | **¿`attachment` con drivers `attachments: "remote"`?** (2026-11-12) | En 3.0.0 se rechaza con `E_ATTACHMENT_UNAVAILABLE` (`unsupported`); es un defecto abierto: debe admitirse (RF-46, `KNOWN-DEFECTS.md`). |

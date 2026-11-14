@@ -1819,10 +1819,10 @@ def _normalized(text: str) -> str:
     return " ".join(text.split())
 
 
-#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a0``).
+#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a1``).
 _VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
 #: ``mailquery 3.0.0`` presented as the final release (a pre-release such as
-#: ``3.0.0a0`` is not the published 3.0.0).
+#: ``3.0.0a1`` is not the published 3.0.0).
 _FINAL_3_0_0 = r"mailquery 3\.0\.0(?!(?:a|b|rc)\d)"
 
 #: Stale patterns the 2.1 documentation retires.

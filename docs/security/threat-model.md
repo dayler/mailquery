@@ -4,7 +4,7 @@
 **Documento:** anexo técnico de seguridad (no forma parte del alcance de `PRD.md`).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** implementado en `develop` (plugins de backend y adjuntos, `PRD.md` v2.1), **no publicado**: el paquete anuncia la pre-release 3.0.0a0 (3.0.0-alpha) en `develop`, todavía sin tag de release ni merge a `main`.
+**Estado:** implementado en `develop` (plugins de backend y adjuntos, `PRD.md` v2.1), **no publicado**: el paquete anuncia la pre-release 3.0.0a1 (3.0.0-alpha) en `develop`, todavía sin tag de release ni merge a `main`.
 **Ámbito:** amenazas derivadas del **contenido** del correo (texto, HTML, URLs, imágenes, firmas, adjuntos) y del uso de la salida de `mailquery` por un harness de agentes. No cubre la seguridad del proveedor de correo, del cliente de escritorio ni del endpoint; esas capas se mencionan solo como mitigaciones externas.
 
 **Documentos relacionados:** [`PRD.md`](../PRD.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); §6.5–§6.7, §10.3, §10.4 y §23.1 (plugins y adjuntos); [`PRD-v2.2.md`](../PRD-v2.2.md) (feature F1: opciones A2–A7); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
