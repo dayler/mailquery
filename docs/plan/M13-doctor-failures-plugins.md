@@ -2,7 +2,7 @@
 
 **Lote:** I4 · rama del lote `integration/i4-mailboxes-doctor-close` · **Oleada:** W8 (sola)
 **Rama:** `feature/m13-doctor-failures-plugins`, creada desde la punta de `integration/i4-mailboxes-doctor-close` (con M12 integrado) · **Worktree:** `../mailquery-wt/m13`
-**Estado:** ⚪ (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
+**Estado:** 🟡 (fases F1–F6 cerradas; pendiente de integración) (leyenda y protocolo en [`00-master-plan.md`](00-master-plan.md))
 
 ## 1. Objetivo
 
@@ -69,12 +69,12 @@ Ninguna (se descartó extraer `doctor` a un módulo propio: sección 5 del plan 
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Plugins | Sección `plugins` (JSON y texto), `config` de primer nivel, orden de cálculo (D-25); UT-DR-05–UT-DR-08 | ⚪ |
-| F2 — `--failures` | Filtrado JSON y texto; UT-DR-01–UT-DR-03, UT-DR-09 | ⚪ |
-| F3 — Diagnóstico | Título, ayuda general, epílogo, instaladores; UT-DR-04; timeout COM (sección 2, punto 4); UT-DR-10 | ⚪ |
-| F4 — Goldens y tests existentes | `plugins: []`, título, `declared for driver` | ⚪ |
-| F5 — Documentación | Sección 2, puntos 3 y 5; DOC-12 | ⚪ |
-| F6 — Cierre | Suite completa, evidencia cruda, bloques | ⚪ |
+| F1 — Plugins | Sección `plugins` (JSON y texto), `config` de primer nivel, orden de cálculo (D-25); UT-DR-05–UT-DR-08 | 🟢 |
+| F2 — `--failures` | Filtrado JSON y texto; UT-DR-01–UT-DR-03, UT-DR-09 | 🟢 |
+| F3 — Diagnóstico | Título, ayuda general, epílogo, instaladores; UT-DR-04; timeout COM (sección 2, punto 4); UT-DR-10 | 🟢 |
+| F4 — Goldens y tests existentes | `plugins: []`, título, `declared for driver` | 🟢 |
+| F5 — Documentación | Sección 2, puntos 3 y 5; DOC-12 | 🟢 |
+| F6 — Cierre | Suite completa, evidencia cruda, bloques | 🟢 |
 
 ## 7. Tests
 
@@ -226,4 +226,9 @@ python -B -m coverage report --include="src/mailquery/cli.py,src/mailquery/plugi
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | F1 — Plugins | Sección `plugins` en JSON y texto, validación de `doctor_checks()`, corte duro con `call_driver`, `config` por plugin y `config` de primer nivel sin bloques de plugins; UT-DR-05–UT-DR-08 verdes. |
+| 2026-11-14 | F2 — `--failures` | Filtrado de `checks`/`not_evaluated` y de cada sección `Plugins:` en JSON y texto; UT-DR-01–UT-DR-03 y UT-DR-09 verdes. |
+| 2026-11-14 | F3 — Diagnóstico | Título y ayuda general con `diagnosis`, epílogo con `--failures`, instaladores, skill y README; timeout COM completa el informe y aplica `--failures`; UT-DR-04 y UT-DR-10 verdes. |
+| 2026-11-14 | F4 — Goldens y tests existentes | `doctor.json` y `outlook/doctor.json` con `plugins: []`; título, barridos TC-03.01 y OL-30 con `--failures`; módulos de test existentes verdes. |
+| 2026-11-14 | F5 — Documentación | Skill y ambos README sin *preflight*, con `--failures` y la sección de plugins; DOC-12 verde; `INTERFACES.md` y `TEST-CATALOG.md` quedan como bloques para el orquestador. |
+| 2026-11-14 | F6 — Cierre | Suite completa `Ran 1425`, `OK (skipped=7)`; cobertura total 91,3 % y `cli.py` 93,2 %; informe de evidencia con los datos crudos y los bloques para el orquestador. |
