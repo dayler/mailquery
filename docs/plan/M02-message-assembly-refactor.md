@@ -52,10 +52,10 @@ Este milestone es la refactorización R-01.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| F1 — Constantes | `SEARCH_ROW_FIELDS`, `SHOW_FIELDS`; tests UT-SR-17 | ⚪ |
-| F2 — Campos comunes | Función de metadatos usada por `_message_payload` y `run_show` | ⚪ |
-| F3 — Cuerpo y warnings por mensaje | Cargador único; warnings por mensaje aplanados en el mismo orden | ⚪ |
-| F4 — Cierre | Suite completa idéntica a la línea base, evidencia cruda, bloques | ⚪ |
+| F1 — Constantes | `SEARCH_ROW_FIELDS`, `SHOW_FIELDS`; tests UT-SR-17 | 🟢 |
+| F2 — Campos comunes | Función de metadatos usada por `_message_payload` y `run_show` | 🟢 |
+| F3 — Cuerpo y warnings por mensaje | Cargador único; warnings por mensaje aplanados en el mismo orden | 🟢 |
+| F4 — Cierre | Suite completa idéntica a la línea base, evidencia cruda, bloques | 🟢 |
 
 ## 8. Tests
 
@@ -113,4 +113,7 @@ Ninguno debería cambiar. Si un test cambia, el cambio es solo de seam (nombre d
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| — | — | — |
+| 2026-11-13 | F1 — Constantes | `SEARCH_ROW_FIELDS` y `SHOW_FIELDS` definidos; UT-SR-17.01 y UT-SR-17.02 verdes |
+| 2026-11-13 | F2 — Campos comunes | `_message_metadata` alimenta `_message_payload` y `run_show`; `_ordered_fields` aplica la constante de cada comando |
+| 2026-11-13 | F3 — Cuerpo y warnings por mensaje | `_LoadedBody` con `_load_body`/`_cached_body`; `_build_messages` agrupa los warnings por mensaje y los aplana en orden |
+| 2026-11-13 | F4 — Cierre | 🟢: suite completa `Ran 1066`, `FAILED (failures=2, skipped=7)` (los dos fallos p95 de la línea base); `search.py` 92 %, sin goldens tocados |
