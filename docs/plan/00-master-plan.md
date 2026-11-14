@@ -62,7 +62,7 @@ Cobertura medida en la revisión del plan (`cf164ff`, Windows, Python 3.14.7, ve
 | M05 | Primitivas A4, A5 y A6 en `output.py` | I2 | W2 | M03 | AC-H02, AC-H06, AC-H08, AC-H09, AC-H10, AC-H11 | [M05](M05-url-sender-signals.md) | 🟢 |
 | M06 | Cuerpo desde el HTML y cabeceras del remitente en los backends | I2 | W2 | M03 | AC-H04, AC-H11, AC-H17 | [M06](M06-body-source-sender-headers.md) | 🟢 |
 | M07 | Campos saneados (A2) y `content_notice` | I2 | W2 | M02, M03 | AC-H01, AC-H03, AC-H14, AC-H18 | [M07](M07-content-notice-sanitized-fields.md) | 🟢 |
-| M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | ⚪ |
+| M08 | Modos de URL, señales de F1, `[content]`, `--strip-links` y reglas de seguridad | I2 | W3 | M05, M06, M07 | AC-H02, AC-H04, AC-H05, AC-H06, AC-H07, AC-H08, AC-H09, AC-H10, AC-H11, AC-H13, AC-H16, AC-H18 | [M08](M08-url-modes-content-warnings.md) | 🟡 |
 | M09 | `attachment`: drivers `"remote"`, tope configurable y A7 | I3 | W4 | M04, M07 (lote I2 mergeado) | AC-H12, AC-H18, AC-D01–AC-D06 | [M09](M09-attachments-remote-timeout-active.md) | ⚪ |
 | M10 | Fila mínima, `--fields` y warnings según lo entregado | I3 | W5 | M08, M09 (orden de archivos) | AC-H14, AC-H18, AC-O01, AC-O02, AC-O03, AC-O08, AC-O09, AC-O10 | [M10](M10-default-row-fields.md) | ⚪ |
 | M11 | `--group-by`, `--count` y `hint` sin resultados | I3 | W6 | M10 | AC-H18, AC-O01, AC-O04–AC-O09, AC-O10, AC-O13 | [M11](M11-group-by-count-hint.md) | ⚪ |
