@@ -26,7 +26,7 @@ classifiers = [
   "Topic :: Communications :: Email",
   "Topic :: Utilities",
 ]
-dependencies = ["pywin32; sys_platform == \"win32\""]
+dependencies = ["css-inline~=0.23.1", "pywin32; sys_platform == \"win32\""]
 
 [project.scripts]
 mailquery = "mailquery.cli:main"
@@ -46,3 +46,16 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.run]
+# Measure line and branch coverage of the package only.
+branch = true
+source = ["src/mailquery"]
+relative_files = true
+
+[tool.coverage.report]
+# The report fails below 85 % combined line and branch coverage.
+fail_under = 85
+precision = 1
+show_missing = true
+skip_covered = true

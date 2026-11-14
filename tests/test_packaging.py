@@ -1,4 +1,4 @@
-"""TC-06, PKG-01 and PKG-02: packaging metadata and version derivation.
+"""TC-06, PKG-01, PKG-02, PKG-03 and DOC-07: packaging, dependencies and READMEs.
 
 ``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a0),
 not yet released: the tests derive every expected version from the package
@@ -24,11 +24,53 @@ EXPECTED_TARGETS = {
     "apple_mail": "mailquery.backends.apple_mail:AppleMailBackend",
     "outlook": "mailquery.backends.outlook:OutlookBackend",
 }
+CSS_INLINE_REQUIREMENT = "css-inline~=0.23.1"
+ADVISORIES_URL = "https://github.com/Stranger6667/css-inline/security/advisories"
 
 
 def _load() -> dict:
     with open(ROOT / "pyproject.toml", "rb") as fh:
         return tomllib.load(fh)
+
+
+def _readme(name: str) -> str:
+    return (ROOT / name).read_text(encoding="utf-8")
+
+
+def _section(text: str, heading: str) -> str:
+    """Body of the level-2 section whose heading line contains ``heading``."""
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith("## ") and heading in line:
+            start = index
+            break
+    if start is None:
+        return ""
+    body = []
+    for line in lines[start + 1:]:
+        if line.startswith("## ") or line.startswith("# "):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def _subsection(text: str, heading: str) -> str:
+    """Body of the level-3 subsection whose heading line contains ``heading``."""
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith("### ") and heading in line:
+            start = index
+            break
+    if start is None:
+        return ""
+    body = []
+    for line in lines[start + 1:]:
+        if line.startswith("### ") or line.startswith("## "):
+            break
+        body.append(line)
+    return "\n".join(body)
 
 
 def _installed_version() -> str | None:
@@ -68,11 +110,11 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual({item["driver"] for item in declared}, set(EXPECTED_TARGETS))
         self.assertEqual({item["plugin_api"] for item in declared}, {1})
 
-    def test_tc_06_03_no_new_runtime_dependencies(self):
-        """TC-06.03: the only runtime dependency is pywin32, Windows-only."""
+    def test_tc_06_03_runtime_dependencies_are_css_inline_and_pywin32(self):
+        """TC-06.03: the runtime dependencies are css-inline and the Windows-only pywin32."""
         deps = _load()["project"]["dependencies"]
         norm = [re.sub(r"\s+", "", d).replace("'", '"') for d in deps]
-        self.assertEqual(norm, ['pywin32;sys_platform=="win32"'])
+        self.assertEqual(norm, [CSS_INLINE_REQUIREMENT, 'pywin32;sys_platform=="win32"'])
 
 
 class PluginPackagingTests(unittest.TestCase):
@@ -144,6 +186,86 @@ class ReleasePackagingTests(unittest.TestCase):
                 f"Windows 10.0.26200 AMD64; drivers: {backend} 2.0.0)\n"
             )
             self.assertNotRegex(stale, version_line_regex(backend))
+
+
+class DependencyPackagingTests(unittest.TestCase):
+    def test_pkg_03_01_css_inline_is_a_patch_range_without_a_platform_marker(self) -> None:
+        """PKG-03.01: the css-inline entry is the literal patch range ``css-inline~=0.23.1``."""
+        deps = _load()["project"]["dependencies"]
+        entries = [dep for dep in deps if dep.strip().lower().startswith("css-inline")]
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry, CSS_INLINE_REQUIREMENT)
+        self.assertNotIn("==", entry)
+        self.assertNotIn(">=", entry)
+        self.assertNotIn(";", entry)
+        self.assertNotIn("<", entry)
+
+    def test_pkg_03_02_pywin32_is_the_only_windows_marker(self) -> None:
+        """PKG-03.02: pywin32 is the only dependency with the ``sys_platform == "win32"`` marker."""
+        deps = _load()["project"]["dependencies"]
+        marked = [dep for dep in deps if ";" in dep]
+        self.assertEqual(marked, ['pywin32; sys_platform == "win32"'])
+
+    def test_pkg_03_03_coverage_configuration_guards_the_suite(self) -> None:
+        """PKG-03.03: the coverage tables set the 85 % gate; coverage is not a runtime dependency."""
+        data = _load()
+        self.assertEqual(data["tool"]["coverage"]["report"]["fail_under"], 85)
+        self.assertIs(data["tool"]["coverage"]["run"]["branch"], True)
+        deps = data["project"]["dependencies"]
+        self.assertFalse(any("coverage" in dep for dep in deps), deps)
+
+
+class ReadmeCssInlineTests(unittest.TestCase):
+    def test_doc_07_01_readme_has_the_css_inline_security_update(self) -> None:
+        """DOC-07.01: README.md documents the css-inline security update procedure."""
+        section = _section(_readme("README.md"), "Install, upgrade and uninstall")
+        body = _subsection(section, "Security update of `css-inline`")
+        self.assertTrue(body)
+        for command in (
+            "pipx runpip mailquery show css-inline",
+            'pipx runpip mailquery install --upgrade "css-inline~=0.23.1"',
+            "pipx reinstall mailquery",
+            'pipx runpip mailquery install "css-inline==',
+        ):
+            self.assertIn(command, body)
+        self.assertIn(ADVISORIES_URL, body)
+
+    def test_doc_07_02_spanish_readme_has_the_css_inline_security_update(self) -> None:
+        """DOC-07.02: README.es.md documents the css-inline security update procedure."""
+        section = _section(_readme("README.es.md"), "Instalar, actualizar y desinstalar")
+        body = _subsection(section, "Actualización de seguridad de `css-inline`")
+        self.assertTrue(body)
+        for command in (
+            "pipx runpip mailquery show css-inline",
+            'pipx runpip mailquery install --upgrade "css-inline~=0.23.1"',
+            "pipx reinstall mailquery",
+            'pipx runpip mailquery install "css-inline==',
+        ):
+            self.assertIn(command, body)
+        self.assertIn(ADVISORIES_URL, body)
+
+    def test_doc_07_03_both_readmes_name_css_inline_where_it_is_needed(self) -> None:
+        """DOC-07.03: both READMEs name css-inline in the intro, requirements and test steps."""
+        for name, requirements, tests in (
+            ("README.md", "Requirements", "Running the tests"),
+            ("README.es.md", "Requisitos", "Ejecutar los tests"),
+        ):
+            text = _readme(name)
+            intro = text.split("\n## ", 1)[0]
+            self.assertIn("css-inline", intro, name)
+            self.assertIn("css-inline", _section(text, requirements), name)
+            test_steps = _section(text, tests)
+            self.assertIn("css-inline", test_steps, name)
+            self.assertIn("coverage run", test_steps, name)
+            self.assertIn("coverage report", test_steps, name)
+
+    def test_doc_07_04_readmes_drop_the_standard_library_only_claim(self) -> None:
+        """DOC-07.04: neither README claims the tool uses the standard library only."""
+        for name in ("README.md", "README.es.md"):
+            flat = " ".join(_readme(name).lower().split())
+            self.assertNotIn("standard library only", flat, name)
+            self.assertNotIn("solo biblioteca estándar", flat, name)
 
 
 if __name__ == "__main__":
