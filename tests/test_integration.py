@@ -2148,6 +2148,19 @@ class ConfigExampleTest(_DocumentationCase):
         parsed = self._load(explicit)
         self.assertEqual(parsed.content.url_display, "neutralize")
 
+    def test_doc_06_05_example_documents_the_attachment_timeout(self) -> None:
+        """DOC-06.05: the [attachments] block documents timeout_seconds and it loads as 60."""
+        template = _read(CONFIG_EXAMPLE)
+        self.assertRegex(template, r"(?m)^#\s*timeout_seconds = 60\b")
+        self.assertIn('# timeout_seconds = 60', template)
+        explicit = (
+            "[attachments]\nenabled = true\nmax_file_size_mb = 100\n"
+            "max_total_size_mb = 200\nmax_count = 50\ntimeout_seconds = 60\n"
+        )
+        parsed = self._load(explicit)
+        self.assertEqual(parsed.attachments.timeout_seconds, 60)
+        self.assertEqual(tomllib.loads(template), {}, "the template must keep all sections commented")
+
     def test_doc_06_03_no_previous_version_keys(self) -> None:
         """DOC-06.03: the example keeps no keys retired by previous versions."""
         template = _read(CONFIG_EXAMPLE)

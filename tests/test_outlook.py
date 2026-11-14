@@ -4598,7 +4598,7 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
         self.assertEqual(list((home / "tmp" / "staging").iterdir()), [])
 
     def test_ut_ol_att_03_04_total_extraction_deadline_is_client_timeout(self) -> None:
-        """UT-OL-ATT-03.04: the 120 s core deadline expires though each COM call is fast."""
+        """UT-OL-ATT-03.04: the configured extraction deadline expires though each COM call is fast."""
         from mailquery.attachments.engine import AttachmentsEngine
         from mailquery.config import load_config
         from mailquery.plugins import wrap_driver
