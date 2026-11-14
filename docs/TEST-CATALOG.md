@@ -21,7 +21,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | Prefijo | Qué cubre | Archivo |
 |---|---|---|
 | UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` |
-| UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible y hojas `<style>` | `tests/test_content.py` |
+| UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` |
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados y `content_notice` | `tests/test_content_wiring.py` |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` |
 | UT-CFG | Configuración | `tests/test_config.py` |
@@ -75,7 +75,7 @@ añadida y el resto de sus valores no cambia.
 - `tests/fakes/attachment_driver.py`: driver de adjuntos para los tests del motor; entrega bytes y motivos y nunca escribe en caché.
 - `tests/fixtures/make_fixtures.py`: construye el store de Apple Mail de prueba, con adjuntos (varios, mismo nombre, nombres hostiles, contenido ejecutable, vacío, S/MIME, externalizados de `.partial.emlx` y uno de más de 1 MiB) o sin ellos (`attachments=False`).
 - `tests/fixtures/attachment_samples.py`: contenidos de muestra para el bloqueo por *magic bytes*.
-- `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>` y un cuerpo típico de 6 KB para la medición informativa del paso a línea.
+- `tests/fixtures/content_samples.py`: textos y HTML de muestra para el saneado (ANSI, C0/C1, `Cf`, selectores de variación, rellenos), la conversión HTML → texto, la omisión de ocultos en línea y por hoja `<style>`, un cuerpo típico de 6 KB para la medición informativa del paso a línea, las muestras de URL (inicios, terminación, dominios, tablas de modos, punycode y URL largas) y las de `Authentication-Results` y `Reply-To`.
 - `tests/fixtures/active_content_samples.py`: PDF, OLE y ZIP de muestra para el detector de contenido activo (con y sin marcadores, con `vbaProject.bin`, con ejecutables, con entradas `.bin` propias de Office y con un ZIP cuyo directorio central no se puede leer). El ZIP cifrado se fabrica activando el bit 0 de *general purpose flag* en las cabeceras local y central.
 
 ## 5. CI y saltos
@@ -136,11 +136,16 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-H15 | La única dependencia nueva es `css-inline~=0.23.1`, instalable desde wheel en macOS (`arm64`, `x86_64`) y en Windows x64 de 64 y 32 bits, con un rango de parches que no pasa a `0.24` y sin cambiar los p95 (delta `PRD-v2.2.md`) | TC-06.03, PKG-03, SMOKE-INSTALL.05, SMOKE-NEW.07; paso "Check css-inline wheels" de la CI | — |
 | AC-H17 | Los dos README tienen la subsección de actualización de seguridad de `css-inline` con sus pasos, comandos y el enlace a los avisos, y `search`, `new` y `show` funcionan sin `css-inline` (delta `PRD-v2.2.md`) | DOC-07, UT-CNT-03, UT-BOD-05 | — |
 | AC-H01 (delta `PRD-v2.2.md`) | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
-| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01 (parcial; completa con UT-CNT-06, UT-CW-13) | — |
+| AC-H02 (delta `PRD-v2.2.md`) | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01, UT-CNT-06 (parcial; completa con UT-CW-13) | — |
 | AC-H03 (delta `PRD-v2.2.md`) | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
 | AC-H04 (delta `PRD-v2.2.md`) | Cuerpo desde HTML; omisión de ocultos en línea | UT-CNT-02 (parcial; completa con UT-BOD-01, UT-BOD-02, UT-BOD-05, UT-CW-07, SMOKE-NEW.09) | — |
 | AC-H05 (delta `PRD-v2.2.md`) | Hojas `<style>`, `@media`, `<link>` sin E/S, fallo de CSS | UT-CNT-03 (parcial; completa con UT-CW-07) | — |
 | AC-H18 (delta `PRD-v2.2.md`) | Texto exacto de `content_notice` | UT-CNT-04 (parcial; completa con UT-CW-05, UT-ATC-04.01, DOC-08, DOC-09, DOC-10, UT-GRP-10, SMOKE-NEW.08) | — |
+| AC-H06 (delta `PRD-v2.2.md`) | Detección y modos de URL en todos los campos | UT-CNT-05, UT-CNT-06, UT-CNT-07 (parcial; completa con UT-CW-08) | — |
+| AC-H08 (delta `PRD-v2.2.md`) | `W_EXTERNAL_LINKS` | UT-CNT-08 (parcial; completa con UT-CW-10) | — |
+| AC-H09 (delta `PRD-v2.2.md`) | `W_NON_ASCII_DOMAIN` y punycode | UT-CNT-07, UT-CNT-08 (parcial; completa con UT-CW-10) | — |
+| AC-H10 (delta `PRD-v2.2.md`) | `W_LONG_URL` y `W_SCRIPT_LINK` | UT-CNT-08 (parcial; completa con UT-CW-10) | — |
+| AC-H11 (delta `PRD-v2.2.md`) | `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | UT-CNT-09 (parcial; completa con UT-BOD-03, UT-BOD-04, UT-CW-11) | — |
 
 ## 8. Casos
 
@@ -383,6 +388,78 @@ Requisitos: RF-66 · Archivo: `tests/test_content.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `CONTENT_NOTICE` es literalmente el texto de RF-66. |
+
+#### UT-CNT-05 — Detección de URLs
+
+Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Cada inicio de RF-54 se detecta, también en mayúsculas (`HTTPS://`, `WWW.`, `HXXPS://`, `JAVASCRIPT:`, `DATA:`): `http`, `https`, `ftp`, `smb`, `file`, `javascript:`, `vbscript:`, `data:text/html…`, `www.`, `hxxp://`, `hxxps://` y la ruta UNC; `kind`, `scheme`, `script` y los offsets son los esperados. |
+| .02 | P | `ｈｔｔｐｓ：／／evil.example/pay` y `ｈｘｘｐ：／／evil.example/pay` se detectan (inicios con esquema en ancho completo). |
+| .03 | P | `evil[.]example/pay` se detecta como una sola URL de tipo `bracket_domain`, sin esquema y sin marca de script. |
+| .04 | N | No son URL: `JavaScript: un lenguaje`, `Data: 12/11`, `metadata:x`, `facturas.example/f/1`, `mailto:a@b.example`, `tel:123`, `ms-word:ofe`, `http://` sin nada detrás, `data:12`, `data:text/html`, `\\`, `\\evil.example` sin `\` final, `\\evil\` sin nada detrás, `www.-x`, `www. x`, los inicios en ancho completo de `data:` y `www.`, `＼＼evil.example\share`, `a[.]`, `[.]b`, `[.]`, `xhttp://a` y la cadena vacía. |
+| .05 | B | Terminación: espacio, `"`, `'`, `<` y `>` cortan la URL; dos URLs seguidas no se solapan. |
+| .06 | P | `url_domain`: con usuario y puerto (`https://u:p@host.example:8080/x` → `host.example`), `www.` con puerto, UNC y `[.]` (`evil[.]example/pay` → `evil.example`); `None` para `javascript:`, `vbscript:` y `data:`. |
+| .07 | P | `url_domain` con inicio en ancho completo (`ｈｔｔｐｓ：／／evil.example/pay`) y ya neutralizado (`hxxps://evil.example/pay`) → `evil.example`; `address_domain` de una dirección (también con dos separadas por coma), de `None`, de `""` o sin `@` da el dominio o `None`. |
+| .08 | N | No son URL `www.` sin letra ni dígito detrás (`www.-x`, `www. x`, `www.`) y `[.]` sin letra o dígito a los dos lados (`a[.]`, `[.]b`, `[.]`, `...[.]...`). |
+
+#### UT-CNT-06 — Modos de URL
+
+Requisitos: RF-54 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `keep` deja el texto igual. |
+| .02 | P | `neutralize`: cada fila de las tablas A4 de la sección 8 de PRD-v2.2 da el resultado indicado, también con el esquema en mayúsculas (`HTTPS://`, `WWW.`). |
+| .03 | P | `strip`: cada URL → `[link omitted]` (filas de la sección 8 de PRD-v2.2) y el resto del texto no cambia. |
+| .04 | B | Una URL ya neutralizada, ASCII y de 2.048 caracteres o menos (`hxxps://…`, `evil[.]example/pay`) no cambia con `neutralize`. |
+| .05 | B | Idempotencia: `render_urls(render_urls(x, "neutralize"), "neutralize") == render_urls(x, "neutralize")` para todas las muestras. |
+| .06 | B | El texto fuera de las URLs no cambia en ningún modo; dos llamadas dan el mismo resultado; un texto sin URLs (incluidos caracteres con NFKC de varios caracteres) no cambia; `render_urls(x, "otro")` lanza `ValueError`. |
+| .07 | P | Esquemas de script en mayúsculas y en ancho completo: `JAVASCRIPT:x` → `JAVASCRIPT[:]x`, `VbScript:x` → `VbScript[:]x`, `DATA:text/html,x` → `DATA[:]text/html,x`, `ｊａｖａｓｃｒｉｐｔ：x` → `ｊａｖａｓｃｒｉｐｔ[:]x`. |
+
+#### UT-CNT-07 — Punycode y acortado
+
+Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `https://pаypal.com/login` (а cirílica) → `hxxps://xn--pypal-4ve.com/login`; solo cambian la etiqueta no ASCII y el esquema. |
+| .02 | P | Dominio entero en otro alfabeto, dominio `www.` no ASCII y dominio con dos etiquetas no ASCII: cada etiqueta no ASCII en ACE y las etiquetas ASCII intactas. |
+| .03 | B | URL de 2.048 caracteres sale entera; de 2.049 sale con 256 + `…[+1793 characters]`; el ejemplo de 5.000 da `…[+4744 characters]`. |
+| .04 | B | `keep` nunca acorta ni cambia el dominio; `strip` da `[link omitted]` también para la URL larga. |
+| .05 | B | El acortado se calcula sobre la URL ya neutralizada (con punycode): el `<n>` correcto cuando el ACE cambia la longitud (`…[+1800 characters]`). |
+| .06 | P | URL ya neutralizada por el remitente (D-20): `hxxps://pаypal.com/x` → `hxxps://xn--pypal-4ve.com/x` (el esquema no cambia, el dominio sí); una `hxxps://` de 5.000 caracteres sale con sus primeros 256 + `…[+4744 characters]`. |
+| .07 | P | ACE en el host de una ruta UNC no ASCII (`\\pаypal\share` → `[\\]xn--pypal-4ve\share`) y en un dominio `[.]` no ASCII (`pаypal[.]com/x` → `xn--pypal-4ve[.]com/x`). |
+
+#### UT-CNT-08 — Conteos y textos de las señales
+
+Requisitos: RF-55, RF-57–RF-59 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `count_url_signals` suma URLs de varios textos; una URL de script cuenta en `external` y en `script`; una de 2.049 cuenta en `long` y una de exactamente 2.048 no; sin entradas da ceros y dos llamadas coinciden. |
+| .02 | P | `non_ascii_domains` cuenta una URL con alfabetos mezclados, una con dominio entero en otro alfabeto y una dirección `soporte@pаypal.com`; no cuenta usuario ni ruta no ASCII de la URL ni dominios ASCII parecidos (`paypa1.com`). |
+| .03 | P | Los textos de los siete warnings son literalmente los de RF-55–RF-61 (con `<n>`, `<uid>` y `<resultados>`). |
+| .04 | P | `content_warnings` devuelve solo los que aplican, en el orden `W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`, `W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED`, `W_REPLY_TO_MISMATCH`; ninguno contiene URL, dominio ni dirección. |
+| .05 | B | Sin URLs, sin oculto y sin señales del remitente → lista vacía. |
+| .06 | P | `JAVASCRIPT:x`, `VbScript:x`, `DATA:text/html,x` y `ｊａｖａｓｃｒｉｐｔ：x` cuentan en `script` y en `external`. |
+
+#### UT-CNT-09 — Señales del remitente
+
+Requisitos: RF-60, RF-61 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | El ejemplo A6 de la sección 8 de PRD-v2.2 → `"spf=softfail dkim=none dmarc=fail"`. |
+| .02 | N | Todo `pass`; `none`/`neutral` sin fallos; cabecera ausente (`None`) → `None`. |
+| .03 | P | `permerror` y `fail` cuentan; mayúsculas (`SPF=FAIL`) → `spf=fail`; un mecanismo ausente no aparece en el resultado. |
+| .04 | B | Varias firmas DKIM: una `pass` → `pass`; ninguna `pass` → la primera. |
+| .05 | B | Resultado desconocido (`dkim=weird`) → `unknown`, y el resultado no contiene otro texto de la cabecera (comentarios, `header.from=…`, `header.d=…`, el servidor). |
+| .06 | P | `reply_to_mismatch`: dominio distinto → `True` (también con varias direcciones y una distinta); el mismo dominio con otras mayúsculas → `False`. |
+| .07 | N | Sin `Reply-To`, `from_address` sin `@`, `Reply-To` sin direcciones con dominio o mal formado (`"<<<"`, `""`) → `False`. |
+| .08 | P | Valor plegado: `"mx.example;\r\n\tspf=pass smtp.mailfrom=a.example;\r\n\tdmarc=fail header.from=a.example"` → `"spf=pass dmarc=fail"`. |
+| .09 | B | `sender_auth_failure("")`, una cabecera sin mecanismos reconocidos y `spf=temperror dkim=policy dmarc=pass` (sin fallo) → `None`. |
 
 #### UT-CW-01 — A2 en los campos de contenido
 

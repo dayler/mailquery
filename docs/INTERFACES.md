@@ -248,7 +248,16 @@ cambia y los mensajes de `stderr` usan esos mismos textos saneados.
 `iso_timestamp(epoch) -> str | None`, `now_iso()`,
 `sanitize_text(text, *, max_chars=None)`, `make_snippet(body_text,
 max_chars=200)`, `CONTENT_NOTICE`, `HtmlText`, `html_body_to_text(html) ->
-HtmlText` y `html_to_text(html) -> str`.
+HtmlText`, `html_to_text(html) -> str`, `URL_MODES`, `URL_OMITTED`, `UrlMatch`,
+`find_urls(text) -> list[UrlMatch]`, `url_domain(match) -> str | None`,
+`address_domain(address) -> str | None`, `render_urls(text, mode) -> str`,
+`UrlSignals`, `count_url_signals(texts, addresses) -> UrlSignals`,
+`sender_auth_failure(header_value) -> str | None`,
+`reply_to_mismatch(reply_to, from_address) -> bool`, los textos
+`W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`, `W_LONG_URL`,
+`W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH`, y
+`content_warnings(uid, hidden_chars, signals, auth_failure, reply_mismatch) ->
+list[str]`.
 
 - `dumps_json`: JSON **formateado** (indentación de 2 espacios, un campo por
   línea, `ensure_ascii=False`); `write_json` añade un único LF final.
@@ -303,6 +312,71 @@ HtmlText` y `html_to_text(html) -> str`.
   importado o `_CSS_INLINE_UNAVAILABLE`. Los tests lo reinician entre casos y lo
   parchean para simular ausencia, fallo del inliner o un constructor espía; no
   se depende de `sys.modules`. Una importación fallida no se reintenta.
+
+- `URL_MODES` es `("neutralize", "keep", "strip")`; `URL_OMITTED` es
+  `[link omitted]`; `URL_LONG_CHARS` (2.048) y `URL_KEPT_CHARS` (256) son los
+  valores fijos del acortado.
+- `UrlMatch` es un `NamedTuple` inmutable con `start` y `end` (offsets en el
+  texto), `text` (la URL), `kind` (`scheme`, `data`, `www`, `neutralized`,
+  `unc` o `bracket_domain`), `scheme` (nombre en minúsculas y en su forma NFKC,
+  `None` en los inicios sin esquema) y `script` (`javascript:`, `vbscript:` y
+  `data:`).
+- `find_urls(text)` devuelve las URLs de izquierda a derecha y sin solapes. Una
+  URL empieza al principio del texto o tras un carácter que no es letra ni
+  dígito y termina antes del primer espacio en blanco, `"`, `'`, `<` o `>`; el
+  inicio es `http://`, `https://`, `ftp://`, `smb://`, `file://`,
+  `javascript:`, `vbscript:`, un `data:` con tipo MIME `tipo/subtipo` cuyas dos
+  partes empiezan por letra, `www.` con letra o dígito, `hxxp://`, `hxxps://` o
+  una ruta UNC (dos `\`, host que empieza por letra o dígito, `\` y al menos un
+  carácter). Los inicios con esquema se reconocen también en ancho completo
+  (cada carácter comparado por su forma NFKC, sin normalizar el texto); `data:`,
+  `www.` y UNC exigen ASCII. También es URL el token completo entre separadores
+  con `[.]` entre dos letras o dígitos.
+- `url_domain(match)` devuelve el dominio o `None`: en los inicios con `//`, el
+  texto entre `//` y el primer `/`, `?`, `#` o el final, sin la parte hasta el
+  último `@` ni la de `:` en adelante; en `www.`, desde `www.` hasta el primer
+  `/`, `?`, `#`, `:` o el final; en UNC, el host; en `[.]`, hasta el primer `/`;
+  `javascript:`, `vbscript:` y `data:` no tienen dominio. `[.]` se lee como `.`.
+  `address_domain(address)` devuelve la parte tras el último `@`, o `None` sin
+  `@` o con dominio vacío.
+- `render_urls(text, mode)`: `keep` devuelve el texto igual; `strip` sustituye
+  cada URL por `URL_OMITTED`; `neutralize` hace cada URL legible pero inerte
+  (`http`/`https` → `hxxp`/`hxxps`, también desde ancho completo; en los demás
+  esquemas el `:` pasa a `[:]` aunque el esquema esté en ancho completo; `www.`
+  → `www[.]`; UNC → empieza por `[\]`; una URL ya neutralizada conserva su
+  esquema), escribe en ACE cada etiqueta del dominio con caracteres no ASCII
+  (`xn--` + Punycode de la etiqueta en minúsculas, códec estándar, sin `idna`) y,
+  si la URL original pasa de 2.048 caracteres, conserva los primeros 256 de la
+  URL ya neutralizada y añade `…[+<n> characters]`, con `<n>` = longitud de la
+  URL neutralizada − 256. El resto del texto no cambia, la operación es
+  idempotente y un `mode` fuera de `URL_MODES` lanza `ValueError`.
+- `UrlSignals` es un `NamedTuple` inmutable con `external`, `script`, `long` y
+  `non_ascii_domains`. `count_url_signals(texts, addresses)` suma las URLs de
+  todos los textos, las de script (que también cuentan como externas), las de
+  más de 2.048 caracteres y cada URL y dirección cuyo dominio tiene algún
+  carácter por encima de `U+007F`. Las direcciones solo se leen, nunca se
+  transforman.
+- `sender_auth_failure(header_value)` despliega las líneas plegadas
+  (`CRLF`/`LF` + espacio o tabulador), ignora los comentarios entre paréntesis y
+  lee `spf`, `dkim` y `dmarc` sin distinguir mayúsculas; con varias firmas DKIM
+  vale `pass` si alguna pasa y, si no, la primera; un resultado fuera de `pass`,
+  `fail`, `softfail`, `neutral`, `none`, `temperror`, `permerror` y `policy` se
+  lee como `unknown`. Devuelve `spf=<resultado> dkim=<resultado>
+  dmarc=<resultado>` con los mecanismos presentes, en ese orden y en minúsculas,
+  solo si alguno es `fail`, `softfail` o `permerror`; en otro caso, `None`.
+- `reply_to_mismatch(reply_to, from_address)` devuelve `True` si alguna
+  dirección de `Reply-To` (leída con `email.utils.getaddresses`) tiene un
+  dominio distinto del de `from_address`, sin distinguir mayúsculas; es `False`
+  sin `Reply-To`, sin dominio en `from_address`, sin direcciones con dominio o
+  con un `Reply-To` mal formado.
+- Los textos `W_*` son plantillas de formato con `{n}`, `{uid}` y `{results}`
+  (este último solo en `W_SENDER_AUTH_FAILED`); el texto de detalle no contiene
+  URL, dominio, dirección ni contenido. `content_warnings(uid, hidden_chars,
+  signals, auth_failure, reply_mismatch)` devuelve una lista con los que aplican
+  en el orden `W_HIDDEN_CONTENT`, `W_EXTERNAL_LINKS`, `W_SCRIPT_LINK`,
+  `W_LONG_URL`, `W_NON_ASCII_DOMAIN`, `W_SENDER_AUTH_FAILED`,
+  `W_REPLY_TO_MISMATCH`; un conteo cero, un `auth_failure` vacío y un
+  `reply_mismatch` falso no emiten nada.
 
 ### `logging_setup.py`
 `setup_logging(home, level="info", max_size_mb=10) -> run_id`,
