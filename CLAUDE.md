@@ -25,7 +25,7 @@ Forbidden in comments and docstrings:
 
 Scope: `src/`, `scripts/`, `pyproject.toml`, `.github/workflows/` and any other code that is not an automated test.
 
-**Only exception:** automated tests (`tests/`) may cite requirement IDs from `docs/PRD.md` and test case IDs defined in `docs/TEST-CATALOG.md`, for traceability. They never cite plans, milestones or other planning IDs.
+**Only exception:** automated tests (`tests/`) may cite requirement IDs from `docs/PRD.md` and test case IDs defined in `docs/tests/`, for traceability. They never cite plans, milestones or other planning IDs.
 
 Example:
 
@@ -40,7 +40,7 @@ Implementation plans, milestones, task lists and their evidence are temporary. T
 
 Nothing outside `docs/plan/` cites them: not the code, not the tests, not `docs/` (PRD, interfaces, test catalog, roadmap, backlogs, known defects), not the READMEs. Permanent documents describe the product as it is. Anything a plan produces that must outlive it is moved into the permanent document it belongs to before the plan is deleted:
 
-- Test case definitions go to `docs/TEST-CATALOG.md`.
+- Test case definitions go to `docs/tests/`, following the rules in `docs/tests/TEST-CATALOG.md`.
 - Open defects go to `docs/KNOWN-DEFECTS.md`; performance debt goes to `docs/PERFORMANCE-BACKLOG.md`.
 - Pending product work goes to `docs/ROADMAP.md`.
 - Product rules go to `docs/PRD.md`.

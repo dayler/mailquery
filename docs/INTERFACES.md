@@ -24,7 +24,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 ├── docs/
 │   ├── PRD.md                      # PRD v2.1: requisitos del producto
 │   ├── INTERFACES.md               # este documento
-│   ├── TEST-CATALOG.md             # qué verifica cada caso de prueba con ID
+│   ├── tests/                      # catálogo de pruebas: índice TEST-CATALOG.md y un archivo por área
 │   ├── KNOWN-DEFECTS.md            # defectos abiertos
 │   ├── PERFORMANCE-BACKLOG.md      # deuda de rendimiento
 │   ├── ROADMAP.md                  # evolución del producto y pendientes del release

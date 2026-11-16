@@ -31,7 +31,7 @@ corregido en `3.0.0` (en desarrollo).
 
 - `_require_attachment_capabilities` de `cli.py`, que rechazaba `mode not in ("none", "remote")`.
 - `docs/INTERFACES.md`, sección de `cli.py` ("el núcleo no puede materializar adjuntos remotos").
-- UT-ATC-10.03 ([`TEST-CATALOG.md`](TEST-CATALOG.md)), retirado; lo sustituyen `UT-RMT-01`–`UT-RMT-03`.
+- UT-ATC-10.03 ([`tests/retired.md`](tests/retired.md)), retirado; lo sustituyen `UT-RMT-01`–`UT-RMT-03`.
 
 **Impacto:** ninguno en uso real mientras no existan plugins remotos, pero impedía implementar `mailquery-graph` u otro conector remoto con recuperación de adjuntos sin cambiar el núcleo.
 
@@ -44,7 +44,7 @@ corregido en `3.0.0` (en desarrollo).
 **Registrado:** 2026-11-16, por decisión del dueño. Detectado en una tarea real
 (extraer montos de los avisos bancarios del 2026-11-15 desde el correo local).
 
-**Comportamiento esperado** (grupo DOC-10 de [`TEST-CATALOG.md`](TEST-CATALOG.md)):
+**Comportamiento esperado** (grupo DOC-10 de [`tests/docs-packaging.md`](tests/docs-packaging.md)):
 
 - La documentación que consume el agente (`skills/mailquery/SKILL.md`) explica el uso económico de `--fields` en los tres comandos, no solo en `search`/`new`.
 - En particular, documenta que `show UID --fields body_text` entrega `uid` + el cuerpo sin `headers`, `source`, `attachments`, `partial` ni `readable`; es la vía barata para responder "cuánto, dónde y cuándo" de un mensaje concreto.

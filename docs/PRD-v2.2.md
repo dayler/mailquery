@@ -121,7 +121,7 @@ Este delta es temporal. Antes de publicar `3.0.0` se concilia en `PRD.md`; hasta
 | §13 | §23 (filas de F1 y F3) y §23.1 (filas de F2) |
 | Historial (decisiones del dueño) | Anexo D, una fila por feature |
 
-**Documentos que consumen el contrato.** Deben reflejar este delta y se revisan al conciliar: `skills/mailquery/SKILL.md`, `docs/recipes/*`, `README.md` y `README.es.md`, `docs/INTERFACES.md`, `docs/config.example.toml`, `docs/TEST-CATALOG.md`, el [anexo de seguridad](security/threat-model.md), `docs/KNOWN-DEFECTS.md` y `docs/PERFORMANCE-BACKLOG.md`. `docs/ROADMAP.md` no es normativo: solo se tachan las ideas y las decisiones pendientes que este delta incorpora (`--fields`, la corrección de BUG-01).
+**Documentos que consumen el contrato.** Deben reflejar este delta y se revisan al conciliar: `skills/mailquery/SKILL.md`, `docs/recipes/*`, `README.md` y `README.es.md`, `docs/INTERFACES.md`, `docs/config.example.toml`, `docs/tests/`, el [anexo de seguridad](security/threat-model.md), `docs/KNOWN-DEFECTS.md` y `docs/PERFORMANCE-BACKLOG.md`. `docs/ROADMAP.md` no es normativo: solo se tachan las ideas y las decisiones pendientes que este delta incorpora (`--fields`, la corrección de BUG-01).
 
 **Checklist de conciliación:**
 
