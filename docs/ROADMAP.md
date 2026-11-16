@@ -289,7 +289,7 @@ merge a `main`. Falta:
 1. Subir la versión de `3.0.0a1` a `3.0.0` en `pyproject.toml`,
    `mailquery.__version__`, los goldens `doctor` y la documentación; reinstalar el
    paquete y comprobar TC-06, PKG-01, PKG-02 y DOC-03
-   ([`TEST-CATALOG.md`](TEST-CATALOG.md)).
+   ([`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md)).
 2. Comprobar con el paquete instalado los entry points de los backends y los
    instaladores (PKG-02, INS-SMOKE-01).
 3. Correr las SMOKE en los equipos del dueño: SMOKE-INSTALL, SMOKE-NEW y
