@@ -1,6 +1,6 @@
 # Defectos conocidos
 
-Estado: **3 defectos abiertos** (BUG-02, BUG-03 y BUG-04, documentación y payload) y **2 observaciones registradas** (OBS-01 salida de errores, OBS-02 payload verboso). Seguimiento de defectos que el dueño reconoce en el producto actual. Este documento no cambia el PRD: [`PRD.md`](PRD.md) describe el comportamiento actual y enlaza cada defecto como "Pendiente conocido".
+Estado: **4 defectos abiertos** (BUG-02 a BUG-05, documentación y payload) y **2 observaciones registradas** (OBS-01 salida de errores, OBS-02 payload verboso). Seguimiento de defectos que el dueño reconoce en el producto actual. Este documento no cambia el PRD: [`PRD.md`](PRD.md) describe el comportamiento actual y enlaza cada defecto como "Pendiente conocido".
 
 | ID | Título | Estado | Registrado |
 |----|--------|--------|------------|
@@ -8,6 +8,7 @@ Estado: **3 defectos abiertos** (BUG-02, BUG-03 y BUG-04, documentación y paylo
 | BUG-02 | El skill no enseña `show UID --fields body_text` y `--fields` se lee como exclusivo de `search` | Abierto | 2026-11-16 |
 | BUG-03 | "Qué mejoraría del skill": afirmaciones no verificadas y semánticas ausentes | Abierto | 2026-11-16 |
 | BUG-04 | `mailbox` se repite completo en cada fila de `search` (24 veces, 3 valores) | Abierto | 2026-11-16 |
+| BUG-05 | Correos masivos: `to`/`cc` entregan la lista completa de cientos de destinatarios | Abierto | 2026-11-17 |
 
 ---
 
@@ -287,6 +288,82 @@ la lista plana, el orden cronológico y el `--limit` total.
 **Nota de convivencia con OBS-02:** OBS-02 registra el mismo hecho (hallazgo #4) con un AC que
 propone el `path` sin la cuenta y que por tanto es incorrecto. Por decisión del dueño no se
 corrige ahora; **BUG-04 prevalece** hasta la depuración del documento.
+
+---
+
+## BUG-05 — Correos masivos: `to`/`cc` entregan la lista completa de cientos de destinatarios
+
+**Registrado:** 2026-11-17, por decisión del dueño. Detectado en una tarea real (crear un
+evento de calendario a partir de una invitación interna enviada a toda la oficina).
+
+**Comportamiento esperado:** el tamaño de una respuesta depende de lo que el agente necesita,
+no del número de destinatarios. En un correo masivo, la lista completa de `to`/`cc` casi nunca
+sirve: basta con saber cuántos destinatarios hay, si la cuenta del usuario está en `to` o en
+`cc` y unos pocos nombres de muestra. La lista completa debe pedirse de forma explícita.
+
+**Comportamiento observado (2026-11-17, `mailquery` 3.0.0a1, Windows/Outlook):**
+
+```
+mailquery show <uid>                                   → 19.906 chars
+mailquery search --subject "<asunto>" --fields to,cc   → 12.700 chars (1 fila)
+mailquery search --subject "<asunto>"                  →    875 chars (1 fila, sin to/cc)
+```
+
+Mensaje de 106 destinatarios en `To`, 0 en `Cc` y un cuerpo de 1.116 chars:
+
+| Parte del `show` | chars | % del payload |
+|---|---|---|
+| `to` (106 objetos `{name, address}`) | 9.672 | 48,6 % |
+| `headers.To` (la misma lista en una cadena) | 5.644 | 28,4 % |
+| **destinatarios en total** | **≈17.000** | **≈85 %** |
+| `body_text` (el contenido útil) | 1.116 | 5,6 % |
+| payload con `to` y `headers.To` vacíos | 2.887 | 14,5 % |
+
+- `show` sin `--fields` entrega todos los campos de `SHOW_FIELDS`, incluidos `to`, `cc` y `headers`. Así, la lista se paga **dos veces** (objeto y cabecera).
+- En `search`/`new`, `to`/`cc` no están en la fila por defecto, pero `--fields to,cc` o `--fields all` multiplican el tamaño de la fila (×14,5 en este caso) por cada mensaje masivo del listado.
+- El filtro `--to` necesita la lista completa para buscar coincidencias, y debe seguir usándola. El defecto está en lo que se **entrega**, no en lo que se lee.
+
+**Origen:**
+
+- `src/mailquery/search.py:1541-1563` (`_recipient_lists` / `_sanitized_recipients`): copian todas las entradas sin límite.
+- `src/mailquery/search.py:2632` (`_show_headers`): construye `headers.To`/`Cc` uniendo la lista completa.
+- `src/mailquery/search.py:167-177` (`show_message_fields`): sin `--fields`, `show` entrega `to`, `cc` y `headers` a la vez.
+- `src/mailquery/backends/outlook.py:743-773` (`recipients`): en Outlook, además, abre cada destinatario por COM (`PropertyAccessor` por entrada), así que el coste también crece en tiempo. No está medido.
+
+**Impacto:** en la tarea, ≈17.000 chars (≈4.600 tokens) de un solo `show` no aportaron nada.
+Para crear el evento bastaban el cuerpo y la fecha. Las invitaciones, los comunicados y los
+boletines internos son justo el tipo de correo que un agente lee para extraer fechas y lugares,
+así que el caso es frecuente. El coste crece linealmente con el número de destinatarios y no
+tiene tope.
+
+**Relación con otras entradas:** OBS-02 hallazgo #2 (`headers` duplica `from`/`to`/…) cubre la
+duplicación en `headers`. Este defecto cubre el tamaño de la lista misma, que sigue presente
+aunque `headers` pase a ser opt-in.
+
+**Remediación propuesta:**
+
+1. Tope por defecto de `N = 10` entradas en `to` y en `cc` (configurable en `[content].max_recipients`), en `show` y en las filas de `search`/`new` que pidan `to`/`cc`.
+2. Con el tope activo, la respuesta añade `to_count`/`cc_count` (total real) y `recipients_truncated: true`, y emite el aviso `W_RECIPIENTS_TRUNCATED` con el total omitido.
+3. Si la dirección de la cuenta propietaria del buzón está entre los destinatarios, va siempre en la muestra, en su lista real (`to` o `cc`), aunque quede fuera de las `N` primeras. Así "¿me lo mandaron directo o en copia?" se sigue respondiendo.
+4. `headers.To`/`headers.Cc` aplican el mismo tope y terminan en `… (+96 more)`.
+5. `--recipients all` (en `show`, `search` y `new`) devuelve la lista completa sin aviso, igual que hoy.
+6. El filtro `--to`/`--cc` sigue evaluándose sobre la lista completa. El tope solo afecta a la salida.
+
+**Criterios de aceptación propuestos:**
+
+| AC | Criterio verificable | Prueba |
+|----|----------------------|--------|
+| AC-05.1 | `show` de un mensaje con 106 `To` entrega 10 entradas en `to`, `to_count: 106`, `recipients_truncated: true` y `W_RECIPIENTS_TRUNCATED` con "96" en el mensaje | `UT-RCP-01` |
+| AC-05.2 | Si la dirección de la cuenta propietaria está en la posición 98 de `To`, aparece en la muestra de `to` (no en `cc`) y la muestra sigue teniendo 10 entradas | `UT-RCP-02` |
+| AC-05.3 | `headers.To` del mismo mensaje contiene 10 direcciones y termina en `(+96 more)` | `UT-RCP-03` |
+| AC-05.4 | `--recipients all` devuelve las 106 entradas, sin `recipients_truncated` ni aviso, byte a byte igual que la salida actual | `UT-RCP-04` |
+| AC-05.5 | `search --to "<destinatario en la posición 98>"` encuentra el mensaje con el tope activo | `UT-RCP-05` |
+| AC-05.6 | Un mensaje con ≤10 destinatarios no cambia: sin `to_count`, sin `recipients_truncated` y sin aviso | `UT-RCP-06` |
+| AC-05.7 | Sobre el mensaje de 106 destinatarios, `show` sin `--fields` pesa ≤25 % del payload actual (medido: el piso sin listas es 14,5 %) | `UT-RCP-07` |
+| AC-05.8 | `[content].max_recipients`, `--recipients all` y `W_RECIPIENTS_TRUNCATED` quedan en `INTERFACES.md`, `PRD.md` (nota de versión) y `SKILL.md`; suite en verde | suite, `DOC-11.…` |
+
+**Decisión pendiente del dueño:** el valor de `N` (10 es la propuesta) y si `cc` comparte el
+tope con `to` o tiene uno propio.
 
 ---
 
