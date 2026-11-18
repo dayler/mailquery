@@ -36,16 +36,9 @@ Example:
 
 ## Plans and permanent documents
 
-Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/`. They are deleted only after the whole plan has been verified (its work, tests and evidence), reviewed and approved by a human reviewer, and the PRD has been reconciled with the incremental PRD (`docs/PRD-v2.2.md` into `docs/PRD.md`). Until all three conditions hold, `docs/plan/` stays in the repository: deleting it is an explicit final step, never automatic and never a side effect of the implementation work finishing.
+Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/`. They are deleted only after the whole plan has been verified (its work, tests and evidence), a human reviewer has reviewed and approved it, and the incremental PRD / specification has been reconciled into the permanent PRD / specification. Until then, `docs/plan/` stays in the repository: deleting it is an explicit final step, never automatic and never a side effect of the implementation finishing.
 
-Nothing outside `docs/plan/` cites them: not the code, not the tests, not `docs/` (PRD, interfaces, test catalog, roadmap, backlogs, known defects), not the READMEs. Permanent documents describe the product as it is. Anything a plan produces that must outlive it is moved into the permanent document it belongs to before the plan is deleted:
-
-- Test case definitions go to `docs/tests/`, following the rules in `docs/tests/TEST-CATALOG.md`.
-- Open defects go to `docs/KNOWN-DEFECTS.md`; performance debt goes to `docs/PERFORMANCE-BACKLOG.md`.
-- Pending product work goes to `docs/ROADMAP.md`.
-- Product rules go to `docs/PRD.md`.
-
-`docs/archive/` holds historical records and is the only other place that may mention past plans.
+Nothing outside `docs/plan/` cites a plan: not code, not tests, not permanent documents, not READMEs. Permanent documents describe the product as it is. Anything a plan produces that must outlive it is moved, before deletion, into the permanent document that owns it. Historical records are the only other place that may mention past plans, and only as events: a historical record may name a plan but never cite it as a requirement or a justification.
 
 ## Plan structure and delegated implementation
 
@@ -55,7 +48,7 @@ This section applies to every agent that writes or executes a plan in `docs/plan
 
 Rules reference these names. The plan's protocol file may override any of them in one block at its start; briefs may not.
 
-| Limit | Default | Bounds |
+| Limit | Default | Meaning |
 |---|---|---|
 | `whole-read-lines` | 300 | Longest file, in lines, read whole |
 | `range-lines` | 200 | Longest range, in lines, read in one call |
@@ -72,12 +65,12 @@ Rules reference these names. The plan's protocol file may override any of them i
 - Protocol file: one file with every subagent rule not in `CLAUDE.md` (branches and worktrees, evidence checklist, redaction, per-shell command and log redirection forms, the plan's log directory, the list of shared documents, limit overrides).
 - Brief: one per milestone or split part, built from the plan's template, with only what that work needs: objective; write scope (exact files, or directories and globs for new tests and fixtures; always the evidence, proposal and handoff files; never a shared document); specification, catalog and interface ranges (heading plus line range at the baseline commit); next free test IDs; code entry points (file and function); baseline commit with known failures and skips; applicable decisions and owner answers; gate commands; log directory.
 - The protocol file and briefs are concise: no background, history, examples or text already in `CLAUDE.md`; a brief also omits what the protocol file or the specification says.
-- The launch protocol hands each subagent its brief. The subagent reads `CLAUDE.md` (unless the harness already loaded it), the protocol file and its brief whole, regardless of length, then the ranges the brief cites; anything else under the reading rule.
+- The launch protocol hands each subagent its brief and the protocol file. The subagent reads `CLAUDE.md` (unless the harness already loaded it), the protocol file and its brief whole, regardless of length, then the ranges the brief cites; anything else under the reading rule.
 
 **Reading and output (every agent bound by this section)**
 
 - A file of up to `whole-read-lines` lines may be read whole; when its length is unknown, the first read is a range. Longer files are located by search and read in ranges of at most `range-lines`; further consecutive ranges are read only while the task needs the rest of the same section or function. Searches are bounded by path, glob or result count.
-- Potentially long command output (test suites, coverage, builds, full diffs, unbounded shell searches) goes to a log in the plan's log directory (for a subagent, the one in its brief), which is outside every checkout or ignored by git. At most `output-lines` lines enter the conversation: for tests, the summary line and one line per failing test (with more failures than fit, their count and the first ones); otherwise, the last lines. Details are read from the log in ranges. Gate results come from the exit code or the summary line, never from truncated output. Short output, such as a single test case, `git status` or `git diff --stat`, enters directly; runs of more than one test module are never verbose (`-v`) in the conversation.
+- Potentially long command output (test suites, coverage, builds, full diffs, unbounded shell searches) goes to a log in the plan's log directory (for a subagent, the one in its brief), which is outside every checkout or ignored by git. At most `output-lines` lines enter the conversation: for tests, the summary line and one line per failing test (with more failures than fit, their count and the first ones); otherwise, the last lines. Details are read from the log in ranges. A gate passes when its exit code is zero or when its summary lists no failure other than the known failures and skips recorded in the brief; gate results come from the exit code or the summary line, never from truncated output. Short output, such as a single test case, `git status` or `git diff --stat`, enters directly; runs of more than one test module are never verbose (`-v`) in the conversation.
 - Logs are scratch: the agent copies into the evidence file what the evidence needs.
 
 **Subagent**
@@ -93,5 +86,5 @@ Rules reference these names. The plan's protocol file may override any of them i
 - The orchestrator is the only writer of shared documents and applies the proposals at integration.
 - It verifies subagent work with the gates, `git diff --stat` and targeted searches.
 - After an out-of-scope return it makes the change itself, widens the scope or chooses an alternative, and records the resolution in the brief; it never relaunches with a brief that does not reflect it.
-- It relaunches in the same worktree and branch with the current brief plus the handoff note. The relaunched subagent relocates stale line ranges by heading or function search. Split parts run one after another in that worktree.
-- It counts every relaunch, whatever its cause, and records it in the execution log. After `relaunch-split` relaunches of a milestone it splits the remaining work or revises the brief. A split part's first launch is not a relaunch, its relaunches count only toward that part, and it is never split again. After `relaunch-stop` relaunches of a milestone or split part, or after a budget handoff with no change outside its handoff note, it stops relaunching that milestone or part: it finishes that work itself, or marks it blocked with the reason and reports it to the owner. Remaining parts that do not depend on it continue.
+- It relaunches in the same worktree and branch with the current brief plus the handoff note. Every launched subagent relocates stale line ranges by heading or function search. Split parts run one after another in that worktree.
+- It counts every relaunch, whatever its cause, and records it in the execution log. After `relaunch-split` relaunches of a milestone it splits the remaining work or revises the brief. A split part's first launch is not a relaunch, its relaunches count only toward that part, and it is never split again. After `relaunch-stop` relaunches of a milestone or split part, or after a budget handoff with no change outside its handoff note, it stops relaunching that milestone or part: it finishes that work itself, or marks it blocked with the reason and reports it to the owner. Parts that depend on a blocked milestone or part are marked blocked with the same reason and reported; they are not launched. Remaining parts that do not depend on it continue.
