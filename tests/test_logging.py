@@ -1,7 +1,7 @@
 """Tests for the log file: rotation, permissions, format and content.
 
 Covers UT-LOG-01 (rotation), UT-LOG-02 (permissions), UT-LOG-03 (format) and
-UT-LOG-04 (content), PRD RF-20 and section 14. UT-LOG-03.04 lives in
+UT-LOG-04 (content), PRD RF-18 and section 14. UT-LOG-03.04 lives in
 ``tests/test_cli.py`` (renamed test).
 """
 

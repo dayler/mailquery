@@ -48,7 +48,7 @@ Requisitos: AC-12, RNF-13 · Archivo: `tests/test_integration.py`
 | .01 | P | Tras `attachment` (éxito, caché, bloqueo, límite), hashes y `mtime` del store no cambian. |
 | .02 | P | Todas las escrituras quedan bajo `~/.mailquery` (`attachments/`, `tmp/`, log/lock/estado); staging limpio. |
 | .03 | P | Directorios `0700` y archivos `0600` en POSIX; sin `+x` (condición POSIX explícita; en Windows se prueba la herencia de ACL y no se relajan permisos). |
-| .04 | P | El backend declara las capacidades de RF-38 y `attachments: "local"`; `doctor` las muestra. |
+| .04 | P | El backend declara las capacidades de RF-36 y `attachments: "local"`; `doctor` las muestra. |
 
 #### UT-ATC-01 — `show.attachments`
 
@@ -133,11 +133,11 @@ Requisitos: AC-15 · Archivo: `tests/test_cli.py`
 
 #### UT-ATC-07 — Timeout de extracción
 
-Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_cli.py`
+Requisitos: AC-43, AC-45 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | Extracción cuyo plazo configurado vence (inyectado con `_attachment_timeout`) ⇒ `E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-68, sin reintento, staging limpio y sin archivos nuevos. |
+| .01 | N | Extracción cuyo plazo configurado vence (inyectado con `_attachment_timeout`) ⇒ `E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-49, sin reintento, staging limpio y sin archivos nuevos. |
 | .02 | N | El timeout no escribe estado ni caché parcial. |
 
 #### UT-ATC-08 — Log de `attachment`
@@ -177,7 +177,7 @@ Requisitos: AC-07, AC-15 · Archivo: `tests/test_cli.py`
 
 #### UT-RMT-01 — Extracción desde un plugin `"remote"`
 
-Requisitos: AC-D01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+Requisitos: AC-40 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -189,7 +189,7 @@ Requisitos: AC-D01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachme
 
 #### UT-RMT-02 — Fallo de origen del plugin `"remote"`
 
-Requisitos: AC-D02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+Requisitos: AC-41 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -201,19 +201,19 @@ Requisitos: AC-D02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachme
 
 #### UT-RMT-03 — Driver `attachments: "none"`
 
-Requisitos: AC-D03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+Requisitos: AC-42 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store, con el hint nuevo de RF-67 literal. |
+| .01 | N | ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store, con el hint nuevo de RF-48 literal. |
 
 #### UT-RMT-04 — Corte duro en plugins externos
 
-Requisitos: AC-D05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+Requisitos: AC-44 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | El plugin se bloquea antes del primer bloque (espera un `threading.Event` que el test no activa hasta el final): con el tope inyectado a 1 s, `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-68; la espera del núcleo, medida con `time.monotonic()`, cumple `elapsed < tope + 1`. |
+| .01 | N | El plugin se bloquea antes del primer bloque (espera un `threading.Event` que el test no activa hasta el final): con el tope inyectado a 1 s, `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-49; la espera del núcleo, medida con `time.monotonic()`, cumple `elapsed < tope + 1`. |
 | .02 | N | El plugin se bloquea entre dos bloques: ídem. |
 | .03 | B | `--all` con los adjuntos 2 y 3 bloqueados: se informa el 2. |
 | .04 | B | Staging limpio y sin archivos nuevos; el hilo del plugin se libera al terminar el test (evento) y no queda ningún hilo vivo. |
@@ -222,7 +222,7 @@ Requisitos: AC-D05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachme
 
 #### UT-RMT-05 — Topes que no cambian y lo que no consume el tope
 
-Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_attachments.py`
+Requisitos: AC-43, AC-45 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -230,4 +230,4 @@ Requisitos: AC-D04, AC-D06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_remote_
 | .02 | P | Apple Mail y Outlook (doble): el tope se comprueba entre bloques y al terminar la llamada (un flujo lento entre bloques con tope inyectado da `E_CLIENT_TIMEOUT`); la creación del flujo ocurre en el hilo principal, no en uno aparte. |
 | .03 | B | Un acierto de caché no invoca la factoría del tope; A7 se ejecuta después y no lo consume (con un detector lento simulado y el tope ya vencido, la respuesta es de éxito). |
 | .04 | P | `cli` pasa al motor el valor de `[attachments].timeout_seconds` (espía sobre la factoría con `timeout_seconds = 180`). |
-| .05 | N | Doble de Outlook con el watchdog COM (`outlook_com.CALL_TIMEOUT_SECONDS` parcheado) vencido antes del tope del adjunto ⇒ `E_CLIENT_TIMEOUT` con el mensaje y el hint de RF-33, no los de RF-68. |
+| .05 | N | Doble de Outlook con el watchdog COM (`outlook_com.CALL_TIMEOUT_SECONDS` parcheado) vencido antes del tope del adjunto ⇒ `E_CLIENT_TIMEOUT` con el mensaje y el hint de RF-31, no los de RF-49. |

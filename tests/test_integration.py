@@ -1321,7 +1321,7 @@ class MultiDriverGoldenTest(IntegrationBase):
 
 
 # --------------------------------------------------------------------------- #
-# TC-02 — Outlook goldens (RF-30, PRD 12.5) over the in-memory fake
+# TC-02 — Outlook goldens (RF-28, PRD 12.5) over the in-memory fake
 # --------------------------------------------------------------------------- #
 
 #: Golden profile config: the cached Exchange account and the excluded shared
@@ -1495,7 +1495,7 @@ class OutlookGoldenTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# TC-04 / TC-05 — recipes and JSON shape on both backends (PRD 21.2, RF-30)
+# TC-04 / TC-05 — recipes and JSON shape on both backends (PRD 21.2, RF-28)
 # --------------------------------------------------------------------------- #
 
 RECIPES_DIR = Path(__file__).resolve().parents[1] / "docs" / "recipes"
@@ -1702,7 +1702,7 @@ class RecipeCommandTest(_AttachmentUidMixin, _BothBackendsCase):
 
 
 class JsonShapeParityTest(_AttachmentUidMixin, _BothBackendsCase):
-    """TC-05 (RF-30): the same recursive set of JSON keys on both backends.
+    """TC-05 (RF-28): the same recursive set of JSON keys on both backends.
 
     The Outlook profile adds to ``item_matrix`` a message with To, Cc and a
     visible attachment (the counterpart of Apple Mail's uid 2714), so that the

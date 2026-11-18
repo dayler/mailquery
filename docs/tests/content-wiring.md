@@ -133,7 +133,7 @@ Requisitos: RF-64 · Archivo: `tests/test_content_wiring.py`
 
 #### UT-CW-13 — Determinismo de punta a punta
 
-Requisitos: RNF-19 · Archivo: `tests/test_content_wiring.py`
+Requisitos: RNF-18 · Archivo: `tests/test_content_wiring.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

@@ -20,7 +20,7 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 
 #### TC-02 — Goldens de Outlook
 
-Requisitos: RF-30 · Archivo: `tests/test_integration.py`
+Requisitos: RF-28 · Archivo: `tests/test_integration.py`
 
 Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaje normal con adjunto, uno solo con cabeceras y uno S/MIME cifrado) y un buzón compartido excluido. Cada caso compara con el golden `outlook/<nombre>`.
 
@@ -55,7 +55,7 @@ Requisitos: PRD.md §21.2 · Archivo: `tests/test_integration.py`
 
 #### TC-05 — Paridad de forma JSON
 
-Requisitos: RF-24, RF-30 · Archivo: `tests/test_integration.py`
+Requisitos: RF-22, RF-28 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

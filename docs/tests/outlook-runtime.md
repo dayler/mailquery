@@ -21,11 +21,11 @@ Requisitos: AC-10/AC-12 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Un adjunto local se materializa con `SaveAsFile`/`GetTemporaryFilePath` en el staging `0700`; el archivo es regular, no symlink, `0600`/ACL del perfil; el núcleo lo lee y lo publica con la validación del motor. |
+| .01 | P | Un adjunto local se materializa con `SaveAsFile` en el staging `0700`; el archivo es regular, no symlink, `0600`/ACL del perfil; el núcleo lo lee y lo publica con la validación del motor. |
 | .02 | N | La materialización se rechaza si el archivo temporal no está dentro de `tmp/staging` o es un symlink ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`) antes de publicar, sin código interno. |
 | .03 | N | Un adjunto con contenido ejecutable en el archivo materializado ⇒ mensaje bloqueado, archivo temporal borrado, nada publicado. |
 | .04 | P | El archivo temporal se borra también cuando la extracción falla o el timeout vence. |
-| .05 | N | La lista blanca del proxy solo añade las dos operaciones de materialización; cualquier otra operación sigue dando `E_INTERNAL` (OL-01). |
+| .05 | N | La lista blanca del proxy solo añade la operación de materialización `SaveAsFile` (`GetTemporaryFilePath` no se autoriza); cualquier otra operación sigue dando `E_INTERNAL` (OL-01). |
 | .06 | N | `object_model_guard` no bloquea la operación de materialización (decisión interna, sin señal observable); el caso solo afirma timeout/permiso y lista blanca, y el riesgo queda documentado. |
 
 #### UT-OL-ATT-03 — Errores, timeout y motivos
@@ -67,7 +67,7 @@ Cada caso negativo produce `E_INTERNAL` con hint no vacío, sin tocar el fake.
 
 #### OL-02 — Detección del cliente
 
-Requisitos: RF-28 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-26 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -81,7 +81,7 @@ Requisitos: RF-28 · Archivo: `tests/test_outlook.py`
 
 #### OL-03 — Errores COM
 
-Requisitos: RF-24, PRD.md §17 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-22, PRD.md §17 · Archivo: `tests/test_outlook.py`
 
 Fallo inyectado en la primera llamada COM.
 
@@ -94,7 +94,7 @@ Fallo inyectado en la primera llamada COM.
 
 #### OL-04 — Timeout
 
-Requisitos: RF-33 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-31 · Archivo: `tests/test_outlook.py`
 
 Plazo de 0,2 s, en subprocess con `run_cli.py`.
 
@@ -118,7 +118,7 @@ Requisitos: RNF-01, PRD.md §9.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-27 — `object_model_guard`
 
-Requisitos: RF-25 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-23 · Archivo: `tests/test_outlook.py`
 
 Con `registry` y `security_center` inyectados.
 

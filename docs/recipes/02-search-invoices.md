@@ -98,7 +98,7 @@ ni los ejecutes.
 Reglas de la CLI que afectan a esta receta (iguales en ambas plataformas salvo
 donde se indica):
 
-- **`--text` exige acotamiento** (RF-17): `--since`/`--until`, `--from`,
+- **`--text` exige acotamiento** (RF-15): `--since`/`--until`, `--from`,
   `--subject` o una carpeta extra (una distinta de INBOX en `mailbox_list` o en
   `--include-mailbox`). Sin acotamiento ⇒ `E_UNBOUNDED_SCAN` (exit 4). El
   `--since` de esta receta cumple ese requisito. Un filtro con valor vacío no

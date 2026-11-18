@@ -2,7 +2,7 @@
 
 #### UT-CFG-01 — `max_size_mb`
 
-Requisitos: RF-20, RF-21 · Archivo: `tests/test_config.py`
+Requisitos: RF-18, RF-19 · Archivo: `tests/test_config.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -10,7 +10,7 @@ Requisitos: RF-20, RF-21 · Archivo: `tests/test_config.py`
 
 #### UT-CFG-02 — `retention_days`
 
-Requisitos: RF-21 · Archivo: `tests/test_config.py`
+Requisitos: RF-19 · Archivo: `tests/test_config.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -29,7 +29,7 @@ Requisitos: RF-63 · Archivo: `tests/test_config.py`
 
 #### UT-CFG-04 — `[attachments].timeout_seconds`
 
-Requisitos: AC-D04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_config.py`
+Requisitos: AC-43 · Archivo: `tests/test_config.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -39,7 +39,7 @@ Requisitos: AC-D04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_config.py`
 
 #### UT-CLI-04 — Opciones que no existen
 
-Requisitos: RF-18, RF-21, RF-26 · Archivo: `tests/test_cli.py`
+Requisitos: RF-16, RF-19, RF-24 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -47,7 +47,7 @@ Requisitos: RF-18, RF-21, RF-26 · Archivo: `tests/test_cli.py`
 
 #### UT-CLI-05 — `--log-level`
 
-Requisitos: RF-20, PRD.md §12.1 · Archivo: `tests/test_cli.py`
+Requisitos: RF-18, PRD.md §12.1 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -56,7 +56,7 @@ Requisitos: RF-20, PRD.md §12.1 · Archivo: `tests/test_cli.py`
 
 #### UT-CLI-08 — UTF-8 y LF
 
-Requisitos: RF-32 · Archivo: `tests/test_cli.py`
+Requisitos: RF-30 · Archivo: `tests/test_cli.py`
 
 Por pipe en subprocess, con cp1252 y `PYTHONUTF8=0`.
 
@@ -68,7 +68,7 @@ Por pipe en subprocess, con cp1252 y `PYTHONUTF8=0`.
 
 #### UT-CLI-09 — Códigos de salida y JSON de error
 
-Requisitos: RF-24 · Archivo: `tests/test_cli.py`
+Requisitos: RF-22 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -76,7 +76,7 @@ Requisitos: RF-24 · Archivo: `tests/test_cli.py`
 
 #### UT-CLI-10 — `doctor`: dependencias en Apple Mail
 
-Requisitos: RF-25 · Archivo: `tests/test_cli.py`
+Requisitos: RF-23 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -88,7 +88,7 @@ Requisitos: RF-25 · Archivo: `tests/test_cli.py`
 
 #### UT-CLI-11 — `doctor`: `state`
 
-Requisitos: RF-25 · Archivo: `tests/test_cli.py`
+Requisitos: RF-23 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -97,7 +97,7 @@ Requisitos: RF-25 · Archivo: `tests/test_cli.py`
 
 #### UT-CLI-12 — `doctor`: `envelope_index`
 
-Requisitos: RF-25 · Archivo: `tests/test_cli.py`
+Requisitos: RF-23 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -127,7 +127,7 @@ Solo en `win32`, con `pipx` y `mailquery` falsos al inicio del `PATH`.
 
 #### UT-LOG-01 — Rotación
 
-Requisitos: RF-20 · Archivo: `tests/test_logging.py`
+Requisitos: RF-18 · Archivo: `tests/test_logging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -146,7 +146,7 @@ Requisitos: RNF-05 · Archivo: `tests/test_logging.py`
 
 #### UT-LOG-03 — Formato
 
-Requisitos: RF-20, RNF-07 · Archivo: `tests/test_cli.py`, `tests/test_logging.py`
+Requisitos: RF-18, RNF-07 · Archivo: `tests/test_cli.py`, `tests/test_logging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -157,7 +157,7 @@ Requisitos: RF-20, RNF-07 · Archivo: `tests/test_cli.py`, `tests/test_logging.p
 
 #### UT-LOG-04 — Contenido
 
-Requisitos: RF-20, RNF-05 · Archivo: `tests/test_logging.py`
+Requisitos: RF-18, RNF-05 · Archivo: `tests/test_logging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -168,7 +168,7 @@ Requisitos: RF-20, RNF-05 · Archivo: `tests/test_logging.py`
 
 #### UT-OUT-01 — JSON formateado
 
-Requisitos: RF-18 · Archivo: `tests/test_output.py`
+Requisitos: RF-16 · Archivo: `tests/test_output.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -187,7 +187,7 @@ Requisitos: RNF-08, PRD.md §11.3 · Archivo: `tests/test_output.py`
 
 #### UT-OUT-03 — Limpieza de contenido
 
-Requisitos: RNF-09, RF-52 (delta `PRD-v2.2.md`) · Archivo: `tests/test_output.py`
+Requisitos: RNF-09, RF-52 · Archivo: `tests/test_output.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

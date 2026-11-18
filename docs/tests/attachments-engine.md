@@ -145,7 +145,7 @@ Requisitos: AC-15 · Archivo: `tests/test_attachments.py`
 
 #### UT-ATT-12 — Manifiesto por mensaje y archivos no verificados
 
-Requisitos: RF-45, RF-51 · Archivo: `tests/test_attachments.py`
+Requisitos: RF-43, RF-51 · Archivo: `tests/test_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -218,7 +218,7 @@ Requisitos: RF-62 · Archivo: `tests/test_active_content.py`
 
 #### UT-ACT-05 — `W_ATTACHMENT_ACTIVE_CONTENT` en `attachment`
 
-Requisitos: AC-H12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_active_content.py`
+Requisitos: AC-33 · Archivo: `tests/test_active_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

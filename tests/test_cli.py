@@ -1782,7 +1782,7 @@ if __name__ == "__main__":
 
 
 # --------------------------------------------------------------------------- #
-# UTF-8 and LF on stdout/stderr (RF-32, PRD 20), through a real pipe
+# UTF-8 and LF on stdout/stderr (RF-30, PRD 20), through a real pipe
 # --------------------------------------------------------------------------- #
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent

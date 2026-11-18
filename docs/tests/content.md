@@ -41,7 +41,7 @@ Requisitos: RF-53, RF-56 · Archivo: `tests/test_content.py`
 
 #### UT-CNT-03 — Hojas `<style>` y `css-inline`
 
-Requisitos: RF-53, RNF-18 · Archivo: `tests/test_content.py`
+Requisitos: RF-53, RNF-17 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -67,7 +67,7 @@ Requisitos: RF-66 · Archivo: `tests/test_content.py`
 
 #### UT-CNT-05 — Detección de URLs
 
-Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+Requisitos: RF-54, RF-57 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -82,13 +82,13 @@ Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.p
 
 #### UT-CNT-06 — Modos de URL
 
-Requisitos: RF-54 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+Requisitos: RF-54 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `keep` deja el texto igual. |
-| .02 | P | `neutralize`: cada fila de las tablas A4 de la sección 8 de PRD-v2.2 da el resultado indicado, también con el esquema en mayúsculas (`HTTPS://`, `WWW.`). |
-| .03 | P | `strip`: cada URL → `[link omitted]` (filas de la sección 8 de PRD-v2.2) y el resto del texto no cambia. |
+| .02 | P | `neutralize`: cada fila de las tablas A4 de la sección 12.5 de PRD.md da el resultado indicado, también con el esquema en mayúsculas (`HTTPS://`, `WWW.`). |
+| .03 | P | `strip`: cada URL → `[link omitted]` (filas de la sección 12.5 de PRD.md) y el resto del texto no cambia. |
 | .04 | B | Una URL ya neutralizada, ASCII y de 2.048 caracteres o menos (`hxxps://…`, `evil[.]example/pay`) no cambia con `neutralize`. |
 | .05 | B | Idempotencia: `render_urls(render_urls(x, "neutralize"), "neutralize") == render_urls(x, "neutralize")` para todas las muestras. |
 | .06 | B | El texto fuera de las URLs no cambia en ningún modo; dos llamadas dan el mismo resultado; un texto sin URLs (incluidos caracteres con NFKC de varios caracteres) no cambia; `render_urls(x, "otro")` lanza `ValueError`. |
@@ -96,7 +96,7 @@ Requisitos: RF-54 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
 
 #### UT-CNT-07 — Punycode y acortado
 
-Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+Requisitos: RF-54, RF-57 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -110,7 +110,7 @@ Requisitos: RF-54, RF-57 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.p
 
 #### UT-CNT-08 — Conteos y textos de las señales
 
-Requisitos: RF-55, RF-57–RF-59 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+Requisitos: RF-55, RF-57–RF-59 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -123,11 +123,11 @@ Requisitos: RF-55, RF-57–RF-59 (delta `PRD-v2.2.md`) · Archivo: `tests/test_c
 
 #### UT-CNT-09 — Señales del remitente
 
-Requisitos: RF-60, RF-61 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content.py`
+Requisitos: RF-60, RF-61 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | El ejemplo A6 de la sección 8 de PRD-v2.2 → `"spf=softfail dkim=none dmarc=fail"`. |
+| .01 | P | El ejemplo A6 de la sección 12.5 de PRD.md → `"spf=softfail dkim=none dmarc=fail"`. |
 | .02 | N | Todo `pass`; `none`/`neutral` sin fallos; cabecera ausente (`None`) → `None`. |
 | .03 | P | `permerror` y `fail` cuentan; mayúsculas (`SPF=FAIL`) → `spf=fail`; un mecanismo ausente no aparece en el resultado. |
 | .04 | B | Varias firmas DKIM: una `pass` → `pass`; ninguna `pass` → la primera. |

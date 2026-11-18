@@ -27,12 +27,12 @@ Presupuesto p95 de `mailquery attachment` (`3.0.0`, todavía no publicado):
 
 | Operación | Apple Mail | Outlook | Plugin local | Plugin remoto |
 |-----------|------------|---------|--------------|---------------|
-| `attachment` acierto de caché (archivo local) | < 50 ms | < 50 ms | — | — |
+| `attachment` acierto de caché (archivo local) | < 50 ms | < 50 ms | < 50 ms | < 50 ms |
 | `attachment` 1 adjunto ≤ 5 MB | < 200 ms | < 600 ms | sin objetivo fijo | sin presupuesto (red) |
-| `attachment --all` de N adjuntos | presupuesto × N (lineal) | presupuesto × N (lineal) | sin objetivo fijo | — |
+| `attachment --all` de N adjuntos | presupuesto × N (lineal) | presupuesto × N (lineal) | sin objetivo fijo | sin presupuesto (red) |
 
 Un plugin local solo está acotado por el timeout de metadatos/extracción
-(RNF-22): 30 s por operación de metadatos y `[attachments].timeout_seconds`
+(RNF-21): 30 s por operación de metadatos y `[attachments].timeout_seconds`
 (60 s por defecto, 10–600) por adjunto. Un plugin remoto no tiene objetivo de
 latencia. Ese tope acota el peor caso y se registra como riesgo aceptado en el
 PRD.

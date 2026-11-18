@@ -36,7 +36,7 @@ Requisitos: AC-03 · Archivo: `tests/test_config.py`
 
 #### UT-DRV-04 — `[attachments]`
 
-Requisitos: AC-14, RF-42/49 · Archivo: `tests/test_config.py`
+Requisitos: AC-14, RF-40, RF-47 · Archivo: `tests/test_config.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -99,7 +99,7 @@ Requisitos: AC-16 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.p
 
 #### UT-ERR-04 — Timeout de metadatos
 
-Requisitos: AC-17, RNF-22 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.py`
+Requisitos: AC-17, RNF-21 · Archivo: `tests/test_multidriver.py`, `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -189,7 +189,7 @@ Requisitos: AC-05, AC-07 · Archivo: `tests/test_multidriver.py`
 
 #### UT-PL-01 — Registro de drivers
 
-Requisitos: AC-01, RF-35 · Archivo: `tests/test_plugins.py`
+Requisitos: AC-01, RF-33 · Archivo: `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -206,7 +206,7 @@ Requisitos: AC-01, RF-35 · Archivo: `tests/test_plugins.py`
 
 #### UT-PL-02 — Capacidades
 
-Requisitos: AC-02, RF-38 · Archivo: `tests/test_plugins.py`
+Requisitos: AC-02, RF-36 · Archivo: `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -232,7 +232,7 @@ Requisitos: AC-18 · Archivo: `tests/test_plugins.py`
 
 #### UT-PL-04 — API de plugin y archivos autónomos
 
-Requisitos: AC-01, RF-39 · Archivo: `tests/test_plugins.py`
+Requisitos: AC-01, RF-37 · Archivo: `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

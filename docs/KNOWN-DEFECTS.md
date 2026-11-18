@@ -1,6 +1,6 @@
 # Defectos conocidos
 
-Estado: **4 defectos abiertos** (BUG-02 a BUG-05, documentación y payload) y **2 observaciones registradas** (OBS-01 salida de errores, OBS-02 payload verboso). Seguimiento de defectos que el dueño reconoce en el producto actual. Este documento no cambia el PRD: [`PRD.md`](PRD.md) describe el comportamiento actual y enlaza cada defecto como "Pendiente conocido".
+Estado: **33 defectos abiertos** (BUG-02 a BUG-31 y BUG-34 a BUG-36: documentación, payload y desviaciones del código respecto de `PRD.md`) y **2 observaciones registradas** (OBS-01 salida de errores, OBS-02 payload verboso). Seguimiento de defectos que el dueño reconoce en el producto actual. Este documento no cambia el PRD: [`PRD.md`](PRD.md) describe el comportamiento actual y enlaza cada defecto como "Pendiente conocido".
 
 | ID | Título | Estado | Registrado |
 |----|--------|--------|------------|
@@ -9,6 +9,35 @@ Estado: **4 defectos abiertos** (BUG-02 a BUG-05, documentación y payload) y **
 | BUG-03 | "Qué mejoraría del skill": afirmaciones no verificadas y semánticas ausentes | Abierto | 2026-11-16 |
 | BUG-04 | `mailbox` se repite completo en cada fila de `search` (24 veces, 3 valores) | Abierto | 2026-11-16 |
 | BUG-05 | Correos masivos: `to`/`cc` entregan la lista completa de cientos de destinatarios | Abierto | 2026-11-17 |
+| BUG-06 | `attachment --all`: el tope de `[attachments].timeout_seconds` no es por adjunto | Abierto | 2026-11-18 |
+| BUG-07 | `search --count` y `--group-by` sin alcance devuelven la forma de `messages[]` | Abierto | 2026-11-18 |
+| BUG-08 | Llamadas a un plugin sin el corte duro de 30 s | Abierto | 2026-11-18 |
+| BUG-09 | Outlook: un item con solo cabeceras pierde los avisos del remitente cuando se pide el cuerpo | Abierto | 2026-11-18 |
+| BUG-10 | Un plugin puede disparar `W_HIDDEN_CONTENT`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` | Abierto | 2026-11-18 |
+| BUG-11 | Apple Mail: una parte `text/html` vacía recurre al texto plano sin `W_HTML_NO_TEXT` | Abierto | 2026-11-18 |
+| BUG-12 | `doctor`: fallos de un plugin fuera de `doctor_checks()` mal clasificados | Abierto | 2026-11-18 |
+| BUG-13 | `doctor` en texto repite `Plugins:` antes de cada plugin | Abierto | 2026-11-18 |
+| BUG-14 | `not_downloaded` tiene dos mensajes distintos según la ruta del código | Abierto | 2026-11-18 |
+| BUG-15 | El registro no comprueba ninguna operación de `MailBackend` al cargar un plugin | Abierto | 2026-11-18 |
+| BUG-16 | La pantalla de *magic bytes* y el staging leen flujos distintos del adjunto | Abierto | 2026-11-18 |
+| BUG-17 | Outlook: item con solo cabeceras y adjuntos da `E_ATTACHMENT_UNREADABLE` en vez de `not_downloaded` | Abierto | 2026-11-18 |
+| BUG-18 | Uid de un plugin: `describe()` se llama antes de `parse_native_id` | Abierto | 2026-11-18 |
+| BUG-19 | Outlook: los errores del flujo de un adjunto no usan la plantilla de mensaje del núcleo | Abierto | 2026-11-18 |
+| BUG-20 | Apple Mail recorta y reemplaza el nombre del adjunto antes de las reglas del núcleo; Outlook no | Abierto | 2026-11-18 |
+| BUG-21 | Windows acepta `[scope."apple_mail:…"]` y falla después con `E_STORE_NOT_FOUND` | Abierto | 2026-11-18 |
+| BUG-22 | El hint de `E_DRIVER_UNKNOWN` no lista los drivers instalados en el uid ni en `[scope]` | Abierto | 2026-11-18 |
+| BUG-23 | Los subcomandos aceptan opciones abreviadas | Abierto | 2026-11-18 |
+| BUG-24 | Ayuda: colores en Python ≥ 3.14 y textos que contradicen el PRD | Abierto | 2026-11-18 |
+| BUG-25 | `doctor --failures` en texto: líneas de primer nivel sin sangría | Abierto | 2026-11-18 |
+| BUG-26 | `W_NO_ACCOUNTS` dice que no hay cuentas declaradas cuando todas están excluidas | Abierto | 2026-11-18 |
+| BUG-27 | Los comodines `*` y `?` no cruzan saltos de línea | Abierto | 2026-11-18 |
+| BUG-28 | `--limit`, `--since`/`--until` e `--include-mailbox` vacío se validan después de abrir el cliente | Abierto | 2026-11-18 |
+| BUG-29 | `--text`: warnings del cuerpo de candidatos que no coinciden y candidatos ilegibles descartados en silencio | Abierto | 2026-11-18 |
+| BUG-30 | `body.truncated` y `snippet` colapsan espacios en blanco de forma distinta | Abierto | 2026-11-18 |
+| BUG-31 | Docstrings y comentarios del código inexactos | Abierto | 2026-11-18 |
+| BUG-34 | `search --help`: `--since`/`--until` no documentan todas las fechas relativas | Abierto | 2026-11-18 |
+| BUG-35 | `search --help`: la nota de URLs cita cabeceras, que `search` no devuelve, y omite el extracto | Abierto | 2026-11-18 |
+| BUG-36 | Ayuda de opciones: `--fields`, `--group-by` y `--count` usan la tercera persona y el resto el imperativo | Abierto | 2026-11-18 |
 
 ---
 
@@ -17,10 +46,10 @@ Estado: **4 defectos abiertos** (BUG-02 a BUG-05, documentación y payload) y **
 **Registrado:** 2026-11-12, por decisión del dueño. **Cerrado:** 2026-11-14,
 corregido en `3.0.0` (en desarrollo).
 
-**Comportamiento esperado** (RF-43, RF-46, ADR-22):
+**Comportamiento esperado** (RF-41, RF-44, ADR-22):
 
 - Un plugin externo con `network: true` y `attachments: "remote"` obtiene los bytes del adjunto desde su origen. Su uso de red es responsabilidad del plugin.
-- El núcleo no abre red. Valida, sanea, aplica límites, calcula el SHA-256 y escribe en la caché exactamente igual que con un driver `"local"` (RF-47).
+- El núcleo no abre red. Valida, sanea, aplica límites, calcula el SHA-256 y escribe en la caché exactamente igual que con un driver `"local"` (RF-45).
 - Un adjunto no recuperable responde `E_ATTACHMENT_UNAVAILABLE` con el `reason` del plugin (`network`, `not_local`, …), no `unsupported`.
 
 **Comportamiento anterior (hasta la corrección):**
@@ -36,7 +65,7 @@ corregido en `3.0.0` (en desarrollo).
 
 **Impacto:** ninguno en uso real mientras no existan plugins remotos, pero impedía implementar `mailquery-graph` u otro conector remoto con recuperación de adjuntos sin cambiar el núcleo.
 
-**Corrección aplicada:** `_require_attachment_capabilities` rechaza solo `attachments: "none"` (con el hint que pide declarar un driver `"local"` o `"remote"`); un driver `"remote"` entrega sus bytes al mismo motor de adjuntos, con el mismo bloqueo, límites, SHA-256, staging, caché, manifiesto, `--force` y A7. Un fallo de origen del plugin se sigue reportando con su `reason` (`network`, `not_local`, …) como `E_ATTACHMENT_UNAVAILABLE`. UT-ATC-10.03 se retiró y lo sustituyen los casos `UT-RMT-01` a `UT-RMT-03`; `INTERFACES.md` y `TEST-CATALOG.md` se actualizan con la integración. En `PRD.md`, la conciliación debe admitir de nuevo los adjuntos remotos en RF-43, RF-46, §4 y la fila 5 de la precedencia de `attachment` (el texto anterior está en `docs/PRD-v2.1.md` del commit `3935ec5`) y retirar la nota "Pendiente conocido".
+**Corrección aplicada:** `_require_attachment_capabilities` rechaza solo `attachments: "none"` (con el hint que pide declarar un driver `"local"` o `"remote"`); un driver `"remote"` entrega sus bytes al mismo motor de adjuntos, con el mismo bloqueo, límites, SHA-256, staging, caché, manifiesto, `--force` y A7. Un fallo de origen del plugin se sigue reportando con su `reason` (`network`, `not_local`, …) como `E_ATTACHMENT_UNAVAILABLE`. UT-ATC-10.03 se retiró y lo sustituyen los casos `UT-RMT-01` a `UT-RMT-03`; `INTERFACES.md` y `TEST-CATALOG.md` se actualizan con la integración. En `PRD.md`, la conciliación debe admitir de nuevo los adjuntos remotos en RF-41, RF-44, §4 y la fila 5 de la precedencia de `attachment` (el texto anterior está en `docs/PRD-v2.1.md` del commit `3935ec5`) y retirar la nota "Pendiente conocido".
 
 ---
 
@@ -364,6 +393,390 @@ aunque `headers` pase a ser opt-in.
 
 **Decisión pendiente del dueño:** el valor de `N` (10 es la propuesta) y si `cc` comparte el
 tope con `to` o tiene uno propio.
+
+---
+
+## BUG-06 — `attachment --all`: el tope de `[attachments].timeout_seconds` no es por adjunto
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-49, RNF-21 y la fila `attachments/` de §9.2: el tope es por adjunto, no por comando; `--all` con N adjuntos puede tardar hasta N veces el tope.
+
+**Comportamiento observado:** el plazo de cada adjunto empieza cuando su flujo se abre para la revisión previa (`screen`), que abre todos los adjuntos antes de extraer ninguno. El plazo del adjunto N incluye la extracción de los adjuntos 1..N-1, así que todo `--all` debe caber en un solo tope. Con un driver de prueba, 3 adjuntos de 6 s y un tope de 10 s dan `E_CLIENT_TIMEOUT` en el adjunto 1.
+
+**Origen:** `src/mailquery/attachments/engine.py:241-245` (`_Deadlines.start()`), `515-517`, `538` y `583-585` (el `tracker.start()` posterior no reinicia el plazo).
+
+---
+
+## BUG-07 — `search --count` y `--group-by` sin alcance devuelven la forma de `messages[]`
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-71: `--count` devuelve `count`, `hint`, `warnings` y `scan`, sin `messages[]` ni `truncated`. RF-70: `groups[]` sustituye a `messages[]`. AC-58 cubre el caso sin cuentas.
+
+**Comportamiento observado:** si no se lee ninguna cuenta (ninguna declarada o todas excluidas) o ninguna carpeta está permitida, la salida es `count, truncated, hint, messages, scan, warnings` con `messages: []` y sin `groups`.
+
+**Origen:** `src/mailquery/search.py:582-593` sale por `_empty_search_result` (`search.py:2897-2907`) antes de las ramas de `--count` y `--group-by` (`search.py:660`, `672`).
+
+---
+
+## BUG-08 — Llamadas a un plugin sin el corte duro de 30 s
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RNF-21: el núcleo espera en un hilo aparte cada llamada del plugin, con corte duro. RF-79: cada llamada al plugin tiene el corte duro de 30 s.
+
+**Comportamiento observado:** la importación del plugin, la lectura de sus metadatos, el constructor, `close()` y el `close()` del iterador de bytes se ejecutan sin plazo. Un plugin que se cuelga en el constructor cuelga `doctor` y todos los comandos de datos.
+
+**Origen:** `src/mailquery/backends/registry.py:243`, `268-273`, `321-328`; `src/mailquery/cli.py:2178`, `2219`, `2389`; `src/mailquery/plugins/api.py:524-530`.
+
+---
+
+## BUG-09 — Outlook: un item con solo cabeceras pierde los avisos del remitente cuando se pide el cuerpo
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-60, RF-61 y RF-72(3): `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` se emiten cuando el mensaje los justifica, con cualquier selección de campos.
+
+**Comportamiento observado:** para un item con solo cabeceras locales (`W_BODY_NOT_LOCAL`), `_load_body` vuelve antes de leer `PR_TRANSPORT_MESSAGE_HEADERS` y entrega `headers: {}`, `authentication_results: None` y `reply_to: None`. El mismo mensaje emite `W_SENDER_AUTH_FAILED` con la fila por defecto (que usa `load_headers`) y no lo emite con `--fields snippet`, `--fields body` ni en `show`.
+
+**Origen:** `src/mailquery/backends/outlook.py:1062-1066` y `1962-1971`; `load_headers` (`outlook.py:1018-1044`) sí lee las cabeceras.
+
+---
+
+## BUG-10 — Un plugin puede disparar `W_HIDDEN_CONTENT`, `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH`
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-56: `W_HIDDEN_CONTENT` no se emite para cuerpos de plugins. RF-60 y RF-61: `W_SENDER_AUTH_FAILED` y `W_REPLY_TO_MISMATCH` no se emiten para un mensaje de un plugin. §9.2: `load_headers(row)` es un gancho interno que no forma parte de `plugin_api`.
+
+**Comportamiento observado:** el núcleo toma `hidden_chars`, `authentication_results` y `reply_to` de la fila de cualquier driver y llama al `load_headers` de un plugin si lo define. La validación del cuerpo de un plugin no quita esas claves, y `METADATA_OPERATIONS` incluye `load_headers` y `mailboxes_without_counters`.
+
+**Origen:** `src/mailquery/search.py:2522-2536` (`_received_body`), `2580-2605` (`_headers_body`), `2588`; `src/mailquery/plugins/api.py:87`, `98`, `624-643` (`_valid_body`).
+
+---
+
+## BUG-11 — Apple Mail: una parte `text/html` vacía recurre al texto plano sin `W_HTML_NO_TEXT`
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-53 y §11.3: si hay HTML, nunca se usa el texto plano; un HTML que no produce texto da cuerpo vacío y `W_HTML_NO_TEXT`. Outlook lo cumple.
+
+**Comportamiento observado:** en Apple Mail, una parte `text/html` con solo espacios en blanco se descarta y el cuerpo sale de la parte `text/plain`, sin `W_HTML_NO_TEXT`. Las dos plataformas dan resultados distintos para el mismo mensaje.
+
+**Origen:** `src/mailquery/emlx.py:461-464` y `474`.
+
+---
+
+## BUG-12 — `doctor`: fallos de un plugin fuera de `doctor_checks()` mal clasificados
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-79 y la fila de §23.1: una llamada al plugin que vence el corte duro da el chequeo `plugin` con `timeout after 30 s: plugin '<driver>' did not respond`; un fallo de `doctor_checks()` sale como `E_PLUGIN_FAILED: …`.
+
+**Comportamiento observado:**
+
+- El texto del timeout solo se usa para `doctor_checks()`. Un timeout en `accounts()`, `mailboxes()` o `resolve_mailbox()` cae en el chequeo `config` del plugin como `E_CLIENT_TIMEOUT: did not respond within the timeout ...` y no añade el chequeo `plugin`.
+- El prefijo `E_PLUGIN_FAILED:` se usa también cuando el código mapeado es `E_PERMISSION`, `E_CLIENT_BUSY` o `E_PLUGIN_INCOMPATIBLE`.
+- Un `PluginError(reason="timeout")` del propio plugin se muestra con el texto del corte de 30 s.
+
+**Origen:** `src/mailquery/cli.py:2188-2194`, `2250-2257`, `2278-2280`; `src/mailquery/plugins/api.py:385-393`.
+
+---
+
+## BUG-13 — `doctor` en texto repite `Plugins:` antes de cada plugin
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-79 y el ejemplo de §12.8: después de `Checks:` sale una sola sección `Plugins:` con el nombre de cada driver y sus filas debajo.
+
+**Comportamiento observado:** con dos o más plugins declarados, el informe imprime una cabecera `Plugins:` antes de cada plugin, también con `--failures`.
+
+**Origen:** `src/mailquery/cli.py:1862-1865` y `1924`.
+
+---
+
+## BUG-14 — `not_downloaded` tiene dos mensajes distintos según la ruta del código
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2.
+
+**Comportamiento esperado:** el mismo `reason` da el mismo `message` en el motor de adjuntos y en la envoltura del plugin; §12.6 asigna la plantilla al núcleo (regla de propiedad), aunque su lista de plantillas no dice cuál corresponde a cada `reason`.
+
+**Comportamiento observado:** para `not_downloaded`, el motor de adjuntos dice `is not available in the local store` y la envoltura del plugin dice `could not be retrieved from its origin`.
+
+**Origen:** `src/mailquery/attachments/engine.py:108` y `114`; `src/mailquery/plugins/api.py:247-248`.
+
+---
+
+## BUG-15 — El registro no comprueba ninguna operación de `MailBackend` al cargar un plugin
+
+**Registrado:** 2026-11-18, en la revisión de la conciliación de `PRD.md` v2.2; ampliado el 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-36: un plugin implementa el contrato de backend completo de `INTERFACES.md`; incumplir el contrato ⇒ `E_PLUGIN_INCOMPATIBLE` en la carga (§12.6). RF-38: el plugin expone `parse_native_id`. RF-79: `doctor_checks()` es obligatorio en `plugin_api = 1`.
+
+**Comportamiento observado:** el registro solo valida `driver`, `plugin_api` y las capacidades; no comprueba que exista ninguna operación de `MailBackend` (`doctor_checks`, `parse_native_id`, `accounts`, `mailboxes`, `query`, `attachments`, …). Un plugin sin `doctor_checks()` pasa el chequeo `driver` y solo falla en `doctor` como un chequeo `plugin` con `E_PLUGIN_FAILED`. Un plugin sin `parse_native_id` recibe su `<native_id>` sin validar en `show` y `attachment`. Un plugin sin otra operación falla en tiempo de ejecución, cuando el proxy del driver la pide, con un `AttributeError` en lugar de `E_PLUGIN_INCOMPATIBLE`.
+
+**Origen:** `src/mailquery/backends/registry.py:342-368` (`_plugin_metadata`); `src/mailquery/cli.py:941-950` (`_validate_command_native_id`); `src/mailquery/plugins/api.py:740-742` (`_DriverCallProxy.__getattr__`).
+
+---
+
+## BUG-16 — La pantalla de *magic bytes* y el staging leen flujos distintos del adjunto
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-46, §9.4 y §10.3.4: los bytes que se escriben en staging y se registran con su SHA-256 son los mismos que pasaron la pantalla de *magic bytes*.
+
+**Comportamiento observado:** la pantalla abre un flujo del driver y lee su primer bloque; la extracción abre después un flujo nuevo del mismo adjunto y lo escribe en staging sin volver a clasificar su primer bloque. Un plugin remoto, o una segunda materialización de Outlook con `SaveAsFile`, puede entregar en el segundo flujo bytes distintos de los inspeccionados.
+
+**Origen:** `src/mailquery/attachments/engine.py:518` y `527` (pantalla), `540` (`extract` abre otro `driver_stream`); `src/mailquery/attachments/screening.py:133-134`.
+
+---
+
+## BUG-17 — Outlook: item con solo cabeceras y adjuntos da `E_ATTACHMENT_UNREADABLE` en vez de `not_downloaded`
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-44: si la disponibilidad de un adjunto no puede determinarse sin descargar ⇒ `E_ATTACHMENT_UNAVAILABLE` (exit 3) con `reason` `not_downloaded`.
+
+**Comportamiento observado:** para un item de Outlook que no está descargado completo y señala adjuntos, `attachments()` lanza `E_ATTACHMENT_UNREADABLE` (`the attachments are not available in the local store and cannot be listed without downloading the message`).
+
+**Origen:** `src/mailquery/backends/outlook.py:817-823`.
+
+---
+
+## BUG-18 — Uid de un plugin: `describe()` se llama antes de `parse_native_id`
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.11, fila 5: la validación nativa del uid (`parse_native_id`) ocurre antes del store, con el registro sin abrir el cliente.
+
+**Comportamiento observado:** en `show` y `attachment` con el uid de un plugin, el núcleo llama a `describe()` del driver (la llamada con la que abre el backend y registra su estrategia) antes de validar el `<native_id>` con `parse_native_id`; un uid inválido llega al plugin después de abrir su backend.
+
+**Origen:** `src/mailquery/cli.py:1018` y `921` (`show`: `describe` al abrir los drivers), `1027-1030` (`attachment`), `1032` (`show`); `_log_backend_connection` en `cli.py:1516-1525`.
+
+---
+
+## BUG-19 — Outlook: los errores del flujo de un adjunto no usan la plantilla de mensaje del núcleo
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-50 y §12.6: el núcleo posee la plantilla de `message` de los errores de adjuntos (`attachment <i> ('<nombre>') of message <uid> …`).
+
+**Comportamiento observado:** los errores del flujo de Outlook ya son `MailqueryError` con el texto del backend y el motor los propaga sin cambios; por ejemplo, `the attachment is corrupt or unreadable` o `the attachment is not available in the local store`, sin índice, nombre ni uid.
+
+**Origen:** `src/mailquery/backends/outlook.py:861-865`, `876-885` y `1823-1831`; `src/mailquery/attachments/engine.py:667-668` (`_driver_error` devuelve el `MailqueryError` tal cual).
+
+---
+
+## BUG-20 — Apple Mail recorta y reemplaza el nombre del adjunto antes de las reglas del núcleo; Outlook no
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §10.3.1: los controles se comprueban sobre el nombre crudo del adjunto, igual en ambas plataformas (RNF-11, RF-28).
+
+**Comportamiento observado:** Apple Mail aplica `.strip()` al nombre (que quita también controles en los extremos, como `\t` o `\n`) y sustituye los surrogates sueltos por `U+FFFD` antes de que el núcleo lo vea, así que esos nombres no se bloquean por controles. Outlook entrega el nombre sin cambios. El mismo adjunto puede bloquearse en Windows y no en macOS.
+
+**Origen:** `src/mailquery/emlx.py:742-749` (`_attachment_part_name`) y `885-890` (`_clean_text`); `src/mailquery/backends/outlook.py:827` y `1644-1645` (`_text`).
+
+---
+
+## BUG-21 — Windows acepta `[scope."apple_mail:…"]` y falla después con `E_STORE_NOT_FOUND`
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-34 y §15.3 ("Drivers en `[scope]`"): un `<driver>` que no está disponible ⇒ `E_DRIVER_UNKNOWN` (exit 2); §12.9: el backend interno `apple_mail` no está disponible en Windows.
+
+**Comportamiento observado:** en Windows, `[scope."apple_mail:…"]` supera la validación de la configuración porque el registro considera instalado el backend interno en cualquier plataforma; los comandos de datos fallan después al abrir el store de Apple Mail con `E_STORE_NOT_FOUND` (exit 3).
+
+**Origen:** `src/mailquery/backends/registry.py:203-205` (`is_installed` no filtra por plataforma, a diferencia de `versions`, `207-215`); `src/mailquery/config.py:568-569`.
+
+---
+
+## BUG-22 — El hint de `E_DRIVER_UNKNOWN` no lista los drivers instalados en el uid ni en `[scope]`
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.6, fila de `E_DRIVER_UNKNOWN`: el hint lista los drivers instalados (`installed drivers: ...`) e indica `pipx inject mailquery <paquete>`.
+
+**Comportamiento observado:** el prefijo desconocido de un uid y el de un bloque `[scope]` usan un hint que indica `pipx inject mailquery <package>`, declarar la cuenta y el formato `[a-z0-9_]{1,64}`, sin la lista de drivers instalados. Solo el registro, al cargar un driver, da `installed drivers: ...`.
+
+**Origen:** `src/mailquery/uid.py:134-142` (`driver_unknown`), usado por `uid.py:118`, `config.py:558` y `569`, `cli.py:1400` y `search.py:374`, `940`; la lista solo está en `src/mailquery/backends/registry.py:127-133`.
+
+---
+
+## BUG-23 — Los subcomandos aceptan opciones abreviadas
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.6 y §12.7: una opción desconocida ⇒ `E_USAGE` (exit 2); el parser raíz y `attachment` desactivan las abreviaturas.
+
+**Comportamiento observado:** los parsers de `doctor`, `mailboxes`, `search`, `new` y `show` no pasan `allow_abbrev=False`; por ejemplo, `mailquery doctor --fail --js` se acepta como `--failures --json`.
+
+**Origen:** `src/mailquery/cli.py:409`, `429`, `448`, `549` y `584`.
+
+---
+
+## BUG-24 — Ayuda: colores en Python ≥ 3.14 y textos que contradicen el PRD
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.7: la ayuda no tiene colores y ningún texto de ayuda contradice el PRD. RF-39 y §12.9: `-v` imprime también los drivers. §12.6: exit 1 es `E_INTERNAL`. RF-25 y RF-38: el uid es `"<driver>:<native_id>"`; el legado solo se acepta en la entrada. §10.3.3 y RF-43: `sanitized_name` ya incluye el prefijo `<index:02d>_`.
+
+**Comportamiento observado:**
+
+- Con Python ≥ 3.14 en una terminal, `argparse` colorea la ayuda: el parser no pasa `color=False`.
+- La línea de `-v` dice `print the version, backend, Python and platform, then exit`, sin los drivers.
+- `Exit codes:` de la ayuda raíz omite el exit 1.
+- `show --help` usa `UID`, la sección `Arguments:` y ejemplos con uids legados (`mailquery show 83143`); `attachment --help` usa `<uid>`, `Positional arguments:` y uids prefijados.
+- Las notas de `attachment --help` dan la ruta `~/.mailquery/attachments/<driver>/<native_id>/<index:02d>_<sanitized_name>`, que se lee como un prefijo doble.
+
+El ejemplo de §12.7 reproduce la ayuda actual y no cambia.
+
+**Origen:** `src/mailquery/cli.py:379-385` (sin `color=False`), `392`, `135-137` (`_ROOT_EPILOG`), `152-153` (`_ATTACHMENT_EPILOG`), `254-257` (`_SHOW_EPILOG`), `592` y `606` (`show`) frente a `620` y `639-644` (`attachment`).
+
+---
+
+## BUG-25 — `doctor --failures` en texto: líneas de primer nivel sin sangría
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-74: el informe de `--failures` conserva el formato del informe de texto, con las líneas de cada sección bajo su cabecera.
+
+**Comportamiento observado:** bajo `Checks:`, las líneas `not evaluated: <nombres>` y `all checks passed` salen en la columna 0, mientras que las filas de chequeos y la línea `not evaluated:` de un plugin llevan sangría.
+
+**Origen:** `src/mailquery/cli.py:1913` y `1926`.
+
+---
+
+## BUG-26 — `W_NO_ACCOUNTS` dice que no hay cuentas declaradas cuando todas están excluidas
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.10: el detalle de un warning indica siempre el motivo concreto. §15.3: si todas las cuentas declaradas están excluidas, `search`/`new` devuelven `W_STORE_EXCLUDED` y `W_NO_ACCOUNTS`.
+
+**Comportamiento observado:** `W_NO_ACCOUNTS` siempre dice `no accounts are declared in config.toml; nothing is observed`, también cuando hay cuentas declaradas y todas resuelven a stores excluidos.
+
+**Origen:** `src/mailquery/search.py:133-135` (`NO_ACCOUNTS_WARNING`).
+
+---
+
+## BUG-27 — Los comodines `*` y `?` no cruzan saltos de línea
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.2, RF-08 y RF-09: `*` es cualquier secuencia y `?` un carácter.
+
+**Comportamiento observado:** el patrón se traduce a `.*` y `.` y se busca sin `re.DOTALL`, así que ninguno coincide con `\n`; `--text "pago*factura"` no encuentra un cuerpo en el que las dos palabras están en líneas distintas.
+
+**Origen:** `src/mailquery/search.py:286-313` (`wildcard_to_regex`, `matches`).
+
+---
+
+## BUG-28 — `--limit`, `--since`/`--until` e `--include-mailbox` vacío se validan después de abrir el cliente
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.12, punto 7: `--limit` se valida con los demás argumentos, antes de crear `~/.mailquery` y de abrir el store.
+
+**Comportamiento observado:** el rango de `--limit` sin `--group-by` (`search` y `new`), `--since`/`--until` (`E_BAD_TIME`) y un `--include-mailbox` vacío se validan dentro de `_execute`, después de crear `~/.mailquery`, cargar `config.toml`, tomar el lock y abrir los drivers (`describe()`).
+
+**Origen:** `src/mailquery/cli.py:1123-1127` y `1547-1553` (`_build_filters`), llamados desde `cli.py:1045`, después de `963`, `976`, `1004` y `1011-1021`.
+
+---
+
+## BUG-29 — `--text`: warnings del cuerpo de candidatos que no coinciden y candidatos ilegibles descartados en silencio
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** RF-72 y las reglas comunes de §6.8: los warnings del estado del cuerpo se emiten por mensaje devuelto, en el orden de `messages[]`. RF-15: nunca resultados parciales silenciosos.
+
+**Comportamiento observado:** con `--text` y `snippet` o `body`, los warnings del estado del cuerpo salen para cada candidato leído, también los que no coinciden, en el orden de lectura y antes de `W_RESULTS_TRUNCATED`. Sin campos de cuerpo, un candidato cuyo cuerpo no se puede leer se descarta sin ningún aviso.
+
+**Origen:** `src/mailquery/search.py:644-650` y `1651-1658` (`_scan_bodies`).
+
+---
+
+## BUG-30 — `body.truncated` y `snippet` colapsan espacios en blanco de forma distinta
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** §12.5: `body.truncated` indica que el `snippet` se cortó a 200 caracteres.
+
+**Comportamiento observado:** `body.truncated` colapsa todos los espacios en blanco Unicode antes de medir, mientras que `snippet` solo colapsa `[ \t\f\v]` y los saltos de línea. Con otros espacios (p. ej. `U+00A0` o `U+3000`) repetidos, `body.truncated` puede ser `false` con un `snippet` cortado, o al revés.
+
+**Origen:** `src/mailquery/search.py:2623-2629` (`_snippet_truncated`); `src/mailquery/output.py:348-362` (`make_snippet`).
+
+---
+
+## BUG-31 — Docstrings y comentarios del código inexactos
+
+**Registrado:** 2026-11-18, en la revisión completa de `PRD.md` v2.2.
+
+**Comportamiento esperado:** `CLAUDE.md`: cada comentario y docstring describe lo que hace el código. RF-24: Apple Mail y Outlook clásico. RF-33: solo se importan los drivers declarados y el nativo. §11.2: el estado se persiste en una corrida de `new` sin `--peek` que emite al menos un mensaje.
+
+**Comportamiento observado:**
+
+- El docstring del paquete describe solo el acceso a Apple Mail (`read-only CLI access to Apple Mail`).
+- El docstring del registro dice que el núcleo carga los drivers declarados "or referenced by a uid".
+- El docstring de `state.py` dice que el esquema 2 se persiste en la siguiente corrida de `new` sin `--peek`, sin la condición de emitir al menos un mensaje.
+
+**Origen:** `src/mailquery/__init__.py:1-7`; `src/mailquery/backends/registry.py:16`; `src/mailquery/state.py:8`.
+
+---
+
+## BUG-34 — `search --help`: `--since`/`--until` no documentan todas las fechas relativas
+
+**Registrado:** 2026-11-18, en la revisión de la ayuda de la CLI.
+
+**Comportamiento esperado:** §12.7: `mailquery search --help` documenta las fechas relativas. RF-11 las define como `<N><unidad>` (unidades `min`, `h`, `d`, `w`, `mo`, `y`) y las palabras clave `now`, `today` y `yesterday`. El hint de `E_BAD_TIME` ya las enumera: `use ISO 8601 (2026-11-01) or a relative value: 30min, 24h, 7d, 2w, 1mo, 6mo, 1y, today, yesterday, now`.
+
+**Comportamiento observado:** `search --help` muestra:
+
+```text
+  --since TIME            received at or after TIME (inclusive): ISO 8601, 7d, 2w, 1mo, today...
+  --until TIME            received before TIME (exclusive): ISO 8601, 7d, 2w, 1mo, today...
+```
+
+Faltan las unidades `min`, `h` e `y`, la forma general `<N><unit>` y las palabras clave `now` y `yesterday`; el epílogo tampoco las enumera.
+
+**Relación con otras entradas:** BUG-32 registra solo la regla de la fecha sin hora (00:00 local) y el ejemplo de un día completo en la misma ayuda.
+
+**Origen:** `src/mailquery/cli.py:493-502` (ayuda de `--since` y `--until`); el hint completo está en `src/mailquery/errors.py:130-131`.
+
+---
+
+## BUG-35 — `search --help`: la nota de URLs cita cabeceras, que `search` no devuelve, y omite el extracto
+
+**Registrado:** 2026-11-18, en la revisión de la ayuda de la CLI.
+
+**Comportamiento esperado:** RF-54: el modo de URL afecta a `subject`, `from.name`, `to[].name`, `cc[].name`, los valores de `headers`, `body_text` y `snippet`. RF-68: la fila de `search` no tiene `headers` (sus campos son `uid`, `message_id`, `duplicate_count`, `subject`, `from`, `to`, `cc`, `date_sent`, `date_received`, `mailbox`, `is_read`, `is_flagged`, `has_attachments`, `size_bytes`, `snippet`, `body`). En `search` la lista correcta es el asunto, los nombres, el extracto y el cuerpo.
+
+**Comportamiento observado:** las notas de `search --help` dicen:
+
+```text
+  URLs in the subject, the names, the headers and the body are neutralized by
+  default ([content].url_display = "keep" keeps the exact text); --strip-links
+  replaces every URL with [link omitted].
+```
+
+Cita `the headers`, que `search` nunca devuelve, y omite el extracto (`snippet`).
+
+**Origen:** `src/mailquery/cli.py:214-217` (notas del epílogo de `search`).
+
+---
+
+## BUG-36 — Ayuda de opciones: `--fields`, `--group-by` y `--count` usan la tercera persona y el resto el imperativo
+
+**Registrado:** 2026-11-18, en la revisión de la ayuda de la CLI.
+
+**Comportamiento esperado:** §12.7: la ayuda es texto para humanos, en inglés y con secciones uniformes; RF-73 pide describir `--fields`, `--group-by` y `--count`. El PRD no fija la forma verbal; la del resto de las opciones, incluida la de `argparse` (`show this help message and exit`), es el imperativo, y las líneas de opción usan una sola forma.
+
+**Comportamiento observado:**
+
+- Tercera persona: `mailboxes --fields` "adds name, url, total and unread to every folder…"; `search --fields` y `new --fields` "adds fields to the default row…"; `search --group-by` "groups the results by up to two keys…"; `search --count` "returns only the number of matching messages, without messages"; `show --fields` "selects the fields of message (uid is always included)…".
+- Imperativo en el resto: `--strip-links` "replace every URL with [link omitted]…", `new --peek` "return the new messages without advancing the cursor", `doctor --failures` "show only the checks that fail and the ones not evaluated", `doctor --json` "print the machine-readable JSON payload instead of the human report", `attachment --all` "recover all attachments of the message…".
+
+**Origen:** `src/mailquery/cli.py:444` (`mailboxes --fields`), `532` (`search --fields`), `540` (`--group-by`), `546` (`--count`), `579` (`new --fields`) y `602` (`show --fields`).
 
 ---
 

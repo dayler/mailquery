@@ -2,7 +2,7 @@
 
 #### DOC-10 — Documentación de la fila y de `--fields`
 
-Requisitos: AC-O10, AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-55, AC-39 · Archivo: `tests/test_fields.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -13,7 +13,7 @@ Requisitos: AC-O10, AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.
 
 #### DOC-11 — Documentación de `--group-by` y `--count`
 
-Requisitos: AC-O10 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-55 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -23,23 +23,23 @@ Requisitos: AC-O10 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### DOC-13 — Documentación de `mailboxes`
 
-Requisitos: AC-O14, AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+Requisitos: AC-59, AC-60 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Los dos README muestran la salida agrupada (ejemplo de PRD-v2.2 sección 8) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
+| .01 | P | Los dos README muestran la salida agrupada (ejemplo de PRD.md sección 12.5) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
 | .02 | P | La skill usa `mailboxes` sin `--fields` para ver carpetas y `--fields total,unread` solo cuando hacen falta los contadores. |
 | .03 | P | `docs/config.example.toml` explica que `mailbox_list` acepta el `path` que muestra `mailboxes` (y el nombre o la URL de `--fields name,url`). |
 
 #### DOC-12 — Diagnóstico sin *preflight*
 
-Requisitos: AC-O10, AC-O12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-55, AC-57 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `doctor --help` describe `--failures` y el ejemplo `mailquery doctor --json --failures`; la ayuda general muestra `environment and read-only diagnosis`. |
 | .02 | N | La skill, los README y la ayuda general no contienen "Preflight once per session", `# 1. preflight` ni `read-only preflight`, ni piden `doctor`/`mailboxes` antes de cada uso. |
-| .03 | P | La skill indica `mailquery doctor --json --failures` en los casos de RF-77, `mailboxes` solo para editar la configuración o tras un `search` sin resultados, y su primer ejemplo es un `search`. |
+| .03 | P | La skill indica `mailquery doctor --json --failures` en los casos de RF-75, `mailboxes` solo para editar la configuración o tras un `search` sin resultados, y su primer ejemplo es un `search`. |
 | .04 | P | Los dos README describen `doctor` como verificación tras instalar o actualizar y como diagnóstico de un fallo, con `--failures` y la sección de plugins. |
 
 #### DOC-01 — `README.md`
@@ -109,7 +109,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 
 #### DOC-07 — Actualización de seguridad de `css-inline` en los README
 
-Requisitos: AC-H17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
+Requisitos: AC-38 · Archivo: `tests/test_packaging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -120,7 +120,7 @@ Requisitos: AC-H17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
 
 #### DOC-08 — Reglas de seguridad
 
-Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content_wiring.py`
+Requisitos: AC-39 · Archivo: `tests/test_content_wiring.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -133,7 +133,7 @@ Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_content_wiring.
 
 #### DOC-09 — Documentación de F2 y A7
 
-Requisitos: AC-H18 (delta `PRD-v2.2.md`), documentación de AC-D01/AC-D06 · Archivo: `tests/test_remote_attachments.py`
+Requisitos: AC-39, documentación de AC-40/AC-45 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -152,7 +152,7 @@ Requisitos: AC-01 · Archivo: `tests/test_packaging.py`
 
 #### PKG-02 — Empaquetado
 
-Requisitos: AC-18, RF-35, PRD.md §22.3 · Archivo: `tests/test_install_scripts.py`, `tests/test_packaging.py`
+Requisitos: AC-18, RF-33, PRD.md §22.3 · Archivo: `tests/test_install_scripts.py`, `tests/test_packaging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -162,7 +162,7 @@ Requisitos: AC-18, RF-35, PRD.md §22.3 · Archivo: `tests/test_install_scripts.
 
 #### PKG-03 — Dependencia `css-inline`
 
-Requisitos: AC-H15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_packaging.py`
+Requisitos: AC-36 · Archivo: `tests/test_packaging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

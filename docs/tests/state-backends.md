@@ -2,7 +2,7 @@
 
 #### UT-BE-01 — Selección del backend
 
-Requisitos: RF-26 · Archivo: `tests/test_backends.py`
+Requisitos: RF-24 · Archivo: `tests/test_backends.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -23,7 +23,7 @@ Requisitos: RNF-02, ADR-14 · Archivo: `tests/test_backends.py`
 
 #### UT-BE-03 — Interfaz
 
-Requisitos: RF-38 · Archivo: `tests/test_backends.py`
+Requisitos: RF-36 · Archivo: `tests/test_backends.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -32,7 +32,7 @@ Requisitos: RF-38 · Archivo: `tests/test_backends.py`
 
 #### UT-BE-04 — Contrato de backend
 
-Requisitos: RF-12, RF-13 · Archivo: `tests/test_backends.py`
+Requisitos: RF-11, RF-12 · Archivo: `tests/test_backends.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -44,7 +44,7 @@ Requisitos: RF-12, RF-13 · Archivo: `tests/test_backends.py`
 
 #### UT-ST-01 — Lock
 
-Requisitos: RF-22 · Archivo: `tests/test_state.py`
+Requisitos: RF-20 · Archivo: `tests/test_state.py`
 
 Los 7 tests de `RunLockTest`, en los 3 SO.
 
@@ -78,7 +78,7 @@ Requisitos: AC-06 · Archivo: `tests/test_state.py`
 
 #### UT-ST-05 — Escritura del estado
 
-Requisitos: RF-23 · Archivo: `tests/test_state.py`
+Requisitos: RF-21 · Archivo: `tests/test_state.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -95,7 +95,7 @@ Requisitos: AC-06 · Archivo: `tests/test_cli.py`, `tests/test_state.py`
 | .02 | P | Strings hexadecimales en mayúsculas ⇒ `outlook:<HEX>`; mayúsculas/minúsculas no se reinterpretan (un valor inválido cae en.03). Estos dos casos prueban la función pura o inyectan un registro con ambos drivers para que la validación posterior no dependa de la plataforma. |
 | .03 | N | Valor no entero, no hex en mayúsculas, `0`, negativo, `None`, lista ⇒ `E_STATE_CORRUPT` con hint de renombrar; un entero migrado cuyo driver no está instalado ⇒ `E_STATE_CORRUPT` en la validación de schema 2 (caso separado). |
 | .04 | P | `new --peek` migra en memoria, no escribe y responde con el cursor migrado. |
-| .05 | P | La siguiente corrida de `new` no `--peek` persiste schema 2 con la escritura atómica; el original solo se reemplaza al final. |
+| .05 | P | La siguiente corrida de `new` sin `--peek` que emite al menos un mensaje persiste schema 2 con la escritura atómica; una corrida sin mensajes no escribe estado; el original solo se reemplaza al final. |
 | .06 | P | `doctor` informa `schema: 1 (migration pending)` hasta la persistencia y schema 2 después. |
 | .07 | P | Ciclo de vida DP-03 (estado): desinstalar un plugin deja su `cursor.last_uid` en `E_STATE_CORRUPT`, poda sus uids del anillo y `doctor state` informa la poda sin romper `new` por los elementos podados. |
 
@@ -124,7 +124,7 @@ POSIX, con los originales en 0644.
 
 #### UT-UID-01 — Formato y parseo
 
-Requisitos: AC-05, RF-40 · Archivo: `tests/test_uid.py`
+Requisitos: AC-05, RF-38 · Archivo: `tests/test_uid.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

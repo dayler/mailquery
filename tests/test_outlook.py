@@ -826,7 +826,7 @@ class OutlookReadOnlyProxyTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-02 — Client detection (PRD 12.6, RF-28)
+# OL-02 — Client detection (PRD 12.6, RF-26)
 # --------------------------------------------------------------------------- #
 
 
@@ -968,7 +968,7 @@ class OutlookComErrorTests(_OutlookCliCase):
 
 
 # --------------------------------------------------------------------------- #
-# OL-04 — Timeout (RF-33, PRD 12.8); 0.2 s deadline
+# OL-04 — Timeout (RF-31, PRD 12.8); 0.2 s deadline
 # --------------------------------------------------------------------------- #
 
 
@@ -1153,7 +1153,7 @@ class OutlookTimeoutTests(_HungCommandCase, unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DR-10 — COM timeout with --failures (RF-76, RF-81, D-25)
+# UT-DR-10 — COM timeout with --failures (RF-74, RF-79, D-25)
 # --------------------------------------------------------------------------- #
 
 
@@ -1491,7 +1491,7 @@ class OutlookStoreClassificationTests(_StoreCase):
         self.assertEqual(rows, expected)
 
     def test_store_matrix_excluded_stores_have_label_path_and_reason(self) -> None:
-        """RF-34: every excluded store with its label, path and reason, in profile order."""
+        """RF-32: every excluded store with its label, path and reason, in profile order."""
         fake = fk.FakeOutlook.store_matrix()
         got = self.make(fake).excluded_stores()
         expected = [
@@ -2182,7 +2182,7 @@ class OutlookFlagAttachmentTests(_ItemCase):
 
 
 class OutlookItemLookupTests(_ItemCase):
-    """membership, duplicate_counts and find_message (PRD 12.4, RF-07)."""
+    """membership, duplicate_counts and find_message (PRD 12.4, RF-06)."""
 
     def test_membership_is_the_folder_of_each_uid(self) -> None:
         fake, backend = self.make_items()
@@ -3869,7 +3869,7 @@ _NARROWING = ("--since", "--until", "--from", "--subject", "--include-mailbox")
 
 
 class OutlookContentScanTests(_CommandScenarioCase):
-    """OL-24 (PRD RF-17, 9.5): bounded `--text`, `--to` and `--cc` on Windows."""
+    """OL-24 (PRD RF-15, 9.5): bounded `--text`, `--to` and `--cc` on Windows."""
 
     _SCOPE = _scope_toml("ana@example.com")  # INBOX only: no narrowing folder
 
@@ -4061,7 +4061,7 @@ class OutlookDoctorTests(_OutlookCommandCase):
         )
 
     def test_doctor_stores_lists_candidates_and_excluded_stores(self) -> None:
-        """RF-34: `stores` lists candidates (label, type) and excluded (label, path, reason)."""
+        """RF-32: `stores` lists candidates (label, type) and excluded (label, path, reason)."""
         checks = self.doctor(fk.FakeOutlook.store_matrix())
         detail = checks["stores"]["detail"]
         self.assertTrue(checks["stores"]["ok"])

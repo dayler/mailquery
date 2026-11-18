@@ -1,6 +1,6 @@
 """Tests for ``mailquery.output``: JSON formatting and content cleaning.
 
-Covers UT-OUT-01 (formatted JSON, PRD RF-18 / 12.5), UT-OUT-02 (dates, PRD 17)
+Covers UT-OUT-01 (formatted JSON, PRD RF-16 / 12.5), UT-OUT-02 (dates, PRD 17)
 and UT-OUT-03 (content cleaning, PRD 16.3).
 """
 

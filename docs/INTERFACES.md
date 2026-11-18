@@ -1,8 +1,8 @@
 # Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
 
 > **Estado del contrato:** implementado en `develop` (plugins de backend y
-> adjuntos; [`PRD.md`](PRD.md) v2.1) y **no publicado**. El paquete anuncia
-> `mailquery.__version__` = 3.0.0a1 (3.0.0-alpha, PEP 440) en `develop`, todavía sin tag de release ni
+> adjuntos, contenido no confiable y salida a medida; [`PRD.md`](PRD.md) v2.2) y **no publicado**. El paquete anuncia
+> `mailquery.__version__` = 3.0.0a1 (3.0.0-alpha.1, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como está
 > implementado.
 
@@ -18,11 +18,11 @@ concretos entre módulos, el layout del repositorio y las reglas de trabajo
 mailquery/                          # raíz del repo (https://github.com/dayler/mailquery)
 ├── README.md                       # instalación, FDA, ejemplos, contratos (español)
 ├── LICENSE                         # MIT (Ariel Dayler Salzar Hinojosa, 2026)
-├── pyproject.toml                  # console script `mailquery`, entry points `mailquery.backends`, sin dependencias runtime
+├── pyproject.toml                  # console script `mailquery`, entry points `mailquery.backends`, dependencias runtime `css-inline` y `pywin32` (solo Windows)
 ├── .gitignore                      # .obsidian/, __pycache__/, fixtures generados
 ├── .github/workflows/tests.yml     # CI: suite en 3 SO × Python 3.11–3.14 + instaladores
 ├── docs/
-│   ├── PRD.md                      # PRD v2.1: requisitos del producto
+│   ├── PRD.md                      # PRD v2.2: requisitos del producto
 │   ├── INTERFACES.md               # este documento
 │   ├── tests/                      # catálogo de pruebas: índice TEST-CATALOG.md y un archivo por área
 │   ├── KNOWN-DEFECTS.md            # defectos abiertos
@@ -112,8 +112,9 @@ Reglas globales:
 
 - **Código en inglés** (identificadores, comentarios, docstrings, mensajes de
   log, nombres de tests). **Documentación en español** (README, docs/, recetas).
-- Solo **biblioteca estándar** de Python ≥ 3.11, con una excepción: `pywin32`
-  (solo Windows), que **únicamente** puede importar
+- Solo **biblioteca estándar** de Python ≥ 3.11, con dos excepciones: `css-inline`,
+  que **únicamente** puede importar `src/mailquery/output.py`, y `pywin32` (solo
+  Windows), que **únicamente** puede importar
   `src/mailquery/backends/outlook_com.py`. Sin red, sin AppleScript/osascript,
   sin escribir nada en `~/Library/Mail` ni en el cliente de correo. Invariante
   I-1 (PRD §4).
@@ -261,7 +262,7 @@ list[str]`.
 
 - `dumps_json`: JSON **formateado** (indentación de 2 espacios, un campo por
   línea, `ensure_ascii=False`); `write_json` añade un único LF final.
-- `configure_streams()`: fuerza UTF-8 y LF en `stdout`/`stderr` (RF-32), también
+- `configure_streams()`: fuerza UTF-8 y LF en `stdout`/`stderr` (RF-30), también
   con pipes en Windows; `cli.main` la llama al empezar.
 - `iso_timestamp`: ISO 8601 en hora local con offset; `None`, valores ≤ 0 o no
   representables dan `None`. La zona local es `LOCAL_ZONE` (`None` = la del
@@ -390,7 +391,7 @@ list[str]`.
 
 ### `plugins/__init__.py` y `plugins/api.py`
 
-API pública de plugin (API 1; PRD §6.5 RF-38, §9.2). Es lo único que
+API pública de plugin (API 1; PRD §6.5 RF-36, §9.2). Es lo único que
 un plugin externo importa de mailquery; `plugins/**` no importa backends ni el
 store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
 
@@ -416,7 +417,7 @@ store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
   `capabilities`, `internal` (este último lo añade el registro).
 
 **Protocolo de errores de plugin y timeout de metadatos (§12.6, RF-50,
-RNF-15/16).** El núcleo posee `code`, `exit` y la plantilla de `message`; el
+RNF-15/RNF-21).** El núcleo posee `code`, `exit` y la plantilla de `message`; el
 plugin solo aporta `reason` (cerrado), `hint`, `detail` y `log_message`. Todo
 paso por el módulo usa una única envoltura:
 
@@ -498,7 +499,7 @@ un hilo daemon con `Event.wait(deadline)`; al vencer ⇒ `E_CLIENT_TIMEOUT` (3),
 sin reintento y sin resultados parciales (el hilo no se puede matar: riesgo
 aceptado, PRD §23.1). Un driver **nativo** se ejecuta inline y se comprueba
 el plazo al volver: sus conexiones SQLite/COM son thread-affine, así que no se
-mueven a otro hilo; Outlook conserva además su watchdog COM de RF-33. Límite
+mueven a otro hilo; Outlook conserva además su watchdog COM de RF-31. Límite
 conocido: una llamada nativa colgada no se aborta por este mecanismo.
 
 Log (RNF-15, §14): el error de plugin lleva `log_message` saneado (o la
@@ -621,8 +622,9 @@ protocolo v1: no está en la ABC ni en `plugin_api`.
 `parse_uid` y `parse_native_id` de los adaptadores son `@staticmethod` puros: el
 núcleo puede validar antes de crear el home, leer la config o abrir el store.
 
-**`doctor_checks()` y la sección `plugins` de `doctor` (RF-81).** Un plugin declarado en
-`[scope."<driver>:…"]` aparece en `doctor --json` dentro de `plugins[]`, con `driver` y `checks[]`;
+**`doctor_checks()` y la sección `plugins` de `doctor` (RF-79).** Un plugin declarado en
+`[scope."<driver>:…"]` aparece en `doctor --json` dentro de `plugins[]`, con `driver` y `checks[]`
+(con la configuración inválida, `plugins` es `[]`);
 `checks[]` lleva primero lo que devuelve `doctor_checks()` y después el chequeo `config` que calcula el
 núcleo. `doctor_checks()` devuelve una lista de objetos `{"name", "ok", "detail"}`: `name` es un
 string único dentro del plugin y distinto de `config` y `plugin` (reservados para el núcleo); `ok` es
@@ -636,13 +638,14 @@ del chequeo `plugin` conserva el prefijo `E_PLUGIN_FAILED`. El `config` del plug
 propio corte duro) y usa el mismo formato de detalle y de errores que el `config` del backend nativo.
 Un fallo al abrir el plugin deja `plugin` con `E_PLUGIN_FAILED` y `config` como
 `not evaluated: plugin failed`. El `config` de primer nivel ya no lista los bloques de plugins; si todos
-los bloques son de plugins, informa `0 account block(s) declared for driver <nativo>` con `ok=true`.
+los bloques son de plugins, informa `0 account block(s) declared for driver <nativo>` con `ok=true`,
+salvo que haya fallado un chequeo del que depende (`not evaluated: <chequeo> failed`, `ok=false`).
 
 ### `backends/__init__.py`
 `get_backend(*, platform=None, outlook_app=None, registry=None,
 security_center=None, pywin32=None, store=None, labels=None, mail_root=None,
 accounts_db=None, tmp_root=None) -> MailBackend`: `win32` ⇒ `OutlookBackend`,
-cualquier otra plataforma ⇒ `AppleMailBackend` (RF-26). `outlook_app`,
+cualquier otra plataforma ⇒ `AppleMailBackend` (RF-24). `outlook_app`,
 `registry`, `security_center` y `pywin32` son puntos de inyección de **solo
 tests** para Outlook; `store`, `labels`, `mail_root`, `accounts_db` y
 `tmp_root` son de Apple Mail.
@@ -698,7 +701,7 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 | `mailboxes_without_counters(account_uuids=None)` | `config.listed_mailboxes` | Outlook: carpetas sin contadores (`total`/`unread` = `None`); con `account_uuids` solo recorre los stores de esas cuentas |
 | `not_found_hint` (atributo) | `search.run_show` | Outlook: el hint de `message uid … was not found` remite a `excluded_stores` |
 | `unreadable_attachments(row)` | `search.run_show` | Outlook: `(nombres, warning)` de un item ilegible: `[]` y `W_ATTACHMENTS_UNAVAILABLE` solo si `has_attachments` y no es S/MIME (PRD §12.10) |
-| `recipients_open_items` (atributo) | `search.run_search` | Outlook (`True`): `--to`/`--cc` abren cada item, así que se validan como `--text` (acotamiento y `max_scan`), no acotan y se aplican después de contar los candidatos (RF-17) |
+| `recipients_open_items` (atributo) | `search.run_search` | Outlook (`True`): `--to`/`--cc` abren cada item, así que se validan como `--text` (acotamiento y `max_scan`), no acotan y se aplican después de contar los candidatos (RF-15) |
 | `items_opened` (propiedad) | `search.run_search`, `search.run_new` | Outlook: items distintos abiertos por la instancia; `scan.messages_read` = la diferencia durante el comando (en Apple Mail sigue siendo los cuerpos leídos) |
 | `load_snippet(row)` | `search.run_search`, `search.run_new` | Outlook: `load_body` sin nombres de adjuntos, con el cuerpo y las cabeceras de transporte (incluida la primera `Authentication-Results` y `Reply-To`; PRD §19) |
 | `load_headers(row)` | `search.run_search`, `search.run_new`, `search.run_show` | Backends internos: solo las cabeceras de `show`, la primera `Authentication-Results` y `Reply-To`, sin leer el cuerpo (Apple Mail: bloque del `.emlx`; Outlook: `PR_TRANSPORT_MESSAGE_HEADERS`, y S/MIME no se abre) |
@@ -747,7 +750,7 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
 - `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
 - `parse_native_id(native_id) -> str` (estático): valida la parte nativa de
   un uid prefijado (hex en mayúsculas) o `E_USAGE`; puro y offline.
-- `attachments(uid) -> list[AttachmentMetadataRow]` (RF-43/RF-47): lista
+- `attachments(uid) -> list[AttachmentMetadataRow]` (RF-41/RF-45): lista
   ordenada de los adjuntos **visibles** (los `PR_ATTACHMENT_HIDDEN` no se
   listan), `index` 1..N compartido con `show` y `attachment`, `name` original
   (`FileName`, si no `DisplayName`), `size_bytes` de la propiedad local `Size`
@@ -769,7 +772,7 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
   `E_ATTACHMENT_UNREADABLE` (`smime`) desde `attachments()`; `show` lo captura
   (`attachments: []`) y `attachment` lo propaga antes de “0 adjuntos”. Sin
   adjuntos ⇒ `[]`.
-- `attachment_stream(uid, index) -> Iterator[bytes]` (RF-45/RF-47):
+- `attachment_stream(uid, index) -> Iterator[bytes]` (RF-43/RF-45):
   materializa el adjunto local con `Attachment.SaveAsFile` —la **excepción COM**
   de PRD §4/§23.1— en un subdirectorio propio `0700`
   (`<home>/tmp/staging/outlook-<aleatorio>/`) con un archivo opaco `0600`,
@@ -779,7 +782,7 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
   borra el archivo y la sesión **siempre** (`finally`, `close()` del backend y
   barrido de sesiones huérfanas propias en la llamada siguiente). Un
   `E_ACCESSDENIED` es `E_PERMISSION`, un rechazo transitorio persistente
-  `E_CLIENT_BUSY` y un cuelgue el watchdog de 30 s por llamada COM (RF-33,
+  `E_CLIENT_BUSY` y un cuelgue el watchdog de 30 s por llamada COM (RF-31,
   `E_CLIENT_TIMEOUT` por el vigilante COM); el tope de `[attachments].timeout_seconds`
   (60 s por defecto, 10–600) lo aplica el motor de adjuntos mientras consume el stream. No resuelve referencias,
   no descarga y no abre red; `size_bytes` desconocido ⇒ `None`.
@@ -841,7 +844,7 @@ de funciones (importarlo en Linux o macOS no toca `pywin32`).
   objetos de `pywin32` llama directamente a `IDispatch.Invoke` con el DISPID
   cacheado por tipo y miembro (por objeto en los `Item`), sin el coste de la
   información de tipos del dispatch dinámico; el fake sigue pasando por `getattr`.
-- `Watchdog` y `WATCHDOG` (vigilante COM, RF-33): plazo `CALL_TIMEOUT_SECONDS` (30 s, punto de
+- `Watchdog` y `WATCHDOG` (vigilante COM, RF-31): plazo `CALL_TIMEOUT_SECONDS` (30 s, punto de
   inyección) por llamada; `call_com(watchdog, call)` arma el plazo y reintenta
   una vez a los 100 ms un rechazo transitorio.
 - Errores: `hresult_of(exc)`, `map_com_error(exc)` y
@@ -900,7 +903,7 @@ Los dos métodos estáticos de parseo:
 - La validación de los uids del estado vive en `state.py`, no en el
   backend.
 
-**Adjuntos (RF-43/RF-46/RF-47, AC-09/AC-10/AC-11/AC-12/AC-15/AC-20).**
+**Adjuntos (RF-41/RF-44/RF-45, AC-09/AC-10/AC-11/AC-12/AC-15/AC-20).**
 El adaptador implementa las dos operaciones del protocolo v1 además de
 `parse_native_id`; no escribe en el store ni en la caché (solo abre el `.emlx`
 en lectura) y nunca dispara descargas.
@@ -1032,16 +1035,17 @@ valida con `mailquery.uid` y la instalación del driver con `is_installed`.
   `EmittedUid` con la clave total `(date_received, driver, native_order_key)`
   (PRD §11.3); el cursor solo avanza (nunca compara el uid como texto) y
   el anillo de 1.000 uids queda en orden total, el más reciente al final. **No
-  guarda**: `search.run_new` llama a `save` salvo con `--peek` (un `--peek`
-  migra en memoria y no escribe; la primera corrida de `new` no `--peek`
-  persiste schema 2 con la escritura atómica). `RunLock(home)` no cambia.
+  guarda**: `search.run_new` llama a `save` solo cuando la corrida no es
+  `--peek` y emite al menos un mensaje (un `--peek` migra en memoria y no
+  escribe; la primera corrida de `new` sin `--peek` que emite persiste schema 2
+  con la escritura atómica). `RunLock(home)` no cambia.
   `state.json` 0600, `tmp + fsync + os.replace`; corrupción →
   `E_STATE_CORRUPT`; sin PII. El schema 1 no se vuelve a escribir jamás.
 
 ### `config.py`
 
 Esquema cerrado de `config.toml`, resolución de alcance por driver y
-`[attachments]` (PRD §6.5 RF-36, §6.6 RF-42/49, §15).
+`[attachments]` (PRD §6.5 RF-34, §6.6 RF-40, RF-47, RF-49, §15).
 
 Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
@@ -1068,7 +1072,7 @@ timeout_seconds)`,
 - `load_config(home=None, *, registry=None)`: `registry` (un
   `BackendRegistry`) valida el prefijo de driver; se crea perezosamente y solo
   si algún bloque declara prefijo. La clave se divide en el **primer** `:`
-  (RF-36): prefijo vacío, con mayúsculas, guion o > 64 ⇒ `E_DRIVER_UNKNOWN`
+  (RF-34): prefijo vacío, con mayúsculas, guion o > 64 ⇒ `E_DRIVER_UNKNOWN`
   (exit 2); prefijo válido pero no instalado (`is_installed`) ⇒
   `E_DRIVER_UNKNOWN`; cuenta vacía tras el prefijo ⇒ `E_CONFIG_INVALID`. Una
   etiqueta de cuenta que contenga `:` debe declararse con el prefijo explícito
@@ -1080,7 +1084,7 @@ timeout_seconds)`,
   instancia. Un bloque sin prefijo resuelve contra el nativo; uno con prefijo
   dentro de las `accounts()` de su driver: formas del `PRD.md` §15.2 (etiqueta
   casefold → email único → UUID completo → prefijo de UUID ≥ 8) para los
-  backends internos y `label`/`uuid` opacos exactos para plugins (sin prefijo
+  backends internos y `label`, `email` o `uuid` opacos para plugins, en ese orden y sin distinguir mayúsculas (sin prefijo
   de UUID). Bloques que resuelven a la misma `(driver, cuenta)` se combinan
   (unión de `mailbox_list`); INBOX va primero; un driver declarado sin backend
   disponible en la llamada ⇒ `E_DRIVER_UNKNOWN`; una clave que resuelve a un
@@ -1145,7 +1149,7 @@ deduplicación aunque no se entreguen. Las cabeceras de A6 salen del `BodyRow` c
 si no, del gancho `load_headers(row)` de los backends nativos (un plugin no lo tiene); solo cuentan en
 `scan.messages_read` las lecturas efectivas.
 
-**Procesamiento del contenido (F1, PRD-v2.2 §10).** Por mensaje, `_content_fields` sanea
+**Procesamiento del contenido (F1, PRD.md §12.12).** Por mensaje, `_content_fields` sanea
 (`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y el cuerpo completo, y
 cuenta las señales solo sobre los campos que esa respuesta entrega (y sobre las direcciones de `from`,
 `to` y `cc` entregados), nunca sobre `headers`; un cuerpo ilegible no aporta texto. Los warnings del
@@ -1154,13 +1158,13 @@ estado del cuerpo y `W_HIDDEN_CONTENT` solo se emiten si se entrega cuerpo; `--t
 `W_REPLY_TO_MISMATCH` se emiten siempre que el mensaje los justifica. El resto del procesamiento (A4,
 `--strip-links`, truncado, orden de los warnings) no cambia.
 
-**Agrupación y recuento (F3, RF-72/RF-73/RF-78).** `GROUP_KEYS` (`from`, `domain`,
+**Agrupación y recuento (F3, RF-70/RF-71/RF-76).** `GROUP_KEYS` (`from`, `domain`,
 `mailbox`, `account`, `day`, `week`, `month`), `GROUP_MAX_KEYS` (2), `GROUP_MAX_GROUPS` (50),
 `GROUP_DEFAULT_LIMIT` (5) y `GROUP_MAX_LIMIT` (50) son constantes públicas. Con `group_by`,
 `run_search` agrupa los mensajes **después** de los filtros y de la deduplicación y devuelve
 `{count, truncated, hint, groups, scan, warnings}`: cada grupo lleva sus claves en el orden
 pedido, su `count` total y sus mensajes más recientes (como mucho `filters.limit`, 5 sin
-`--limit`), con la fila de M10 menos `from`/`mailbox` si esa es la clave. `from` es la
+`--limit`), con la fila por defecto (`DEFAULT_ROW_FIELDS`) menos `from`/`mailbox` si esa es la clave. `from` es la
 dirección en minúsculas (`null` sin dirección), `domain` la parte tras el último `@` (`null`
 sin dirección o sin `@`), `day`/`week`/`month` salen de `date_received` en
 `output.LOCAL_ZONE` (`null` sin fecha válida: nula, ≤ 0 o no representable) y
@@ -1179,10 +1183,10 @@ de `resolved` (nunca las excluidas) y `<n>` sus carpetas únicas (INBOX, `mailbo
 llamadas nuevas al driver. Las filas emitidas son las únicas que se leen (cabeceras de A6 o
 cuerpo si la fila lo entrega).
 
-**Motor multi-driver (PRD RF-37, §11.3).** Cada driver
+**Motor multi-driver (PRD RF-35, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
 native=)` y se consulta con los mismos filtros; la deduplicación por
-`message_id` se hace **dentro** de cada driver (RF-07 del `PRD.md`, sin dedupe
+`message_id` se hace **dentro** de cada driver (RF-06 del `PRD.md`, sin dedupe
 cross-driver), y los resultados se fusionan con el orden total
 `(date_received, driver, native_order_key)` — DESC en `search`/`show`, ASC en
 `new`, `driver` siempre ASC — comparando el key como entero si la capacidad es
@@ -1205,7 +1209,7 @@ nada y, sin ningún bloque `[scope]`, se conserva el listado 2.0.1 con
 `W_NO_ACCOUNTS`.
 `run_show` despacha por el driver del prefijo: resuelve solo los bloques de ese
 driver, llama a su `find_message`/`load_body` y a su operación `attachments()`
-(API 1) para componer `message.attachments[]` (RF-43/AC-07):
+(API 1) para componer `message.attachments[]` (RF-41/AC-07):
 `[{index, name, cached_path}]` con el nombre **original**, el índice estable
 1..N del driver y `cached_path` calculado con `attachments.cache.cached_path`
 — `null` si el nombre dispara `classify_name` (regla de nombre) o si la
@@ -1233,7 +1237,7 @@ pasa el catálogo ya envuelto). Un fallo de plugin sale con el código/exit de
 §12.6 y nunca `E_INTERNAL`; un fallo inesperado de un driver nativo se propaga
 intacto (el CLI lo convierte en `E_INTERNAL`). El plazo se comprueba tras la
 llamada en los drivers nativos y con un hilo daemon en los externos (límite
-conocido de RNF-22: ver la sección de `plugins/api.py`).
+conocido de RNF-21: ver la sección de `plugins/api.py`).
 Devuelven los campos de comando **sin** `ok`/`command`/`generated_at` (los
 añade `cli`); `run_mailboxes` devuelve `accounts`, `excluded_stores` y
 `warnings`. Semántica de fechas: `--since` incluye,
@@ -1375,7 +1379,7 @@ ocho campos por adjunto y `warnings[]` (puede llevar
 `lambda: time.monotonic() + timeout`, una por adjunto. Para un driver externo el
 CLI pasa además `stream_guard=AttachmentStreamGuard(driver)` (véase la sección de
 `plugins/api.py`); en Apple Mail y Outlook pasa `None`. Al vencer ⇒
-`E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-68, sin reintento, staging
+`E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-49, sin reintento, staging
 limpio y sin archivos nuevos. Tras `AttachmentsEngine.recover`, el CLI recorre
 `attachments[]` en orden y añade
 `W_ATTACHMENT_ACTIVE_CONTENT: attachment <index> contains <tipo> in <uid>` por
@@ -1416,9 +1420,10 @@ uids). Un cursor de un driver no instalado deja el chequeo `ok=false` con
 `_record_driver_check` valida el driver nativo (el backend en
 diagnóstico) y cada driver declarado; el detalle y los sufijos son el contrato
 de §12.8 (ver `### doctor`). `_record_config_check` resuelve cada bloque del driver nativo (o `not evaluated: <chequeo> failed` si
-falló su dependencia: primero `driver`, luego `store` en Apple Mail y `stores` en Outlook; los bloques
+falló su dependencia: primero `driver`, luego `schema` en Apple Mail y `stores` en Outlook; los bloques
 de un driver distinto del nativo los resuelve la sección de ese plugin, y un config con solo bloques
-de plugins informa `0 account block(s) declared for driver <nativo>` con `ok=true`) y añade
+de plugins informa `0 account block(s) declared for driver <nativo>` con `ok=true` si no falló
+ninguna de sus dependencias) y añade
 `W_STORE_EXCLUDED` al `detail` con `ok=true` (PRD §15.3). `_collect_plugin_sections` y `_plugin_checks`
 calculan cada plugin con `registry.open_drivers([driver], context=...)`,
 `call_driver("doctor_checks", …)` y `_plugin_config_check` (que resuelve sus bloques con
@@ -1431,7 +1436,7 @@ línea `event=end` del log), aplica el mismo filtrado de `--failures` y hace `fl
 
 ### `attachments/`
 
-Núcleo **puro** de adjuntos (PRD §6.6 RF-43/RF-47/RF-48/RF-49, §10.3,
+Núcleo **puro** de adjuntos (PRD §6.6 RF-41/RF-45/RF-46/RF-47, §10.3,
 §12.11 filas 8–15, AC-09/AC-10/AC-11 y parte de AC-15). Es la política que
 consumen el motor (límites/staging/caché) y los comandos `show`/`attachment`: **no escribe
 en disco, no lee la caché y no abre rutas**. Solo stdlib y el propio paquete
@@ -1613,7 +1618,7 @@ antes de A7.
 ### `attachments/engine.py` y `attachments/cache.py`
 
 Motor de recuperación local: límites, aciertos de caché, staging y publicación
-atómica (PRD RF-45/RF-47/RF-49/RF-51, §10.2, §10.4, §12.11 filas
+atómica (PRD RF-43/RF-45/RF-47/RF-51, §10.2, §10.4, §12.11 filas
 11–15, AC-12/AC-13/AC-15/AC-20 y RNF-13/RNF-14). Es el contrato estable
 que consumen el comando `attachment` y `show.attachments`. El motor no abre el store ni resuelve la cuenta; tampoco compone el
 JSON: devuelve los registros de §12.11 y deja `uid`, `output_dir`, `count` y
@@ -1672,7 +1677,7 @@ class AttachmentsEngine:
   bloque, y el mismo instante acota la pantalla de contenido y la extracción.
   El comando `attachment` pasa el presupuesto de
   `[attachments].timeout_seconds` (60 s por defecto, también en `--all`); al
-  vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-68,
+  vencer ⇒ `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-49,
   staging limpio y sin archivos nuevos. El motor **no** fija políticas de tiempo
   por sí solo.
 - `stream_guard` acota el flujo de un driver externo: recibe la factoría del
@@ -1702,7 +1707,7 @@ class AttachmentsEngine:
 6. `screen_content(rows, misses, open_stream)`: primer bloque decodificado solo
    de los adjuntos que se van a extraer (fila 13/14); bloqueo ⇒
    `E_ATTACHMENT_BLOCKED`; ilegible/no disponible ⇒ su código. Los aciertos no
-   se re-validan por contenido (RF-45, §10.3.1). Cada flujo de un driver
+   se re-validan por contenido (RF-43, §10.3.1). Cada flujo de un driver
    externo se abre a través de `stream_guard` con el instante del adjunto; un
    presupuesto agotado no pide otro bloque.
 7. Extracción a staging de los misses: `magic bytes` ya validados, `sha256`
@@ -1721,7 +1726,7 @@ puede dejar archivos nuevos **completos** (riesgo aceptado §23.1); nunca
 parciales. La caché previa **verificada** se conserva si el aborto ocurre antes
 de publicar; una entrada **sin verificar** se elimina (CR-01).
 
-#### Semántica de caché y `--force` (RF-45, RF-51; CR-01)
+#### Semántica de caché y `--force` (RF-43, RF-51; CR-01)
 
 - **Manifiesto por mensaje:** `<message_dir>/.manifest.json` (`0600`), escrito
   de forma atómica (staging + `os.replace`) bajo el lock de ejecución:
@@ -1853,7 +1858,7 @@ class StagedAttachment:
 - Los comandos **no** deben reimplementar `stat`/symlink: `output_dir` =
   `message_dir(home, uid)` y `cached_path` = `cache.cached_path(...)`.
 - Los adaptadores de backend no usan `AttachmentCache`: reciben `legacy_uid` y devuelven metadatos
-  y bytes decodificados; nunca escriben en la caché (RF-47).
+  y bytes decodificados; nunca escriben en la caché (RF-45).
 
 #### Errores del motor (§12.6) y precedencia DP-01
 
@@ -1922,7 +1927,7 @@ transforman.
  "scan": {"mode": "metadata", "candidates": 1, "messages_read": 1, "duration_ms": 211}}
 ```
 Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<EntryID>"`
-(Windows). `hint` (RF-15) es `null` cuando hay resultados y `truncated=false`; cuando
+(Windows). `hint` (RF-14) es `null` cuando hay resultados y `truncated=false`; cuando
 `truncated=true` es un string accionable, p. ej. `"refina los filtros o sube
 --limit (máx. 200)"`, y además se emite
 `W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`. Con
@@ -1931,7 +1936,7 @@ Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<EntryID>"`
 other folders, or add --include-mailbox` (sin nombres y sin llamadas nuevas al driver); sin
 cuentas leídas es `null` y aparece `W_NO_ACCOUNTS`.
 
-Con `--group-by`, `messages[]` se sustituye por `groups[]` (RF-72):
+Con `--group-by`, `messages[]` se sustituye por `groups[]` (RF-70):
 ```json
 {"count": 2, "truncated": false, "hint": null,
  "groups": [
@@ -1946,14 +1951,14 @@ mucho `--limit`, 5 por defecto y 0–50); `count` de la respuesta es el total de
 cumplen los filtros. Con más de 50 grupos, `truncated: true`, hint `<n> more group(s);
 refine the filters` y `W_RESULTS_TRUNCATED: <n> more group(s); refine the filters`.
 
-Con `--count` (RF-73), la respuesta es exactamente:
+Con `--count` (RF-71), la respuesta es exactamente:
 ```json
 {"ok": true, "command": "search", "generated_at": "<ISO local>",
  "content_notice": "<texto fijo>", "count": 143, "hint": null, "warnings": [],
  "scan": {"mode": "metadata", "candidates": 143, "messages_read": 0, "duration_ms": 41}}
 ```
 `count` es el total tras deduplicar y sin el límite de 200 ni `--limit`; no hay `messages`
-ni `truncated`; `hint` es el de RF-78 solo cuando `count: 0`; los warnings son solo de
+ni `truncated`; `hint` es el de RF-76 solo cuando `count: 0`; los warnings son solo de
 alcance. `--count` no se admite con `--fields`, `--group-by` ni `--limit`.
 
 ### `new`
@@ -2063,8 +2068,9 @@ body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|
 `; `; la versión es la de la distribución (`package_version()`, `3.0.0a1` en `develop`) y el nativo se
 obtiene del backend seleccionado (así el fake de Outlook sobre `platform="win32"` reporta `outlook` en
 cualquier host). Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒ `; no declared drivers`
-(valida solo el nativo); config que no parsea ⇒ `; declared drivers: unknown (config failed)` (valida
-solo el nativo y el error lo reporta `config`); un driver que no valida añade
+(valida solo el nativo); config que no parsea o no supera la validación (también `E_DRIVER_UNKNOWN` por un
+driver declarado no instalado) ⇒ `; declared drivers: unknown (config failed)` (valida solo el
+nativo, el error lo reporta `config` y `plugins` es `[]`); un driver que no valida añade
 `; <driver>: <CODE>: <message> (hint: <hint>)` y `driver` queda `ok=false` (exit 0 siempre).
 
 La sección `plugins` se calcula antes que los chequeos del backend nativo (cada llamada al plugin
@@ -2089,7 +2095,8 @@ El chequeo `config` valida el TOML y **la resolución de cada bloque `[scope]` y
 del driver nativo contra el store y las etiquetas de cuenta (por entrada, con el `code`/`hint` de cada
 error); los bloques de otro driver declarado los resuelve la sección de ese plugin y no se listan
 aquí. Si todos los bloques son de plugins, el detalle es
-`0 account block(s) declared for driver <nativo>` con `ok=true`. Distingue config ausente de config
+`0 account block(s) declared for driver <nativo>` con `ok=true`, salvo que haya fallado una de sus
+dependencias (`not evaluated: <chequeo> failed`, `ok=false`). Distingue config ausente de config
 presente sin `[scope]` y, cuando no hay cuentas declaradas, lista las disponibles con el formato
 `0 account block(s) declared; available: <label>, ...` sin activarlas.
 

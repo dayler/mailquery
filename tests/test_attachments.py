@@ -359,7 +359,7 @@ class AttachmentContentBlockingTests(unittest.TestCase):
 
 
 class AttachmentMessageScreeningTests(unittest.TestCase):
-    """UT-ATT-03: whole-message screening (PRD §10.3.1, RF-48, AC-09)."""
+    """UT-ATT-03: whole-message screening (PRD §10.3.1, RF-46, AC-09)."""
 
     def test_ut_att_03_01_hostile_name_blocks_whole_message(self) -> None:
         """UT-ATT-03.01: safe or hostile ``--index`` and ``--all`` all block."""
@@ -906,7 +906,7 @@ def _assert_no_staging(test: unittest.TestCase, home: Path) -> None:
 
 
 class AttachmentLimitTests(unittest.TestCase):
-    """UT-ATT-06: ``[attachments]`` limits (AC-13, RF-49, PRD §12.11 row 12)."""
+    """UT-ATT-06: ``[attachments]`` limits (AC-13, RF-47, PRD §12.11 row 12)."""
 
     def test_ut_att_06_01_boundary_is_strictly_greater_in_mib(self) -> None:
         """UT-ATT-06.01 B: the exact limit passes; one byte more exceeds ."""
@@ -1451,7 +1451,7 @@ class AttachmentCacheTests(unittest.TestCase):
 
 
 class AttachmentManifestTests(unittest.TestCase):
-    """UT-ATT-12: per-message manifest and unverified entries (CR-01, RF-45, RF-51)."""
+    """UT-ATT-12: per-message manifest and unverified entries (CR-01, RF-43, RF-51)."""
 
     def test_ut_att_12_01_publication_registers_name_size_and_sha256(self) -> None:
         """UT-ATT-12.01 P: each published file is registered; other entries are kept."""

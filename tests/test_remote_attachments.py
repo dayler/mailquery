@@ -918,7 +918,7 @@ class RemoteBudgetScopeTests(_RemoteCase):
         self.assertLessEqual(seen["budget"], 180.5)
 
     def test_ut_rmt_05_05_the_outlook_com_timeout_keeps_its_message_and_hint(self) -> None:
-        """UT-RMT-05.05: a COM watchdog timeout before the budget keeps the RF-33 text."""
+        """UT-RMT-05.05: a COM watchdog timeout before the budget keeps the RF-31 text."""
         with mock.patch.object(outlook_com, "CALL_TIMEOUT_SECONDS", 0.05):
             backend = self.backend(
                 driver="outlook",

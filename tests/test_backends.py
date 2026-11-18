@@ -165,7 +165,7 @@ class BackendResolveContractMixin:
 
 
 class BackendContractMixin(BackendResolveContractMixin):
-    """UT-BE-04: behavior every backend must show (PRD 9.3, 15.3, RF-12, RF-13).
+    """UT-BE-04: behavior every backend must show (PRD 9.3, 15.3, RF-11, RF-12).
 
     Mix into a ``unittest.TestCase`` and implement the hooks. The Apple Mail
     fixture and the Outlook fake both run it.
