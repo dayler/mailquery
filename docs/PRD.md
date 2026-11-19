@@ -7,6 +7,8 @@
 **Repositorio:** <https://github.com/dayler/mailquery>.
 **Estado:** v0.13 aprobado e implementado (macOS + Apple Mail). v1.0 **aprobado** por el dueño del producto el 2026-11-03. v1.3 es un solo documento según el estándar de un PRD, con la arquitectura como única excepción porque no hay TRD. v2.1: plugins de backend y adjuntos aprobados por el dueño el 2026-11-11, implementados en `develop` y conciliados en este documento el 2026-11-12. v2.2: endurecimiento del contenido no confiable (F1), corrección de defectos de adjuntos (F2) y salida a medida (F3), aprobados por el dueño el 2026-11-13, implementados en `develop` y conciliados en este documento el 2026-11-18; sin publicar.
 
+**Tabla: Historial de versiones del PRD**
+
 | Versión | Cambios |
 |---------|---------|
 | 0.1 | Propuesta inicial (relevamiento del store real, arquitectura y requisitos). |
@@ -147,6 +149,8 @@ Entregar una herramienta local, simple y auditable, que permita a un harness de 
 
 ### 3.2 Objetivos específicos
 
+**Tabla: Objetivos específicos y medida de éxito**
+
 | ID | Objetivo | Medida de éxito |
 |----|----------|-----------------|
 | O1 | Leer correos nuevos de forma incremental | `mailquery new` devuelve cada mensaje una sola vez, sin duplicados ni omisiones dentro del alcance configurado |
@@ -266,6 +270,8 @@ Reglas comunes a ambos backends:
 
 La herramienta no programa nada: no hay frecuencias ni cron internos; el harness decide cuándo ejecutar cada comando.
 
+**Tabla: Casos de uso**
+
 | ID | Caso de uso | Comando típico | Desencadenante |
 |----|-------------|----------------|----------------|
 | CU-01 | Resumen de correo nuevo | `mailquery new` | Cuando el harness lo decida |
@@ -286,6 +292,8 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-23 aplican
 
 ### 6.1 Lectura y descubrimiento
 
+**Tabla: Requisitos de lectura y descubrimiento**
+
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
 | RF-01 | `mailquery new` devuelve los mensajes recibidos desde la última ejecución exitosa usando un cursor persistente `(last_date_received, last_uid)` (`last_uid` string `"<driver>:<native_id>"`, §11.2) con ventana de solape (*lookback* configurable) y anillo de uids emitidos. Primera corrida y lookback: §12.3. | M |
@@ -296,6 +304,8 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-23 aplican
 | RF-06 | Resultados deduplicados por identificador global del mensaje dentro de cada driver, sin deduplicación entre drivers (RF-35) (el mismo correo puede existir en varias cuentas/carpetas): canónico = copia de INBOX; si no, carpeta normal; si no, buzón agregado; a igual prioridad, la copia con menor `date_received` y, después, menor `native_order_key`; el JSON reporta `duplicate_count`, el número de copias en las carpetas del alcance del driver, cumplan o no los filtros. Un mensaje sin identificador global (vacío o ausente) es único: no se agrupa con otros y su `duplicate_count` es 1. Clave por backend: §11.3. | M |
 
 ### 6.2 Búsqueda
+
+**Tabla: Requisitos de búsqueda**
 
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
@@ -311,6 +321,8 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-23 aplican
 
 ### 6.3 Integración y operación
 
+**Tabla: Requisitos de integración y operación**
+
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
 | RF-16 | Único formato de salida: un objeto JSON por ejecución en `stdout`, **formateado** (indentación de 2 espacios, §12.5). No existe `--format`. Únicas excepciones documentadas: `-h`/`--help` (RF-17), `-v`/`--version` (RF-29) y el informe por defecto de `doctor` sin `--json` (RF-23). Codificación y fin de línea: RF-30. | M |
@@ -323,6 +335,8 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-23 aplican
 | RF-23 | `mailquery doctor` muestra por defecto un informe de texto human-readable con los chequeos y el detalle de cualquier fallo, e incluye la **resolución real** de cada bloque `[scope]` y su `mailbox_list` (cuentas declaradas, etiquetas/email/UUID y carpetas existentes) además de la resolubilidad de etiquetas de cuenta; `--json` conserva el payload máquina con la lista de chequeos. Los chequeos de entorno dependen del backend (§12.8). Con `--failures` muestra solo lo que falla (RF-74) y, con plugins declarados, añade su sección `plugins` (RF-79). | M |
 
 ### 6.4 Plataformas y backends
+
+**Tabla: Requisitos de plataformas y backends**
 
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
@@ -340,6 +354,8 @@ Prioridades: **M** = imprescindible, **S** = deseable. Los RF-01…RF-23 aplican
 
 Prioridades: **M** = imprescindible. Numeración continuada respecto a §6.1–§6.4 (que terminan en RF-32).
 
+**Tabla: Requisitos de plugins de backend**
+
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
 | RF-33 | **Registro `mailquery.backends`:** el núcleo descubre backends por el entry point group `mailquery.backends`. Los backends internos (`apple_mail`, `outlook`) se registran por la misma vía; el registro funciona también en modo desarrollo sin instalación. Cada plugin declara `driver` único (`[a-z0-9_]{1,64}`; el máximo de 64 mantiene `<driver>.toml`, `logs/<driver>.log`, `tmp/plugin-<driver>/` y la ruta de caché dentro de los límites del sistema de archivos); `apple_mail` y `outlook` son nombres reservados para los internos. Un driver duplicado o reservado ⇒ `E_PLUGIN_INCOMPATIBLE` (exit 3). Solo se importan los drivers declarados en `config.toml` y el nativo en los casos de RF-34; el prefijo de un driver no declarado en un uid no lo importa; `--version` no importa plugins (usa metadata). | M |
@@ -351,6 +367,8 @@ Prioridades: **M** = imprescindible. Numeración continuada respecto a §6.1–�
 | RF-39 | **`doctor` y `--version`:** `doctor` añade el chequeo `driver` (§12.8); `--version` (`-v`) mantiene el formato del §12.9 y añade `; drivers: <driver> <versión>, ...` dentro del paréntesis. | M |
 
 ### 6.6 Recuperación local y segura de adjuntos (`attachment` y `show`)
+
+**Tabla: Requisitos de recuperación de adjuntos**
 
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
@@ -378,6 +396,8 @@ Requisitos del contenido no confiable; A2–A7 son las opciones que define §1.
 
 Reglas comunes de RF-55–RF-61: cada señal se emite en `search`, `new` y `show`, una vez por mensaje devuelto que la justifica, nunca en `attachment`, `mailboxes` ni `doctor`; no cambia el exit code; los warnings siguen el orden de `messages[]` y, dentro de un mensaje, el de §12.12, punto 6; en `new`, `W_FIRST_RUN` es el último (§12.3, punto 6). Las señales de URL (RF-55, RF-57–RF-59) cuentan las URLs de RF-54 de `subject`, `from.name`, `to[].name`, `cc[].name` y el cuerpo completo, nunca de `headers`, después de A2 y antes de A4, así que no dependen del modo, y solo en los campos que se entregan (RF-72).
 
+**Tabla: Requisitos de contenido no confiable**
+
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
 | RF-52 | **Saneado del texto (A2).** Regla determinista e idempotente que, en este orden: (1) quita las secuencias de escape CSI (`ESC [`), OSC (`ESC ]`, hasta BEL o `ESC \`) y las de dos caracteres (`ESC` seguido de un carácter de `@` a `_`); de cualquier otra secuencia, el paso 3 quita el `ESC` o el control C1 y deja el resto; (2) normaliza `\r\n` y `\r` a `\n`; (3) elimina los controles C0 salvo `\n` y `\t`, DEL (`U+007F`), los controles C1 (`U+0080..U+009F`), todos los caracteres de categoría Unicode `Cf`, los selectores de variación salvo `U+FE0E` y `U+FE0F` (es decir, `U+FE00..U+FE0D` y `U+E0100..U+E01EF`) y los rellenos Hangul `U+115F`, `U+1160`, `U+3164` y `U+FFA0`. No aplica otra normalización (ni NFC ni NFKC). Se aplica en la salida a los **campos de contenido**: `subject`, `from.name`, `to[].name`, `cc[].name`, los valores de `headers`, `body_text`, `snippet`, `attachments[].name` de `show`, `attachments[].original_name` de `attachment`, cada elemento de `warnings[]` y los textos del objeto de error (`message`, `hint`). **No** se aplica a identificadores ni a rutas: `uid`, `message_id`, direcciones (`address`), `account.*`, `mailbox.*`, `excluded_stores[]`, `sanitized_name`, `source.emlx_path`, `cached_path`, `output_dir`, `path`; tampoco a fechas ni números. Un identificador citado dentro de un warning, de un texto de error o de `headers` (p. ej. `Message-ID`) pasa por A2 con ese texto; para copiarlo tal cual se usa su campo de identificador (`message_id`, `mailboxes`). La búsqueda aplica A2 al patrón y al valor comparado (§12.12, punto 5). El bloqueo, el `sanitized_name` y la caché de adjuntos siguen trabajando sobre el nombre original. | M |
@@ -398,7 +418,7 @@ Reglas comunes de RF-55–RF-61: cada señal se emite en `search`, `new` y `show
 
 ### 6.9 Salida a medida
 
-Requisitos de la salida a medida.
+**Tabla: Requisitos de la salida a medida**
 
 | ID | Requisito | Prioridad |
 |----|-----------|-----------|
@@ -419,6 +439,8 @@ Requisitos de la salida a medida.
 ---
 
 ## 7. Requisitos no funcionales
+
+**Tabla: Requisitos no funcionales**
 
 | ID | Requisito |
 |----|-----------|
@@ -448,6 +470,8 @@ Requisitos de la salida a medida.
 ---
 
 ## 8. Decisiones de arquitectura (ADR resumidas)
+
+**Tabla: Decisiones de arquitectura**
 
 | ID | Decisión | Alternativas descartadas | Motivo |
 |----|----------|--------------------------|--------|
@@ -543,6 +567,8 @@ flowchart LR
 ```
 
 ### 9.2 Responsabilidades de módulos
+
+**Tabla: Responsabilidades de cada módulo**
 
 | Módulo | Responsabilidad | No debe |
 |--------|-----------------|---------|
@@ -805,6 +831,8 @@ Solo para adjuntos que superan el bloqueo. `sanitized_name` es la representació
 
 Lo que el núcleo y el JSON conocen; cada backend lo rellena (correspondencias en §11.3).
 
+**Tabla: Entidades del modelo común**
+
 | Entidad | Campos | Notas |
 |---------|--------|-------|
 | Cuenta | `uuid`, `label`, `email`, `local` | `uuid` con forma de UUID en los backends internos (§11.3) e identificador opaco y estable en un plugin; `local` = cuenta sin servidor (p. ej. `On My Device`, un PST). |
@@ -841,6 +869,8 @@ En todas las plataformas, `last_uid` y los elementos de `emitted_uids` son strin
 - Si está corrupto, `new` falla con `E_STATE_CORRUPT` (exit 3) y un hint que sugiere renombrarlo y avisa de que la siguiente corrida será una primera corrida (§12.3). `search`/`show`/`mailboxes` no se ven afectadas; `doctor` lo reporta en el chequeo `state` con `ok=false`.
 
 ### 11.3 Correspondencia de cada backend con el modelo común
+
+**Tabla: Correspondencia de cada backend con el modelo común**
 
 | Concepto | Apple Mail (macOS) | Outlook clásico (Windows) |
 |----------|--------------------|---------------------------|
@@ -882,6 +912,8 @@ Todas las fechas del JSON (incluido `generated_at`) son ISO 8601 con el offset l
 
 Invocación: `mailquery <comando> [opciones]`. Comandos, opciones y semántica son idénticos en ambas plataformas.
 
+**Tabla: Comandos**
+
 | Comando | Descripción | Salida |
 |---------|-------------|--------|
 | `doctor` | Diagnóstico del entorno y de la garantía read-only. | Informe de texto (JSON con `--json`; solo lo que falla con `--failures`) |
@@ -902,6 +934,8 @@ Invocación: `mailquery <comando> [opciones]`. Comandos, opciones y semántica s
 No existen `--format`, `--config`, `--home`, `--quiet`, `--verbose`, `--no-color`, `--timeout` ni `--backend`. `-v` significa `--version`, no *verbose*.
 
 ### 12.2 `search`
+
+**Tabla: Opciones de `search`**
 
 | Opción | Descripción |
 |--------|-------------|
@@ -926,6 +960,8 @@ Alcance: RF-07 y §15.
 Orden de `messages[]`: orden total `(date_received DESC, driver ASC, native_order_key DESC)` (§11.3). La deduplicación (RF-06) se aplica antes de `--limit`, de `--group-by` y de `--count`. Con `--group-by`, `groups[]` sigue el orden de RF-70.
 
 ### 12.3 `new`
+
+**Tabla: Opciones de `new`**
 
 | Opción | Descripción |
 |--------|-------------|
@@ -971,7 +1007,7 @@ El formato del uid se valida antes de crear `~/.mailquery`, leer la config o abr
 
 `show` resuelve `[scope]` igual que `search` y `new` (§15.3): un bloque o una carpeta de `mailbox_list` que no resuelve da el mismo error que en `search`, aunque el mensaje pedido no esté en esa carpeta.
 
-Resolución del uid (igual en ambas plataformas):
+**Tabla: Resolución del uid (igual en ambas plataformas)**
 
 | Caso | Resultado |
 |------|-----------|
@@ -1261,13 +1297,15 @@ Sin el RLO, el nombre muestra su orden real de caracteres en lugar del texto inv
 
 **A4 — modos de URL.** Cuerpo `Revisa https://example.com/factura antes del 30/11.`
 
+**Tabla: Ejemplo A4: `body_text` según el modo de URL**
+
 | Modo | `body_text` |
 |---|---|
 | `keep` | `Revisa https://example.com/factura antes del 30/11.` |
 | `neutralize` (default) | `Revisa hxxps://example.com/factura antes del 30/11.` |
 | `strip` | `Revisa [link omitted] antes del 30/11.` |
 
-Otros inicios de RF-54:
+**Tabla: Otros inicios de URL de RF-54**
 
 | Texto | `neutralize` | `strip` |
 |---|---|---|
@@ -1290,6 +1328,8 @@ El asunto, los nombres y `headers` siguen la misma regla. Con `--strip-links`, u
 ```
 
 **A4/A5 — URL larga y enlace de script.** Cuerpo `Pago: https://evil.example/aaaa…` (una URL de 5.000 caracteres) `y pega javascript:fetch(1)`:
+
+**Tabla: Ejemplo A4/A5: `body_text` con URL larga y enlace de script**
 
 | Modo | `body_text` |
 |---|---|
@@ -1328,6 +1368,8 @@ Con `spf=pass dkim=pass dmarc=pass`, sin `Authentication-Results` o con `Reply-T
 ```
 
 **A5 — homoglifos.** Cuerpo `Entra en https://pаypal.com/login` (la "а" es cirílica, `U+0430`) de `soporte@pаypal.com`:
+
+**Tabla: Ejemplo A5: homoglifos según el modo de URL**
 
 | Modo | `body_text` | `from.address` |
 |---|---|---|
@@ -1500,6 +1542,8 @@ Con `--fields total,unread`, cada carpeta añade sus contadores: `{"path": "INBO
 
 ### 12.6 Códigos de salida y diccionario de errores
 
+**Tabla: Códigos de salida**
+
 | Exit | Significado | Códigos `E_*` |
 |------|-------------|----------------|
 | 0 | Éxito (incluye 0 resultados, `--help` y `--version`) | — |
@@ -1510,7 +1554,7 @@ Con `--fields total,unread`, cada carpeta añade sus contadores: `{"path": "INBO
 | 5 | Ocupado/transitorio | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` |
 | 6 | Cliente de correo no disponible | `E_OUTLOOK_NOT_RUNNING` |
 
-Errores propios de cada plataforma:
+**Tabla: Errores propios de cada plataforma**
 
 | Código | Plataforma | Cuándo |
 |--------|-----------|--------|
@@ -1532,6 +1576,8 @@ Cada error debe incluir un `hint` accionable, en inglés (p. ej. "add --since, -
 **Errores de plugins y de adjuntos (núcleo y plugins):**
 
 **Regla de propiedad:** el núcleo define `code`, `exit` y la plantilla de `message`; el plugin aporta `reason` (enum cerrado), `hint` (inglés, ≤ 300 bytes, sin PII ni rutas), `detail` opcional (≤ 200 bytes, sin PII) y `log_message` (≤ 200 bytes, sin PII). El núcleo sanea controles y longitudes. Un plugin nunca elige `code` ni `exit`; un fallo no mapeado ⇒ `E_PLUGIN_FAILED` (exit 3), nunca `E_INTERNAL`.
+
+**Tabla: Errores de drivers, plugins y adjuntos, con su dueño y su hint**
 
 | Código | Exit | Dueño | Cuándo | Hint |
 |--------|------|-------|--------|------|
@@ -1774,6 +1820,8 @@ mailquery 3.0.0 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drive
 
 Formato: `mailquery <versión> (backend <backend>; Python <x.y.z>; <plataforma>; drivers: <driver> <versión>, ...)`. En `develop`, `<versión>` es la pre-release `3.0.0a1` (§22.3).
 
+**Tabla: Campos de `--version`**
+
 | Campo | Origen |
 |-------|--------|
 | `<versión>` | Versión del paquete instalado (§22.3). |
@@ -1794,6 +1842,8 @@ Reglas:
 ### 12.10 Catálogo de warnings
 
 Los warnings son strings `"W_CODIGO: detalle"`; el detalle es en inglés y siempre indica el motivo concreto. En `attachment`, el único warning es `W_ATTACHMENT_ACTIVE_CONTENT` (RF-62); el bloqueo de un mensaje es un error (`E_ATTACHMENT_BLOCKED`, exit 4). En `search`, `new` y `show`, los warnings se emiten según los campos entregados (RF-72), y los de contenido de un mensaje siguen el orden de §12.12, punto 6.
+
+**Tabla: Catálogo de warnings**
 
 | Código | Plataforma | Cuándo |
 |--------|-----------|--------|
@@ -1836,6 +1886,8 @@ mailquery attachment apple_mail:83143 --all
 **Campos de la respuesta de `attachment`:** `content_notice` (RF-66, después de `generated_at`), `uid` (string), `output_dir` (ruta absoluta del directorio del mensaje), `count` (número de adjuntos devueltos en `attachments[]`), `attachments[]` (cada uno con `index`, `original_name`, `sanitized_name`, `saved` (`true` en todo éxito: el archivo está en disco), `cached`, `path`, `size_bytes`, `sha256`) y `warnings[]` (`W_ATTACHMENT_ACTIVE_CONTENT` por adjunto devuelto con contenido activo, RF-62). Un acierto de caché devuelve `cached: true` y `saved: true`.
 
 **Precedencia de validaciones y errores.** Se evalúa en este orden; el primer fallo determina el código y el exit. “Antes del store” significa que no se abre el cliente ni se leen/escriben estado o caché; `~/.mailquery` y el log pueden crearse como en el §21.3.
+
+**Tabla: Precedencia de validaciones y errores de `attachment`**
 
 | # | Validación | Error | Momento |
 |---|---|---|---|
@@ -1885,6 +1937,8 @@ Reglas adicionales:
 ## 13. Despliegue e instalación
 
 ### 13.1 Requisitos
+
+**Tabla: Requisitos de instalación por plataforma**
 
 | Requisito | macOS | Windows |
 |-----------|-------|---------|
@@ -1991,6 +2045,8 @@ Plugins y `attachment`:
 - Un plugin externo puede tener su propia configuración en `~/.mailquery/<driver>.toml`; la gestiona el plugin y el núcleo no la lee ni la valida (RF-37).
 
 ### 15.1 Tabla de propiedades configurables
+
+**Tabla: Propiedades configurables**
 
 | Propiedad | Tipo | Obligatoria | Default | Valores válidos | Ejemplo | Qué hace |
 |-----------|------|-------------|---------|-----------------|---------|----------|
@@ -2206,6 +2262,8 @@ mailbox_list = ["Contabilidad"]
 
 Los valores configurables están en §15.1. Estos son los que se mantienen fijos en el producto para no abrir combinaciones que rompan el contrato; si alguna tarea necesita otro valor, se evalúa como una propiedad documentada nueva.
 
+**Tabla: Valores fijos**
+
 | Aspecto | Valor fijo | Nota |
 |---------|-----------|------|
 | Home de la app | `~/.mailquery` | Config, estado, logs, locks, temporales y caché de adjuntos. En Windows, `%USERPROFILE%\.mailquery`. |
@@ -2239,6 +2297,8 @@ Los valores configurables están en §15.1. Estos son los que se mantienen fijos
 Si un `.pst` es el buzón de entrega de una cuenta POP3, se etiqueta como la cuenta (`POP3 (…)`), no como `PST (…)`.
 
 **Excluidos** (lo que `mailboxes` lista en `excluded_stores[]`; RF-32):
+
+**Tabla: Stores excluidos en Windows**
 
 | Store | `reason` | Etiqueta | `path` |
 |-------|----------|----------|--------|
@@ -2283,6 +2343,8 @@ El contenido de los correos (asunto, nombres, `headers`, cuerpos, nombres de adj
 ## 17. Comportamiento ante errores
 
 Comunes a ambos backends (los propios de cada plataforma están en §12.6; los de configuración en §15.3, los de `show` en §12.4 y los de `attachment` en §12.11):
+
+**Tabla: Comportamiento ante errores comunes a ambos backends**
 
 | Situación | Comportamiento |
 |-----------|----------------|
@@ -2329,7 +2391,7 @@ Por tanto, el re-procesamiento **solo** aparece si una tarea consulta por estado
 
 ## 19. Rendimiento
 
-Presupuestos p95 por backend:
+**Tabla: Presupuestos p95 por backend**
 
 | Operación | Apple Mail (macOS) | Outlook (Windows) |
 |-----------|--------------------|--------------------------------|
@@ -2345,7 +2407,7 @@ presupuesto, y `mailboxes --fields total` o `unread` tiene el coste del recuento
 presupuesto (RNF-22). El análisis, la medición reproducible y los criterios de cierre están en
 [`docs/PERFORMANCE-BACKLOG.md`](PERFORMANCE-BACKLOG.md).
 
-Presupuesto de `attachment` (p95):
+**Tabla: Presupuesto p95 de `attachment`**
 
 | Operación | Apple Mail | Outlook | Plugin local | Plugin remoto |
 |-----------|------------|---------|--------------|---------------|
@@ -2534,6 +2596,8 @@ Implementada y validada (PRD v0.13). La búsqueda de contenido sin filtros (índ
 
 Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás debe quedar idéntico:
 
+**Tabla: Cambios de comportamiento de 2.0.0 en macOS**
+
 | Cambio | Antes (1.x, PRD v0.13) | Después (2.0.0) |
 |--------|---------------|----------------|
 | `show` fuera de las cuentas declaradas | Busca el uid en todo el store y no lee `[scope]` | Solo cuentas declaradas; fuera ⇒ `E_ACCOUNT_NOT_IN_SCOPE`; un `[scope]` que no resuelve falla como en `search` (§12.4) |
@@ -2570,6 +2634,8 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 ### 22.4 Cambios visibles en 3.0.0 (amplían §22.2)
 
 **Ambas plataformas.** `3.0.0` cambia en macOS y en Windows exactamente esto:
+
+**Tabla: Cambios visibles de 3.0.0 en ambas plataformas**
 
 | Cambio | Antes (2.0.x) | Después (3.0.0) |
 |---|---|---|
@@ -2611,6 +2677,8 @@ Todo lo demás de macOS debe quedar idéntico.
 
 **Windows.** Además de la tabla común, en Windows `3.0.0` cambia exactamente esto; el resto debe quedar idéntico:
 
+**Tabla: Cambios visibles de 3.0.0 solo en Windows**
+
 | Cambio | Antes (2.0.x) | Después (3.0.0) |
 |---|---|---|
 | `[scope]` | `[scope."<cuenta>"]` | `[scope."<driver>:<cuenta>"]` (el prefijo puede omitirse; nativo `outlook`) |
@@ -2626,6 +2694,8 @@ Todo lo demás de macOS debe quedar idéntico.
 ---
 
 ## 23. Riesgos y mitigaciones
+
+**Tabla: Riesgos y mitigaciones**
 
 | Riesgo | Prob. | Impacto | Mitigación |
 |--------|-------|---------|------------|
@@ -2698,6 +2768,8 @@ Todo lo demás de macOS debe quedar idéntico.
 | Los chequeos de un plugin son tan fiables como el plugin (puede dar `ok` sin comprobar nada) | Media | Bajo | Responsabilidad del plugin (ADR-22); el `config` de su sección lo calcula el núcleo y sí detecta cuentas y carpetas que no resuelven. |
 
 ### 23.1 Riesgos aceptados de plugins y adjuntos
+
+**Tabla: Riesgos aceptados de plugins y adjuntos**
 
 | Riesgo | Prob. | Impacto | Mitigación / decisión |
 |--------|-------|---------|-----------------------|
@@ -2817,6 +2889,8 @@ Herramientas existentes (p. ej. Fruitmail) confirman el camino técnico. `mailqu
 | MAPI de terceros / Windows Search | Descartada | Dependencias nativas o índice parcial; no aportan frente al OOM. |
 
 ### Anexo D — Registro de decisiones
+
+**Tabla: Registro de decisiones**
 
 | Pregunta original | Decisión |
 |-------------------|----------|

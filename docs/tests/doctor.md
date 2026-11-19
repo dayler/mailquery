@@ -40,6 +40,8 @@ Requisitos: AC-56, AC-57 · Archivo: `tests/test_doctor.py`
 
 Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
 
+**Tabla: Casos de UT-DR-05**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Plugin falso declarado con `doctor_checks()` válido: `plugins` con su `driver`, sus chequeos sin cambios y después `config` con la resolución de sus bloques. |
@@ -52,6 +54,8 @@ Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
 
 Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
 
+**Tabla: Casos de UT-DR-06**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | Plugin declarado incompatible: sus `checks` son solo `config` con `not evaluated: driver failed` y `doctor_checks()` no se llama. |
@@ -60,6 +64,8 @@ Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
 #### UT-DR-07 — `doctor_checks()` inválido o colgado
 
 Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
+
+**Tabla: Casos de UT-DR-07**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

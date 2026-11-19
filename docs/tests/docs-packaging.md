@@ -25,6 +25,8 @@ Requisitos: AC-55 · Archivo: `tests/test_group_count.py`
 
 Requisitos: AC-59, AC-60 · Archivo: `tests/test_mailboxes.py`
 
+**Tabla: Casos de DOC-13**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Los dos README muestran la salida agrupada (ejemplo de PRD.md sección 12.5) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
@@ -34,6 +36,8 @@ Requisitos: AC-59, AC-60 · Archivo: `tests/test_mailboxes.py`
 #### DOC-12 — Diagnóstico sin *preflight*
 
 Requisitos: AC-55, AC-57 · Archivo: `tests/test_doctor.py`
+
+**Tabla: Casos de DOC-12**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

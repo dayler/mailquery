@@ -2,6 +2,8 @@
 
 Cada criterio de §20 con los grupos que lo verifican.
 
+**Tabla: Matriz de criterios de aceptación**
+
 | Criterio | Qué exige | Casos | Goldens |
 |---|---|---|---|
 | §20 punto 1 | Solo lectura en macOS | TC-03 | — |

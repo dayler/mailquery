@@ -114,6 +114,8 @@ excepción queda acotada así:
 
 ### 4.2 Huecos conocidos que aborda `PRD.md` (F1)
 
+**Tabla: Huecos conocidos que aborda `PRD.md`**
+
 | ID | Hueco | Evidencia | Consecuencia |
 |---|---|---|---|
 | G-01 | `sanitize_text` no elimina `Cf` (RLO, zero-width, bidi) ni C1 (0x80–0x9F), pese a que el docstring menciona C0/C1 | [`output.py`](../../src/mailquery/output.py#L26) | Spoofing visual en asunto/remitente/cuerpo; el agente puede leer texto “invisible”. |
@@ -134,6 +136,8 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 ---
 
 ## 5. Catálogo de amenazas
+
+**Tabla: Catálogo de amenazas**
 
 | ID | Vector | Ejemplo | Impacto | Mitigación primaria | Residual |
 |---|---|---|---|---|---|

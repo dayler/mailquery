@@ -26,6 +26,8 @@ Requisitos: AC-46 · Archivo: `tests/test_fields.py`
 
 Requisitos: AC-47 · Archivo: `tests/test_fields.py`
 
+**Tabla: Casos de UT-FLD-03**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `--fields snippet` añade `snippet` al final de la fila por defecto. |
@@ -38,6 +40,8 @@ Requisitos: AC-47 · Archivo: `tests/test_fields.py`
 #### UT-FLD-04 — `show --fields`
 
 Requisitos: AC-48 · Archivo: `tests/test_fields.py`
+
+**Tabla: Casos de UT-FLD-04**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -81,6 +85,8 @@ Requisitos: AC-35 · Archivo: `tests/test_fields.py`
 
 Requisitos: AC-46, AC-49 · Archivo: `tests/test_group_count.py`
 
+**Tabla: Casos de UT-GRP-01**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Un grupo por remitente (dirección en minúsculas) con su `count` y sus 5 mensajes más recientes, de más reciente a más antiguo, sin `from` en las filas. |
@@ -93,6 +99,8 @@ Requisitos: AC-46, AC-49 · Archivo: `tests/test_group_count.py`
 #### UT-GRP-02 — Dos claves y fechas
 
 Requisitos: AC-46, AC-50 · Archivo: `tests/test_group_count.py`
+
+**Tabla: Casos de UT-GRP-02**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -130,6 +138,8 @@ Requisitos: AC-51 · Archivo: `tests/test_group_count.py`
 #### UT-GRP-05 — `--count`
 
 Requisitos: AC-52, AC-58 · Archivo: `tests/test_group_count.py`
+
+**Tabla: Casos de UT-GRP-05**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

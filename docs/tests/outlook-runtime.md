@@ -19,6 +19,8 @@ Requisitos: AC-07/AC-15 · Archivo: `tests/test_outlook.py`
 
 Requisitos: AC-10/AC-12 · Archivo: `tests/test_outlook.py`
 
+**Tabla: Casos de UT-OL-ATT-02**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Un adjunto local se materializa con `SaveAsFile` en el staging `0700`; el archivo es regular, no symlink, `0600`/ACL del perfil; el núcleo lo lee y lo publica con la validación del motor. |

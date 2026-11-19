@@ -23,7 +23,7 @@ Medición **histórica** del 2026-11-04, `develop` @ `11b81fa`, Mac del dueño, 
 
 ## Presupuestos de adjuntos (PRD §19)
 
-Presupuesto p95 de `mailquery attachment` (`3.0.0`, todavía no publicado):
+**Tabla: Presupuesto p95 de `mailquery attachment` (`3.0.0`, todavía no publicado)**
 
 | Operación | Apple Mail | Outlook | Plugin local | Plugin remoto |
 |-----------|------------|---------|--------------|---------------|

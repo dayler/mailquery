@@ -89,6 +89,8 @@ Requisitos: RF-21 · Archivo: `tests/test_state.py`
 
 Requisitos: AC-06 · Archivo: `tests/test_cli.py`, `tests/test_state.py`
 
+**Tabla: Casos de UT-ST-06**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Función pura de migración: enteros ≥ 1 en `cursor.last_uid` y `emitted_uids` ⇒ `apple_mail:<n>`, sin depender del SO. |

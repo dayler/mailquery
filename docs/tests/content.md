@@ -84,6 +84,8 @@ Requisitos: RF-54, RF-57 · Archivo: `tests/test_content.py`
 
 Requisitos: RF-54 · Archivo: `tests/test_content.py`
 
+**Tabla: Casos de UT-CNT-06**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `keep` deja el texto igual. |
@@ -124,6 +126,8 @@ Requisitos: RF-55, RF-57–RF-59 · Archivo: `tests/test_content.py`
 #### UT-CNT-09 — Señales del remitente
 
 Requisitos: RF-60, RF-61 · Archivo: `tests/test_content.py`
+
+**Tabla: Casos de UT-CNT-09**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

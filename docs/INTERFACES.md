@@ -695,6 +695,8 @@ validar antes de crear el home, leer `config.toml` o abrir el store.
 **Ganchos opcionales del núcleo** (fuera de la superficie de PRD §9.2; el
 núcleo los busca con `getattr` y Apple Mail no los tiene):
 
+**Tabla: Ganchos opcionales del backend que usa el núcleo**
+
 | Gancho | Lo usa | Para qué |
 |--------|--------|----------|
 | `bind_command(command)` | `cli` antes de ejecutar | Outlook: el vigilante COM informa el comando en `E_CLIENT_TIMEOUT` |

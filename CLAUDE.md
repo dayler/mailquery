@@ -9,6 +9,10 @@ Exceptions:
 - **README:** always kept in both English (`README.md`) and Spanish (`README.es.md`). Both files carry the same content; a change to one is applied to the other in the same change.
 - **`docs/`:** may be written in Spanish for now.
 
+## Tables and figures
+
+**Every table, image, diagram, chart or other figure carries a title**, in chat answers and in every file or artifact written. The title goes on its own line right above the table or figure: `**Tabla: <title>**` in Spanish documents and `**Table: <title>**` in English ones. A table or figure that is added or modified gets its title in the same change.
+
 ## Source code comments
 
 **Every comment and docstring in the source code describes what the code does. It never justifies the code by citing documents, tickets or any other project artifact, and never points the reader to them.**

@@ -951,6 +951,8 @@ recovered files.
 
 ## Troubleshooting
 
+**Table: Common problems, cause and fix**
+
 | Symptom | Cause | What to do |
 |---------|-------|------------|
 | `mailquery: command not found` / `pipx: command not found` | The `pipx` directory is not on the session `PATH` | `pipx ensurepath` and open a new terminal |

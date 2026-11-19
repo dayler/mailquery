@@ -43,6 +43,8 @@ Requisitos: AC-12/AC-15, AC-20 · Archivo: `tests/test_integration.py`
 
 Requisitos: AC-12, RNF-13 · Archivo: `tests/test_integration.py`
 
+**Tabla: Casos de UT-AM-04**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Tras `attachment` (éxito, caché, bloqueo, límite), hashes y `mtime` del store no cambian. |
@@ -135,6 +137,8 @@ Requisitos: AC-15 · Archivo: `tests/test_cli.py`
 
 Requisitos: AC-43, AC-45 · Archivo: `tests/test_cli.py`
 
+**Tabla: Casos de UT-ATC-07**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | Extracción cuyo plazo configurado vence (inyectado con `_attachment_timeout`) ⇒ `E_CLIENT_TIMEOUT` (3) con el mensaje y el hint de RF-49, sin reintento, staging limpio y sin archivos nuevos. |
@@ -203,6 +207,8 @@ Requisitos: AC-41 · Archivo: `tests/test_remote_attachments.py`
 
 Requisitos: AC-42 · Archivo: `tests/test_remote_attachments.py`
 
+**Tabla: Casos de UT-RMT-03**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`, exit 3) antes de abrir el store, con el hint nuevo de RF-48 literal. |
@@ -210,6 +216,8 @@ Requisitos: AC-42 · Archivo: `tests/test_remote_attachments.py`
 #### UT-RMT-04 — Corte duro en plugins externos
 
 Requisitos: AC-44 · Archivo: `tests/test_remote_attachments.py`
+
+**Tabla: Casos de UT-RMT-04**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -223,6 +231,8 @@ Requisitos: AC-44 · Archivo: `tests/test_remote_attachments.py`
 #### UT-RMT-05 — Topes que no cambian y lo que no consume el tope
 
 Requisitos: AC-43, AC-45 · Archivo: `tests/test_remote_attachments.py`
+
+**Tabla: Casos de UT-RMT-05**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

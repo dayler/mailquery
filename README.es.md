@@ -969,6 +969,8 @@ abren ni ejecutan los archivos recuperados.
 
 ## Problemas típicos
 
+**Tabla: Problemas típicos, causa y solución**
+
 | Síntoma | Causa | Qué hacer |
 |---------|-------|-----------|
 | `mailquery: command not found` / `pipx: command not found` | El directorio de `pipx` no está en el `PATH` de la sesión | `pipx ensurepath` y abre una terminal nueva |
