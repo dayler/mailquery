@@ -344,4 +344,4 @@ Números de línea en la base; se localizan por búsqueda. Si una línea tiene v
 | `docs/security/threat-model.md` | 129 | Destino `../prd/08-adr.md` |
 | `docs/tests/TEST-CATALOG.md` | 3 | Destino `../prd/00-indice.md` |
 
-`docs/KNOWN-DEFECTS.md` no tiene enlaces markdown a `PRD.md` (solo el texto `PRD.md`) y no cambia.
+`docs/KNOWN-DEFECTS.md` tiene un enlace markdown a `PRD.md` en la línea 3, pero no cambia (R-04, orden del dueño): sigue apuntando a `docs/PRD.md`, que existe (D-06).

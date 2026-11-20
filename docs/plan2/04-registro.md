@@ -49,7 +49,7 @@ Lo rellena quien implementa, hito a hito. Los logs completos quedan en el direct
 | 2800 (+9) | E-06 (lista de anexos) |
 | 2973–2991 | E-07 (glosario) |
 
-- `docs/prd/`: 47 archivos; el más largo, `15-configuracion.md`, 295 líneas.
+- `docs/prd/`: 47 archivos; el más largo, `15-configuracion.md`, 296 líneas.
 - Tablas sin título en `docs/prd/`: 0. Archivos con BOM: 0.
 
 ## 4. Prueba de estructura (M3)
@@ -84,10 +84,11 @@ Lo rellena quien implementa, hito a hito. Los logs completos quedan en el direct
 | ID | Desviación | Motivo |
 |---|---|---|
 | X-01 | P-01 no se cumple: `develop` (`89f8441`) no incluye `feature/prd-v22-reconciliation`. La rama `feature/prd-chapters` sale de `9a3080a`, cuyo `docs/PRD.md` es el blob esperado. Las comparaciones contra `develop` de la sección 7.4 se hacen contra `9a3080a`. El cambio sin commitear de `docs/KNOWN-DEFECTS.md` se queda en el árbol de trabajo y no entra en ningún commit. | El dueño ordenó implementar el plan sin integrar antes esa rama |
-| X-02 | `docs/PRD.md` no se sustituye ni se modifica; DOC-14 deja de comprobarlo (casos .05, .11 y .12 del plan revisado) y la sección 6 de `02-textos.md` se retira. | Orden del dueño del 2026-11-20 (D-06) |
+| X-02 | `docs/PRD.md` no se sustituye ni se modifica, y DOC-14 no lo comprueba: sus casos son .01 a .11 de `03-prueba-estructura.md`. Se retiró de `02-textos.md` la sección que daba el texto de sustitución de `docs/PRD.md`; las secciones 6 y 7 actuales son las ediciones de README, `CLAUDE.md` y enlaces, y se aplicaron. | Orden del dueño del 2026-11-20 (D-06) |
 | X-03 | Directorio de logs en el scratchpad de la sesión, fuera del checkout, en lugar de `../mailquery-plan2-logs/`. | Evitar escribir fuera del directorio de trabajo |
 | X-04 | Los tres archivos de la 12.5 se llaman `12.05-1-contrato-json.md`, `12.05-2-ejemplos-show-attachment.md` y `12.05-3-ejemplos-contenido-salida.md`. | Con los nombres del plan, el orden alfabético invertía los dos archivos de ejemplos (D-01) |
 | X-05 | Límite de caracteres R-09 añadido. | Orden del dueño del 2026-11-20 |
 | X-06 | El script de la sección 7.2 mide también R-09. | R-09 |
 | X-07 | `docs/KNOWN-DEFECTS.md:3` tiene un enlace markdown a `PRD.md` (la sección 7 de `02-textos.md` decía que no). No se cambia: R-04 y orden del dueño de no tocar ese archivo. El enlace sigue funcionando porque `docs/PRD.md` existe (D-06). | R-04 |
 | X-08 | En `00-plan.md`, el límite del script de la sección 7.2 se calcula como base + base // 10, y la tabla de riesgos cita DOC-14.11 en lugar de DOC-14.12. | Expresar el límite como incremento máximo; corregir la referencia al caso de BOM |
+| X-09 | Contra D-12, las menciones de texto `PRD.md` que nombran el PRD vigente pasan a "PRD" (o "el PRD"/"del PRD" según la frase) en `docs/INTERFACES.md`, `docs/security/threat-model.md`, `docs/PERFORMANCE-BACKLOG.md`, `docs/ROADMAP.md`, nueve archivos de `docs/tests/`, `tests/test_state.py` y `tests/test_multidriver.py` (83 cambios en 17 archivos). No cambian `docs/KNOWN-DEFECTS.md` (R-04), los documentos históricos (`docs/archive/`, `docs/PRD-v2.2.md`) ni la ADR-26 de `docs/prd/08-adr.md`, que es un registro de decisión. | Orden del dueño del 2026-11-20 de actualizar los documentos que referencian el PRD |
