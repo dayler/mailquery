@@ -47,7 +47,7 @@ Requisitos: RF-16, RF-19, RF-24 · Archivo: `tests/test_cli.py`
 
 #### UT-CLI-05 — `--log-level`
 
-Requisitos: RF-18, PRD.md §12.1 · Archivo: `tests/test_cli.py`
+Requisitos: RF-18, PRD §12.1 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -176,7 +176,7 @@ Requisitos: RF-16 · Archivo: `tests/test_output.py`
 
 #### UT-OUT-02 — Fechas
 
-Requisitos: RNF-08, PRD.md §11.3 · Archivo: `tests/test_output.py`
+Requisitos: RNF-08, PRD §11.3 · Archivo: `tests/test_output.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

@@ -31,9 +31,9 @@ Requisitos: AC-47 · Archivo: `tests/test_fields.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `--fields snippet` añade `snippet` al final de la fila por defecto. |
-| .02 | P | `--fields all` da la fila completa de `PRD.md` sección 12.5 (`SEARCH_ROW_FIELDS`). |
+| .02 | P | `--fields all` da la fila completa del PRD sección 12.5 (`SEARCH_ROW_FIELDS`). |
 | .03 | P | `--fields to,uid` y `--fields uid --fields to` dan la fila por defecto más `to`, en el orden canónico. |
-| .04 | N | `--fields remitente` ⇒ `E_USAGE`, exit 2, mensaje y hint literales de PRD.md sección 12.5; `--fields ""` y `--fields uid,,to` ⇒ ídem con `''`. |
+| .04 | N | `--fields remitente` ⇒ `E_USAGE`, exit 2, mensaje y hint literales del PRD sección 12.5; `--fields ""` y `--fields uid,,to` ⇒ ídem con `''`. |
 | .05 | B | El error ocurre antes de crear el home (el `HOME` temporal no tiene `.mailquery`) y sin abrir el store. |
 | .06 | B | D-24: `--fields "to, uid"` equivale a `--fields to,uid`; `--fields ALL` y `--fields Snippet` ⇒ `E_USAGE` con `unknown field 'ALL'` / `unknown field 'Snippet'`; `--fields " "` ⇒ ídem con `''`. |
 
@@ -104,7 +104,7 @@ Requisitos: AC-46, AC-50 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `--group-by domain,month` y `--group-by domain --group-by month` dan el mismo resultado: un grupo plano por combinación con mensajes, con `domain` y `month` en ese orden (ejemplo de PRD.md sección 12.5). |
+| .01 | P | `--group-by domain,month` y `--group-by domain --group-by month` dan el mismo resultado: un grupo plano por combinación con mensajes, con `domain` y `month` en ese orden (ejemplo del PRD sección 12.5). |
 | .02 | P | `day`, `week`, `month` usan la zona local (`output.LOCAL_ZONE` inyectada): un mensaje a las 02:00 UTC cae en el día anterior con UTC−4. |
 | .03 | B | Semana ISO en el cambio de año: 2026-12-31 y 2027-01-01 → `2026-W53`; 2027-01-04 → `2027-W01`. |
 | .04 | B | Mensajes sin fecha (nula, 0 o no representable) forman el grupo `null` de `day`/`week`/`month` y van al final; mensajes sin dirección del remitente, el grupo `null` de `from`/`domain`. |
@@ -207,7 +207,7 @@ Requisitos: AC-59 · Archivo: `tests/test_mailboxes.py`
 | .01 | P | Sin `--fields`: claves de primer nivel exactamente `ok`, `command`, `generated_at`, `accounts`, `excluded_stores`, `warnings`, con el store sintético, el doble de Outlook y un plugin falso. |
 | .02 | P | Cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes`, en ese orden; cada carpeta solo `path` e `included`, con los mismos valores e igual orden que el catálogo plano anterior. |
 | .03 | N | Ninguna carpeta lleva `account`; no hay `mailboxes` de primer nivel. |
-| .04 | B | Una cuenta declarada sin carpetas tiene `mailboxes: []`; con dos drivers declarados, el orden de cuentas es el de `PRD.md` §11.3; una carpeta sin cuenta se agrupa en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`. |
+| .04 | B | Una cuenta declarada sin carpetas tiene `mailboxes: []`; con dos drivers declarados, el orden de cuentas es el del PRD §11.3; una carpeta sin cuenta se agrupa en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`. |
 
 #### UT-MBX-02 — Referencias copiadas
 

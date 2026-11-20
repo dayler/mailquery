@@ -45,7 +45,7 @@ Requisitos: RNF-01 · Archivo: `tests/test_readonly.py`
 
 #### TC-04 — Recetas
 
-Requisitos: PRD.md §21.2 · Archivo: `tests/test_integration.py`
+Requisitos: PRD §21.2 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

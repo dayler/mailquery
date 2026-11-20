@@ -1,4 +1,4 @@
-"""Tests for :mod:`mailquery.state` (PRD.md 11.2, 18, 21.3; PRD §11.2).
+"""Tests for :mod:`mailquery.state` (PRD 11.2, 18, 21.3; PRD §11.2).
 
 Covers the atomic ``state.json`` lifecycle (defaults, roundtrip, 0600 mode,
 corruption), the schema-1 to schema-2 uid migration (UT-ST-06/07), the ``new``

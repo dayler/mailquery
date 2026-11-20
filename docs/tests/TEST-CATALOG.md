@@ -1,6 +1,6 @@
 # Catálogo de pruebas
 
-Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.md`](../prd/00-indice.md) cubre y dónde vive. Las referencias `§N` son secciones de `PRD.md`; los IDs `RF-`, `RNF-`, `AC-` y `ADR-` son los de `PRD.md`.
+Qué verifica cada caso con ID de la suite de `tests/`, qué requisito del [PRD](../prd/00-indice.md) cubre y dónde vive. Las referencias `§N` son secciones del PRD; los IDs `RF-`, `RNF-`, `AC-` y `ADR-` son los del PRD.
 
 ## 1. Convenciones
 
@@ -8,7 +8,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 - **Tipo.** **P** positivo; **N** negativo (entrada inválida, error o algo que no debe ocurrir); **B** borde (un límite del requisito).
 - **Nombre del método.** `test_<grupo>_<caso>_<descripción>` en minúsculas y con `_`: `test_ut_sr_07_03_excludes_message_before_window`. Un caso puede repartirse en varios métodos con el mismo prefijo.
 - **Ejecución.** Toda la suite: `python -B -m unittest discover -s tests -t . -v`. Un caso o un grupo: `-k ut_sr_07_03` o `-k ut_sr_07`.
-- **Esperado.** Lo que fija `PRD.md`; los textos que el PRD fija se comparan literalmente.
+- **Esperado.** Lo que fija el PRD; los textos que el PRD fija se comparan literalmente.
 - **Tests sin ID.** Los tests sin ID también son cobertura; su nombre describe lo que verifican.
 - **Un ID, un comportamiento.** Un comportamiento ya probado se extiende o se renombra en su test; no se crea un grupo paralelo ni se reutiliza un ID para otra cosa.
 - **Aislamiento.** Ningún test usa el `HOME`, el `~/.mailquery` ni el `config.toml` del usuario. Todo subproceso fija `HOME` y, en Windows, `USERPROFILE` a un directorio temporal.

@@ -1,7 +1,7 @@
 # Pendientes de rendimiento — presupuesto p95
 
 Estado: **abierto**. Documento de seguimiento para futuras versiones. No cambia el
-PRD: el presupuesto p95 de macOS (§19 de [`PRD.md`](prd/19-rendimiento.md)) sigue vigente. La
+PRD: el presupuesto p95 de macOS (§19 del [PRD](prd/19-rendimiento.md)) sigue vigente. La
 medición del 2026-11-14 con la salida por defecto de `3.0.0` cumple los
 presupuestos de `search`, `new`, `show` y `mailboxes` sin contadores. El
 pendiente abierto queda limitado a `mailboxes --fields total` o `unread` (sin
@@ -167,7 +167,7 @@ Medición informativa, sin aserción: `mailboxes --fields total,unread` da un p9
 **Deuda abierta: acierto de caché de `attachment` en Outlook.** Cada acierto
 tarda entre 106 y 126 ms, de forma estable en dos series de 20. Antes de servir
 la caché, el comando se conecta a Outlook por COM y lista los adjuntos del
-mensaje para aplicar la regla de bloqueo de nombres (`PRD.md` §10.3.1), así que
+mensaje para aplicar la regla de bloqueo de nombres (PRD §10.3.1), así que
 el acierto de caché no evita el coste de COM y no baja de 50 ms en este equipo.
 No hay fallo funcional: el archivo servido coincide con su SHA-256 del manifiesto
 y los contadores de Outlook no cambian. El coste de las cabeceras de A6 en
@@ -204,9 +204,9 @@ contrato y no la latencia.
 
 ## Referencias
 
-- [`PRD.md` §19](prd/19-rendimiento.md) — presupuestos p95.
+- [PRD §19](prd/19-rendimiento.md) — presupuestos p95.
 - [`tests/test_smoke.py`](../tests/test_smoke.py) — SMOKE-NEW.07 y SMOKE-ATT.
-- [`PRD.md` §19](prd/19-rendimiento.md) — presupuestos de `attachment`.
+- [PRD §19](prd/19-rendimiento.md) — presupuestos de `attachment`.
 - [`src/mailquery/search.py`](../src/mailquery/search.py) — `run_mailboxes`.
 - [`src/mailquery/cli.py`](../src/mailquery/cli.py) — `duration_ms` de `event=end`.
 - [`Walkthrough-w5-polish.md`](archive/2026-11-04-Walkthrough-w5-polish.md) §3 —

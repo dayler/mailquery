@@ -1,7 +1,7 @@
 # Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
 
 > **Estado del contrato:** implementado en `develop` (plugins de backend y
-> adjuntos, contenido no confiable y salida a medida; [`PRD.md`](prd/00-indice.md) v2.3) y **no publicado**. El paquete anuncia
+> adjuntos, contenido no confiable y salida a medida; [PRD](prd/00-indice.md) v2.3) y **no publicado**. El paquete anuncia
 > `mailquery.__version__` = 3.0.0a1 (3.0.0-alpha.1, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como está
 > implementado.
@@ -222,7 +222,7 @@ Las filas que cruzan la interfaz de backend son `dict` tipados con
 (rutas, carpetas, cuentas, términos, uids); el log escribe `log_message` si
 existe y `message` si no. Un código desconocido se degrada a `E_INTERNAL`.
 `CODE_EXIT` mapea cada `E_*` al exit documentado. Catálogo vigente (32
-códigos, PRD.md §12.6): exit 1 `E_INTERNAL`; exit 2 11 códigos
+códigos, PRD §12.6): exit 1 `E_INTERNAL`; exit 2 11 códigos
 (entre ellos `E_USAGE`, `E_DRIVER_UNKNOWN`, `E_ATTACHMENTS_DISABLED`); exit 3 12
 códigos (entre ellos `E_PLUGIN_INCOMPATIBLE`, `E_PLUGIN_FAILED`,
 `E_ATTACHMENT_UNAVAILABLE`, `E_ATTACHMENT_UNREADABLE`, `E_IO`); exit 4
@@ -1084,7 +1084,7 @@ timeout_seconds)`,
   -> list[ResolvedScope]`: `backend`/`native` son el driver nativo (por
   defecto `backend.driver`) y `drivers` mapea los demás drivers declarados a su
   instancia. Un bloque sin prefijo resuelve contra el nativo; uno con prefijo
-  dentro de las `accounts()` de su driver: formas del `PRD.md` §15.2 (etiqueta
+  dentro de las `accounts()` de su driver: formas del PRD §15.2 (etiqueta
   casefold → email único → UUID completo → prefijo de UUID ≥ 8) para los
   backends internos y `label`, `email` o `uuid` opacos para plugins, en ese orden y sin distinguir mayúsculas (sin prefijo
   de UUID). Bloques que resuelven a la misma `(driver, cuenta)` se combinan
@@ -1151,7 +1151,7 @@ deduplicación aunque no se entreguen. Las cabeceras de A6 salen del `BodyRow` c
 si no, del gancho `load_headers(row)` de los backends nativos (un plugin no lo tiene); solo cuentan en
 `scan.messages_read` las lecturas efectivas.
 
-**Procesamiento del contenido (F1, PRD.md §12.12).** Por mensaje, `_content_fields` sanea
+**Procesamiento del contenido (F1, PRD §12.12).** Por mensaje, `_content_fields` sanea
 (`output.sanitize_text`) `subject`, `from.name`, `to[].name`, `cc[].name` y el cuerpo completo, y
 cuenta las señales solo sobre los campos que esa respuesta entrega (y sobre las direcciones de `from`,
 `to` y `cc` entregados), nunca sobre `headers`; un cuerpo ilegible no aporta texto. Los warnings del
@@ -1188,7 +1188,7 @@ cuerpo si la fila lo entrega).
 **Motor multi-driver (PRD RF-35, §11.3).** Cada driver
 declarado resuelve sus cuentas con `config.resolve_scope(..., drivers=,
 native=)` y se consulta con los mismos filtros; la deduplicación por
-`message_id` se hace **dentro** de cada driver (RF-06 del `PRD.md`, sin dedupe
+`message_id` se hace **dentro** de cada driver (RF-06 del PRD, sin dedupe
 cross-driver), y los resultados se fusionan con el orden total
 `(date_received, driver, native_order_key)` — DESC en `search`/`show`, ASC en
 `new`, `driver` siempre ASC — comparando el key como entero si la capacidad es
@@ -1399,7 +1399,7 @@ Internos de `doctor` (no son API pública): `_DoctorRun(home_path)` guarda el pr
 secciones `plugins` ya calculadas) y lo comparte con el gancho de timeout; `.ordered()` los devuelve
 en el orden de PRD §12.8 y `.after_timeout(backend, backend_checks, detail)` completa el informe sin
 volver a llamar al cliente de correo.
-`--version`/`-v` conserva el prefijo del PRD.md §12.9 y añade
+`--version`/`-v` conserva el prefijo del PRD §12.9 y añade
 `; drivers: <driver> <versión>, ...` dentro del paréntesis, alfabético: los
 backends internos se filtran por plataforma (DP-02) y los plugins externos se
 listan siempre; la línea usa `BackendRegistry.versions()` (metadata de
@@ -1885,7 +1885,7 @@ class StagedAttachment:
 
 ## 4. Contrato JSON
 
-Contrato final (PRD.md §12.5). Todo `uid` emitido es
+Contrato final (PRD §12.5). Todo `uid` emitido es
 el string prefijado `"<driver>:<native_id>"`; `state.json` usa `schema: 2` y
 migra desde `schema: 1`; `show.message.attachments[]` es
 `{index, name, cached_path}` y el comando `attachment` devuelve el payload de

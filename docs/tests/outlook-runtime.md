@@ -83,7 +83,7 @@ Requisitos: RF-26 · Archivo: `tests/test_outlook.py`
 
 #### OL-03 — Errores COM
 
-Requisitos: RF-22, PRD.md §17 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-22, PRD §17 · Archivo: `tests/test_outlook.py`
 
 Fallo inyectado en la primera llamada COM.
 
@@ -111,7 +111,7 @@ Plazo de 0,2 s, en subprocess con `run_cli.py`.
 
 #### OL-05 — Caché de `pywin32`
 
-Requisitos: RNF-01, PRD.md §9.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RNF-01, PRD §9.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

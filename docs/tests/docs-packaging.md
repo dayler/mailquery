@@ -29,7 +29,7 @@ Requisitos: AC-59, AC-60 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Los dos README muestran la salida agrupada (ejemplo de PRD.md sección 12.5) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
+| .01 | P | Los dos README muestran la salida agrupada (ejemplo del PRD sección 12.5) y `--fields total,unread` para los contadores; ningún README describe un `mailboxes[]` de primer nivel con `account`. |
 | .02 | P | La skill usa `mailboxes` sin `--fields` para ver carpetas y `--fields total,unread` solo cuando hacen falta los contadores. |
 | .03 | P | `docs/config.example.toml` explica que `mailbox_list` acepta el `path` que muestra `mailboxes` (y el nombre o la URL de `--fields name,url`). |
 
@@ -176,7 +176,7 @@ Requisitos: AC-01 · Archivo: `tests/test_packaging.py`
 
 #### PKG-02 — Empaquetado
 
-Requisitos: AC-18, RF-33, PRD.md §22.3 · Archivo: `tests/test_install_scripts.py`, `tests/test_packaging.py`
+Requisitos: AC-18, RF-33, PRD §22.3 · Archivo: `tests/test_install_scripts.py`, `tests/test_packaging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

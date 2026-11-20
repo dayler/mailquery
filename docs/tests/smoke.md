@@ -2,7 +2,7 @@
 
 #### INS-SMOKE-01 — Instaladores
 
-Requisitos: RF-29, PRD.md §13.2 · Archivo: `tests/test_install_scripts.py`
+Requisitos: RF-29, PRD §13.2 · Archivo: `tests/test_install_scripts.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -33,7 +33,7 @@ Requisitos: AC-07, AC-12, AC-20 · Archivo: `tests/test_smoke.py`
 
 #### SMOKE-INSTALL — Instalación real con `pipx`
 
-Requisitos: RF-29, PRD.md §13.2, AC-36 · Archivo: `tests/test_smoke.py`
+Requisitos: RF-29, PRD §13.2, AC-36 · Archivo: `tests/test_smoke.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

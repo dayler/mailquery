@@ -89,8 +89,8 @@ Requisitos: RF-54 · Archivo: `tests/test_content.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `keep` deja el texto igual. |
-| .02 | P | `neutralize`: cada fila de las tablas A4 de la sección 12.5 de PRD.md da el resultado indicado, también con el esquema en mayúsculas (`HTTPS://`, `WWW.`). |
-| .03 | P | `strip`: cada URL → `[link omitted]` (filas de la sección 12.5 de PRD.md) y el resto del texto no cambia. |
+| .02 | P | `neutralize`: cada fila de las tablas A4 de la sección 12.5 del PRD da el resultado indicado, también con el esquema en mayúsculas (`HTTPS://`, `WWW.`). |
+| .03 | P | `strip`: cada URL → `[link omitted]` (filas de la sección 12.5 del PRD) y el resto del texto no cambia. |
 | .04 | B | Una URL ya neutralizada, ASCII y de 2.048 caracteres o menos (`hxxps://…`, `evil[.]example/pay`) no cambia con `neutralize`. |
 | .05 | B | Idempotencia: `render_urls(render_urls(x, "neutralize"), "neutralize") == render_urls(x, "neutralize")` para todas las muestras. |
 | .06 | B | El texto fuera de las URLs no cambia en ningún modo; dos llamadas dan el mismo resultado; un texto sin URLs (incluidos caracteres con NFKC de varios caracteres) no cambia; `render_urls(x, "otro")` lanza `ValueError`. |
@@ -131,7 +131,7 @@ Requisitos: RF-60, RF-61 · Archivo: `tests/test_content.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | El ejemplo A6 de la sección 12.5 de PRD.md → `"spf=softfail dkim=none dmarc=fail"`. |
+| .01 | P | El ejemplo A6 de la sección 12.5 del PRD → `"spf=softfail dkim=none dmarc=fail"`. |
 | .02 | N | Todo `pass`; `none`/`neutral` sin fallos; cabecera ausente (`None`) → `None`. |
 | .03 | P | `permerror` y `fail` cuentan; mayúsculas (`SPF=FAIL`) → `spf=fail`; un mecanismo ausente no aparece en el resultado. |
 | .04 | B | Varias firmas DKIM: una `pass` → `pass`; ninguna `pass` → la primera. |

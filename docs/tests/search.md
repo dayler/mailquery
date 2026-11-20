@@ -63,7 +63,7 @@ Requisitos: RF-04, RF-05 · Archivo: `tests/test_search.py`
 
 #### UT-SR-06 — Etiquetas no disponibles
 
-Requisitos: PRD.md §15.2 · Archivo: `tests/test_search.py`
+Requisitos: PRD §15.2 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -147,7 +147,7 @@ Requisitos: RF-03, RF-04 · Archivo: `tests/test_search.py`
 
 #### UT-SR-13 — Consultas con la base bloqueada
 
-Requisitos: PRD.md §17 · Archivo: `tests/test_search.py`
+Requisitos: PRD §17 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -175,7 +175,7 @@ Requisitos: RF-06 · Archivo: `tests/test_search.py`
 
 #### UT-SR-16 — Referencias de carpeta entre cuentas
 
-Requisitos: RF-13, PRD.md §15.3 · Archivo: `tests/test_search.py`
+Requisitos: RF-13, PRD §15.3 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -186,7 +186,7 @@ Requisitos: RF-13, PRD.md §15.3 · Archivo: `tests/test_search.py`
 
 #### UT-SR-17 — Orden canónico de campos
 
-Requisitos: RF-28, PRD.md §12.5 · Archivo: `tests/test_search.py`
+Requisitos: RF-28, PRD §12.5 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

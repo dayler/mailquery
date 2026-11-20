@@ -37,7 +37,7 @@ Cada caso en `mailboxes.excluded_stores` con `label`, `path` y `reason`.
 
 #### OL-08 — `account.uuid`
 
-Requisitos: RF-77, RF-78, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-77, RF-78, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -56,7 +56,7 @@ Requisitos: RF-32 · Archivo: `tests/test_outlook.py`
 
 #### OL-10 — INBOX
 
-Requisitos: RF-07, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-07, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -66,7 +66,7 @@ Requisitos: RF-07, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-11 — `path`, `name` y `url`
 
-Requisitos: RF-77, RF-78, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-77, RF-78, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -77,7 +77,7 @@ Requisitos: RF-77, RF-78, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-12 — Carpetas listadas y contadores
 
-Requisitos: RF-77, RF-78, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-77, RF-78, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -104,7 +104,7 @@ Requisitos: RF-25, RNF-04 · Archivo: `tests/test_outlook.py`
 
 #### OL-15 — Fechas
 
-Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -113,7 +113,7 @@ Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-16 — Direcciones
 
-Requisitos: RF-10, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-10, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -132,7 +132,7 @@ Requisitos: RF-06 · Archivo: `tests/test_outlook.py`
 
 #### OL-18 — Items buscables
 
-Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -176,7 +176,7 @@ Requisitos: RF-03, RF-04 · Archivo: `tests/test_outlook.py`
 
 #### OL-22 — `show`: cabeceras
 
-Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-03, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
