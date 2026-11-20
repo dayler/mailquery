@@ -2,7 +2,7 @@
 
 Documentos de las fases ya cerradas de la implementación de 2.0.0 (Windows +
 Outlook clásico, paridad macOS), guardados como registro histórico. **No se
-mantienen actualizados**: el contrato vigente está en [`../PRD.md`](../PRD.md) y
+mantienen actualizados**: el contrato vigente está en [`../prd/`](../prd/00-indice.md) y
 las reglas de desarrollo y pruebas en [`../INTERFACES.md`](../INTERFACES.md).
 
 El prefijo de cada archivo es la fecha del informe (campo «Fecha» del propio

@@ -2,7 +2,7 @@
 
 #### UT-DR-01 — `--failures` con todo correcto
 
-Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-56 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -10,7 +10,7 @@ Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
 
 #### UT-DR-02 — `--failures` con un chequeo que falla
 
-Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-56 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -21,7 +21,7 @@ Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
 
 #### UT-DR-03 — `--failures` en texto
 
-Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-56 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -30,7 +30,7 @@ Requisitos: AC-O11 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
 
 #### UT-DR-04 — `doctor` sin `--failures`
 
-Requisitos: AC-O11, AC-O12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-56, AC-57 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -38,39 +38,45 @@ Requisitos: AC-O11, AC-O12 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.
 
 #### UT-DR-05 — Sección de plugins
 
-Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
+
+**Tabla: Casos de UT-DR-05**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Plugin falso declarado con `doctor_checks()` válido: `plugins` con su `driver`, sus chequeos sin cambios y después `config` con la resolución de sus bloques. |
 | .02 | N | Un bloque del plugin que no resuelve ⇒ `config` del plugin `ok: false` con `<clave>: <código>: <mensaje> (hint: …)`. |
-| .03 | P | `checks[]` de primer nivel igual que sin el plugin salvo el detalle de `driver` y que `config` ya no lista sus bloques; con solo bloques de plugins, `config` de primer nivel `0 account block(s) declared for driver <nativo>` y `ok: true`. |
+| .03 | P | `checks[]` de primer nivel igual que sin el plugin salvo el detalle de `driver` y que `config` ya no lista sus bloques; con solo bloques de plugins, `config` de primer nivel `0 account block(s) declared for driver <nativo>` y `ok: true` cuando no falla ninguna de sus dependencias. |
 | .04 | P | Varios plugins en el orden de su primer bloque. |
 | .05 | B | `close()` del plugin lanza una excepción: el resultado del plugin y el resto del informe no cambian; exit 0. |
 
 #### UT-DR-06 — Plugin que no pasa `driver` o no se abre
 
-Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
+
+**Tabla: Casos de UT-DR-06**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | Plugin declarado no instalado o incompatible: sus `checks` son solo `config` con `not evaluated: driver failed` y `doctor_checks()` no se llama. |
+| .01 | N | Plugin declarado incompatible: sus `checks` son solo `config` con `not evaluated: driver failed` y `doctor_checks()` no se llama. |
 | .02 | N | El chequeo `driver` pasa pero `registry.open_drivers` falla al abrir el plugin: chequeo `plugin` `ok: false` con `E_PLUGIN_FAILED: …` y `config` con `not evaluated: plugin failed`; el resto del informe igual; exit 0. |
 
 #### UT-DR-07 — `doctor_checks()` inválido o colgado
 
-Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
+
+**Tabla: Casos de UT-DR-07**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | Lanza una excepción ⇒ chequeo `plugin` `ok: false` con `E_PLUGIN_FAILED: …`, seguido de `config`; el detalle del caso no mapeado es `E_PLUGIN_FAILED: <tipo>: <texto>`. |
 | .02 | N | Devuelve algo que no es lista; un elemento que no es un dict; un elemento sin la forma; `ok` que no es booleano; `detail` que no es texto; un `name` repetido; un `name` `config` o `plugin`; un `detail` con `\n` o solo con `\r` ⇒ ídem. |
 | .03 | N | No responde (plazo inyectado con `mock.patch("mailquery.plugins.api.METADATA_TIMEOUT_SECONDS", 0.05)`) ⇒ `plugin` `ok: false` con `timeout after 30 s: plugin '<driver>' did not respond`; el resto de `doctor` se muestra igual. |
-| .04 | N | `accounts()` o `resolve_mailbox()` del plugin lanzan una excepción o no responden (mismo plazo inyectado) ⇒ `config` del plugin `ok: false` con el formato de error de RF-81; una cuenta malformada y un fallo del wrapper también se reportan; exit 0 y el resto del informe intacto. |
+| .04 | N | `accounts()` o `resolve_mailbox()` del plugin lanzan una excepción o no responden (mismo plazo inyectado) ⇒ `config` del plugin `ok: false` con el formato de error de RF-79; una cuenta malformada y un fallo del wrapper también se reportan; exit 0 y el resto del informe intacto. |
 
 #### UT-DR-08 — Texto y `Result:`
 
-Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-61 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -79,7 +85,7 @@ Requisitos: AC-O16 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
 
 #### UT-DR-09 — `--failures` con plugins
 
-Requisitos: AC-O17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
+Requisitos: AC-62 · Archivo: `tests/test_doctor.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -89,7 +95,7 @@ Requisitos: AC-O17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_doctor.py`
 
 #### UT-DR-10 — Timeout COM con `--failures`
 
-Requisitos: AC-O11, AC-O16, AC-O17 (delta `PRD-v2.2.md`) · Archivo: `tests/test_outlook.py`
+Requisitos: AC-56, AC-61, AC-62 · Archivo: `tests/test_outlook.py`
 
 Plazo de 0,2 s, en subproceso con `run_cli.py`; el plugin se descubre por una distribución
 `graph-0.1.0.dist-info` temporal en `PYTHONPATH`.

@@ -2,7 +2,7 @@
 
 #### UT-SR-01 — Comodines y acentos
 
-Requisitos: RF-09, RF-10, RF-11 · Archivo: `tests/test_search.py`
+Requisitos: RF-08, RF-09, RF-10 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -16,7 +16,7 @@ Requisitos: RF-09, RF-10, RF-11 · Archivo: `tests/test_search.py`
 
 #### UT-SR-02 — Términos de filtro
 
-Requisitos: RF-09, RF-10, RF-11 · Archivo: `tests/test_search.py`
+Requisitos: RF-08, RF-09, RF-10 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -26,7 +26,7 @@ Requisitos: RF-09, RF-10, RF-11 · Archivo: `tests/test_search.py`
 
 #### UT-SR-03 — Acotamiento de `--text` en macOS
 
-Requisitos: RF-17 · Archivo: `tests/test_search.py`
+Requisitos: RF-15 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -39,7 +39,7 @@ Requisitos: RF-17 · Archivo: `tests/test_search.py`
 
 #### UT-SR-04 — `--include-mailbox`
 
-Requisitos: RF-14 · Archivo: `tests/test_search.py`
+Requisitos: RF-13 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -48,7 +48,7 @@ Requisitos: RF-14 · Archivo: `tests/test_search.py`
 
 #### UT-SR-05 — `body` en `search`/`new`
 
-Requisitos: RF-05, RF-06 · Archivo: `tests/test_search.py`
+Requisitos: RF-04, RF-05 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -63,7 +63,7 @@ Requisitos: RF-05, RF-06 · Archivo: `tests/test_search.py`
 
 #### UT-SR-06 — Etiquetas no disponibles
 
-Requisitos: PRD.md §15.2 · Archivo: `tests/test_search.py`
+Requisitos: PRD §15.2 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -123,7 +123,7 @@ Reloj inyectado.
 
 #### UT-SR-11 — `show` y alcance
 
-Requisitos: RF-04 · Archivo: `tests/test_search.py`
+Requisitos: RF-03 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -138,7 +138,7 @@ Requisitos: RF-04 · Archivo: `tests/test_search.py`
 
 #### UT-SR-12 — `show`: adjuntos con cuerpo ilegible
 
-Requisitos: RF-04, RF-05 · Archivo: `tests/test_search.py`
+Requisitos: RF-03, RF-04 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -147,7 +147,7 @@ Requisitos: RF-04, RF-05 · Archivo: `tests/test_search.py`
 
 #### UT-SR-13 — Consultas con la base bloqueada
 
-Requisitos: PRD.md §17 · Archivo: `tests/test_search.py`
+Requisitos: PRD §17 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -157,7 +157,7 @@ Requisitos: PRD.md §17 · Archivo: `tests/test_search.py`
 
 #### UT-SR-14 — INBOX
 
-Requisitos: RF-08 · Archivo: `tests/test_search.py`
+Requisitos: RF-07 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -166,7 +166,7 @@ Requisitos: RF-08 · Archivo: `tests/test_search.py`
 
 #### UT-SR-15 — Dedupe
 
-Requisitos: RF-07 · Archivo: `tests/test_search.py`
+Requisitos: RF-06 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -175,7 +175,7 @@ Requisitos: RF-07 · Archivo: `tests/test_search.py`
 
 #### UT-SR-16 — Referencias de carpeta entre cuentas
 
-Requisitos: RF-14, PRD.md §15.3 · Archivo: `tests/test_search.py`
+Requisitos: RF-13, PRD §15.3 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -186,7 +186,7 @@ Requisitos: RF-14, PRD.md §15.3 · Archivo: `tests/test_search.py`
 
 #### UT-SR-17 — Orden canónico de campos
 
-Requisitos: RF-30, PRD.md §12.5 · Archivo: `tests/test_search.py`
+Requisitos: RF-28, PRD §12.5 · Archivo: `tests/test_search.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

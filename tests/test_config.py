@@ -235,7 +235,7 @@ def _plugin_mailbox(
 
 
 class _PluginBackend:
-    """Fake external driver with opaque ``label``/``uuid`` account identifiers (RF-36)."""
+    """Fake external driver with opaque ``label``/``uuid`` account identifiers (RF-34)."""
 
     driver = PLUGIN_DRIVER
     plugin_api = 1
@@ -942,7 +942,7 @@ class FixtureScopeResolutionTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DRV-01: [scope."<driver>:<cuenta>"] schema (AC-03, RF-36)
+# UT-DRV-01: [scope."<driver>:<cuenta>"] schema (AC-03, RF-34)
 # --------------------------------------------------------------------------- #
 
 
@@ -1067,7 +1067,7 @@ class DriverScopeSchemaTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DRV-02: account resolution inside each driver (AC-03, RF-36)
+# UT-DRV-02: account resolution inside each driver (AC-03, RF-34)
 # --------------------------------------------------------------------------- #
 
 
@@ -1147,7 +1147,7 @@ class DriverAccountResolutionTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DRV-03: installed-but-not-declared drivers (AC-03, RF-36)
+# UT-DRV-03: installed-but-not-declared drivers (AC-03, RF-34)
 # --------------------------------------------------------------------------- #
 
 
@@ -1193,7 +1193,7 @@ class DriverInScopeTests(_DriverConfigCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-DRV-04: [attachments] table (AC-14, RF-42/49, PRD §15)
+# UT-DRV-04: [attachments] table (AC-14, RF-40, RF-47, PRD §15)
 # --------------------------------------------------------------------------- #
 
 

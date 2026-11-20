@@ -2,7 +2,7 @@
 
 Covers AC-01 (entry point group, driver/plugin_api validation, duplicates),
 AC-02 (capability validation), AC-18 (``--version`` additive ``drivers:``) and
-the plugin-file boundaries of RF-39 (PRD §6.5, §12.6, §12.9).
+the plugin-file boundaries of RF-37 (PRD §6.5, §12.6, §12.9).
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ class _PluginTestCase(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-PL-01 — driver registry (AC-01, RF-35)
+# UT-PL-01 — driver registry (AC-01, RF-33)
 # --------------------------------------------------------------------------- #
 
 
@@ -288,7 +288,7 @@ class RegistryTests(_PluginTestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-PL-02 — capabilities (AC-02, RF-38)
+# UT-PL-02 — capabilities (AC-02, RF-36)
 # --------------------------------------------------------------------------- #
 
 
@@ -553,7 +553,7 @@ class VersionTests(_PluginTestCase):
 
 
 # --------------------------------------------------------------------------- #
-# UT-PL-04 — plugin API and autonomous plugin files (AC-01, RF-39)
+# UT-PL-04 — plugin API and autonomous plugin files (AC-01, RF-37)
 # --------------------------------------------------------------------------- #
 
 
@@ -1234,7 +1234,7 @@ class PluginErrorRuntimeTests(unittest.TestCase):
         self.assertFalse((self.home / "state.json").exists())
 
 
-# UT-ERR-04 — metadata timeout (AC-17, RNF-16)
+# UT-ERR-04 — metadata timeout (AC-17, RNF-21)
 # --------------------------------------------------------------------------- #
 
 

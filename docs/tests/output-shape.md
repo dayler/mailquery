@@ -2,7 +2,7 @@
 
 #### UT-FLD-01 — Fila por defecto
 
-Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-46 · Archivo: `tests/test_fields.py`
 
 | Caso | Tipo | Verifica                                                                                                                                                                                                                                                                |
 | ---- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -11,7 +11,7 @@ Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
 
 #### UT-FLD-02 — Sin lectura de cuerpos
 
-Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-46 · Archivo: `tests/test_fields.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -24,20 +24,24 @@ Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
 
 #### UT-FLD-03 — `--fields` en `search` y `new`
 
-Requisitos: AC-O02 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-47 · Archivo: `tests/test_fields.py`
+
+**Tabla: Casos de UT-FLD-03**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `--fields snippet` añade `snippet` al final de la fila por defecto. |
-| .02 | P | `--fields all` da la fila completa de `PRD.md` sección 12.5 (`SEARCH_ROW_FIELDS`). |
+| .02 | P | `--fields all` da la fila completa del PRD sección 12.5 (`SEARCH_ROW_FIELDS`). |
 | .03 | P | `--fields to,uid` y `--fields uid --fields to` dan la fila por defecto más `to`, en el orden canónico. |
-| .04 | N | `--fields remitente` ⇒ `E_USAGE`, exit 2, mensaje y hint literales de PRD-v2.2 sección 8; `--fields ""` y `--fields uid,,to` ⇒ ídem con `''`. |
+| .04 | N | `--fields remitente` ⇒ `E_USAGE`, exit 2, mensaje y hint literales del PRD sección 12.5; `--fields ""` y `--fields uid,,to` ⇒ ídem con `''`. |
 | .05 | B | El error ocurre antes de crear el home (el `HOME` temporal no tiene `.mailquery`) y sin abrir el store. |
 | .06 | B | D-24: `--fields "to, uid"` equivale a `--fields to,uid`; `--fields ALL` y `--fields Snippet` ⇒ `E_USAGE` con `unknown field 'ALL'` / `unknown field 'Snippet'`; `--fields " "` ⇒ ídem con `''`. |
 
 #### UT-FLD-04 — `show --fields`
 
-Requisitos: AC-O03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-48 · Archivo: `tests/test_fields.py`
+
+**Tabla: Casos de UT-FLD-04**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -46,11 +50,11 @@ Requisitos: AC-O03 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
 | .03 | P | `--fields headers` → `uid` y `headers` sin leer el cuerpo (Apple Mail con `load_headers`; Outlook sin `Body`/`HTMLBody`). |
 | .04 | P | Sin `--fields` → los mismos campos y valores que antes más `content_notice`. |
 | .05 | N | Campo desconocido ⇒ `E_USAGE` con la lista de `show`. |
-| .06 | P | `--fields source` y `--fields partial`, cada uno solo: leen el cuerpo, entregan `uid` y ese campo, y emiten los warnings del cuerpo (cuerpo entregado según RF-74). |
+| .06 | P | `--fields source` y `--fields partial`, cada uno solo: leen el cuerpo, entregan `uid` y ese campo, y emiten los warnings del cuerpo (cuerpo entregado según RF-72). |
 
 #### UT-FLD-05 — Warnings según lo entregado
 
-Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-54 · Archivo: `tests/test_fields.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -62,7 +66,7 @@ Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
 
 #### UT-FLD-06 — `new --fields`
 
-Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-53 · Archivo: `tests/test_fields.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -71,7 +75,7 @@ Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
 
 #### UT-FLD-07 — Compatibilidad final de F1
 
-Requisitos: AC-H14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
+Requisitos: AC-35 · Archivo: `tests/test_fields.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -79,7 +83,9 @@ Requisitos: AC-H14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_fields.py`
 
 #### UT-GRP-01 — `--group-by from`
 
-Requisitos: AC-O01, AC-O04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-46, AC-49 · Archivo: `tests/test_group_count.py`
+
+**Tabla: Casos de UT-GRP-01**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -88,15 +94,17 @@ Requisitos: AC-O01, AC-O04 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_c
 | .03 | B | `--limit 0` → `messages: []` en cada grupo y `count` correcto. |
 | .04 | P | `--fields snippet` añade `snippet` a las filas de los grupos. |
 | .05 | P | La deduplicación se aplica antes de agrupar (el duplicado Gmail/INBOX del store sintético cuenta una vez). |
-| .06 | P | Con `[search].default_limit = 20` en la configuración, `--group-by from` sin `--limit` da 5 mensajes por grupo (RF-72: `default_limit` no aplica). |
+| .06 | P | Con `[search].default_limit = 20` en la configuración, `--group-by from` sin `--limit` da 5 mensajes por grupo (RF-70: `default_limit` no aplica). |
 
 #### UT-GRP-02 — Dos claves y fechas
 
-Requisitos: AC-O01, AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-46, AC-50 · Archivo: `tests/test_group_count.py`
+
+**Tabla: Casos de UT-GRP-02**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `--group-by domain,month` y `--group-by domain --group-by month` dan el mismo resultado: un grupo plano por combinación con mensajes, con `domain` y `month` en ese orden (ejemplo de PRD-v2.2 sección 8). |
+| .01 | P | `--group-by domain,month` y `--group-by domain --group-by month` dan el mismo resultado: un grupo plano por combinación con mensajes, con `domain` y `month` en ese orden (ejemplo del PRD sección 12.5). |
 | .02 | P | `day`, `week`, `month` usan la zona local (`output.LOCAL_ZONE` inyectada): un mensaje a las 02:00 UTC cae en el día anterior con UTC−4. |
 | .03 | B | Semana ISO en el cambio de año: 2026-12-31 y 2027-01-01 → `2026-W53`; 2027-01-04 → `2027-W01`. |
 | .04 | B | Mensajes sin fecha (nula, 0 o no representable) forman el grupo `null` de `day`/`week`/`month` y van al final; mensajes sin dirección del remitente, el grupo `null` de `from`/`domain`. |
@@ -107,7 +115,7 @@ Requisitos: AC-O01, AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_c
 
 #### UT-GRP-03 — Errores de `--group-by` y `--limit`
 
-Requisitos: AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-50 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -119,7 +127,7 @@ Requisitos: AC-O05 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-GRP-04 — Más de 50 grupos
 
-Requisitos: AC-O06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-51 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -129,19 +137,21 @@ Requisitos: AC-O06 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-GRP-05 — `--count`
 
-Requisitos: AC-O07, AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-52, AC-58 · Archivo: `tests/test_group_count.py`
+
+**Tabla: Casos de UT-GRP-05**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Respuesta con exactamente `ok`, `command`, `generated_at`, `content_notice`, `count`, `hint`, `warnings`, `scan`, en ese orden; `hint: null` con resultados. |
 | .02 | P | Con 250 mensajes (plugin falso) el `count` es 250, sin el límite de 200 ni de `--limit`, y después de deduplicar. |
-| .03 | P | Cero resultados → `count: 0`, hint de RF-78, exit 0. |
+| .03 | P | Cero resultados → `count: 0`, hint de RF-76, exit 0. |
 | .04 | N | `--count` con `--fields`, con `--group-by` y con `--limit` ⇒ `E_USAGE` con el mensaje y el hint literales. |
 | .05 | N | `--count --text x` sin filtro de acotamiento ⇒ `E_UNBOUNDED_SCAN`; con más candidatos que `[search].max_scan` ⇒ `E_SCAN_TOO_LARGE`. |
 
 #### UT-GRP-06 — `new` sin agrupación ni recuento
 
-Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-53 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -149,7 +159,7 @@ Requisitos: AC-O08 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-GRP-07 — Lecturas
 
-Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-46 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -159,7 +169,7 @@ Requisitos: AC-O01 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-GRP-08 — `hint` de `search` sin resultados
 
-Requisitos: AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-58 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -173,7 +183,7 @@ Requisitos: AC-O13 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-GRP-09 — Warnings con `--count` y `--group-by`
 
-Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-54 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -182,7 +192,7 @@ Requisitos: AC-O09 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-GRP-10 — `content_notice` con cualquier opción
 
-Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
+Requisitos: AC-39 · Archivo: `tests/test_group_count.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -190,18 +200,18 @@ Requisitos: AC-H18 (delta `PRD-v2.2.md`) · Archivo: `tests/test_group_count.py`
 
 #### UT-MBX-01 — Forma por defecto
 
-Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+Requisitos: AC-59 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Sin `--fields`: claves de primer nivel exactamente `ok`, `command`, `generated_at`, `accounts`, `excluded_stores`, `warnings`, con el store sintético, el doble de Outlook y un plugin falso. |
 | .02 | P | Cada cuenta tiene `uuid`, `label`, `email`, `declared` y `mailboxes`, en ese orden; cada carpeta solo `path` e `included`, con los mismos valores e igual orden que el catálogo plano anterior. |
 | .03 | N | Ninguna carpeta lleva `account`; no hay `mailboxes` de primer nivel. |
-| .04 | B | Una cuenta declarada sin carpetas tiene `mailboxes: []`; con dos drivers declarados, el orden de cuentas es el de `PRD.md` §11.3; una carpeta sin cuenta se agrupa en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`. |
+| .04 | B | Una cuenta declarada sin carpetas tiene `mailboxes: []`; con dos drivers declarados, el orden de cuentas es el del PRD §11.3; una carpeta sin cuenta se agrupa en una cuenta con `uuid: ""`, `label: ""`, `email: null` y `declared: false`. |
 
 #### UT-MBX-02 — Referencias copiadas
 
-Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+Requisitos: AC-59 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -210,7 +220,7 @@ Requisitos: AC-O14 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
 
 #### UT-MBX-03 — `--fields`
 
-Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+Requisitos: AC-60 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -220,7 +230,7 @@ Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
 
 #### UT-MBX-04 — Sin recuento sin `total` ni `unread`
 
-Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+Requisitos: AC-60 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -234,7 +244,7 @@ Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
 
 #### UT-MBX-05 — Ayudas
 
-Requisitos: AC-O15 (delta `PRD-v2.2.md`) · Archivo: `tests/test_mailboxes.py`
+Requisitos: AC-60 · Archivo: `tests/test_mailboxes.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

@@ -773,7 +773,7 @@ class SearchMetadataTest(SearchFixtureTest):
 
 
 class SearchTextTest(SearchFixtureTest):
-    """Bounded content scans (RF-17): validation, matching and counters."""
+    """Bounded content scans (RF-15): validation, matching and counters."""
 
     def assert_unbounded(self, **filters: object) -> MailqueryError:
         with self.assertRaises(MailqueryError) as context:

@@ -4,7 +4,7 @@ The double stands in for a ``MailBackend`` at the attachment boundary
 fixed by ``backends/base.py``: it exposes ``driver``, ``parse_native_id``,
 ``attachments(uid)`` and ``attachment_stream(uid, index)`` and never touches
 the application home, the attachment cache or the staging area (the core owns
-every byte written; PRD RF-47/RNF-13). Every reachable failure is
+every byte written; PRD RF-45/RNF-13). Every reachable failure is
 injected from the test:
 
 * metadata failures through ``FakeAttachmentDriver(metadata_error=...)`` or
@@ -122,7 +122,7 @@ class FakeAttachmentDriver:
 
     @staticmethod
     def parse_native_id(native_id: str) -> str:
-        """A plugin native id is an opaque non-empty string (RF-40)."""
+        """A plugin native id is an opaque non-empty string (RF-38)."""
         if not isinstance(native_id, str) or not native_id:
             raise DriverFailure("invalid_uid", "empty native id")
         return native_id

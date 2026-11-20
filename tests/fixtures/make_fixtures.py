@@ -838,7 +838,7 @@ mailbox_list = ["Facturas", "Archivo"]
 [scope."{LOCAL_LABEL}"]
 """
 
-#: Same accounts declared with the explicit driver prefix (RF-36).
+#: Same accounts declared with the explicit driver prefix (RF-34).
 PREFIXED_CONFIG = f"""\
 {ATTACHMENTS_CONFIG}
 [scope."apple_mail:{ICLOUD_LABEL}"]
@@ -995,7 +995,7 @@ def build_store(
 def prefixed_uid(native_uid: int | str, driver: str = "apple_mail") -> str:
     """Test-only helper: the prefixed uid a command emits for a fixture native uid.
 
-    PRD RF-40 makes every emitted uid ``"<driver>:<native_id>"``; the data
+    PRD RF-38 makes every emitted uid ``"<driver>:<native_id>"``; the data
     fixtures keep their native uids (Apple Mail integers) and the tests build the
     expected JSON values with this helper.
     """

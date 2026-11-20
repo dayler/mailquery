@@ -30,7 +30,7 @@ DRIVER = "graph"
 #: Version the entry point metadata advertises for the double.
 VERSION = "0.1.0"
 
-#: Account and mailbox identifiers of the double (opaque and stable, RF-36).
+#: Account and mailbox identifiers of the double (opaque and stable, RF-34).
 ACCOUNT_UUID = "graph-account"
 ACCOUNT_LABEL = "Graph (user@example.com)"
 MAILBOX_ID = "graph-inbox"
@@ -45,7 +45,7 @@ CAPABILITIES: dict[str, Any] = {
     "native_order": "text",
 }
 
-#: Attachment metadata the double returns by default (RF-43/RF-47 contract).
+#: Attachment metadata the double returns by default (RF-41/RF-45 contract).
 DEFAULT_ATTACHMENTS: list[dict[str, Any]] = [
     {
         "index": 1,
@@ -163,7 +163,7 @@ class FakePluginBackend:
 
     @staticmethod
     def parse_uid(raw: Any) -> str:
-        """Native id of a plugin message: an opaque string (RF-40)."""
+        """Native id of a plugin message: an opaque string (RF-38)."""
         text = raw if isinstance(raw, str) else str(raw)
         if not text:
             raise PluginError(Reason.INVALID_UID, "empty uid")
@@ -171,7 +171,7 @@ class FakePluginBackend:
 
     @staticmethod
     def parse_native_id(native_id: str) -> str:
-        """Validate the native part of a prefixed uid (RF-40); opaque non-empty text."""
+        """Validate the native part of a prefixed uid (RF-38); opaque non-empty text."""
         if not isinstance(native_id, str) or not native_id:
             raise PluginError(Reason.INVALID_UID, "expected a non-empty native id")
         return native_id

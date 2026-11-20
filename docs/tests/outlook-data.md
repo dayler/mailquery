@@ -2,7 +2,7 @@
 
 #### OL-06 — Stores candidatos
 
-Requisitos: RF-29 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-27 · Archivo: `tests/test_outlook.py`
 
 Cada caso declara la cuenta y ejecuta `search` y `show`.
 
@@ -17,7 +17,7 @@ Cada caso declara la cuenta y ejecuta `search` y `show`.
 
 #### OL-07 — Stores excluidos
 
-Requisitos: RF-34 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-32 · Archivo: `tests/test_outlook.py`
 
 Cada caso en `mailboxes.excluded_stores` con `label`, `path` y `reason`.
 
@@ -37,7 +37,7 @@ Cada caso en `mailboxes.excluded_stores` con `label`, `path` y `reason`.
 
 #### OL-08 — `account.uuid`
 
-Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-77, RF-78, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -45,7 +45,7 @@ Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-09 — Cuentas declaradas excluidas
 
-Requisitos: RF-34 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-32 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -56,7 +56,7 @@ Requisitos: RF-34 · Archivo: `tests/test_outlook.py`
 
 #### OL-10 — INBOX
 
-Requisitos: RF-08, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-07, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -66,7 +66,7 @@ Requisitos: RF-08, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-11 — `path`, `name` y `url`
 
-Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-77, RF-78, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -77,7 +77,7 @@ Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-12 — Carpetas listadas y contadores
 
-Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-77, RF-78, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -87,7 +87,7 @@ Requisitos: RF-03, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-13 — Referencias a la bandeja
 
-Requisitos: RF-08, RF-14 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-07, RF-13 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -95,7 +95,7 @@ Requisitos: RF-08, RF-14 · Archivo: `tests/test_outlook.py`
 
 #### OL-14 — uid y orden
 
-Requisitos: RF-27, RNF-04 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-25, RNF-04 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -104,7 +104,7 @@ Requisitos: RF-27, RNF-04 · Archivo: `tests/test_outlook.py`
 
 #### OL-15 — Fechas
 
-Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -113,7 +113,7 @@ Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-16 — Direcciones
 
-Requisitos: RF-11, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-10, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -123,7 +123,7 @@ Requisitos: RF-11, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-17 — Dedupe
 
-Requisitos: RF-07 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-06 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -132,7 +132,7 @@ Requisitos: RF-07 · Archivo: `tests/test_outlook.py`
 
 #### OL-18 — Items buscables
 
-Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -142,7 +142,7 @@ Requisitos: PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-19 — Marcas y adjuntos
 
-Requisitos: RF-13 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-12 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -153,7 +153,7 @@ Requisitos: RF-13 · Archivo: `tests/test_outlook.py`
 
 #### OL-20 — Cuerpo
 
-Requisitos: RF-05, RF-06 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-04, RF-05 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -167,7 +167,7 @@ Requisitos: RF-05, RF-06 · Archivo: `tests/test_outlook.py`
 
 #### OL-21 — `show`: adjuntos con el item ilegible
 
-Requisitos: RF-04, RF-05 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-03, RF-04 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -176,7 +176,7 @@ Requisitos: RF-04, RF-05 · Archivo: `tests/test_outlook.py`
 
 #### OL-22 — `show`: cabeceras
 
-Requisitos: RF-04, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-03, PRD §11.3 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -185,7 +185,7 @@ Requisitos: RF-04, PRD.md §11.3 · Archivo: `tests/test_outlook.py`
 
 #### OL-23 — `show`: resolución del uid
 
-Requisitos: RF-04, RF-27 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-03, RF-25 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -199,7 +199,7 @@ Requisitos: RF-04, RF-27 · Archivo: `tests/test_outlook.py`
 
 #### OL-24 — `--text`, `--to` y `--cc` en Windows
 
-Requisitos: RF-17 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-15 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -213,7 +213,7 @@ Requisitos: RF-17 · Archivo: `tests/test_outlook.py`
 
 #### OL-25 — `new` en Windows
 
-Requisitos: RF-01, RF-34 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-01, RF-32 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -224,7 +224,7 @@ Requisitos: RF-01, RF-34 · Archivo: `tests/test_outlook.py`
 
 #### OL-26 — `doctor` en Windows
 
-Requisitos: RF-25, RF-34 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-23, RF-32 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
@@ -235,7 +235,7 @@ Requisitos: RF-25, RF-34 · Archivo: `tests/test_outlook.py`
 
 #### OL-28 — Campos neutros
 
-Requisitos: RF-30 · Archivo: `tests/test_outlook.py`
+Requisitos: RF-28 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|

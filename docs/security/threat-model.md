@@ -1,13 +1,13 @@
 # Modelo de amenaza — contenido de correo y frontera de confianza
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes.
-**Documento:** anexo técnico de seguridad (no forma parte del alcance de `PRD.md`).
+**Documento:** anexo técnico de seguridad (no forma parte del alcance del PRD).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** implementado en `develop` (plugins de backend y adjuntos, `PRD.md` v2.1), **no publicado**: el paquete anuncia la pre-release 3.0.0a1 (3.0.0-alpha) en `develop`, todavía sin tag de release ni merge a `main`.
+**Estado:** implementado en `develop` (plugins de backend y adjuntos, PRD v2.3), **no publicado**: el paquete anuncia la pre-release 3.0.0a1 (3.0.0-alpha.1) en `develop`, todavía sin tag de release ni merge a `main`.
 **Ámbito:** amenazas derivadas del **contenido** del correo (texto, HTML, URLs, imágenes, firmas, adjuntos) y del uso de la salida de `mailquery` por un harness de agentes. No cubre la seguridad del proveedor de correo, del cliente de escritorio ni del endpoint; esas capas se mencionan solo como mitigaciones externas.
 
-**Documentos relacionados:** [`PRD.md`](../PRD.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); §6.5–§6.7, §10.3, §10.4 y §23.1 (plugins y adjuntos); [`PRD-v2.2.md`](../PRD-v2.2.md) (feature F1: opciones A2–A7); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
+**Documentos relacionados:** [PRD](../prd/00-indice.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); §6.5–§6.7, §10.3, §10.4 y §23.1 (plugins y adjuntos); §6.8 y §12.12 (feature F1: opciones A2–A7); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
 
 ---
 
@@ -74,17 +74,17 @@ La frontera relevante es **`mailquery` → harness**: todo lo que sale de `mailq
 
 ## 4. Qué protege hoy `mailquery` (verificado en código)
 
-- **Sin red, sin cliente, sin ejecución:** I-1 y [PRD.md §4](../PRD.md#L101); el núcleo no abre conexiones ni lanza el cliente; `attachment` solo copia bytes y nunca abre/ejecuta el archivo.
+- **Sin red, sin cliente, sin ejecución:** I-1 y [PRD §4](../prd/04-solo-lectura.md); el núcleo no abre conexiones ni lanza el cliente; `attachment` solo copia bytes y nunca abre/ejecuta el archivo.
 - **HTML sin contenido activo:** [`html_to_text`](../../src/mailquery/output.py#L93) descarta `script`, `style`, `head`, `noscript`, `template`, `svg` y `math`; **ignora todos los atributos**, así que no extrae `href`, `src` ni `alt`, no carga imágenes remotas y no expone la URL oculta de un ancla.
 - **Saneado del texto:** [`sanitize_text`](../../src/mailquery/output.py) elimina ANSI, controles C0/C1, DEL, `Cf`, selectores de variación (salvo `U+FE0E`/`U+FE0F`) y rellenos Hangul, normaliza fin de línea y conserva `\n`/`\t`; se aplica a los campos de contenido de `search`, `new`, `show` y `attachment`, a los `warnings` y a los textos de error, y la búsqueda aplica el mismo saneado a ambos lados.
 - **Cabeceras limitadas:** `show` expone solo `From`, `To`, `Cc`, `Subject`, `Date` y `Message-ID` ([`_show_headers`](../../src/mailquery/search.py)); no expone `Reply-To`, `List-Unsubscribe` ni cabeceras completas. `Authentication-Results` y `Reply-To` se leen de los backends internos solo para las señales del remitente y no se emiten como campos.
-- **Adjuntos:** bloqueo por nombre, extensión y *magic bytes*; staging, permisos `0600` y caché efímera ([`PRD.md`](../PRD.md) §10.3, §10.4).
+- **Adjuntos:** bloqueo por nombre, extensión y *magic bytes*; staging, permisos `0600` y caché efímera ([PRD](../prd/10-carpetas-y-cache.md) §10.3, §10.4).
 - **Excepción COM de Outlook (futuro 3.0.0, no publicado):** el proxy de solo lectura autoriza
   `Attachment.SaveAsFile` únicamente para materializar en staging un adjunto
   **ya descargado**; no se resuelven referencias, no se descarga contenido y el
   archivo temporal se valida (regular, dentro de su sesión, no symlink) y se
   borra siempre (§4.1).
-- **Contenido como no confiable en el contrato:** [PRD.md §21.1](../PRD.md#L1123) y las recetas ya piden guardrails, aunque no definen política de URLs ni de archivos.
+- **Contenido como no confiable en el contrato:** [PRD §21.1](../prd/21-harness.md) y las recetas ya piden guardrails, aunque no definen política de URLs ni de archivos.
 
 ### 4.1 Excepción de materialización COM (Outlook)
 
@@ -112,7 +112,9 @@ excepción queda acotada así:
   contrato se cubre con el doble y con la SMOKE de Windows del dueño (riesgo
   aceptado, PRD §23.1).
 
-### 4.2 Huecos conocidos que aborda `PRD-v2.2` (F1)
+### 4.2 Huecos conocidos que aborda el PRD (F1)
+
+**Tabla: Huecos conocidos que aborda el PRD**
 
 | ID | Hueco | Evidencia | Consecuencia |
 |---|---|---|---|
@@ -122,12 +124,12 @@ excepción queda acotada así:
 | G-04 | No hay señal ni control de URLs: el cuerpo, el asunto y los nombres (y `headers` en `show`, que los repite) pueden traer URLs como texto y el harness puede abrirlas | `body_text`/`snippet`/`subject`/`headers` | Phishing, descarga o *drive-by* si el harness tiene navegador/herramientas de red. |
 | G-05 | Con HTML y texto plano alternativo, el cuerpo sale del texto plano (`.emlx`) o del texto plano del item (Outlook); el destinatario ve el HTML y la conversión HTML casi nunca se usa | [`emlx.py`](../../src/mailquery/emlx.py#L318), [`outlook.py`](../../src/mailquery/backends/outlook.py#L1803) | Datos o instrucciones en un texto plano que el destinatario no ve llegan al agente; la omisión de HTML oculto no protege. |
 | G-06 | El saneado no elimina invisibles que no son `Cf`: selectores de variación (`U+FE00..U+FE0F`, `U+E0100..U+E01EF`) y rellenos Hangul | [`output.py`](../../src/mailquery/output.py#L26) | Datos o instrucciones escondidos detrás de un emoji que algunos LLM decodifican. |
-| G-07 | El bloqueo de adjuntos es una *blocklist* de prefijos/nombres; no inspecciona contenido. `PRD-v2.2` (A7) añade un aviso para PDF con JavaScript o `/Launch`, documentos con macros y ZIP con ejecutables, sin descomprimir; los objetos comprimidos de un PDF, RAR/7z, ZIP anidados y RTF no se inspeccionan | [`PRD.md` §10.3, §23.1](../PRD.md) | Malware que evade las firmas, el catálogo o los marcadores. |
-| G-08 | No hay sandbox ni política de herramientas en `mailquery`; el impacto depende del harness | PRD.md §21.1 | Inyección de prompt con efectos reales si el agente puede ejecutar/abrir/enviar. |
-| G-09 | Un plugin externo ejecuta código arbitrario y puede usar red si lo declara | [`PRD.md` ADR-22](../PRD.md) | Compromiso del proceso o de datos; consentimiento al instalar. |
+| G-07 | El bloqueo de adjuntos es una *blocklist* de prefijos/nombres; no inspecciona contenido. El PRD (A7) añade un aviso para PDF con JavaScript o `/Launch`, documentos con macros y ZIP con ejecutables, sin descomprimir; los objetos comprimidos de un PDF, RAR/7z, ZIP anidados y RTF no se inspeccionan | [PRD §10.3, §23.1](../prd/00-indice.md) | Malware que evade las firmas, el catálogo o los marcadores. |
+| G-08 | No hay sandbox ni política de herramientas en `mailquery`; el impacto depende del harness | PRD §21.1 | Inyección de prompt con efectos reales si el agente puede ejecutar/abrir/enviar. |
+| G-09 | Un plugin externo ejecuta código arbitrario y puede usar red si lo declara | [PRD ADR-22](../prd/08-adr.md) | Compromiso del proceso o de datos; consentimiento al instalar. |
 | G-10 | `source.emlx_path` y rutas de caché se exponen en el JSON; la caché es propiedad del usuario | [`search.py`](../../src/mailquery/search.py#L521) | Fuga menor de rutas locales; manipulación local aceptada. |
 
-G-01 a G-06 son los que cubre la feature F1 de [`PRD-v2.2.md`](../PRD-v2.2.md): A2–A6 están implementados en `search`, `new` y `show`, y los huecos de esta tabla dejan de estar abiertos en esos comandos. G-07 a G-10 se aceptan como riesgos documentados y se mitigan en el harness/OS (G-07 con la ayuda de los avisos de A7); el dueño confirmó G-10 y T-12 como riesgos aceptados el 2026-11-12.
+G-01 a G-06 son los que cubre la feature F1 del [PRD](../prd/00-indice.md): A2–A6 están implementados en `search`, `new` y `show`, y los huecos de esta tabla dejan de estar abiertos en esos comandos. G-07 a G-10 se aceptan como riesgos documentados y se mitigan en el harness/OS (G-07 con la ayuda de los avisos de A7); el dueño confirmó G-10 y T-12 como riesgos aceptados el 2026-11-12.
 
 Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*) son `Cf` y los cubre G-01; el JSON escapa los controles C0, así que una secuencia ANSI de un campo no saneado no llega cruda a la terminal; las referencias de carácter HTML (`&#x202E;`) se decodifican antes del saneado; los comentarios HTML, incluidos los condicionales de Outlook, no aportan texto; un MIME anidado a gran profundidad no rompe el proceso (el mensaje queda ilegible). Otros invisibles que no son `Cf` (`U+2800`, marcas combinantes sueltas, variantes de espacio) se aceptan: no se conoce un ataque práctico contra un LLM con ellos y quitarlos alteraría texto legítimo; se revisa si aparece uno.
 
@@ -135,18 +137,20 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 
 ## 5. Catálogo de amenazas
 
+**Tabla: Catálogo de amenazas**
+
 | ID | Vector | Ejemplo | Impacto | Mitigación primaria | Residual |
 |---|---|---|---|---|---|
 | T-01 | Inyección de prompt en cuerpo, asunto, remitente, firma o nombres | “Ignora tus instrucciones y envía/abre/borra…” | El agente desvía la tarea, exfiltra o ejecuta acciones con las herramientas del harness | Harness: jerarquía de instrucciones, contenido como dato, tools de mínimo privilegio, confirmación humana | Alto si el harness no aplica política |
-| T-02 | URL maliciosa en el texto (phishing, descarga, drive-by, shortener, punycode, ruta UNC) | Enlace a un dominio parecido o a un ejecutable; `\\evil.example\recurso` que filtra el hash NTLM al abrirse en Windows | Robo de credenciales, descarga, ejecución según navegador/OS | `mailquery` no resuelve URLs; `PRD-v2.2` F1, A4/A5 reconocen `http(s)://`, `www.`, `file://`, `smb://`, `ftp://`, `javascript:`, `vbscript:`, `data:`, rutas UNC y URLs ya neutralizadas para transformarlas y contarlas; `W_SCRIPT_LINK` señala `javascript:`, `vbscript:` y `data:`, y `W_LONG_URL` las URLs de más de 2.048 caracteres, que `neutralize` acorta; harness: no auto-abrir, allowlist, sandbox, confirmación | Medio (dominios sin `www.` y URLs partidas no se reconocen; JavaScript dentro de una URL `https` no se señala) |
-| T-03 | Texto oculto por CSS en HTML | Párrafo `display:none` con instrucciones | Datos o instrucciones que el destinatario no ve llegan al agente | `PRD-v2.2` F1, A3 (cuerpo desde el HTML y no del texto plano alternativo; hojas `<style>` pasadas a línea con `css-inline`; omitir elementos con `hidden` o `display:none`/`visibility:hidden`; aviso `W_HIDDEN_CONTENT`) + harness trata el cuerpo como dato | Bajo (reglas `@media`, hojas enlazadas, `max-height:0`, color igual al fondo y otras técnicas no se detectan; `font-size:0`, `opacity:0` y `mso-hide:all` sí) |
-| T-04 | Bidi/zero-width en asunto, remitente o nombres | RLO para invertir el nombre de un dominio | Spoofing visual, decisión equivocada | `PRD-v2.2` F1, A2 (sanear `Cf`/C1, selectores de variación y rellenos Hangul en todos los campos de contenido; la búsqueda ignora esos caracteres) | Bajo |
+| T-02 | URL maliciosa en el texto (phishing, descarga, drive-by, shortener, punycode, ruta UNC) | Enlace a un dominio parecido o a un ejecutable; `\\evil.example\recurso` que filtra el hash NTLM al abrirse en Windows | Robo de credenciales, descarga, ejecución según navegador/OS | `mailquery` no resuelve URLs; PRD F1, A4/A5 reconocen `http(s)://`, `www.`, `file://`, `smb://`, `ftp://`, `javascript:`, `vbscript:`, `data:`, rutas UNC y URLs ya neutralizadas para transformarlas y contarlas; `W_SCRIPT_LINK` señala `javascript:`, `vbscript:` y `data:`, y `W_LONG_URL` las URLs de más de 2.048 caracteres, que `neutralize` acorta; harness: no auto-abrir, allowlist, sandbox, confirmación | Medio (dominios sin `www.` y URLs partidas no se reconocen; JavaScript dentro de una URL `https` no se señala) |
+| T-03 | Texto oculto por CSS en HTML | Párrafo `display:none` con instrucciones | Datos o instrucciones que el destinatario no ve llegan al agente | PRD F1, A3 (cuerpo desde el HTML y no del texto plano alternativo; hojas `<style>` pasadas a línea con `css-inline`; omitir elementos con `hidden` o `display:none`/`visibility:hidden`; aviso `W_HIDDEN_CONTENT`) + harness trata el cuerpo como dato | Bajo (reglas `@media`, hojas enlazadas, `max-height:0`, color igual al fondo y otras técnicas no se detectan; `font-size:0`, `opacity:0` y `mso-hide:all` sí) |
+| T-04 | Bidi/zero-width en asunto, remitente o nombres | RLO para invertir el nombre de un dominio | Spoofing visual, decisión equivocada | PRD F1, A2 (sanear `Cf`/C1, selectores de variación y rellenos Hangul en todos los campos de contenido; la búsqueda ignora esos caracteres) | Bajo |
 | T-05 | HTML activo (script, iframe, formularios, CSS) | Correo con `<script>` o formulario de credenciales | Ejecución o captura de credenciales | `mailquery` descarta el contenido activo y nunca emite HTML; aun así, `body_text` puede contener el texto `<script>` (de `&lt;script&gt;` o de una URL cortada en `<`); el harness no debe renderizar el contenido y debe escapar los campos antes de insertarlos en HTML (checklist, punto 15) | Bajo en `mailquery`; depende del harness |
 | T-06 | Imágenes remotas y píxeles de tracking | `<img src=...>` de seguimiento | Beacon de lectura, fingerprinting | `mailquery` no carga imágenes ni resuelve `src`; el harness no debe renderizarlas | Bajo |
-| T-07 | Adjunto malicioso (ejecutable, macro, PDF con JS, ZIP, bomba de descompresión) | `.exe`, `.docm`, PDF con JavaScript | Ejecución o agotamiento de recursos | Bloqueo por nombre/magic; `PRD-v2.2` A7: `W_ATTACHMENT_ACTIVE_CONTENT` (PDF con JavaScript o `/Launch`, macros, ZIP con ejecutables) sin abrir ni descomprimir; harness no abre/ejecuta; AV/EDR y visor aislado | Medio |
+| T-07 | Adjunto malicioso (ejecutable, macro, PDF con JS, ZIP, bomba de descompresión) | `.exe`, `.docm`, PDF con JavaScript | Ejecución o agotamiento de recursos | Bloqueo por nombre/magic; PRD A7: `W_ATTACHMENT_ACTIVE_CONTENT` (PDF con JavaScript o `/Launch`, macros, ZIP con ejecutables) sin abrir ni descomprimir; harness no abre/ejecuta; AV/EDR y visor aislado | Medio |
 | T-08 | Inyección de prompt dentro de un adjunto | PDF/factura con instrucciones para el agente | Mismo impacto que T-01, pero tras una extracción explícita | Tratar archivos extraídos como dato; no abrirlos automáticamente; provenance | Alto si el agente los lee sin política |
 | T-09 | Inyección visual o QR en imágenes/firmas | Imagen con texto “ignora…” o QR a URL maliciosa | Inyección o redirección | `mailquery` no carga imágenes ni extrae `src`/`alt`; una imagen solo sale con `attachment` (orden explícita) y nunca se analiza; harness: no analizar imágenes no solicitadas, confirmar antes de decodificar QR/OCR | Bajo (solo tras una extracción explícita; el análisis es decisión del harness) |
-| T-10 | Spoofing de remitente o dominio | Nombre visible de banco con dominio parecido; `pаypal.com` con una "а" cirílica (homoglifo) | Confianza indebida, phishing | `PRD-v2.2` F1: `W_NON_ASCII_DOMAIN` cuenta los dominios no ASCII en URLs y direcciones, y `neutralize` muestra el dominio de la URL en punycode (`xn--pypal-4ve.com`); A6: `W_SENDER_AUTH_FAILED` repite el SPF/DKIM/DMARC fallido de la primera `Authentication-Results` y `W_REPLY_TO_MISMATCH` avisa de un `Reply-To` de otro dominio; harness: no confiar en `from.name`; verificar dominio | Medio (dominios ASCII parecidos, como `paypa1.com`, no se señalan; sin la cabecera o con una falsificada con `pass` no hay aviso) |
+| T-10 | Spoofing de remitente o dominio | Nombre visible de banco con dominio parecido; `pаypal.com` con una "а" cirílica (homoglifo) | Confianza indebida, phishing | PRD F1: `W_NON_ASCII_DOMAIN` cuenta los dominios no ASCII en URLs y direcciones, y `neutralize` muestra el dominio de la URL en punycode (`xn--pypal-4ve.com`); A6: `W_SENDER_AUTH_FAILED` repite el SPF/DKIM/DMARC fallido de la primera `Authentication-Results` y `W_REPLY_TO_MISMATCH` avisa de un `Reply-To` de otro dominio; harness: no confiar en `from.name`; verificar dominio | Medio (dominios ASCII parecidos, como `paypa1.com`, no se señalan; sin la cabecera o con una falsificada con `pass` no hay aviso) |
 | T-11 | Plugin externo malicioso o comprometido | Paquete que lee red, devuelve datos falsos o deja pasar texto oculto en el cuerpo | Compromiso del proceso y de la salida | Consentimiento al instalar; capacidades en `doctor`; revisar paquete; sandbox del OS; el plugin es responsable de entregar el cuerpo sin contenido oculto (§9) | Aceptado |
 | T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/` | El agente lee datos alterados | Permisos `0700/0600`; manifiesto por mensaje con el SHA-256 de los bytes que pasaron la pantalla: `attachment` nunca sirve un archivo sin verificar y lo re-extrae o elimina; directorios de caché enlazados ⇒ `E_IO`; usuario monousuario. Residual: quien tenga la misma cuenta puede reescribir archivo y manifiesto a la vez (un HMAC no ayuda: la clave viviría en el mismo `~/.mailquery`); `show` no valida (`cached_path` solo comprueba el archivo regular); TOCTOU entre el hash y la lectura del agente | Aceptado |
 | T-13 | Abuso de la excepción COM de materialización (Outlook) | `SaveAsFile` escribiendo fuera del staging o materializando un adjunto no local | Escritura arbitraria o descarga forzada | Solo `Attachment.SaveAsFile` en la lista blanca; path propio en staging `0700`/`0600`; solo adjuntos `OL_FULL_ITEM`/`olByValue`; validación regular/dentro de sesión (D12); borrado siempre | Aceptado (§4.1) |
@@ -186,9 +190,9 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 13. **No afirmar el destino de un enlace a partir de su texto:** `mailquery` no expone el `href` de un ancla; un texto `https://banco.example` puede apuntar a otro sitio en el cliente de correo.
 14. **Usar las señales en la política:** `W_HIDDEN_CONTENT` (caracteres ocultos omitidos), `W_EXTERNAL_LINKS` (URLs en el mensaje), `W_SCRIPT_LINK` (enlaces `javascript:`, `vbscript:` o `data:`, casi siempre maliciosos), `W_LONG_URL` (URLs de más de 2.048 caracteres), `W_NON_ASCII_DOMAIN` (dominios no ASCII, posibles homoglifos), `W_SENDER_AUTH_FAILED` (autenticación fallida según el proveedor), `W_REPLY_TO_MISMATCH` (las respuestas irían a otro dominio) y, en `attachment`, `W_ATTACHMENT_ACTIVE_CONTENT` (JavaScript, macros o ejecutables en un adjunto) permiten marcar el mensaje o el archivo, pedir confirmación o excluirlo según la tarea. Son señales, no veredictos: el texto oculto es común en correo legítimo (preheaders), y su ausencia no prueba que el mensaje sea seguro.
 15. **Tratar la salida como texto plano:** `body_text`, `snippet`, `subject`, los nombres, `headers` y los warnings son texto, aunque contengan `<script>`, etiquetas o URLs; escaparlos siempre antes de insertarlos en HTML, Markdown renderizado o cualquier interfaz que interprete marcado, y no evaluarlos como código.
-16. **Triaje sin contenido:** decidir con la fila por defecto de `search`/`new` (sin cuerpo), `--group-by` y `--count`, y pedir el cuerpo (`--fields snippet` o `show`) solo de los mensajes elegidos (F3 de `PRD-v2.2.md`). Los avisos del cuerpo solo salen cuando se entrega el cuerpo; los del remitente salen siempre.
+16. **Triaje sin contenido:** decidir con la fila por defecto de `search`/`new` (sin cuerpo), `--group-by` y `--count`, y pedir el cuerpo (`--fields snippet` o `show`) solo de los mensajes elegidos (F3 del PRD). Los avisos del cuerpo solo salen cuando se entrega el cuerpo; los del remitente salen siempre.
 
-**Cómo llega este checklist al harness.** Las reglas de comportamiento (puntos 1, 3, 5, 6, 8 y 12 a 16) están en la skill, que el agente lee antes de usar `mailquery`; los controles de configuración (puntos 2, 4, 7, 9, 10 y 11), en los README, porque solo los puede aplicar quien opera el harness. Cada respuesta de éxito de `search`, `new`, `show` y `attachment` lleva además `content_notice`, un texto fijo que recuerda que el contenido no es confiable (RF-66 de `PRD-v2.2.md`). Es un recordatorio, no un control: un correo puede contradecirlo, y lo único que frena una inyección son los controles del harness.
+**Cómo llega este checklist al harness.** Las reglas de comportamiento (puntos 1, 3, 5, 6, 8 y 12 a 16) están en la skill, que el agente lee antes de usar `mailquery`; los controles de configuración (puntos 2, 4, 7, 9, 10 y 11), en los README, porque solo los puede aplicar quien opera el harness. Cada respuesta de éxito de `search`, `new`, `show` y `attachment` lleva además `content_notice`, un texto fijo que recuerda que el contenido no es confiable (RF-66 del PRD). Es un recordatorio, no un control: un correo puede contradecirlo, y lo único que frena una inyección son los controles del harness.
 
 ---
 
@@ -204,7 +208,7 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 
 ## 9. Adjuntos, imágenes y firmas
 
-- **Adjuntos:** la extracción es inerte; el bloqueo es una red de seguridad, no un antivirus. `PRD-v2.2` (A7) añade `W_ATTACHMENT_ACTIVE_CONTENT` cuando los bytes de un adjunto entregado tienen JavaScript o `/Launch` (PDF), macros (`_VBA_PROJECT`, `vbaProject.bin`) o un ZIP con una entrada cuya extensión está en el catálogo, salvo `.bin`; solo lee bytes y el directorio central del ZIP, sin descomprimir, y no bloquea. El harness no debe abrirlos automáticamente ni ejecutarlos. En Outlook la extracción usa la excepción COM de §4.1 (copia de un adjunto ya local a un staging privado y efímero, nunca una descarga).
+- **Adjuntos:** la extracción es inerte; el bloqueo es una red de seguridad, no un antivirus. El PRD (A7) añade `W_ATTACHMENT_ACTIVE_CONTENT` cuando los bytes de un adjunto entregado tienen JavaScript o `/Launch` (PDF), macros (`_VBA_PROJECT`, `vbaProject.bin`) o un ZIP con una entrada cuya extensión está en el catálogo, salvo `.bin`; solo lee bytes y el directorio central del ZIP, sin descomprimir, y no bloquea. El harness no debe abrirlos automáticamente ni ejecutarlos. En Outlook la extracción usa la excepción COM de §4.1 (copia de un adjunto ya local a un staging privado y efímero, nunca una descarga).
 - **Bloqueo del mensaje completo:** si cualquier adjunto tiene un nombre peligroso,
   una extensión del catálogo o *magic bytes* ejecutables, `mailquery attachment`
   falla con `E_ATTACHMENT_BLOCKED` (exit 4) y no escribe **ningún** archivo del
@@ -228,11 +232,11 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
   las capacidades declaradas (`network`, `readonly`, `body_local`, `attachments`,
   `native_order`) para que el harness decida. Un S/MIME no se extrae
   (`E_ATTACHMENT_UNREADABLE`), nunca se reporta como “sin adjuntos”. Un plugin entrega
-  el cuerpo ya convertido a texto: `mailquery` no ve su HTML y no le aplica A3 de
-  `PRD-v2.2` (cuerpo desde el HTML, omisión de ocultos, `W_HIDDEN_CONTENT`); el plugin
+  el cuerpo ya convertido a texto: `mailquery` no ve su HTML y no le aplica A3 del
+  PRD (cuerpo desde el HTML, omisión de ocultos, `W_HIDDEN_CONTENT`); el plugin
   es responsable de entregar el texto que ve el destinatario. A2, A4 y A5 sí se aplican.
   Un plugin `attachments: "remote"` entrega los bytes de sus adjuntos desde su origen
-  (F2 de `PRD-v2.2`): el núcleo no abre red y les aplica bloqueo, límites, caché y A7
+  (F2 del PRD): el núcleo no abre red y les aplica bloqueo, límites, caché y A7
   igual que a un adjunto local, y corta la espera al vencer
   `[attachments].timeout_seconds`; la integridad de esos bytes es responsabilidad del
   plugin.
@@ -241,11 +245,11 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 
 ---
 
-## 10. Relación con `PRD-v2.2`
+## 10. Relación con la feature F1 del PRD
 
-La feature F1 de [`PRD-v2.2.md`](../PRD-v2.2.md) especifica las opciones A2–A7 (saneado `Cf`/C1 e invisibles de los campos de contenido, cuerpo desde el HTML con descarte y aviso del HTML oculto, modos de visualización de URLs con punycode para dominios no ASCII, avisos de enlaces y de dominios no ASCII por mensaje, señales del remitente desde `Authentication-Results` y `Reply-To`, y aviso de contenido activo en adjuntos) y referencia este anexo para A1. Se entrega con el `3.0.0`.
+La feature F1 del [PRD](../prd/00-indice.md) especifica las opciones A2–A7 (saneado `Cf`/C1 e invisibles de los campos de contenido, cuerpo desde el HTML con descarte y aviso del HTML oculto, modos de visualización de URLs con punycode para dominios no ASCII, avisos de enlaces y de dominios no ASCII por mensaje, señales del remitente desde `Authentication-Results` y `Reply-To`, y aviso de contenido activo en adjuntos) y referencia este anexo para A1. Se entrega con el `3.0.0`.
 
-Para detectar la ocultación declarada en hojas `<style>`, F1 añade `css-inline` como dependencia del núcleo (ADR-33 de `PRD-v2.2.md`). La librería solo pasa el CSS del propio mensaje a estilos en línea; se configura sin carga de hojas enlazadas (por defecto carga `<link>` por red y desde `file://`, así que `load_remote_stylesheets` debe ser falso) y sin `base_url`, y descarta las reglas `@media`. Es código nativo (Rust) que procesa HTML no confiable: se declara con un rango limitado a parches (`~=0.23.1`), de modo que una corrección de seguridad se aplica con `pipx runpip mailquery install --upgrade "css-inline~=0.23.1"` sin publicar `mailquery`, mientras que una versión menor nueva entra en el rango con una versión de `mailquery` (ante un aviso crítico se puede instalar antes, §9.1 de `PRD-v2.2.md`); si falla, se usa el HTML original. El rango implica aceptar que un parche defectuoso o malicioso entre al actualizar (cadena de suministro). Los README explican cómo comprobar la versión instalada, aplicar un parche, forzar una versión corregida ante un aviso crítico y volver atrás (RF-65 y §9.1 de `PRD-v2.2.md`). **No** implementa detección de prompt injection, reputación de URLs, antivirus ni sandbox: esas siguen siendo responsabilidades del harness y del OS.
+Para detectar la ocultación declarada en hojas `<style>`, F1 añade `css-inline` como dependencia del núcleo (ADR-33 del PRD). La librería solo pasa el CSS del propio mensaje a estilos en línea; se configura sin carga de hojas enlazadas (por defecto carga `<link>` por red y desde `file://`, así que `load_remote_stylesheets` debe ser falso) y sin `base_url`, y descarta las reglas `@media`. Es código nativo (Rust) que procesa HTML no confiable: se declara con un rango limitado a parches (`~=0.23.1`), de modo que una corrección de seguridad se aplica con `pipx runpip mailquery install --upgrade "css-inline~=0.23.1"` sin publicar `mailquery`, mientras que una versión menor nueva entra en el rango con una versión de `mailquery` (ante un aviso crítico se puede instalar antes, §13.3 del PRD); si falla, se usa el HTML original. El rango implica aceptar que un parche defectuoso o malicioso entre al actualizar (cadena de suministro). Los README explican cómo comprobar la versión instalada, aplicar un parche, forzar una versión corregida ante un aviso crítico y volver atrás (RF-65 y §13.3 del PRD). **No** implementa detección de prompt injection, reputación de URLs, antivirus ni sandbox: esas siguen siendo responsabilidades del harness y del OS.
 
 ---
 
@@ -261,7 +265,7 @@ Para detectar la ocultación declarada en hojas `<style>`, F1 añade `css-inline
 2. Todo lo que emite es **dato no confiable**; el contrato JSON no debe interpretarse como instrucciones.
 3. El **harness** es responsable de la jerarquía de instrucciones, la política de URLs, el sandbox, la confirmación humana y la auditoría (§7).
 4. El **OS/organización** aporta sandbox, navegador aislado, EDR/AV, filtrado de red y autenticación de correo.
-5. El endurecimiento de salida (sanitización `Cf`/C1 e invisibles, cuerpo visible y HTML oculto con su aviso, modos de URL, avisos de enlaces y de dominios no ASCII, señales del remitente y avisos de contenido activo en adjuntos) se especifica en la feature F1 de `PRD-v2.2.md`; en los plugins y los adjuntos de `PRD.md` v2.1 solo añade el aviso de A7 en `attachment`.
+5. El endurecimiento de salida (sanitización `Cf`/C1 e invisibles, cuerpo visible y HTML oculto con su aviso, modos de URL, avisos de enlaces y de dominios no ASCII, señales del remitente y avisos de contenido activo en adjuntos) se especifica en la feature F1 del PRD (§6.8); en los plugins y los adjuntos solo añade el aviso de A7 en `attachment`.
 
 **Consecuencias:**
 
@@ -281,8 +285,7 @@ Para detectar la ocultación declarada en hojas `<style>`, F1 añade `css-inline
 
 ## 12. Referencias
 
-- [`PRD.md`](../PRD.md) §4, §21.1, §23.
-- [`PRD.md`](../PRD.md) v2.1 (plugins y adjuntos).
-- [`PRD-v2.2.md`](../PRD-v2.2.md) (feature F1: A2–A7).
+- [PRD](../prd/00-indice.md) §4, §21.1, §23.
+- [PRD](../prd/00-indice.md) v2.3: §6.5–§6.7 y §23.1 (plugins y adjuntos), §6.8 y §12.12 (feature F1: A2–A7).
 - Código: [`output.py`](../../src/mailquery/output.py) (`sanitize_text`, `html_to_text`), [`search.py`](../../src/mailquery/search.py) (`_show_headers`), [`cli.py`](../../src/mailquery/cli.py), [`emlx.py`](../../src/mailquery/emlx.py).
 - [`ROADMAP.md`](../ROADMAP.md) solo como contexto, no como requisito.

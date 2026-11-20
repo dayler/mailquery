@@ -9,6 +9,10 @@ Exceptions:
 - **README:** always kept in both English (`README.md`) and Spanish (`README.es.md`). Both files carry the same content; a change to one is applied to the other in the same change.
 - **`docs/`:** may be written in Spanish for now.
 
+## Tables and figures
+
+**Every table, image, diagram, chart or other figure carries a title**, in chat answers and in every file or artifact written. The title goes on its own line right above the table or figure: `**Tabla: <title>**` in Spanish documents and `**Table: <title>**` in English ones. A table or figure that is added or modified gets its title in the same change.
+
 ## Source code comments
 
 **Every comment and docstring in the source code describes what the code does. It never justifies the code by citing documents, tickets or any other project artifact, and never points the reader to them.**
@@ -25,7 +29,7 @@ Forbidden in comments and docstrings:
 
 Scope: `src/`, `scripts/`, `pyproject.toml`, `.github/workflows/` and any other code that is not an automated test.
 
-**Only exception:** automated tests (`tests/`) may cite requirement IDs from `docs/PRD.md` and test case IDs defined in `docs/tests/`, for traceability. They never cite plans, milestones or other planning IDs.
+**Only exception:** automated tests (`tests/`) may cite requirement IDs from the PRD (`docs/prd/`) and test case IDs defined in `docs/tests/`, for traceability. They never cite plans, milestones or other planning IDs.
 
 Example:
 
@@ -37,6 +41,8 @@ Example:
 ## Plans and permanent documents
 
 Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/`. They are deleted only after the whole plan has been verified (its work, tests and evidence), a human reviewer has reviewed and approved it, and the incremental PRD / specification has been reconciled into the permanent PRD / specification. Until then, `docs/plan/` stays in the repository: deleting it is an explicit final step, never automatic and never a side effect of the implementation finishing.
+
+The PRD lives in `docs/prd/`, one file per section, with `docs/prd/00-indice.md` as its entry point. A change reaches the PRD only through a change document in `docs/changes/`, reconciled unit by unit as the part "Cómo se concilia un cambio" of `docs/prd/00-indice.md` describes. A change document is deleted only on the owner's order, once all its units are reconciled.
 
 Nothing outside `docs/plan/` cites a plan: not code, not tests, not permanent documents, not READMEs. Permanent documents describe the product as it is. Anything a plan produces that must outlive it is moved, before deletion, into the permanent document that owns it. Historical records are the only other place that may mention past plans, and only as events: a historical record may name a plan but never cite it as a requirement or a justification.
 
