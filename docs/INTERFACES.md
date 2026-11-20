@@ -1,13 +1,13 @@
 # Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
 
 > **Estado del contrato:** implementado en `develop` (plugins de backend y
-> adjuntos, contenido no confiable y salida a medida; [`PRD.md`](PRD.md) v2.2) y **no publicado**. El paquete anuncia
+> adjuntos, contenido no confiable y salida a medida; [`PRD.md`](prd/00-indice.md) v2.3) y **no publicado**. El paquete anuncia
 > `mailquery.__version__` = 3.0.0a1 (3.0.0-alpha.1, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como está
 > implementado.
 
 Documento de coordinación para el equipo de implementación y guía de
-desarrollo. El **PRD** oficial está en [`docs/PRD.md`](PRD.md) y manda sobre
+desarrollo. El **PRD** oficial está en [`docs/prd/`](prd/00-indice.md) y manda sobre
 este documento, junto con sus anexos (§24); aquí se fijan los contratos
 concretos entre módulos, el layout del repositorio y las reglas de trabajo
 (pruebas, fixtures, goldens, git, CI).
@@ -22,7 +22,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 ├── .gitignore                      # .obsidian/, __pycache__/, fixtures generados
 ├── .github/workflows/tests.yml     # CI: suite en 3 SO × Python 3.11–3.14 + instaladores
 ├── docs/
-│   ├── PRD.md                      # PRD v2.2: requisitos del producto
+│   ├── prd/                        # PRD: un archivo por sección (portada: 00-indice.md)
 │   ├── INTERFACES.md               # este documento
 │   ├── tests/                      # catálogo de pruebas: índice TEST-CATALOG.md y un archivo por área
 │   ├── KNOWN-DEFECTS.md            # defectos abiertos

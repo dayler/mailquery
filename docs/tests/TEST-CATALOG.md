@@ -1,6 +1,6 @@
 # Catálogo de pruebas
 
-Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.md`](../PRD.md) cubre y dónde vive. Las referencias `§N` son secciones de `PRD.md`; los IDs `RF-`, `RNF-`, `AC-` y `ADR-` son los de `PRD.md`.
+Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.md`](../prd/00-indice.md) cubre y dónde vive. Las referencias `§N` son secciones de `PRD.md`; los IDs `RF-`, `RNF-`, `AC-` y `ADR-` son los de `PRD.md`.
 
 ## 1. Convenciones
 

@@ -28,7 +28,7 @@ The attachment and multi-driver features are part of the future 3.0.0, not
 yet released. `develop` reports the pre-release `3.0.0a1` (3.0.0-alpha.1) from
 `--version`, but publishes nothing: no tag, no release and no `main` merge.
 
-References: [`docs/PRD.md`](docs/PRD.md) (product contract, v2.2),
+References: [`docs/prd/`](docs/prd/00-indice.md) (product contract, v2.3),
 [`docs/recipes/`](docs/recipes/) (recipes for the harness),
 [`docs/config.example.toml`](docs/config.example.toml) and
 [`docs/INTERFACES.md`](docs/INTERFACES.md) (development and tests),

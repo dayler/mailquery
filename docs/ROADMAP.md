@@ -2,7 +2,7 @@
 
 Estado: **abierto**. Registro de la revisión de producto del 2026-11-06 sobre
 `develop` @ `d5ea689` (`mailquery 2.0.0`). No cambia el PRD
-([`PRD.md`](PRD.md)): recoge el análisis competitivo, las decisiones tomadas
+([`PRD.md`](prd/00-indice.md)): recoge el análisis competitivo, las decisiones tomadas
 sobre qué añadir y qué no, y el diseño propuesto para la evolución del
 producto. Cuando una decisión de aquí se implemente, se traslada al PRD y se
 marca en este documento.
