@@ -17,8 +17,11 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 - **Red y herramientas.** Sin red externa, salvo `pipx install` en las SMOKE; UT-CNT-03.05 y UT-CNT-03.11 usan un servidor HTTP en `127.0.0.1` dentro del propio test. Solo `unittest`, sin otros frameworks de test.
 - **Requisitos.** Cada grupo lleva la línea `Requisitos:` con los IDs que verifica.
 - **Estado.** Un caso sin marca está implementado; los demás estados se marcan en `Verifica` (ver Estados).
+- **Estructura de la documentación.** Un grupo DOC puede verificar la estructura de la documentación del producto en lugar de un requisito; lleva `Requisitos: —` y dice qué estructura verifica.
 
 ## 2. Prefijos y archivos
+
+**Tabla: Prefijos y archivos de la suite**
 
 | Prefijo | Qué cubre | Archivo | Catálogo |
 |---|---|---|---|
@@ -52,7 +55,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito de [`PRD.
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` | [`outlook-runtime.md`](outlook-runtime.md), [`outlook-data.md`](outlook-data.md) |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` | [`end-to-end.md`](end-to-end.md) |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` | [`docs-packaging.md`](docs-packaging.md) |
-| DOC | READMEs, skill, ayudas y `config.example.toml` | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py`, `tests/test_remote_attachments.py` | [`docs-packaging.md`](docs-packaging.md) |
+| DOC | READMEs, skill, ayudas, `config.example.toml` y estructura del PRD | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py`, `tests/test_remote_attachments.py`, `tests/test_prd_structure.py` | [`docs-packaging.md`](docs-packaging.md) |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` | [`smoke.md`](smoke.md) |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` | [`smoke.md`](smoke.md) |
 
@@ -94,7 +97,7 @@ Un grupo tiene ficha cuando un caso necesita precondiciones, pasos, esperado o b
 
 ## Qué no entra en el catálogo
 
-El resultado obtenido de una corrida (va a la evidencia o a `KNOWN-DEFECTS.md`), los datos voluminosos (van a fixtures o goldens) y cualquier comportamiento que el PRD no fija.
+El resultado obtenido de una corrida (va a la evidencia o a `KNOWN-DEFECTS.md`), los datos voluminosos (van a fixtures o goldens) y cualquier comportamiento que el PRD no fija, salvo la estructura de la documentación (punto "Estructura de la documentación" de las convenciones).
 
 ## Instrucciones para agentes
 

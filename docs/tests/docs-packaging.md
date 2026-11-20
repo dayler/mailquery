@@ -144,6 +144,26 @@ Requisitos: AC-39, documentación de AC-40/AC-45 · Archivo: `tests/test_remote_
 | .01 | P | Los dos README documentan `timeout_seconds` (10–600, 60 por defecto), los drivers `"remote"` en `attachment` y `W_ATTACHMENT_ACTIVE_CONTENT`. |
 | .02 | P | La skill nombra `W_ATTACHMENT_ACTIVE_CONTENT` en "Security rules", recupera los adjuntos de drivers `"remote"` y ya no dice que no se pueden recuperar. |
 
+#### DOC-14 — Estructura del PRD
+
+Requisitos: — (estructura de la documentación) · Archivo: `tests/test_prd_structure.py`
+
+**Tabla: Casos de DOC-14**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | B | Ningún archivo de `docs/prd/` supera 300 líneas. |
+| .02 | P | Cada sección del Índice de la portada tiene un solo encabezado, en el archivo de su prefijo. |
+| .03 | P | Los IDs O, CU, RF, RNF, ADR y AC son únicos y sin huecos en su capítulo dueño, y la portada tiene los próximos libres. |
+| .04 | P | Toda referencia de sección de los capítulos corresponde a un encabezado. |
+| .05 | P | Todo enlace relativo de `docs/prd/` apunta a un archivo existente y no lleva ancla. |
+| .06 | P | La portada enlaza a todos los archivos de `docs/prd/`. |
+| .07 | P | Toda tabla tiene su línea `**Tabla: …**`. |
+| .08 | N | Ningún archivo de `docs/prd/` cita un plan. |
+| .09 | P | Todo archivo de `docs/prd/` tiene frontmatter con `aliases` y la etiqueta `prd`. |
+| .10 | P | Los términos del glosario están en orden alfabético dentro de cada grupo. |
+| .11 | N | Ningún archivo de `docs/prd/` empieza por BOM. |
+
 #### PKG-01 — Empaquetado y entry points
 
 Requisitos: AC-01 · Archivo: `tests/test_packaging.py`
