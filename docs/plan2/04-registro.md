@@ -9,10 +9,10 @@ Lo rellena quien implementa, hito a hito. Los logs completos quedan en el direct
 | Hito | Estado | Commit | Fecha |
 |---|---|---|---|
 | M1 Preparación | hecho | — (sin cambios en el repositorio) | 2026-11-20 |
-| M2 Partición | hecho | ver `git log` de la rama (`docs(prd): split the PRD into one file per section`) | 2026-11-20 |
-| M3 Prueba de estructura | pendiente | — | — |
-| M4 Referencias | pendiente | — | — |
-| M5 Verificación final | pendiente | — | — |
+| M2 Partición | hecho | `29d7cbf` `docs(prd): split the PRD into one file per section` | 2026-11-20 |
+| M3 Prueba de estructura | hecho | `05c0016` `test(docs): check the structure of the split PRD` | 2026-11-20 |
+| M4 Referencias | hecho | `23d112b` `docs: point the references to the split PRD` | 2026-11-20 |
+| M5 Verificación final | hecho; estado propuesto: listo para revisión del dueño | commit de este registro | 2026-11-20 |
 
 ## 2. Línea base (M1)
 
@@ -54,9 +54,10 @@ Lo rellena quien implementa, hito a hito. Los logs completos quedan en el direct
 
 ## 4. Prueba de estructura (M3)
 
-- DOC-14: not run
-- Prueba negativa DOC-14.03 (fila RF duplicada en el árbol de trabajo y restaurada): not run
-- Prueba negativa DOC-14.06 (archivo sin enlace desde la portada, borrado después): not run
+- DOC-14: `Ran 11 tests`, `OK`.
+- Prueba negativa DOC-14.03 (fila RF-01 duplicada en el árbol de trabajo y restaurada con `git checkout`): falla con `RF: duplicated ['RF-01']`.
+- Prueba negativa DOC-14.06 (archivo vacío `99-vacio.md`, borrado después): falla con `['99-vacio.md']`.
+- Lo que DOC-14 inspecciona: 43 capítulos, 86 encabezados numerados, 5 de anexo, 406 referencias de sección, 62 enlaces y 44 filas del Índice.
 
 ## 5. Búsquedas y suite final (M4, M5)
 
@@ -64,15 +65,17 @@ Lo rellena quien implementa, hito a hito. Los logs completos quedan en el direct
 
 | Búsqueda | Resultado |
 |---|---|
-| Enlaces a `PRD.md` fuera de las exclusiones | not run |
-| Anclas `PRD.md#L` | not run |
-| `docs/PRD.md` en `CLAUDE.md` y los README | not run |
-| `v2.2` en los README | not run |
-| Citas de planes en `docs/prd/` | not run |
-| Cambios en `src`, `docs/PRD.md`, `docs/plan`, `docs/archive`, `docs/PRD-v2.2.md`, `docs/KNOWN-DEFECTS.md`, `docs/tmp` | not run |
+| Enlaces a `PRD.md` fuera de las exclusiones | 1: `docs/KNOWN-DEFECTS.md:3` (X-07) |
+| Anclas `PRD.md#L` | ninguno |
+| `docs/PRD.md` en `CLAUDE.md` y los README | ninguno |
+| `v2.2` en los README | ninguno |
+| Citas de planes en `docs/prd/` | ninguno |
+| Cambios en `src`, `docs/PRD.md`, `docs/plan`, `docs/archive`, `docs/PRD-v2.2.md`, `docs/KNOWN-DEFECTS.md`, `docs/tmp` | vacío |
 
-- Suite completa: not run
-- `git diff --stat 9a3080a...HEAD`: not run
+- Suite completa: `Ran 1438 tests`, `FAILED (failures=10, skipped=7)`: los mismos 10 fallos de la línea base; los 11 tests nuevos son DOC-14.
+- `git diff --stat 9a3080a...HEAD`: 62 archivos; fuera de `docs/prd/` solo los de la sección 5 del plan y `docs/plan2/`.
+- R-01 y R-09 sobre el último commit: 156 líneas (límite 299); 375.780 caracteres, +5,92 % (límite 390.261).
+- `docs/PRD.md`: blob `ca24a3576fce0b6abd0c4f251aea5ebb313ad52a`, sin cambios. `docs/KNOWN-DEFECTS.md`: sin tocar, su cambio pendiente sigue fuera de los commits.
 
 ## 6. Desviaciones y decisiones de ejecución
 
@@ -86,3 +89,5 @@ Lo rellena quien implementa, hito a hito. Los logs completos quedan en el direct
 | X-04 | Los tres archivos de la 12.5 se llaman `12.05-1-contrato-json.md`, `12.05-2-ejemplos-show-attachment.md` y `12.05-3-ejemplos-contenido-salida.md`. | Con los nombres del plan, el orden alfabético invertía los dos archivos de ejemplos (D-01) |
 | X-05 | Límite de caracteres R-09 añadido. | Orden del dueño del 2026-11-20 |
 | X-06 | El script de la sección 7.2 mide también R-09. | R-09 |
+| X-07 | `docs/KNOWN-DEFECTS.md:3` tiene un enlace markdown a `PRD.md` (la sección 7 de `02-textos.md` decía que no). No se cambia: R-04 y orden del dueño de no tocar ese archivo. El enlace sigue funcionando porque `docs/PRD.md` existe (D-06). | R-04 |
+| X-08 | En `00-plan.md`, el límite del script de la sección 7.2 se calcula como base + base // 10, y la tabla de riesgos cita DOC-14.11 en lugar de DOC-14.12. | Expresar el límite como incremento máximo; corregir la referencia al caso de BOM |
