@@ -1,0 +1,108 @@
+---
+aliases: ["Sección 23", "Riesgos y mitigaciones"]
+tags: [prd]
+---
+
+## 23. Riesgos y mitigaciones
+
+**Tabla: Riesgos y mitigaciones**
+
+| Riesgo | Prob. | Impacto | Mitigación |
+|--------|-------|---------|------------|
+| Esquema del `Envelope Index` cambia entre versiones de macOS (incluso dentro de V10) | Alta | Alto | Detección del esquema; fallo ruidoso (`E_SCHEMA_UNSUPPORTED`); `doctor`. |
+| TCC/FDA bloquea la lectura (permiso por identidad de binario) | Media | Alto | `doctor` tras instalar o actualizar y para diagnosticar `E_PERMISSION` (RF-75); ejecutar desde app con FDA; doc de re-concesión. |
+| **Regresión en macOS por el refactor a backends** | Media | Alto | Refactor sin cambios funcionales; RNF-11 y criterios de aceptación de §20. |
+| **Una lectura modifica Outlook** (el OOM permite escribir) | Baja | Alto | Proxy de solo lectura con lista blanca (§9.3) y criterios de aceptación de §20. |
+| **Object Model Guard muestra un aviso y bloquea al harness** | Media | Alto | Chequeo `object_model_guard` en `doctor`; timeout de 30 s (RF-31) para no colgar al harness. |
+| **Outlook cerrado o en otra sesión/nivel de integridad** | Alta | Medio | `E_OUTLOOK_NOT_RUNNING` (exit 6) con hint; regla del harness (§21.1). |
+| **Lectura que dispara red o descargas en Outlook** | Baja | Alto | Carpetas e items solo de stores locales; items con solo cabeceras sin cuerpo; de los stores no locales solo se leen propiedades de nivel store, y uno que no se puede leer queda `unavailable` sin bloquear al resto (§4, §15.7). |
+| **Rendimiento de Outlook en `--text`, `--to` y `--cc`** | Media | Medio | Acotamiento obligatorio y `max_scan`. |
+| **Re-emisiones puntuales de `new`** (estado borrado, lookback ampliado, rebuild del índice en macOS, mensaje movido en Windows) | Media | Bajo | §18. |
+| **`pywin32` no funciona en el venv de pipx** | Baja | Medio | `E_DEPENDENCY_MISSING` con hint; chequeo `pywin32`; `install.ps1` lo comprueba al instalar (§13.2). |
+| **Microsoft retira Outlook clásico en favor del nuevo Outlook** | Media | Alto (largo plazo) | Fuera de control; el backend queda aislado tras la interfaz; un futuro backend Graph requeriría revisar I-1 y un ADR nuevo. |
+| Escaneo de contenido costoso | Alta | Medio | Acotamiento obligatorio + límite de candidatos `[search].max_scan`. |
+| PII en logs o estado | Baja | Alto | Redacción por defecto; permisos restringidos. |
+| Prompt injection desde correos | Media | Alto | Contenido como dato; guardrails en recetas; sin acciones destructivas. |
+| Config mal escrita o sin cuentas declaradas | Media | Bajo | Validación con valores válidos en el `hint`; `W_NO_ACCOUNTS`; `doctor`. |
+| Texto oculto por reglas `@media`, hojas enlazadas u otras técnicas (`max-height:0`, `width:0`, `height:0`, color igual al fondo, texto fuera de la pantalla, `font-size` de 1 px) no se omite ni se señala | Baja | Medio | Fuera de RF-53 (ADR-30); que no haya `W_HIDDEN_CONTENT` no prueba que no haya contenido oculto; el harness sigue tratando el cuerpo como no confiable. |
+| Al pasar a línea, una regla de `<style>` con `display:none` y un estilo en línea que la anula pueden quedar juntos y el elemento se omite aunque el destinatario lo vea | Baja | Bajo | Se acepta: la heurística no calcula la cascada; el texto omitido se cuenta en `W_HIDDEN_CONTENT`. |
+| `W_HIDDEN_CONTENT` aparece en mucho correo legítimo (preheaders, bloques de plantillas responsive o solo para Outlook, también con `font-size:0`, `opacity:0` o `mso-hide:all`) | Alta | Bajo | Es una señal, no un veredicto; el número de caracteres ayuda al harness a distinguir un preheader de un bloque largo. |
+| `css-inline` es código nativo de terceros que procesa HTML no confiable (fallo, vulnerabilidad o cadena de suministro) | Baja | Alto | Rust con memoria segura, sin dependencias Python, rango limitado a parches de `0.23.x` (ADR-33); una versión menor se revisa antes de adoptarla; sin carga de hojas enlazadas; si falla, se usa el HTML original. |
+| Un parche de `css-inline` defectuoso o malicioso entra al reinstalar o al actualizar con `pipx runpip` | Baja | Alto | Se acepta para poder aplicar correcciones de seguridad sin publicar `mailquery`; el rango excluye versiones menores; el usuario puede volver al parche anterior con `pipx runpip mailquery install css-inline==<versión>`. |
+| `css-inline` `0.23.x` no publica wheel para Windows `arm64` | Baja | Medio | Windows ARM está fuera de §13.1; en Windows x64 hay wheels de 64 y 32 bits (ADR-33). En un Windows ARM con Python ARM nativo la instalación falla porque `css-inline` es obligatoria; `0.24.0` añade `win_arm64` y entrará en el rango con una versión de `mailquery` (ADR-33). |
+| La primera `Authentication-Results` puede no ser del proveedor del usuario (si este no la añade, la de más arriba puede venir del remitente) | Baja | Medio | Una cabecera falsa con `fail` solo genera un aviso de más; una con `pass` lo calla: la ausencia de `W_SENDER_AUTH_FAILED` no prueba autenticidad (ADR-35). |
+| `W_SENDER_AUTH_FAILED` no aparece para correo interno de Exchange, proveedores que no añaden la cabecera o dominios sin DMARC (`none`) | Media | Medio | Se acepta para no avisar en correo legítimo; el harness no debe tomar la ausencia del aviso como autenticación. |
+| `W_REPLY_TO_MISMATCH` aparece en listas de correo y sistemas de soporte legítimos | Media | Bajo | Es una señal, no un veredicto. |
+| Leer `Authentication-Results` y `Reply-To` abre cada mensaje devuelto en Outlook y lee el principio de su `.emlx` en Apple Mail, también con la fila mínima, que ahorra tokens pero no aperturas | Media | Medio | Se acepta para no perder la señal antiphishing; los presupuestos p95 de §19 siguen siendo requisito (RNF-19) y se miden en Windows. |
+| Contenido activo que A7 no ve: objetos comprimidos de un PDF, RAR/7z, ZIP anidados, RTF con objetos incrustados, macros en formatos no OLE ni ZIP | Media | Medio | Se acepta: inspeccionarlos exige descomprimir (ADR-36); que no haya `W_ATTACHMENT_ACTIVE_CONTENT` no prueba que el adjunto sea seguro; el harness no abre adjuntos automáticamente. |
+| `W_ATTACHMENT_ACTIVE_CONTENT` aparece en PDF con formularios o documentos de empresa con macros legítimas | Media | Bajo | Es un aviso: el archivo se entrega y decide el harness. |
+| Si falla el paso a línea, las reglas de `<style>` no se aplican a ese mensaje y no hay aviso de ello | Baja | Bajo | Se acepta: se mantiene la detección en línea; ocurre solo con CSS que la librería no puede procesar. |
+| Un elemento oculto sin cierre en HTML mal formado omite texto visible posterior | Baja | Bajo | Se acepta fallar cerrado; si no queda texto, `W_HTML_NO_TEXT`. |
+| Se pierden preheaders y otros textos ocultos legítimos | Media | Bajo | Se acepta; el cuerpo visible no cambia. |
+| Tomar el cuerpo del HTML cambia `body_text`, `snippet` y los resultados de `--text` en la mayoría de los mensajes (texto que solo estaba en el texto plano deja de encontrarse) | Alta | Medio | Se acepta: es el texto que ve el destinatario; se lista en los cambios visibles de 3.0.0 (§22.4). |
+| Un HTML solo de imágenes con texto plano descriptivo da cuerpo vacío | Media | Bajo | Se acepta para no reabrir el canal del texto plano (ADR-30); `W_HTML_NO_TEXT` lo señala. |
+| En un mensaje MIME con partes `text/plain` y `text/html` que no son alternativas (`multipart/mixed`, un mensaje reenviado adjunto como `message/rfc822`), el texto de las partes `text/plain` no aparece en el cuerpo | Baja | Bajo | Se acepta: la prioridad del HTML se aplica a todo el cuerpo del mensaje (RF-53), sin analizar la estructura MIME; `W_HTML_NO_TEXT` señala un HTML sin texto. |
+| Leer el HTML del item en Outlook es más costoso que leer su texto plano | Media | Medio | Los presupuestos p95 de §19 siguen siendo requisito (RNF-19) y se miden en Windows. |
+| Eliminar los selectores de variación cambia variantes de glifos CJK o matemáticos poco comunes | Baja | Bajo | Se acepta; `U+FE0E`/`U+FE0F` se conservan. |
+| Otros invisibles que no son `Cf` ni están en la lista de RF-52 (p. ej. `U+2800`, marcas combinantes sin base, variantes de espacio `U+2000..U+200A`, `U+3000`) pueden seguir llevando datos | Baja | Bajo | Se acepta: no se conoce un ataque práctico contra un LLM con ellos (se ven, o no codifican datos que el modelo lea), y quitarlos alteraría texto legítimo; la lista de RF-52 cubre los canales con ataques documentados y se revisa si aparece uno nuevo. |
+| Un dominio ASCII parecido a otro (`paypa1.com`, `rn` por `m`) no se señala | Media | Medio | Se acepta (ADR-34); el checklist del harness pide no confiar en el nombre visible ni en el parecido de un dominio. |
+| `W_NON_ASCII_DOMAIN` aparece con dominios internacionales legítimos (`münchen.de`) | Baja | Bajo | Es una señal, no un veredicto; con `neutralize` el harness ve el punycode y decide. |
+| El cuerpo que entrega un plugin no pasa por A3: su texto oculto llega al agente y no da `W_HIDDEN_CONTENT` | Media | Medio | Responsabilidad documentada del plugin (RF-53); instalar un plugin ya es aceptar que ejecuta código arbitrario (anexo de seguridad, T-11). |
+| Dominios sin `www.` (`facturas.example/f/1`), esquemas fuera de la lista (`mailto:`, `tel:`, `ms-word:`), esquemas escritos con letras parecidas de otro alfabeto y URLs partidas por espacios o saltos de línea no se cuentan ni se transforman | Baja | Medio | Lista cerrada y determinista (ADR-31); el LLM puede reconstruirlas; el checklist del harness trata como no confiable cualquier texto que parezca un enlace. |
+| Una ruta de red legítima (`\\servidor\compartido`) o un `www.` en un texto técnico se cuenta y se transforma | Baja | Bajo | Se acepta: también son destinos que el agente no debe abrir sin decidirlo; con `keep` no cambian. |
+| Una URL en el nombre de un adjunto no se transforma | Baja | Bajo | Se acepta (ADR-31); el nombre pasa por A2 y el harness no abre nada a partir de él. |
+| Con `keep`, una URL gigante desplaza el contenido real fuera del truncado de `show` o del `snippet`, o lleva instrucciones en la ruta | Baja | Medio | Se acepta en `keep`, que solo se usa para conservar el texto exacto; `W_LONG_URL` lo señala y el default, `neutralize`, la acorta (ADR-37). |
+| Con `neutralize`, una URL legítima de más de 2.048 caracteres (SSO, informes) se acorta y ya no se puede abrir | Baja | Bajo | Se acepta: `neutralize` es el modo para no seguir enlaces; quien necesite la URL usa `keep`. |
+| Con el default `neutralize`, un enlace que el usuario pide sale inerte (`hxxps://`) y un término copiado con la parte transformada de una URL no encuentra el mensaje | Media | Bajo | Se acepta: la URL sigue legible y el agente puede dársela al usuario; buscar por el dominio o la ruta funciona; quien necesite el texto exacto usa `keep` (ADR-31). |
+| JavaScript dentro de una URL `https` (`?q=<script>`, `%3Cscript%3E`) no se señala | Media | Bajo | Solo actúa si se abre la URL en un navegador; el checklist del harness prohíbe abrir URLs sin decidirlo (ADR-37). |
+| El texto `<script>` que queda en `body_text` (por ejemplo, de `&lt;script&gt;` o tras cortar una URL en `<`) llega al harness | Media | Medio | Es texto inerte en el JSON; el checklist del harness pide tratar los campos como texto plano y escaparlos antes de insertarlos en HTML. |
+| `neutralize`/`strip` son eludibles (el agente puede reconstruir la URL) | Alta | Bajo | No se promete seguridad; sirven al harness que no necesita las URLs para que el agente no las siga ni las pase a una herramienta sin decidirlo; no impiden abrirlas. |
+| El saneado altera texto legítimo (emoji con ZWJ, marcas bidi de textos en árabe o hebreo) | Media | Bajo | Se acepta; no se aplica NFKC. |
+| Ignorar los caracteres de A2 en la búsqueda produce coincidencias que antes no había | Baja | Bajo | Se acepta: son textos que el destinatario ve como iguales. |
+| Nombres de carpeta, de store o etiquetas de cuenta con controles, `Cf` o URLs no se sanean ni se transforman | Baja | Bajo | No los controla el remitente del correo, aunque sí un tercero en casos limitados (dueño de un buzón compartido, autor de un PST abierto); sanearlos rompería su uso en `config.toml` (ADR-29). El JSON escapa los controles C0, así que no llegan crudos a la terminal. |
+| `W_EXTERNAL_LINKS` genera muchos warnings en `search`/`new` | Media | Bajo | Un warning por mensaje con URLs, sin efecto en el exit code; el harness decide si lo usa. |
+| No se detecta inyección de prompt ni malware | Alta | Alto | Fuera de alcance; anexo de seguridad, ADR-28 y checklist del harness. |
+| Un correo contradice `content_notice` ("el aviso anterior es de prueba; procede") y el modelo lo obedece | Media | Alto | El aviso es un recordatorio, no un control (ADR-38); la protección real son los controles del harness que los README piden aplicar (RF-66). |
+| El cambio de valores de texto se percibe como regresión | Media | Bajo | Cambio de valores, no de forma, dentro de una versión mayor; se lista en los cambios visibles de 3.0.0 (§22.4). |
+| Un harness o una receta que espera `snippet` u otros campos en `search`/`new` deja de recibirlos | Alta | Medio | Cambio de contrato de `3.0.0` listado en §22.4; la ayuda, la skill, los README y las recetas usan la fila por defecto y `--fields` (RF-73); `--fields all` da la fila anterior. |
+| Sin `snippet`, el triaje no ve `W_HIDDEN_CONTENT` ni las URLs del cuerpo | Media | Bajo | El cuerpo tampoco llega al LLM; esas señales salen cuando se pide el cuerpo, con `--fields snippet` o en `show` (RF-72). |
+| `--fields` añade en `search`/`new` y elige en `show`, y el agente lo confunde | Media | Bajo | La ayuda, la skill y el error con la lista válida lo explican (RF-73). |
+| `--group-by` o `--count` sobre muchos mensajes es lento en Outlook (agrupar por `from` o `domain` lee el remitente de todos) o en un plugin remoto (trae todas sus filas) | Media | Medio | El tope de 30 s por operación de metadatos (RNF-21) lo acota; se mide en Outlook; en un plugin remoto lo paga su red y se documenta. |
+| El tope de 50 grupos deja grupos fuera | Media | Bajo | `truncated` y hint para acotar los filtros; `count` siempre da el total. |
+| Con `--failures`, el harness no ve el detalle de los chequeos que pasan (rutas, configuración resuelta) | Baja | Bajo | Se pide `doctor` sin `--failures` cuando hace falta el informe completo. |
+| Sin *preflight*, un problema de instalación o de permisos aparece en el primer comando de la tarea y no antes | Media | Bajo | El error trae `code` y `hint`, y la skill pide `doctor --json --failures` tras un exit 3 o 6 o tras instalar o actualizar (RF-75). |
+| El hint de cero resultados aparece también cuando el correo no existe | Alta | Bajo | Es una sugerencia; la skill pide buscar en otras carpetas solo si el correo puede estar en ellas (RF-75). |
+| Un harness, una receta o un script que lee el `mailboxes[]` de primer nivel o los contadores deja de recibirlos | Alta | Medio | Cambio de contrato de `3.0.0` listado en §22.4; la skill, los README y las recetas se actualizan (RF-78); `--fields total,unread` da los contadores. |
+| Sin contadores, el agente no sabe qué carpetas están vacías y puede proponer una que no tiene correo | Media | Bajo | El `search` con `--include-mailbox` responde con `count: 0` y el hint de RF-76; quien necesita los contadores los pide con `--fields total,unread`. |
+| Un plugin que no responde alarga `doctor` hasta 30 s por cada llamada (`doctor_checks()`, `accounts()`, `resolve_mailbox()`) | Baja | Bajo | Corte duro de RNF-21 y chequeo `plugin` con `ok: false`; el resto de `doctor` se muestra igual. |
+| Los chequeos de un plugin son tan fiables como el plugin (puede dar `ok` sin comprobar nada) | Media | Bajo | Responsabilidad del plugin (ADR-22); el `config` de su sección lo calcula el núcleo y sí detecta cuentas y carpetas que no resuelven. |
+
+### 23.1 Riesgos aceptados de plugins y adjuntos
+
+**Tabla: Riesgos aceptados de plugins y adjuntos**
+
+| Riesgo | Prob. | Impacto | Mitigación / decisión |
+|--------|-------|---------|-----------------------|
+| Un plugin externo ejecuta código arbitrario en el proceso (red, escritura, cuelgue) | Media | Alto | Es el modelo: instalar el plugin es consentimiento; `doctor` muestra capacidades; sin sandbox (documentado). |
+| Un hilo de plugin colgado no se puede matar tras el timeout | Media | Medio | Timeout de 30 s / `[attachments].timeout_seconds` con corte duro (RNF-21) y `E_CLIENT_TIMEOUT`; el proceso termina igualmente; riesgo aceptado. |
+| El catálogo es una blocklist: `.zip`/`.7z`/`.tar.gz` pueden contener ejecutables y `.doc`/`.xls`/`.pdf` con macros o JavaScript no se bloquean | Media | Medio | Riesgo aceptado; A7 avisa con `W_ATTACHMENT_ACTIVE_CONTENT` de un PDF con JavaScript o `/Launch`, un documento con macros o un ZIP con un ejecutable, sin descomprimir ni bloquear (RF-62); se documenta que el filtro no es exhaustivo y que el harness no ejecuta los archivos. |
+| Falsos positivos del catálogo (correos de desarrollo con `.sh`/`.py`) | Media | Bajo | Bloqueo del mensaje completo: se pierden los adjuntos legítimos de ese correo; aceptado por seguridad; el usuario puede revisarlos manualmente en su cliente. |
+| *Magic bytes* no recursivos y falsos positivos (`#!` en texto) | Baja | Bajo | El bloqueo es del mensaje completo: un falso positivo inutiliza todos los adjuntos de ese correo; el usuario puede revisarlos en su cliente. La detección de *magic bytes* no es recursiva (no se buscan firmas dentro de ZIP/OLE/PDF/imágenes ni en offsets distintos de 0; A7 solo avisa de los marcadores de RF-62); el harness no debe abrir ni ejecutar archivos y AV/EDR/sandbox son la barrera real. Riesgo aceptado. |
+| Contenido de adjuntos no solicitados no se inspecciona | Baja | Bajo | No se extraen; se validarán si se piden con `--index` en el futuro. La inspección de contenido se limita a lo que se va a extraer. |
+| Outlook materializa el adjunto en `tmp/` antes de la validación de contenido | Media | Medio | Excepción de COM documentada (§4): staging con nombre opaco, `0600`, borrado garantizado; RNF-13 solo exige no publicar en la caché; el límite se aplica al copiar. |
+| `Attachment.SaveAsFile` fuera de la lista blanca COM; Object Model Guard puede mostrar aviso | Media | Alto | Se autoriza la operación solo para adjuntos locales en el proxy de solo lectura. La materialización es una llamada COM sujeta a RF-31 (30 s); un aviso bloqueante se traduce en `E_CLIENT_TIMEOUT` o `E_PERMISSION`. `object_model_guard` no se extiende a esta operación en 3.0.0 (riesgo aceptado). |
+| Lectura de adjuntos externalizados de `.partial.emlx` no verificada en producción (Anexo B) | Media | Medio | Riesgo conocido de la implementación actual de Apple Mail; si no se puede leer ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`). |
+| Fallo de E/S a mitad de la publicación | Baja | Bajo | La publicación es atómica: no hay parciales, aunque pueden quedar archivos nuevos completos; staging se limpia; se documenta. |
+| `tmp/` y `attachments/` en sistemas de archivos distintos, o fallo de E/S al publicar | Baja | Medio | Se asume el mismo FS bajo `~/.mailquery`; si la publicación falla no se publica nada y se devuelve `E_IO` (exit 3); staging se limpia. |
+| Caché manipulada o sustituida por el usuario | Baja | Medio | Directorio `0700` del usuario; un archivo cuyo SHA-256 no coincide con el manifiesto del mensaje no se sirve y se re-extrae (§10.3.4); el manifiesto vive en el mismo directorio, así que quien puede escribir la caché puede rehacerlo; riesgo aceptado. |
+| Cron externo borra archivos en mitad de la ejecución | Media | Bajo | Miss ⇒ re-extracción una vez; si falla, el comando falla con el código de ese fallo (§10.4); la app nunca asume la caché. |
+| Migración de `state.json` interrumpida | Baja | Alto | Validar todo en memoria y escribir con el mecanismo atómico (RF-21); el original queda intacto hasta el reemplazo. |
+| Rutas largas en Windows (EntryID largo) | Baja | Medio | Fallback determinista a un identificador de 32 hex derivado de `uid`; límite de 240 bytes de ruta. |
+| Un plugin remoto en una red lenta no termina un adjunto grande en 60 s (100 MiB, el máximo por defecto, necesita unos 14 Mbit/s) | Media | Bajo | `E_CLIENT_TIMEOUT` con un hint que pide subir `[attachments].timeout_seconds` (hasta 600 s). |
+| `--all` con muchos adjuntos tarda hasta N veces el tope | Baja | Medio | El tope es por adjunto (ADR-40) y `max_count` acota N; si el tiempo del harness es menor, usa `--index`. |
+| Con un tope bajo, Outlook lo supera en una llamada COM lenta | Baja | Bajo | Mínimo de 10 s; la llamada sigue acotada por RF-31 y el error es `E_CLIENT_TIMEOUT`. |
+| Un plugin remoto entrega bytes distintos del adjunto real (manipulados en el origen o en la red) | Baja | Alto | Responsabilidad del plugin (ADR-22, T-11 del anexo de seguridad); el núcleo aplica bloqueo, límites y A7 como a un adjunto local. |
+| Documentación desincronizada tras el release | Media | Medio | Los documentos consumidores (README, `INTERFACES.md`, recetas, skill y `config.example.toml`) se actualizan en el mismo cambio que el contrato. |
+
+---
+
