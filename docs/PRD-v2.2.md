@@ -1,7 +1,7 @@
 # PRD (Incremental) v2.2 — Features adicionales de 3.0.0
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes.
-**Versión del documento:** 2.2 — **delta** sobre [`PRD.md`](PRD.md) v2.1.
+**Versión del documento:** 2.2 — **delta** sobre el [PRD](prd/00-indice.md) v2.1.
 **Versión del paquete que introduce:** `3.0.0` (en desarrollo `3.0.0a1`). Las features se acumulan en `develop` y no tienen release propio: se publican con el `3.0.0` (`PRD.md` §22.3).
 **Fecha:** 2026-11-13.
 **Repositorio:** <https://github.com/dayler/mailquery>.
@@ -1021,7 +1021,7 @@ F2, los avisos y el `content_notice` de `attachment` y la sección de plugins de
 ## 14. Referencias
 
 - [`docs/security/threat-model.md`](security/threat-model.md) — anexo de seguridad, ADR-28 y checklist del harness.
-- [`PRD.md`](PRD.md) v2.1: secciones citadas en §0.2 y en el texto.
+- [PRD](prd/00-indice.md) v2.1: secciones citadas en §0.2 y en el texto.
 - [`KNOWN-DEFECTS.md`](KNOWN-DEFECTS.md) — BUG-01 (F2).
 - [`ROADMAP.md`](ROADMAP.md) — §4 y §9 (`--fields`, F3).
 - [`skills/mailquery/SKILL.md`](../skills/mailquery/SKILL.md) — reglas del agente que actualizan RF-66, RF-75 y RF-77.
