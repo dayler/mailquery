@@ -11,7 +11,7 @@ Exceptions:
 
 ## Tables and figures
 
-**Every table, image, diagram, chart or other figure carries a title**, in chat answers and in every file or artifact written. The title goes on its own line right above the table or figure: `**Tabla: <title>**` in Spanish documents and `**Table: <title>**` in English ones. A table or figure that is added or modified gets its title in the same change.
+**Every table, image, diagram, chart or other figure carries a title**, in chat answers and in every file or artifact written. The title goes on its own line right above the table or figure: `**Tabla: <title>**` in Spanish documents and `**Table: <title>**` in English ones; a figure that is not a table uses `**Figura: <title>**` or `**Figure: <title>**`. A table or figure that is added or modified gets its title in the same change.
 
 ## Source code comments
 
@@ -40,19 +40,21 @@ Example:
 
 ## Plans and permanent documents
 
-Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/`. They are deleted only after the whole plan has been verified (its work, tests and evidence), a human reviewer has reviewed and approved it, and the incremental PRD / specification has been reconciled into the permanent PRD / specification. Until then, `docs/plan/` stays in the repository: deleting it is an explicit final step, never automatic and never a side effect of the implementation finishing.
+Implementation plans, milestones, task lists and their evidence are temporary. They live only in `docs/plan/`, one directory per plan (`docs/plan/<plan-name>/`); plans that are open at the same time share no file. A plan is deleted only after the whole plan has been verified (its work, tests and evidence), a human reviewer has reviewed and approved it, and the change units it implements have been reconciled into the PRD. Until then, its directory stays in the repository: deleting it is an explicit final step, ordered by the owner, never automatic and never a side effect of the implementation finishing.
 
-The PRD lives in `docs/prd/`, one file per section, with `docs/prd/00-indice.md` as its entry point. A change reaches the PRD only through a change document in `docs/changes/`, reconciled unit by unit as the part "Cómo se concilia un cambio" of `docs/prd/00-indice.md` describes. A change document is deleted only on the owner's order, once all its units are reconciled.
+The PRD lives in `docs/prd/`, one file per section, with `docs/prd/00-indice.md` as its entry point. A change reaches the PRD only through a change unit, one file in `docs/changes/`, written and reconciled as `docs/changes/PROTOCOLO.md` describes. That document also says when a change needs a unit, when it needs a plan and how plans relate to units. A change unit is deleted only on the owner's order, once it is reconciled or withdrawn.
 
 Nothing outside `docs/plan/` cites a plan: not code, not tests, not permanent documents, not READMEs. Permanent documents describe the product as it is. Anything a plan produces that must outlive it is moved, before deletion, into the permanent document that owns it. Historical records are the only other place that may mention past plans, and only as events: a historical record may name a plan but never cite it as a requirement or a justification.
 
 ## Plan structure and delegated implementation
 
-This section applies to every agent that writes or executes a plan in `docs/plan/` that delegates implementation to subagents. The protocol file, brief template, briefs, evidence, proposals and handoff notes live in `docs/plan/` and are deleted with the plan.
+This section applies to every agent that writes or executes a plan in `docs/plan/` that delegates implementation to subagents. The protocol file, brief template, briefs, evidence, proposals and handoff notes live in the plan's directory and are deleted with the plan.
 
 **Limits**
 
 Rules reference these names. The plan's protocol file may override any of them in one block at its start; briefs may not.
+
+**Table: Limits of delegated implementation**
 
 | Limit | Default | Meaning |
 |---|---|---|
@@ -67,7 +69,7 @@ Rules reference these names. The plan's protocol file may override any of them i
 **Plan documents**
 
 - A plan never tells a subagent to read the master plan or a whole specification, catalog or interface document.
-- Master plan: only milestones, dependencies, file ownership and the launch protocol. Traceability, owner answers, decisions, risks and the execution log go in separate files.
+- Master plan: only milestones (each with the change unit it completes, if any), dependencies, file ownership and the launch protocol. Traceability, owner answers, decisions, risks and the execution log go in separate files.
 - Protocol file: one file with every subagent rule not in `CLAUDE.md` (branches and worktrees, evidence checklist, redaction, per-shell command and log redirection forms, the plan's log directory, the list of shared documents, limit overrides).
 - Brief: one per milestone or split part, built from the plan's template, with only what that work needs: objective; write scope (exact files, or directories and globs for new tests and fixtures; always the evidence, proposal and handoff files; never a shared document); specification, catalog and interface ranges (heading plus line range at the baseline commit); next free test IDs; code entry points (file and function); baseline commit with known failures and skips; applicable decisions and owner answers; gate commands; log directory.
 - The protocol file and briefs are concise: no background, history, examples or text already in `CLAUDE.md`; a brief also omits what the protocol file or the specification says.

@@ -164,6 +164,30 @@ Requisitos: — (estructura de la documentación) · Archivo: `tests/test_prd_st
 | .10 | P | Los términos del glosario están en orden alfabético dentro de cada grupo. |
 | .11 | N | Ningún archivo de `docs/prd/` empieza por BOM. |
 
+#### DOC-15 — Estructura de las unidades de cambio
+
+Requisitos: — (estructura de la documentación) · Archivo: `tests/test_changes_structure.py`
+
+**Tabla: Casos de DOC-15**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `docs/changes/` no tiene subcarpetas; los nombres de archivo de las unidades son válidos; las unidades y la plantilla tienen frontmatter con `aliases` y la etiqueta `cambio`, sin BOM. |
+| .02 | P | Las unidades y la plantilla tienen título y un valor por campo de la cabecera (Tipo, Base, Fecha, Aprobación, Paquete); en las unidades, cada valor tiene su formato (la versión del paquete, sin sufijo de pre-release) y la clase del paquete es una de las que la tabla "Clases de cambio del paquete" del protocolo admite para el tipo de la unidad; las dos tablas de tipos del protocolo y la plantilla nombran los mismos tipos. |
+| .03 | P | Las unidades y la plantilla tienen exactamente las secciones del protocolo, en su orden. |
+| .04 | P | El estado de cada unidad tiene una forma válida; un borrador no tiene aprobación y los demás estados tienen quién aprobó y la fecha; una errata nunca está `implementado`; la plantilla es un borrador sin aprobación. |
+| .05 | P | La sección "IDs" tiene las líneas "Crea" y "Elimina", con rangos válidos; los borradores solo crean marcadores y las demás unidades no tienen marcadores; en una unidad abierta, los IDs de "Crea" son exactamente los IDs nuevos que definen sus textos finales, cada uno en el archivo dueño de su tipo, sin contar los que crea una unidad abierta de la que depende; en una unidad abierta sin dependencias abiertas, los IDs de "Elimina" son exactamente los que sus cambios quitan del PRD y un `modificar` de una línea que define un ID lo conserva; la plantilla tiene las dos líneas; los IDs reservados continúan desde los próximos libres de la portada, sin huecos ni repetidos. |
+| .06 | P | "Dependencias" es `Ninguna` o una lista de nombres de unidad; una unidad abierta solo depende de unidades que existen, distintas de ella y sin ciclos. |
+| .07 | P | Cada unidad tiene cambios, o declara `Ninguno` y cambia el glosario o añade decisiones; cada encabezado de archivo es válido, único, con algún cambio, con la sección de su archivo y en el orden de la portada, y `GLOSARIO.md` e `HISTORIAL.md` no tienen encabezado; cada cambio tiene operación válida, una ubicación de una línea y texto final (una eliminación no lo tiene). En una unidad abierta sin dependencias abiertas, exactamente una línea del archivo del PRD empieza por la ubicación, o la ubicación es `archivo nuevo` en una adición a un archivo que no existe. La plantilla se lee como una unidad con un cambio. |
+| .08 | N | Ningún texto final cita un plan ni tiene una tabla completa sin título. |
+| .09 | N | Dos unidades abiertas no modifican ni eliminan bloques que comparten alguna línea, salvo que una dependa de la otra; el bloque de una ubicación es el que fija la tabla "Bloque que identifica una Ubicación" del protocolo. |
+| .10 | P | Cada unidad marca una vez cada fila de la tabla "Secciones que suelen cambiar a la vez" del protocolo y tiene la línea de textos obsoletos; la plantilla lista las mismas filas. |
+| .11 | P | "Documentos consumidores" es `Ninguno` o una lista con estados válidos, y ninguno está `pendiente` en una unidad implementada o conciliada. |
+| .12 | P | Toda tabla del protocolo, de la plantilla y de las unidades tiene su línea `**Tabla: …**`. |
+| .13 | P | Unidades de ejemplo válidas de cada forma (aprobada con IDs nuevos y decisiones, que depende de una conciliada que creó el mismo ID en su época; dependiente que añade, dependiente que modifica una fila que crea su dependencia, borrador con marcadores, dos que cambian el mismo bloque con dependencia, eliminación, archivo nuevo, sin documentos consumidores, errata, versión de parche, solo glosario y conciliada) no producen ningún problema. |
+| .14 | N | Cada defecto de estructura de una unidad de ejemplo lo informa su comprobación. |
+| .15 | P | El bloque de cada tipo de línea (encabezado, línea de campo con continuación, párrafo, título de tabla, fila, entrada de lista con subentradas y línea dentro de un bloque de código) es el que fija la tabla "Bloque que identifica una Ubicación" del protocolo. |
+
 #### PKG-01 — Empaquetado y entry points
 
 Requisitos: AC-01 · Archivo: `tests/test_packaging.py`

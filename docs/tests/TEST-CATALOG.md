@@ -55,7 +55,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito del [PRD]
 | OL | Backend de Outlook sobre el doble | `tests/test_outlook.py` | [`outlook-runtime.md`](outlook-runtime.md), [`outlook-data.md`](outlook-data.md) |
 | TC | Punta a punta por `cli.main`: goldens, gates de solo lectura, recetas, empaquetado | `tests/test_integration.py`, `tests/test_readonly.py`, `tests/test_outlook.py`, `tests/test_packaging.py` | [`end-to-end.md`](end-to-end.md) |
 | PKG | Metadatos del paquete y entry points | `tests/test_packaging.py`, `tests/test_install_scripts.py` | [`docs-packaging.md`](docs-packaging.md) |
-| DOC | READMEs, skill, ayudas, `config.example.toml` y estructura del PRD | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py`, `tests/test_remote_attachments.py`, `tests/test_prd_structure.py` | [`docs-packaging.md`](docs-packaging.md) |
+| DOC | READMEs, skill, ayudas, `config.example.toml` y estructura del PRD y de las unidades de cambio | `tests/test_integration.py`, `tests/test_packaging.py`, `tests/test_content_wiring.py`, `tests/test_remote_attachments.py`, `tests/test_prd_structure.py`, `tests/test_changes_structure.py` | [`docs-packaging.md`](docs-packaging.md) |
 | INS-SMOKE | Instaladores | `tests/test_install_scripts.py` | [`smoke.md`](smoke.md) |
 | SMOKE | Cliente de correo real del equipo | `tests/test_smoke.py` | [`smoke.md`](smoke.md) |
 
