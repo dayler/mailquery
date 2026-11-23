@@ -387,14 +387,18 @@ class NativeIdCache:
 
         A native id already registered or assigned earlier in this execution
         keeps its part. A new one receives the short id plus the next ``seq`` of
-        its driver and short id, in the order the native ids are given.
+        its driver and short id; new native ids that share a short id take their
+        ``seq`` in the order of their native id, whatever order the sequence
+        arrives in.
         """
         with self._lock:
             self._ensure_open()
-            parts: dict[str, str] = {}
-            for native_id in native_ids:
+            values = list(native_ids)
+            for native_id in values:
                 if not isinstance(native_id, str) or not native_id:
                     raise ValueError(f"invalid native id: {native_id!r}")
+            parts: dict[str, str] = {}
+            for native_id in sorted(set(values)):
                 parts[native_id] = _format_part(*self._assign_one(native_id, length))
             return parts
 
