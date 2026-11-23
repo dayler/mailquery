@@ -159,7 +159,7 @@ Requisitos: RF-81, AC-63 · Archivo: `tests/test_uid.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] Con solo `apple_mail`, el uid sigue siendo `apple_mail:<n>` y, tras `search`, `new`, `show` y `attachment`, no existen `~/.mailquery/db/` ni `cache.db`. |
+| .01 | P | Con solo `apple_mail`, el uid sigue siendo `apple_mail:<n>` y, tras `search`, `new`, `show` y `attachment`, no existen `~/.mailquery/db/` ni `cache.db`. |
 
 Tests que cambian (el orquestador ya marcó `[por actualizar]` los que tienen ID):
 

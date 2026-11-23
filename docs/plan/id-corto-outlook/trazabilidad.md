@@ -8,11 +8,11 @@ Solo el orquestador escribe este archivo, al cerrar cada milestone y cada lote.
 
 | AC | Qué exige (resumen) | Milestones | Tests | Estado |
 |---|---|---|---|---|
-| AC-63 | uid `outlook:` + id corto, estable, resuelto; `EntryID`, mayúsculas, `-1`, `-02` ⇒ `E_USAGE` sin caché; macOS sin cambios y sin `cache.db` | M05, M06 | OL-31.01–.04, OL-32.01–.03, UT-UID-03.01, SMOKE-NEW.11 | ⚪ |
+| AC-63 | uid `outlook:` + id corto, estable, resuelto; `EntryID`, mayúsculas, `-1`, `-02` ⇒ `E_USAGE` sin caché; macOS sin cambios y sin `cache.db` | M05, M06 | OL-31.01–.04, OL-32.01–.03, UT-UID-03.01, SMOKE-NEW.11 | 🟡 |
 | AC-64 | `seq` 1 y 2 y sus uids, también en la misma consulta; parte estable en la ejecución; cada uid a su mensaje y a su directorio de adjuntos; `seq` 3 tras borrar el 2 | M01, M06 | UT-NID-03.02, .03, .07, .09; OL-34.01–.04 | 🟡 |
 | AC-65 | Solo se registra lo impreso (`search`, `--group-by`, `new`, `--peek`); `--count` sin filas; sin mensajes no avisa; fallo del registro ⇒ sin mensajes ni estado | M03, M05 | UT-PL-06.01–.03, .05; OL-33.01–.06 | 🟡 |
 | AC-66 | Ausente confirmado ⇒ no encontrado y fila borrada; cada causa de indeterminado conserva la fila; ninguna fila cambia de `native_id` | M06 | OL-35.01–.15 | ⚪ |
-| AC-67 | Sin `short_id` ni `seq` en ninguna salida; claves de Windows iguales a las de macOS | M05 | OL-31.05 | ⚪ |
+| AC-67 | Sin `short_id` ni `seq` en ninguna salida; claves de Windows iguales a las de macOS | M05 | OL-31.05 | 🟡 |
 | AC-68 | `--show-native-id` en Windows y macOS; mismas claves y valores; el id nativo no es entrada; otros comandos ⇒ `E_USAGE`; forma nativa inválida ⇒ `E_PLUGIN_FAILED` | M03, M04, M06, M07 | UT-PL-06.08, UT-SNI-01.01–.08, OL-36.01–.03, OL-30 (barrido con la opción), DOC-16.01, SMOKE-NEW.11 | 🟡 |
 | AC-69 | Cálculo `pmw3w06f5e`; `E_LOCKED`, `E_PERMISSION`, `E_IO` y sus versiones en un plugin; base vacía; hint de repetir la búsqueda; `show` sin base; permisos; columnas; `mailboxes`, `doctor` y `--version` no crean `cache.db` | M01, M03, M05, M06 | UT-NID-01.01, UT-NID-02.01–.08, UT-NID-04.01; UT-PL-05.05, .06; OL-31.06, OL-32.04–.07; OL-35.01 | 🟡 |
 | AC-70 | Base abierta en el contexto del plugin, también en un gancho vigilado, sin ver otro driver; plugin sin ganchos igual; gancho > 30 s ⇒ `E_CLIENT_TIMEOUT` sin mensajes | M01, M03, M04 | UT-NID-04.02–.04; UT-PL-05.01–.03, .06; UT-PL-06.04, .06; UT-SNI-01.03 | 🟡 |
