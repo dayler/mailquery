@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/id-corto-outlook-lote-1`. **Rama del milestone:** `feature/id-corto-outlook-m03`, creada desde el tip de la rama del lote (con M01 y M02 integrados).
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `b8d35bd` (tip de `feature/id-corto-outlook-lote-1`, con M01 y M02 integrados). **Línea base de la suite:** `Ran 1481 tests`, `OK (skipped=7)`, 0 fallos; los 7 saltos son casos SMOKE/installer que no aplican en macOS.
 - **Depende de:** M01 (`PluginNativeIds`, `short_id`). **Lo usan:** M04 (llamada a `display_native_id`), M05 (aviso de impresos, `bind_home`, `MessageNotFound`).
 - **ACs:** AC-65 (aviso en el núcleo), AC-69 (sin crear la caché en `mailboxes`, `doctor` y `--version` con plugins), AC-70 (contexto de plugin, ganchos, tope de 30 s).
 
@@ -72,7 +72,7 @@ Rangos de `docs/changes/id-corto-outlook.md` en el commit `384e5a8`:
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `MessageNotFound` y sus capturas; test sin ID en `tests/test_cli.py` | ⚪ |
+| 1 | `MessageNotFound` y sus capturas; test sin ID en `tests/test_cli.py` | 🟡 |
 | 2 | `OPTIONAL_OPERATIONS`, llamada a ganchos opcionales y validación de la forma nativa; UT-PL-06.08 | ⚪ |
 | 3 | `PluginContext.native_ids`, un contexto por plugin, `short_id` en `mailquery.plugins`, `bind_home`; UT-PL-05 | ⚪ |
 | 4 | Aviso de impresos en `search` y `new`; plugin de prueba con ganchos; UT-PL-06.01–.07 | ⚪ |
