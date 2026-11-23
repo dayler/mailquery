@@ -23,7 +23,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from mailquery import __version__, cli as cli_mod
+from mailquery import __version__, cli as cli_mod, mcp_server
 from mailquery.errors import MailqueryError
 from mailquery.mcp_server import (
     LATEST_PROTOCOL_VERSION,
@@ -547,7 +547,8 @@ class ValidationTests(_ServerCase):
     def test_ut_mcp_06_06_argv_over_the_platform_limit_is_rejected(self) -> None:
         """UT-MCP-06.06: an argv above the platform limit ⇒ E_USAGE without a child."""
         runner = RecordingRunner()
-        _, replies, _ = _session([_call("search", {"since": "x" * 3_000_000})], runner)
+        limit = 32_767 if sys.platform == "win32" else mcp_server._arg_max()
+        _, replies, _ = _session([_call("search", {"since": "x" * (limit + 1_000_000)})], runner)
         payload = _tool_json(replies[0])
         self.assertEqual(payload["error"]["code"], "E_USAGE")
         self.assertIn("since", payload["error"]["hint"])
