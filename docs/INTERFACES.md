@@ -123,8 +123,8 @@ proceso hijo.
 ~/.mailquery/
 ├── config.toml
 ├── state.json                  # 0600
-├── logs/mailquery.log            # formato de texto (por defecto)
-├── logs/mailquery.jsonl          # con [logging].json = true
+├── logs/mailquery.log          # formato de texto (por defecto)
+├── logs/mailquery.jsonl        # con [logging].json = true
 ├── locks/mailquery.lock
 ├── tmp/                        # 0700, staging
 ├── attachments/<driver>/<native_id>/   # caché de adjuntos, 0700/0600
