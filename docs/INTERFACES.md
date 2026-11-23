@@ -1,7 +1,7 @@
 # Interfaz interna y reglas de trabajo — contrato del futuro 3.0.0 (no publicado)
 
 > **Estado del contrato:** implementado en `develop` (plugins de backend y
-> adjuntos, contenido no confiable y salida a medida; [PRD](prd/00-indice.md) v2.3) y **no publicado**. El paquete anuncia
+> adjuntos, contenido no confiable, salida a medida y servidor MCP; [PRD](prd/00-indice.md) v2.3) y **no publicado**. El paquete anuncia
 > `mailquery.__version__` = 3.0.0a3 (3.0.0-alpha.3, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como está
 > implementado.
@@ -43,11 +43,12 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   ├── uid.py                      # uid prefijado `<driver>:<native_id>`: formato, parseo y hash estable
 │   ├── native_ids.py               # ids cortos y caché de ids nativos: short_id, NativeIdCache, PluginNativeIds
 │   ├── output.py                   # JSON formateado, snippets, fechas ISO, sanetización, html_to_text
-│   ├── logging_setup.py            # log texto con rotación por tamaño
+│   ├── logging_setup.py            # log texto o JSON Lines, rotación por tamaño y log del servidor
 │   ├── config.py                   # config.toml + resolución de alcance (vía MailBackend)
 │   ├── search.py                   # search/new/show/mailboxes (no renderiza JSON; vía MailBackend)
 │   ├── state.py                    # cursor + anillo + lock
 │   ├── cli.py                      # argparse, dispatch, stdout/stderr, exit codes
+│   ├── mcp_server.py               # servidor MCP por stdio: protocolo, esquemas y proceso hijo por llamada
 │   ├── accounts.py                 # Apple Mail: etiquetas de cuenta (Accounts4.sqlite ro)
 │   ├── store.py                    # Apple Mail: Envelope Index ro + mapeo de mailboxes
 │   ├── emlx.py                     # Apple Mail: resolución uid->ruta + parseo .emlx
@@ -99,6 +100,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     ├── test_search.py
     ├── test_state.py
     ├── test_cli.py
+    ├── test_mcp_server.py          # UT-MCP: protocolo, esquemas, argv y ejecutor real
     ├── test_readonly.py            # obligatorio y bloqueante
     ├── test_integration.py         # flujos completos y goldens
     ├── test_install_scripts.py     # instaladores (install.sh / install.ps1; UT-INS-01)
@@ -108,10 +110,12 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 
 Los dos adaptadores internos (`apple_mail`, `outlook`) implementan el protocolo
 v1 completo, incluidos `parse_native_id` y las operaciones de adjuntos, y se
-registran por el mismo grupo de entry points que un plugin. Los **seis**
-comandos (`doctor`, `mailboxes`, `search`, `new`, `show`, `attachment`) tienen
+registran por el mismo grupo de entry points que un plugin. Los comandos de
+datos (`doctor`, `mailboxes`, `search`, `new`, `show`, `attachment`) tienen
 todos sus flags en ambos backends; `attachment` solo recupera adjuntos ya
-presentes en el store local.
+presentes en el store local. `mcp serve` no consulta ningún driver: expone esos
+comandos como herramientas MCP por stdio y cada llamada ejecuta la CLI como
+proceso hijo.
 
 **Figura: Contenido del home `~/.mailquery`**
 
@@ -119,7 +123,8 @@ presentes en el store local.
 ~/.mailquery/
 ├── config.toml
 ├── state.json                  # 0600
-├── logs/mailquery.log
+├── logs/mailquery.log          # formato de texto (por defecto)
+├── logs/mailquery.jsonl        # con [logging].json = true
 ├── locks/mailquery.lock
 ├── tmp/                        # 0700, staging
 ├── attachments/<driver>/<native_id>/   # caché de adjuntos, 0700/0600
@@ -179,6 +184,9 @@ backends/outlook (→ base, outlook_com, output, errors, native_ids, plugins)
 backends/__init__ ──→ apple_mail | outlook (import perezoso solo en win32)
         ↑
        cli ──→ backends, config, errors, logging_setup, native_ids, output, search, state
+        │
+        └──→ mcp_server ──→ errors, logging_setup, output
+                          └─→ cli.build_parser (import perezoso)
 
 search (→ config, output, errors, state, backends/base [ExcludedStoreError];
         MailBackend solo en TYPE_CHECKING)
@@ -206,8 +214,15 @@ Reglas:
   otra plataforma importa jamás `win32com`.
 - **Solo `backends/outlook_com.py` puede importar `win32com`**; `outlook.py` y
   el resto del paquete no.
-- `cli` es el único que escribe `stdout`/`stderr`, el único que decide exit
+- `cli` es el único que escribe `stdout`/`stderr` (salvo el protocolo MCP, que
+  `mcp_server.py` escribe en el `stdout` que recibe), el único que decide exit
   codes y el único que construye el backend (`get_backend`) y lo cierra.
+- `mcp_server.py` no importa drivers, plugins, `config`, `search`, `state` ni
+  `backends`: solo `errors`, `logging_setup`, `output` y `__version__`, más
+  `cli.build_parser` de forma perezosa (dentro de `_default_parser`). `cli` lo
+  importa perezosamente dentro de `_run_mcp`, que lee `[logging]`, configura el
+  log del servidor y le pasa los flujos de entrada y salida. El servidor nunca
+  lee correo, estado, configuración ni un driver.
 - `plugins/**` (API pública de plugin) y `backends/registry.py` solo importan
   stdlib y el propio paquete; ninguno importa `store`, `emlx`, `accounts`,
   `search`, `config` ni una implementación de backend (RNF-12, UT-PL-04.04).
@@ -405,11 +420,31 @@ list[str]`.
   `reply_mismatch` falso no emiten nada.
 
 ### `logging_setup.py`
-`setup_logging(home, level="info", max_size_mb=10) -> run_id`,
-`get_logger(name="mailquery") -> LoggerAdapter` con `run_id` en el formato y
-`current_run_id()`. `~/.mailquery/logs/mailquery.log` (0600, directorio 0700),
-**rotación por tamaño** (`RotatingFileHandler`, `maxBytes = max_size_mb` MiB,
-5 archivos rotados fijos; `max_size_mb` viene de `[logging].max_size_mb`).
+`setup_logging(home, level="info", max_size_mb=10, json=False) -> run_id`,
+`get_logger(name="mailquery") -> LoggerAdapter` con `run_id` en el formato,
+`current_run_id()`, `active_log_filename()` (archivo que escribe la
+configuración vigente; `mailquery.log` antes de la primera) y
+`log_event(logger, level, fields=(), *, text=None, traceback=None,
+exc_info=False)`, que registra un evento estructurado con sus pares
+`clave=valor` en orden y un `text` libre, sin cambiar la línea de texto
+renderizada. `~/.mailquery/logs/mailquery.log` en texto o
+`~/.mailquery/logs/mailquery.jsonl` con `[logging].json = true`; ambos 0600 y
+directorio 0700. **Una ejecución escribe solo en el archivo de su formato** y
+nunca abre, rota ni borra el del otro. **Rotación por tamaño**
+(`RotatingFileHandler`, `maxBytes = max_size_mb` MiB, 5 archivos rotados fijos;
+`max_size_mb` viene de `[logging].max_size_mb`).
+
+Con el formato JSON Lines, cada línea es un objeto con `ts` (ISO 8601 local con
+milisegundos y desfase), `level`, `logger`, `run`, `fields` (los pares del
+evento con su tipo JSON: un entero decimal como número, `true`/`false` como
+booleano, `-` como `null` y el resto como texto; `message` es siempre texto), y
+`text` y `traceback` solo cuando existen.
+`setup_server_logging(home, level="info", max_size_mb=10, json=False) -> run_id`
+configura el log del servidor con un handler que abre, escribe, comprueba la
+rotación y cierra el archivo en cada evento, de modo que un proceso hijo pueda
+rotar el mismo archivo también en Windows; sus eventos van a `mailquery.mcp` y
+el archivo activo es el mismo que el del resto del núcleo.
+
 **Nunca** logear asunto, cuerpo, direcciones, nombres ni términos de búsqueda.
 **Este módulo no sanea errores de plugin:** el `log_message` de un plugin se sanea antes, en
 `plugins/api.py`, y el CLI lo registra en lugar del `message` (§14).
@@ -1145,7 +1180,7 @@ valida con `mailquery.uid` y la instalación del driver con `is_installed`.
 Esquema cerrado de `config.toml`, resolución de alcance por driver y
 `[attachments]` (PRD §6.5 RF-34, §6.6 RF-40, RF-47, RF-49, §15).
 
-Tipos: `LoggingConfig(level, max_size_mb)`, `SearchConfig(default_limit,
+Tipos: `LoggingConfig(level, max_size_mb, json)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
 `AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count,
 timeout_seconds)`,
@@ -1153,6 +1188,16 @@ timeout_seconds)`,
 `Config(home, logging, search, new, attachments, content, scopes)` y
 `ResolvedScope(account_uuid, account_label, account_email, mailboxes, driver)`.
 
+- `LoggingConfig`: `level`, `max_size_mb` y `json` (por defecto `info`, `10` y
+  `false`). `[logging].json` es booleano; un valor que no lo sea ⇒
+  `E_CONFIG_INVALID` (exit 2) con el mensaje `[logging].json must be a boolean:
+  <valor>` y el hint `use true or false`.
+- `load_logging_config(home) -> LoggingConfig`: lee **solo** la tabla
+  `[logging]` y **nunca lanza**: un archivo ausente o ilegible, un TOML
+  inválido o una tabla `[logging]` inválida devuelven los valores por defecto
+  (`info`, `10` MiB y texto), de modo que quien solo necesita el log no queda
+  bloqueado por el resto del archivo. La usa el subcomando `mcp serve` antes
+  de configurar su log.
 - `AttachmentsConfig`: defaults `true`/`100`/`200`/`50`/`60`; rangos `1..500`,
   `1..1024` (`>= max_file_size_mb`), `1..500` y `10..600`; una tabla ausente usa
   los defaults. Un `timeout_seconds` que no sea entero (un `bool` no lo es) o
@@ -1449,7 +1494,7 @@ con el `type=int` de argparse) y `--index`/`--all` son mutuamente excluyentes
 con el texto `attachment requires exactly one of --index or --all`. La ayuda
 (`attachment --help`) reproduce literalmente §12.7 (usage, positional,
 options, examples y notes; columnas alineadas a 17 y ≤ 100 columnas) y la
-ayuda raíz lista los seis comandos con la línea de exits de §12.7.
+ayuda raíz lista los comandos de datos y `mcp` con la línea de exits de §12.7.
 `_run_command` implementa la precedencia de §12.11 filas 1–10 **antes** de
 llamar al motor de adjuntos: (1) argumentos; (2) sintaxis del uid y driver instalado,
 antes de crear el home; (3) config (incluye `[attachments]` y `[scope]`);
@@ -1533,6 +1578,97 @@ de retorno y los nombres reservados. `_bind_doctor_timeout` registra en el backe
 `_emit_doctor_report(checks, plugins, json_output, logger, client, failures=...)` (JSON o texto, más la
 línea `event=end` del log), aplica el mismo filtrado de `--failures` y hace `flush` de `stdout`,
 `stderr` y el log y termina con `os._exit(0)`.
+
+**Comando `mcp serve`.** `mailquery mcp serve` arranca el servidor MCP por
+stdio. `main` despacha `command == "mcp"` a `_run_mcp(home, args.log_level)` sin
+construir backend, abrir lock ni leer el store: `_run_mcp` lee solo `[logging]`
+con `load_logging_config`, configura el log del servidor con
+`setup_server_logging` (nivel `--log-level` o `[logging].level`, tamaño y
+formato), registra `event=start command=mcp`, adapta los flujos con
+`_mcp_streams` (UTF-8 sin traducción de fin de línea sobre el `buffer` de
+`stdin`), ejecuta `mcp_server.serve(stdin, stdout,
+runner=SubprocessToolRunner())` y registra `event=end` en un `finally`; una
+excepción del servidor termina con exit 1 sin escribir traceback en stdout ni
+en stderr. La ayuda raíz lista `mcp` entre los comandos y advierte que la
+salida de `mcp serve` es el protocolo, no el JSON de un comando.
+
+### `mcp_server.py`
+
+Servidor MCP por stdio: habla el subconjunto de MCP que necesita un servidor de
+herramientas (`initialize`, `ping`, `tools/list` y `tools/call`) con la
+biblioteca estándar y traduce cada llamada a una ejecución completa de la CLI.
+No conoce drivers ni plugins, no lee correo ni el estado y no abre red.
+
+Interfaz pública:
+
+- `PROTOCOL_VERSIONS` y `LATEST_PROTOCOL_VERSION`: versiones aceptadas
+  (`2024-11-05`, `2025-03-26`, `2025-06-18` y `2025-11-25`); `initialize`
+  responde la pedida si está en la lista y, si no, la última.
+- `TOOL_NAMES`: `search`, `new`, `show`, `attachment`, `mailboxes` y `doctor`,
+  en el orden de `tools/list`.
+- `ToolOutcome(stdout, exit_code, duration_ms)` y `ToolRunner` (protocolo con
+  `run(argv) -> ToolOutcome`); el ejecutor real es `SubprocessToolRunner`.
+- `serve(stdin, stdout, *, runner) -> int`: atiende líneas hasta el fin de
+  `stdin` y devuelve 0.
+- `tool_definitions(parser) -> list[dict]`: `name`, `description` e
+  `inputSchema` de cada herramienta, generados desde el parser de la CLI.
+- `build_argv(tool, arguments) -> list[str]`: argumentos de la CLI de una
+  llamada, o `MailqueryError` `E_USAGE`.
+
+**Protocolo.** Una línea es un objeto JSON-RPC; una línea que es un array se
+atiende como lote y se responde con un array (un lote vacío y un elemento que
+no es objeto dan `-32600`). `initialize` devuelve `protocolVersion`,
+`capabilities.tools` y `serverInfo` (`mailquery` y `__version__`); `ping`
+devuelve `{}`; `tools/list` devuelve las definiciones; `tools/call` ejecuta una
+llamada. Las notificaciones (sin `id` y `notifications/*`) no se responden, un
+método desconocido da `-32601`, una petición mal formada `-32600`, una línea
+que no es JSON `-32700` y unos parámetros de `tools/call` que no son un objeto,
+un `arguments` que no es objeto o una herramienta desconocida `-32602`. Cada
+respuesta se escribe como JSON compacto en UTF-8 más `\n` y se vacía el búfer.
+
+**Esquemas.** Cada herramienta se genera desde su subparser: una propiedad por
+opción larga, con el nombre del primer flag largo sin `--` y con `-` cambiado
+por `_`; la descripción es la ayuda de la opción. `log_level` se añade desde el
+parser raíz con su `enum`; `uid` es la posición de `show` y `attachment` y es
+obligatorio. No se exponen `--help`, `doctor --json` ni `show
+--show-native-id`. Los tipos son `boolean` (`store_true`/`store_false`),
+`integer` (`type=int` y `attachment.index`), `enum` (opciones con `choices`),
+`array` de strings (`action="append"`) o `string`; `additionalProperties` es
+`false`.
+
+**Traducción de argumentos.** `log_level` va antes del comando como
+`--log-level=<valor>`; un booleano verdadero añade `--<nombre>`; un array
+repite `--<nombre>=<elemento>`; el resto va como `--<nombre>=<valor>`, con el
+nombre en guiones. `uid` se valida como string y se pasa tras `--` para que no
+se interprete como opción. `doctor` siempre añade `--json`, y `--failures`
+cuando el parámetro es verdadero. Un parámetro desconocido, con tipo
+equivocado, con un NUL, fuera del `enum` o que haría superar el límite de argv
+devuelve un resultado de error con `isError: true` y el JSON de error de la CLI
+(`error.code` `E_USAGE`), sin lanzar el proceso hijo.
+
+**Límite de argv.** Antes de ejecutar, el servidor rechaza un argv que supere
+el límite de la plataforma y nombra el parámetro más largo: en POSIX compara
+`os.sysconf("SC_ARG_MAX")` (o 131072 si no está disponible) con el tamaño en
+bytes del intérprete, `-P -m mailquery`, los argumentos y el entorno; en
+Windows compara `subprocess.list2cmdline([sys.executable, "-P", "-m",
+"mailquery", *argv])` con 32767.
+
+**Ejecutor real.** `SubprocessToolRunner` lanza
+`[sys.executable, "-P", "-m", "mailquery", *argv]` sin shell, con stdin vacío,
+stdout capturado, stderr descartado, el mismo directorio de trabajo y el
+entorno heredado; en Windows añade `CREATE_NO_WINDOW`. `-P` evita que el
+directorio del servidor entre en `sys.path`, así que el hijo es siempre la
+misma instalación. Hay un proceso hijo por llamada.
+
+**Resultado de la llamada.** El servidor quita un `\n` final del stdout del
+hijo y lo parsea; si no es un objeto JSON (o el lanzamiento falla) devuelve
+`E_INTERNAL` como resultado de la herramienta. En éxito, `content` lleva un
+bloque `text` con el stdout del hijo sin el `\n` final e `isError` es verdadero
+cuando el código de salida no es 0; el JSON conserva el contrato de la CLI, así
+que el código de salida se deduce de `error.code`. Cada llamada registra
+`event=call tool=<nombre> exit_code=<n> duration_ms=<ms>` en `mailquery.mcp`,
+nunca los valores de los parámetros; si el lanzamiento falla no se registra esa
+línea.
 
 ### `attachments/`
 
@@ -2512,7 +2648,7 @@ cada comando de datos da `E_OUTLOOK_NOT_RUNNING` y `doctor` sale con exit 0).
 `tests/fakes/run_cli.py` ejecuta `cli.main` con el fake en un subprocess
 (tests del vigilante, que termina el proceso con `os._exit`). El gate de solo
 lectura de Outlook (OL-30, `test_outlook.OutlookReadOnlyGateTests`) barre los
-6 comandos con todos sus flags sobre todos los escenarios y exige miembros ⊆
+comandos de datos con todos sus flags sobre todos los escenarios y exige miembros ⊆
 lista blanca, 0 asignaciones, 0 mutaciones y ningún código de error fuera de los admitidos para una corrida de solo lectura.
 
 Para regenerarlos tras un cambio **intencional** del contrato:
@@ -2559,3 +2695,23 @@ PRD (§22.2, §22.4) lo exige; regenerar no sustituye la revisión.
 Rige la regla de git de la §1: el orquestador crea la rama de cada cambio y
 hace los commits; los merges a `develop` y los tags los hace o autoriza el
 dueño tras la revisión del planificador.
+
+### 8.8 Prueba manual del servidor MCP
+
+Un cliente JSON-RPC mínimo por stdin comprueba el protocolo sin registrar nada
+en el harness:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"doctor","arguments":{}}}' \
+  | python3 -m mailquery mcp serve
+```
+
+stdout lleva solo las tres respuestas JSON-RPC; los diagnósticos van al archivo
+activo del log (`mailquery.log` o `mailquery.jsonl`) con `event=start`,
+`event=call` y `event=end`, y el proceso termina con exit 0 al cerrar stdin.
+Para usarlo desde Claude Code, `claude mcp add --scope user mailquery --
+mailquery mcp serve` y comprobar que lista las seis herramientas; sin
+registrar, la misma tarea se hace con la CLI y las recetas.

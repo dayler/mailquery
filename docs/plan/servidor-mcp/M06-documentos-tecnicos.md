@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 4 / 2. **Rama del lote:** `feature/servidor-mcp-lote-2`. **Rama del milestone:** `feature/servidor-mcp-m06`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `0ca8909`. **Línea base de la suite:** `Ran 1598 tests`, `failures=2`, `skipped=7`; los dos fallos son SMOKE-NEW.07 y SMOKE-NEW.10 (entorno SMOKE local, no de este milestone).
 - **Depende de:** M04 (log JSON, `load_logging_config`, archivo activo) y M05 (`mcp serve`, `mcp_server.py` final, `log_event` en uso). **Lo usan:** F3 y F5 del plan.
 - **ACs:** ninguno; prepara CL-05 y CL-06 de la unidad para los documentos técnicos.
 
@@ -64,10 +64,10 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `docs/INTERFACES.md` | ⚪ |
-| 2 | `docs/security/threat-model.md` y `docs/ROADMAP.md` | ⚪ |
-| 3 | Recetas: revisión y, si hace falta, la frase de MCP; TC-04 verde | ⚪ |
-| 4 | Barrido: `grep -rniE "six commands\|seis comandos\|3\.0\.0a2\|3\.0\.0-alpha\.2" README.md README.es.md skills docs/INTERFACES.md docs/ROADMAP.md docs/recipes docs/security docs/config.example.toml` y búsqueda de `mailquery.log` como único archivo del log del núcleo en esos documentos; DOC-16.02 y DOC-03 verdes; suite completa, evidencia cruda y propuestas | ⚪ |
+| 1 | `docs/INTERFACES.md` | 🟢 |
+| 2 | `docs/security/threat-model.md` y `docs/ROADMAP.md` | 🟢 |
+| 3 | Recetas: revisión y, si hace falta, la frase de MCP; TC-04 verde | 🟢 |
+| 4 | Barrido: `grep -rniE "six commands\|seis comandos\|3\.0\.0a2\|3\.0\.0-alpha\.2" README.md README.es.md skills docs/INTERFACES.md docs/ROADMAP.md docs/recipes docs/security docs/config.example.toml` y búsqueda de `mailquery.log` como único archivo del log del núcleo en esos documentos; DOC-16.02 y DOC-03 verdes; suite completa, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -109,3 +109,7 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `docs/INTERFACES.md`: layout, dirección de dependencias, `mcp_server.py`, `logging_setup.py`, `config.py`, `cli.py` y prueba manual del servidor. |
+| 2026-11-23 | 2 | `docs/security/threat-model.md`: superficie del servidor por stdio, T-14, matriz, checklist y privacidad de `mailquery.jsonl`; `docs/ROADMAP.md`: servidor MCP y log JSON como hechos de 3.0.0. |
+| 2026-11-23 | 3 | Recetas: ninguna afirma que la CLI sea la única vía, así que no lleva la frase de MCP; la fila `E_INTERNAL` nombra los dos logs. TC-04 verde (9 tests). |
+| 2026-11-23 | 4 | Barrido limpio (CL-06 y CL-11); DOC-03, DOC-16, DOC-14 y DOC-15 verdes; diff limpio y dentro del alcance; evidencia cruda y propuestas escritas. Suite completa no ejecutada por indicación del orquestador. |
