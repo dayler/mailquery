@@ -70,8 +70,8 @@ Ninguna de `decisiones.md` le aplica. Regla: ningún comportamiento observable c
 |---|---|---|
 | 1 | Inventario de los usos del uid en `outlook.py` (lista en la evidencia cruda) | 🟢 |
 | 2 | `_entry_id`/`_uid_part`, traducción en cada operación de entrada y en la emisión; cachés por `EntryID` | 🟢 |
-| 3 | Test sin ID con traducción reversible; suite completa sin cambios en tests existentes | 🟡 |
-| 4 | Diff, evidencia cruda | ⚪ |
+| 3 | Test sin ID con traducción reversible; suite completa sin cambios en tests existentes | 🟢 |
+| 4 | Diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -112,3 +112,5 @@ Los de `protocolo.md`, más el inventario de la fase 1 (función, línea y si re
 |---|---|---|
 | 2026-11-23 | 1 | Inventario de los usos del uid en `outlook.py`, en la evidencia cruda. |
 | 2026-11-23 | 2 | `_entry_id`/`_uid_part` añadidos; entrada y emisión traducidas; cachés por `EntryID`; `_order_key` por `native_order_key`. |
+| 2026-11-23 | 3 | Test nuevo sin ID en verde; `tests.test_outlook` 225 tests `OK (skipped=1)`; suite completa 1453 tests `OK (skipped=8)`. |
+| 2026-11-23 | 4 | `git diff --check` limpio; `git diff --stat` solo `outlook.py`, `test_outlook.py` y este archivo; evidencia cruda en `../../.logs/id-corto-outlook/M02/evidencia-cruda.md`. |
