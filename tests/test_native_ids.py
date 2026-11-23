@@ -415,6 +415,70 @@ class CacheOpenTests(_NativeIdsTestCase):
         self.assertEqual(reopened.resolve(parts["bravo"]), "bravo")
         self.assertEqual(reopened.assign(["alpha", "bravo"]), parts)
 
+    def test_ut_nid_02_10_database_initialized_by_another_open_is_kept(self) -> None:
+        """UT-NID-02.10: an open that read the file before another open initialized it keeps the schema."""
+        cache = self.open_cache()
+        parts = cache.assign(["alpha"])
+        cache.register(["alpha"])
+        cache.close()
+        real_read_format = native_ids._read_format
+        for first_read in ((0, set()), (0, {"cache_native_ids"})):
+            with self.subTest(first_read=first_read):
+                calls: list[int] = []
+
+                def read_format(connection: sqlite3.Connection):
+                    calls.append(1)
+                    if len(calls) == 1:
+                        return first_read
+                    return real_read_format(connection)
+
+                with mock.patch(
+                    "mailquery.native_ids._read_format", side_effect=read_format
+                ):
+                    reopened = NativeIdCache.open("outlook", home=self.home)
+                try:
+                    self.assertEqual(len(calls), 2)
+                    self.assertEqual(
+                        self.query("PRAGMA user_version")[0][0], FORMAT_VERSION
+                    )
+                    self.assertEqual(reopened.resolve(parts["alpha"]), "alpha")
+                finally:
+                    reopened.close()
+        foreign_home = self.root / "foreign-home"
+        foreign_file = native_ids.cache_path(foreign_home)
+        foreign_file.parent.mkdir(parents=True)
+        foreign = sqlite3.connect(str(foreign_file))
+        try:
+            foreign.execute("CREATE TABLE other (value TEXT)")
+            foreign.commit()
+        finally:
+            foreign.close()
+        calls = []
+
+        def read_empty_first(connection: sqlite3.Connection):
+            calls.append(1)
+            if len(calls) == 1:
+                return 0, set()
+            return real_read_format(connection)
+
+        with mock.patch(
+            "mailquery.native_ids._read_format", side_effect=read_empty_first
+        ):
+            with self.assertRaises(MailqueryError) as context:
+                NativeIdCache.open("outlook", home=foreign_home)
+        self.assertEqual(context.exception.code, "E_IO")
+        check = sqlite3.connect(str(foreign_file))
+        try:
+            tables = {
+                row[0]
+                for row in check.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        finally:
+            check.close()
+        self.assertEqual(tables, {"other"})
+
 
 class CacheOperationsTests(_NativeIdsTestCase):
     """UT-NID-03: assign, register, resolve and discard."""
