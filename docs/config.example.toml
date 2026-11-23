@@ -29,6 +29,7 @@
 # [logging]
 # level = "info"                 # error | warning | info | debug
 # max_size_mb = 10               # 1..1024; rotates the log when it grows (5 kept)
+# json = false                   # true: JSON Lines in mailquery.jsonl
 
 # [search]
 # default_limit = 20             # 1..200

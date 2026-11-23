@@ -3,13 +3,14 @@
 Only this module writes to ``stdout``/``stderr``. It parses ``argv`` with
 ``argparse`` (``-h``/``--help`` is the documented non-JSON exception), loads
 the configuration, sets up logging, takes the run lock, dispatches one of the
-six commands and renders either success or a JSON error object.
+seven commands and renders either success or a JSON error object.
 """
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import io
 import logging
 import os
 import re
@@ -45,7 +46,12 @@ from mailquery.config import (
     resolve_scope,
 )
 from mailquery.errors import MailqueryError, error_detail
-from mailquery.logging_setup import get_logger, setup_logging
+from mailquery.logging_setup import (
+    active_log_filename,
+    get_logger,
+    log_event,
+    setup_logging,
+)
 from mailquery.native_ids import PluginNativeIds
 from mailquery.output import (
     CONTENT_NOTICE,
@@ -81,7 +87,7 @@ from mailquery.search import (
 )
 from mailquery.state import RunLock, StateStore
 
-COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
+COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment", "mcp")
 # Backend check that the resolution of the ``[scope]`` blocks depends on, by
 # backend name.
 _RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
@@ -131,8 +137,10 @@ Examples:
 
 Configuration: ~/.mailquery/config.toml (optional; see README.md)
 Output: one JSON object on stdout for every command, in UTF-8 (this help,
-        --version and the default doctor report are the only non-JSON output);
-        logs go to ~/.mailquery/logs/mailquery.log
+        --version, the default doctor report and the MCP protocol of
+        mcp serve are the only non-JSON output);
+        logs go to ~/.mailquery/logs/mailquery.log (text) or
+        ~/.mailquery/logs/mailquery.jsonl with [logging].json = true
 Exit codes: 0 ok | 2 usage or config error | 3 environment error
             | 4 rejected query or blocked attachments | 5 busy or transient error
             | 6 mail client not running
@@ -184,6 +192,37 @@ Notes:
   total and unread are added only when requested with --fields. Counters are
   calculated from the mail store only with --fields total or unread, because the
   mail client's own counters are not reliable.
+"""
+
+_MCP_EPILOG = """\
+Examples:
+  mailquery mcp serve
+
+Notes:
+  Starts a JSON-RPC server on stdin and stdout and serves the read commands as
+  MCP tools. Register it once with Claude Code:
+    claude mcp add --scope user mailquery -- mailquery mcp serve
+  Generic mcpServers entry:
+    {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}
+  Each call runs one child `mailquery` process with empty stdin; the server
+  never reads mail, state or drivers itself. It writes its own events to the
+  active log file and never lets a log failure reach stdout or stderr.
+"""
+
+_MCP_SERVE_EPILOG = """\
+Examples:
+  mailquery mcp serve
+
+Notes:
+  Serves initialize, ping, tools/list and tools/call over stdin and stdout.
+  The tools are search, new, show, attachment, mailboxes and doctor; each call
+  is one `mailquery` child process and returns the same JSON as the CLI.
+  Register it once with Claude Code:
+    claude mcp add --scope user mailquery -- mailquery mcp serve
+  Generic mcpServers entry:
+    {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}
+  The harness closes stdin to stop the server. Registration and permissions
+  are documented in README.md.
 """
 
 _SEARCH_EPILOG = """\
@@ -653,6 +692,28 @@ def build_parser() -> argparse.ArgumentParser:
         "the legacy unprefixed uid is accepted for the native driver)",
     )
 
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="serve the read commands as MCP tools over stdio",
+        description="Serve the read commands as MCP tools over stdio.",
+        epilog=_MCP_EPILOG,
+        formatter_class=_HelpFormatter,
+    )
+    mcp_parser.set_defaults(command="mcp")
+    _style_parser(mcp_parser, root=False)
+    mcp_subparsers = mcp_parser.add_subparsers(
+        dest="mcp_command", metavar="<subcommand>", required=True
+    )
+    serve_parser = mcp_subparsers.add_parser(
+        "serve",
+        help="serve MCP over stdin and stdout",
+        description="Serve the read commands as MCP tools over stdin and stdout.",
+        epilog=_MCP_SERVE_EPILOG,
+        formatter_class=_HelpFormatter,
+    )
+    serve_parser.set_defaults(command="mcp", mcp_command="serve")
+    _style_parser(serve_parser, root=False)
+
     return parser
 
 
@@ -748,6 +809,9 @@ def _main(
             log_message="cannot resolve the application home",
         )
         return _report_error(error, command)
+
+    if command == "mcp":
+        return _run_mcp(home_path, args.log_level)
 
     if command == "doctor":
         return _run_doctor(
@@ -987,6 +1051,45 @@ def _validate_command_native_id(
         args.uid = str(getattr(args, "uid_native_id", ""))
 
 
+def _run_mcp(home_path: Path, log_level: str | None) -> int:
+    """Run the MCP server over stdin and stdout with its own per-event log."""
+    from mailquery import mcp_server
+    from mailquery.config import load_logging_config
+    from mailquery.logging_setup import setup_server_logging
+
+    settings = load_logging_config(home_path)
+    try:
+        setup_server_logging(
+            home_path,
+            log_level or settings.level,
+            settings.max_size_mb,
+            json=settings.json,
+        )
+    except Exception:  # noqa: BLE001 - the server must start without a log
+        pass
+    logger = get_logger("mailquery.mcp")
+    log_event(logger, logging.INFO, (("command", "mcp"),), text="event=start")
+    stdin, stdout = _mcp_streams()
+    try:
+        mcp_server.serve(stdin, stdout, runner=mcp_server.SubprocessToolRunner())
+    except Exception:  # noqa: BLE001 - never write a traceback to stdout or stderr
+        return 1
+    finally:
+        log_event(logger, logging.INFO, (("command", "mcp"),), text="event=end")
+    return 0
+
+
+def _mcp_streams():
+    """Text streams over the CLI bytes: UTF-8, no newline translation."""
+    stdin = sys.stdin
+    buffer = getattr(stdin, "buffer", None)
+    wrapper = None
+    if buffer is not None:
+        wrapper = io.TextIOWrapper(buffer, encoding="utf-8", errors="strict", newline="")
+        stdin = wrapper
+    return stdin, sys.stdout
+
+
 def _run_command(
     args: argparse.Namespace,
     home_path: Path,
@@ -1018,7 +1121,9 @@ def _run_command(
     level = args.log_level or config.logging.level
     try:
         _close_logging_handlers()
-        setup_logging(home_path, level, config.logging.max_size_mb)
+        setup_logging(
+            home_path, level, config.logging.max_size_mb, config.logging.json
+        )
     except OSError as exc:
         error = MailqueryError(
             "E_PERMISSION",
@@ -1068,11 +1173,15 @@ def _run_command(
                 _validate_command_native_id(args, opened, native_name)
             if command == "show":
                 _validate_command_native_id(args, opened, native_name)
-            logger.info(
-                "event=start command=%s backend=%s drivers=%s",
-                command,
-                native_name or "-",
-                ",".join(_declared_driver_names(config, native_name)) or "-",
+            log_event(
+                logger,
+                logging.INFO,
+                (
+                    ("command", command),
+                    ("backend", native_name or "-"),
+                    ("drivers", ",".join(_declared_driver_names(config, native_name)) or "-"),
+                ),
+                text="event=start",
             )
             selected = opened.get(native_name)
             drivers = {
@@ -1100,12 +1209,18 @@ def _run_command(
         _log_error(logger, command, exc)
         return _report_error(exc, command)
     except Exception as exc:  # noqa: BLE001 - the CLI must never raise
-        logger.exception("event=internal_error command=%s", command)
+        log_event(
+            logger,
+            logging.ERROR,
+            (("command", command),),
+            text="event=internal_error",
+            exc_info=True,
+        )
         error = MailqueryError(
             "E_INTERNAL",
             f"unexpected internal error: {type(exc).__name__}",
             "run `mailquery doctor` and check "
-            "~/.mailquery/logs/mailquery.log for the traceback",
+            f"~/.mailquery/logs/{active_log_filename()} for the traceback",
         )
         return _report_error(error, command)
     finally:
@@ -1118,30 +1233,39 @@ def _run_command(
     duration_ms = int((time.perf_counter() - started) * 1000)
     if command == "attachment":
         attachments = payload.get("attachments") or ()
-        logger.info(
-            "event=end command=attachment exit_code=0 count=%d cached=%d bytes=%d "
-            "duration_ms=%d",
-            len(attachments),
-            sum(1 for entry in attachments if entry.get("cached")),
-            sum(int(entry.get("size_bytes") or 0) for entry in attachments),
-            duration_ms,
+        log_event(
+            logger,
+            logging.INFO,
+            (
+                ("command", "attachment"),
+                ("exit_code", 0),
+                ("count", len(attachments)),
+                ("cached", sum(1 for entry in attachments if entry.get("cached"))),
+                ("bytes", sum(int(entry.get("size_bytes") or 0) for entry in attachments)),
+                ("duration_ms", duration_ms),
+            ),
+            text="event=end",
         )
         return 0
     warnings = payload.get("warnings") or ()
     raw_scan = payload.get("scan")
     scan: dict[str, Any] = raw_scan if isinstance(raw_scan, dict) else {}
-    logger.info(
-        "event=end command=%s exit_code=0 count=%s truncated=%s warnings=%d "
-        "warning_codes=%s mode=%s candidates=%s messages_read=%s duration_ms=%d",
-        command,
-        payload.get("count", 0),
-        bool(payload.get("truncated", False)),
-        len(warnings),
-        ",".join(_warning_code(warning) for warning in warnings) or "-",
-        scan.get("mode", "-"),
-        scan.get("candidates", "-"),
-        scan.get("messages_read", "-"),
-        duration_ms,
+    log_event(
+        logger,
+        logging.INFO,
+        (
+            ("command", command),
+            ("exit_code", 0),
+            ("count", payload.get("count", 0)),
+            ("truncated", bool(payload.get("truncated", False))),
+            ("warnings", len(warnings)),
+            ("warning_codes", ",".join(_warning_code(warning) for warning in warnings) or "-"),
+            ("mode", scan.get("mode", "-")),
+            ("candidates", scan.get("candidates", "-")),
+            ("messages_read", scan.get("messages_read", "-")),
+            ("duration_ms", duration_ms),
+        ),
+        text="event=end",
     )
     return 0
 
@@ -1574,11 +1698,14 @@ def _log_backend_connection(backend: Any) -> None:
     except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
         return
     try:
-        get_logger("mailquery.store").info(
-            "strategy=%s version=%s schema_ok=%s",
-            info.get("strategy", "-"),
-            info.get("version", "-"),
-            str(info.get("schema_ok", True)).lower(),
+        log_event(
+            get_logger("mailquery.store"),
+            logging.INFO,
+            (
+                ("strategy", info.get("strategy", "-")),
+                ("version", info.get("version", "-")),
+                ("schema_ok", str(info.get("schema_ok", True)).lower()),
+            ),
         )
     except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
         pass
@@ -1697,8 +1824,8 @@ def _run_doctor(
     json_output: bool = False,
     failures: bool = False,
 ) -> int:
-    level, max_size_mb = _doctor_log_settings(home_path, log_level)
-    logger = _best_effort_logger(home_path, level, max_size_mb)
+    level, max_size_mb, json_log = _doctor_log_settings(home_path, log_level)
+    logger = _best_effort_logger(home_path, level, max_size_mb, json_log)
     selected = None
     run = _DoctorRun(home_path)
     client = _CLIENT_NAMES["apple_mail"]
@@ -1814,10 +1941,15 @@ def _emit_doctor_report(
         )
         sys.stdout.flush()
     if logger is not None:
-        logger.info(
-            "event=end command=doctor exit_code=0 checks=%d/%d",
-            passed_checks,
-            total_checks,
+        log_event(
+            logger,
+            logging.INFO,
+            (
+                ("command", "doctor"),
+                ("exit_code", 0),
+                ("checks", f"{passed_checks}/{total_checks}"),
+            ),
+            text="event=end",
         )
 
 
@@ -2592,17 +2724,28 @@ def _log_error(logger: Any, command: str, error: MailqueryError) -> None:
 
         frames = "".join(traceback.format_tb(error.__traceback__)).rstrip("\n")
         kind = f"{type(error).__module__}.{type(error).__qualname__}"
-        logger.error(
-            "event=error command=%s code=%s message=%s\n"
-            "Traceback (most recent call last):\n%s\n%s",
-            command,
-            error.code,
-            text,
-            frames,
-            kind,
+        log_event(
+            logger,
+            logging.ERROR,
+            (
+                ("command", command),
+                ("code", error.code),
+                ("message", text),
+            ),
+            text="event=error",
+            traceback=f"Traceback (most recent call last):\n{frames}\n{kind}",
         )
         return
-    logger.error("event=error command=%s code=%s message=%s", command, error.code, text)
+    log_event(
+        logger,
+        logging.ERROR,
+        (
+            ("command", command),
+            ("code", error.code),
+            ("message", text),
+        ),
+        text="event=error",
+    )
 
 
 def _warning_code(warning: Any) -> str:
@@ -2614,25 +2757,29 @@ def _best_effort_logger(
     home_path: Path,
     level: str | None,
     max_size_mb: int = DEFAULT_MAX_SIZE_MB,
+    json: bool = False,
 ) -> Any:
     try:
         ensure_app_home(home_path)
         _close_logging_handlers()
-        setup_logging(home_path, level or DEFAULT_LOG_LEVEL, max_size_mb)
+        setup_logging(home_path, level or DEFAULT_LOG_LEVEL, max_size_mb, json)
     except Exception:  # noqa: BLE001 - logging is never fatal
         return None
     return get_logger("mailquery.cli")
 
 
-def _doctor_log_settings(home_path: Path, log_level: str | None) -> tuple[str, int]:
+def _doctor_log_settings(
+    home_path: Path, log_level: str | None
+) -> tuple[str, int, bool]:
     """Resolve doctor logging settings: flag > config > defaults."""
     try:
         config = load_config(home_path)
     except Exception:  # noqa: BLE001 - doctor diagnoses broken configs itself
-        return log_level or DEFAULT_LOG_LEVEL, DEFAULT_MAX_SIZE_MB
+        return log_level or DEFAULT_LOG_LEVEL, DEFAULT_MAX_SIZE_MB, False
     return (
         log_level or config.logging.level,
         config.logging.max_size_mb,
+        config.logging.json,
     )
 
 

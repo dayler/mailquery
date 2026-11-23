@@ -27,7 +27,7 @@ meant for an agent harness to invoke it **on demand** and consume its output.
   legacy unprefixed uid is accepted on input for the platform's native driver.
 
 The attachment and multi-driver features are part of the future 3.0.0, not
-yet released. `develop` reports the pre-release `3.0.0a2` (3.0.0-alpha.2) from
+yet released. `develop` reports the pre-release `3.0.0a3` (3.0.0-alpha.3) from
 `--version`, but publishes nothing: no tag, no release and no `main` merge.
 
 References: [`docs/prd/`](docs/prd/00-indice.md) (product contract, v2.3),
@@ -304,6 +304,14 @@ accounts) are in [`docs/config.example.toml`](docs/config.example.toml) and in
 PRD §15. Precedence: CLI flags, `config.toml`, defaults. The 1.x daily log
 rotation was replaced by `[logging].max_size_mb`; the retired key gives
 `E_CONFIG_INVALID` with the hint `retention_days was replaced by max_size_mb`.
+The format of the log is chosen per run with `[logging].json`: with `true`, the
+run writes JSON Lines to `~/.mailquery/logs/mailquery.jsonl` instead of the
+plain-text `~/.mailquery/logs/mailquery.log`:
+
+```toml
+[logging]
+json = true                    # false (default): text in mailquery.log
+```
 
 ### Attachment recovery (`[attachments]`)
 
@@ -374,7 +382,7 @@ reminder that email content is untrusted; it is not a control.
 
 ```text
 $ mailquery -v          # no side effects: does not create ~/.mailquery nor open the client
-mailquery 3.0.0a2 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a2)
+mailquery 3.0.0a3 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a3)
 ```
 
 The line keeps `backend <native driver>` and adds `; drivers: <driver>
@@ -404,7 +412,7 @@ Generated at: 2026-11-13T09:15:00-04:00
 Checks:
   [ok]   python              3.14.7
   [ok]   home                …\.mailquery (writable)
-  [ok]   driver              outlook (api=1; pkg 3.0.0a2; network=false; readonly=structural;
+  [ok]   driver              outlook (api=1; pkg 3.0.0a3; network=false; readonly=structural;
                              body_local=true; attachments=local; native_order=text)
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)
@@ -794,9 +802,52 @@ mailquery attachment apple_mail:83301 --index 2 --force
   unlike the native id cache. There is no purge on start: use an external
   cron/cleanup if needed. The app tolerates concurrent deletions.
 
+### `mailquery mcp serve`
+
+Starts an MCP server over stdin and stdout for a harness: one tool per read
+command (`search`, `new`, `show`, `attachment`, `mailboxes` and `doctor`). This
+is the same executable and the same JSON contract as the CLI:
+
+```text
+$ mailquery mcp serve
+```
+
+Register it once with Claude Code (user scope, available in every session):
+
+```bash
+claude mcp add --scope user mailquery -- mailquery mcp serve
+```
+
+For other harnesses, the equivalent `mcpServers` entry is:
+
+```json
+{"mcpServers": {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}}
+```
+
+Each tool parameter is one option of its command, with the leading dashes
+removed and `-` replaced by `_`: `include_mailbox` is `--include-mailbox`,
+`has_attachments` is `--has-attachments` and `log_level` is `--log-level`.
+`uid` is the positional argument of `show` and `attachment` and is required.
+`doctor` always runs with `--json`; `json` is not a parameter. The call
+`{"since": "1w", "unread": true, "fields": ["snippet"]}` on `search` is exactly
+`mailquery search --since=1w --unread --fields=snippet`.
+
+The server never reads mail, the state or a driver: every call runs one
+`mailquery` child process with the same environment and working directory,
+empty stdin and discarded stderr, and returns its stdout as one `text` block.
+`isError` is true when the child exits non-zero; the JSON keeps the CLI
+contract, so the exit code is deduced from `error.code`. The server writes
+`event=start command=mcp`, one `event=call tool=… exit_code=… duration_ms=…`
+line per call (never parameter values) and `event=end` to the active log file,
+and it does not keep that file open between events.
+
+Permissions apply to the app that launches the server, not to the terminal: on
+macOS it needs **Full Disk Access**, and on Windows it must run in the same
+session and with the same integrity level as classic Outlook.
+
 ### `mailquery <command> --help`
 
-Each subcommand documents its own options; `mailquery --help` lists the six
+Each subcommand documents its own options; `mailquery --help` lists the seven
 commands and the exit code line below.
 
 ## Body and warnings
@@ -944,12 +995,23 @@ capabilities and `pipx inject` instructions above are the trust boundary.
 ## Logs and privacy
 
 `~/.mailquery/logs/mailquery.log`, plain text; it rotates by size
-(`[logging].max_size_mb`, default 10 MB, 5 rotated files). The `event=start`
-line records `backend=` (the native driver) and `drivers=` (the declared list);
-`attachment` success records `event=end` with counts and bytes. Subjects, bodies,
-addresses, folders, accounts, paths, search terms, uids and attachment names are
-never logged. Zero network and zero telemetry from the core; credentials and
-tokens are never read.
+(`[logging].max_size_mb`, default 10 MB, 5 rotated files). With
+`[logging].json = true` the run writes `~/.mailquery/logs/mailquery.jsonl`
+instead, one JSON object per line, with the same rotation. Each run writes only
+the file of the active format: the other file and its rotated files are not
+modified, rotated or removed. Every object has `ts` (local ISO 8601 with
+milliseconds and offset), `level`, `logger`, `run`, `fields` with the event
+fields, `text` for free text and `traceback` for an internal error, for example:
+
+```json
+{"ts": "2026-11-02T02:15:00.214-04:00", "level": "INFO", "logger": "mailquery.cli", "run": "abc123", "fields": {"event": "start", "command": "search", "backend": "apple_mail", "drivers": "apple_mail"}}
+```
+
+The `event=start` line records `backend=` (the native driver) and `drivers=`
+(the declared list); `attachment` success records `event=end` with counts and
+bytes. Subjects, bodies, addresses, folders, accounts, paths, search terms, uids
+and attachment names are never logged. Zero network and zero telemetry from the
+core; credentials and tokens are never read.
 
 ## Permissions
 
@@ -1005,7 +1067,7 @@ recovered files.
 | `E_ATTACHMENT_UNREADABLE` (3) | The attachment is corrupt or S/MIME-protected | Inspect it in the mail client; S/MIME attachments cannot be extracted |
 | `E_IO` (3) | I/O failure of the attachment cache, the native id cache or staging (space, quota, file system) | Check free space and permissions of `~/.mailquery`, then retry |
 | `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` without narrowing / too many candidates | Add `--since` or another filter, or raise `search.max_scan` (max 50000) |
-| `E_INTERNAL` (1) | Unexpected failure | Check `~/.mailquery/logs/mailquery.log` with `--log-level debug` |
+| `E_INTERNAL` (1) | Unexpected failure | Check `~/.mailquery/logs/mailquery.log` (or `mailquery.jsonl` with `[logging].json = true`) with `--log-level debug` |
 
 ## License
 

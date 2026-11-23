@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from mailquery.errors import MailqueryError
-from mailquery.logging_setup import get_logger
+from mailquery.logging_setup import active_log_filename, get_logger, log_event
 
 # --------------------------------------------------------------------------- #
 # Constants and seams
@@ -127,13 +127,20 @@ HINT_TIMEOUT = (
     "Outlook may be showing a security prompt or a dialog; check the Outlook "
     "window and run `mailquery doctor`"
 )
-HINT_INTERNAL = (
-    "run `mailquery doctor` and check ~/.mailquery/logs/mailquery.log for details"
-)
-HINT_READONLY = (
-    "this is a mailquery bug: the read-only proxy blocked an Outlook member; "
-    "report it with ~/.mailquery/logs/mailquery.log"
-)
+def hint_internal() -> str:
+    """Hint of an unexpected COM failure, naming the active log file."""
+    return (
+        "run `mailquery doctor` and check "
+        f"~/.mailquery/logs/{active_log_filename()} for details"
+    )
+
+
+def hint_readonly() -> str:
+    """Hint of a member the read-only proxy blocks, naming the active log file."""
+    return (
+        "this is a mailquery bug: the read-only proxy blocked an Outlook member; "
+        f"report it with ~/.mailquery/logs/{active_log_filename()}"
+    )
 
 # --------------------------------------------------------------------------- #
 # Read-only whitelist
@@ -252,7 +259,7 @@ class ComCallError(MailqueryError):
         super().__init__(
             "E_INTERNAL",
             f"unexpected Outlook COM error (HRESULT {text})",
-            HINT_INTERNAL,
+            hint_internal(),
         )
 
 
@@ -301,7 +308,7 @@ def readonly_violation(kind: str, name: str, reason: str) -> MailqueryError:
     return MailqueryError(
         "E_INTERNAL",
         f"read-only proxy refused {kind}.{name}: {reason}",
-        HINT_READONLY,
+        hint_readonly(),
     )
 
 
@@ -442,7 +449,7 @@ class Watchdog:
             try:
                 handler(self, seconds)
             except Exception:  # noqa: BLE001 - the watchdog thread must survive
-                get_logger("mailquery.outlook").exception("event=watchdog_error")
+                log_event(get_logger("mailquery.outlook"), logging.ERROR, text="event=watchdog_error", exc_info=True)
 
 
 def default_on_expire(watchdog: Watchdog, seconds: float) -> None:
