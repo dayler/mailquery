@@ -74,7 +74,6 @@ class SubprocessToolRunner:
         started = time.perf_counter()
         kwargs: dict[str, Any] = {
             "stdin": subprocess.PIPE,
-            "input": "",
             "stdout": subprocess.PIPE,
             "stderr": subprocess.DEVNULL,
             "text": True,

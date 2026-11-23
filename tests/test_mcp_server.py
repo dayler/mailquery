@@ -484,7 +484,7 @@ class ResultTests(_ServerCase):
         kwargs = run.call_args.kwargs
         self.assertNotIn("shell", kwargs)
         self.assertIs(kwargs["stdin"], subprocess.PIPE)
-        self.assertEqual(kwargs["input"], "")
+        self.assertNotIn("input", kwargs)
         self.assertIs(kwargs["stdout"], subprocess.PIPE)
         self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
         self.assertEqual(kwargs["cwd"], os.getcwd())
