@@ -1052,3 +1052,217 @@ class SmokeAttAppleMail(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------- #
+# SMOKE-MCP — the MCP server against the real mail client
+# --------------------------------------------------------------------------- #
+
+
+class _McpClient:
+    """Minimal JSON-RPC test client: one request line, one response line."""
+
+    def __init__(self, exe: str, env: dict, cwd: Path) -> None:
+        self.proc = subprocess.Popen(
+            [exe, "mcp", "serve"],
+            cwd=str(cwd),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        self._id = 0
+
+    def request(self, method: str, params: dict | None = None) -> dict:
+        self._id += 1
+        message = {"jsonrpc": "2.0", "id": self._id, "method": method}
+        if params is not None:
+            message["params"] = params
+        self.proc.stdin.write(json.dumps(message) + "\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            raise AssertionError("the MCP server closed stdout without a response")
+        return json.loads(line)
+
+    def initialize(self) -> dict:
+        return self.request(
+            "initialize",
+            {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "smoke"}},
+        )
+
+    def call(self, tool: str, arguments: dict | None = None) -> dict:
+        return self.request("tools/call", {"name": tool, "arguments": arguments or {}})
+
+    def close(self) -> tuple[int, str]:
+        if self.proc.stdin is not None and not self.proc.stdin.closed:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
+        try:
+            code = self.proc.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait()
+            raise
+        err = self.proc.stderr.read() if self.proc.stderr is not None else ""
+        for stream in (self.proc.stdout, self.proc.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+        return code, err or ""
+
+
+def _tool_payload(reply: dict) -> dict:
+    return json.loads(reply["result"]["content"][0]["text"])
+
+
+class SmokeMcpTest(unittest.TestCase):
+    """SMOKE-MCP.01–.07: the installed ``mailquery mcp serve`` on the real client."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Reuse SmokeTest's install, HOME, config and helpers without inheriting
+        # (and duplicating) its command-level tests.
+        SmokeTest.setUpClass.__func__(cls)
+
+    _run = classmethod(SmokeTest._run.__func__)
+    _store_counts = classmethod(SmokeTest._store_counts.__func__)
+
+    def setUp(self) -> None:
+        self.client = _McpClient(self.exe, dict(self.env), self.tmp)
+        self.addCleanup(self._close_client)
+
+    def _close_client(self) -> None:
+        if self.client.proc.poll() is None:
+            self.client.close()
+
+    def _payload(self, tool, arguments=None) -> dict:
+        reply = self.client.call(tool, arguments)
+        self.assertIn("result", reply, reply)
+        return _tool_payload(reply)
+
+    def test_smoke_mcp_01_initialize_and_tools_list(self) -> None:
+        """SMOKE-MCP.01: initialize and tools/list expose the six tools."""
+        initialized = self.client.initialize()
+        self.assertEqual(initialized["result"]["serverInfo"]["name"], "mailquery")
+        tools = self.client.request("tools/list")
+        names = [tool["name"] for tool in tools["result"]["tools"]]
+        self.assertEqual(
+            names, ["search", "new", "show", "attachment", "mailboxes", "doctor"]
+        )
+        code, err = self.client.close()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err, "")
+
+    def test_smoke_mcp_02_search_and_show(self) -> None:
+        """SMOKE-MCP.02: search returns the default row and show succeeds."""
+        self.client.initialize()
+        search = self._payload("search", {"since": "1w"})
+        self.assertTrue(search["ok"], search)
+        if not search["messages"]:
+            self.skipTest("no messages in the last week")
+        for row in search["messages"]:
+            self.assertEqual(
+                list(row),
+                ["uid", "subject", "from", "date_received", "is_read", "has_attachments"],
+            )
+        show = self._payload("show", {"uid": search["messages"][0]["uid"]})
+        self.assertTrue(show["ok"], show)
+        self.assertFalse(self.client.call("show", {"uid": search["messages"][0]["uid"]})["result"]["isError"])
+
+    def test_smoke_mcp_03_new_advances_the_cursor_without_repeats(self) -> None:
+        """SMOKE-MCP.03: two new calls advance the cursor and do not repeat messages."""
+        self.client.initialize()
+        first = self._payload("new", {})
+        if not first["messages"]:
+            self.skipTest("no new messages available")
+        first_uids = {message["uid"] for message in first["messages"]}
+        second = self._payload("new", {})
+        second_uids = {message["uid"] for message in second["messages"]}
+        self.assertTrue(second["ok"], second)
+        self.assertFalse(first_uids & second_uids)
+
+    def test_smoke_mcp_04_attachment_of_a_local_attachment(self) -> None:
+        """SMOKE-MCP.04: attachment recovers a local attachment under the temporary home."""
+        self.client.initialize()
+        candidates = self._payload("search", {"has_attachments": True, "limit": 20})
+        for message in candidates.get("messages") or ():
+            reply = self.client.call(
+                "attachment", {"uid": message["uid"], "index": 1, "force": True}
+            )
+            if reply.get("result", {}).get("isError"):
+                continue
+            payload = _tool_payload(reply)
+            self.assertTrue(payload["ok"], payload)
+            path = Path(payload["attachments"][0]["path"])
+            self.assertTrue(path.is_file(), path)
+            self.assertIn(self.home / ".mailquery" / "attachments", path.parents)
+            return
+        self.skipTest("no message with a recoverable local attachment")
+
+    def test_smoke_mcp_05_permission_denied_or_outlook_closed(self) -> None:
+        """SMOKE-MCP.05: E_PERMISSION / E_OUTLOOK_NOT_RUNNING needs an external condition."""
+        self.skipTest(
+            "cannot prepare the missing Full Disk Access or a closed Outlook from the suite"
+        )
+
+    def test_smoke_mcp_06_plugin_next_to_the_native_driver(self) -> None:
+        """SMOKE-MCP.06: a plugin next to the native driver and a failing plugin."""
+        plugin_root = Path(tempfile.mkdtemp(prefix="mq-smoke-plugin-"))
+        self.addCleanup(shutil.rmtree, plugin_root, ignore_errors=True)
+        module = plugin_root / "mq_smoke_plugin.py"
+        module.write_text(
+            "from tests.fakes.plugin import FakePluginBackend\n"
+            "class FailingPlugin(FakePluginBackend):\n"
+            "    def query(self, *args, **kwargs):\n"
+            "        raise RuntimeError('smoke plugin failure')\n",
+            encoding="utf-8",
+        )
+        dist_info = plugin_root / "graph-0.1.0.dist-info"
+        dist_info.mkdir()
+        (dist_info / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: graph\nVersion: 0.1.0\n", encoding="utf-8"
+        )
+        (dist_info / "entry_points.txt").write_text(
+            "[mailquery.backends]\ngraph = mq_smoke_plugin:FailingPlugin\n",
+            encoding="utf-8",
+        )
+        env = dict(self.env)
+        env["PYTHONPATH"] = os.pathsep.join([str(ROOT), str(plugin_root)])
+        client = _McpClient(self.exe, env, self.tmp)
+        self.addCleanup(lambda: client.proc.poll() is None and client.close())
+        client.initialize()
+        self.assertEqual(len(client.request("tools/list")["result"]["tools"]), 6)
+        cfg = self.home / ".mailquery" / "config.toml"
+        original = cfg.read_text(encoding="utf-8")
+        self.addCleanup(cfg.write_text, original, encoding="utf-8")
+        cfg.write_text(original + '[scope."graph:smoke"]\n', encoding="utf-8")
+        reply = client.call("search", {"since": "1w"})
+        if reply.get("result", {}).get("isError"):
+            payload = _tool_payload(reply)
+            self.assertIn(payload["error"]["code"], ("E_PLUGIN_FAILED", "E_CONFIG_ACCOUNT_UNKNOWN"))
+        client.close()
+
+    def test_smoke_mcp_07_unread_counters_do_not_change(self) -> None:
+        """SMOKE-MCP.07: the unread counters of the included folders do not change."""
+        before = self._unread_counters()
+        self.client.initialize()
+        self._payload("search", {"since": "1w"})
+        after = self._unread_counters()
+        self.assertEqual(after, before)
+
+    def _unread_counters(self) -> dict:
+        rc, out, err, _ = self._run(["mailboxes", "--fields", "url,total,unread"])
+        self.assertEqual(rc, 0, err)
+        data = json.loads(out)
+        counters = {}
+        for account in data.get("accounts") or ():
+            for mailbox in account.get("mailboxes") or ():
+                if mailbox.get("included"):
+                    counters[mailbox.get("url")] = (mailbox.get("total"), mailbox.get("unread"))
+        return counters
