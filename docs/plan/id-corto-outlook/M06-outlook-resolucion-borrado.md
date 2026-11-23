@@ -77,7 +77,7 @@ Ninguna nueva (usa la frontera de M02).
 | 2 | OL-35 (un caso por causa), con el doble y el subproceso para el timeout | 🟢 |
 | 3 | OL-34 (colisiones) y OL-36 (`--show-native-id`) | 🟢 |
 | 4 | SMOKE-NEW.11 | 🟢 |
-| 5 | Suite completa, cobertura, diff, evidencia cruda | 🟡 |
+| 5 | Suite completa, cobertura, diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -191,4 +191,5 @@ Los de `protocolo.md`, más: la tabla de causas de OL-35 con el código de error
 | 2026-11-23 | 1 | `_open_candidate` distingue ausente confirmado (store montado y legible, `GetItemFromID` con `MAPI_E_NOT_FOUND`/`MAPI_E_INVALID_ENTRYID`) de indeterminado; `_discard_absent` borra la fila; `find_message` y `_attachment_item` comparten la clasificación. |
 | 2026-11-23 | 2 | OL-35.01–.15 verdes, un caso por causa; .12 en subproceso con `--hang NameSpace.GetItemFromID` y lectura de `cache.db`. OL-23.03 queda con el caso de store no montado, que es el de su definición; el item inexistente en store montado pasa a OL-35.01. |
 | 2026-11-23 | 3 | OL-34.01–.04 verdes (colisión con `mock.patch` en proceso, ambos directorios de adjuntos, `seq` 3 tras borrar) y OL-36.01–.03 verdes. |
-| 2026-11-23 | 4 | SMOKE-NEW.11 verde en este equipo (macOS): `search` y `show` reales no crean `db/cache.db`. |
+| 2026-11-23 | 4 | SMOKE-NEW.11 verde en este equipo (macOS): `search` y `show` reales no crean `db/cache.db`; 20 mensajes en la última semana, primer uid de 16 caracteres. |
+| 2026-11-23 | 5 | Suite completa `Ran 1548 tests`, `OK (skipped=7)`; cobertura de `backends/outlook.py` 88.1 % (sobre `tests/test_outlook.py`, suite completa no medida); `git diff --check` limpio y diff dentro del alcance; evidencia cruda en `../../.logs/id-corto-outlook/M06/evidencia-cruda.md`. |
