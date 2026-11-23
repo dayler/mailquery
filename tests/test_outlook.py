@@ -11,12 +11,15 @@ only exception is OL-05.02, which needs a real Windows host.
 from __future__ import annotations
 
 import ast
+import copy
 import importlib.abc
 import importlib.machinery
 import importlib.util
 import io
 import json
 import os
+import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -30,6 +33,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from mailquery.backends.base import MessageNotFound
+from mailquery.errors import MailqueryError
 from tests.fakes import outlook as fk
 from tests.fakes import run_cli
 from tests.fixtures.make_fixtures import prefixed_uid
@@ -2007,9 +2012,19 @@ class _ItemCase(_StoreCase):
         return [row["id"] for row in backend.mailboxes()]
 
     def row_of(self, fake: fk.FakeOutlook, backend, key: str, **filters) -> dict | None:
-        uid = fake.item(key).entry_id
+        entry_id = fake.item(key).entry_id
         rows = backend.query(self.all_ids(backend), **filters)
-        return next((row for row in rows if row["uid"] == uid), None)
+        return next((row for row in rows if row["native_order_key"] == entry_id), None)
+
+    def part_of(self, fake: fk.FakeOutlook, backend, key: str, **filters) -> str:
+        """The uid part the backend assigns to a fixture item (test helper)."""
+        return self.row_of(fake, backend, key, **filters)["uid"]
+
+    def seed_part(self, fake: fk.FakeOutlook, backend, entry_id: str) -> str:
+        """Register an EntryID in the cache and return the uid part of its row."""
+        part = backend._uid_part(entry_id)
+        backend.printed_messages([part])
+        return part
 
     def assert_read_only(self, fake: fk.FakeOutlook) -> None:
         members = {member for _kind, member in fake.call_log.members()}
@@ -2019,18 +2034,23 @@ class _ItemCase(_StoreCase):
 
 class OutlookUidOrderTests(_ItemCase):
     def test_ol_14_01_uid_is_the_permanent_entryid_not_the_table_id(self) -> None:
-        """OL-14.01: uid = permanent EntryID in uppercase hex, not the short table id."""
+        """OL-14.01: uid = short id of the permanent EntryID; native_order_key = that EntryID."""
+        from mailquery.native_ids import short_id
+
         fake, backend = self.make_items()
         rows = backend.query(self.all_ids(backend))
         uids = [row["uid"] for row in rows]
-        self.assertEqual(sorted(uids), sorted(spec.entry_id for spec in _searchable_specs(fake)))
+        self.assertEqual(
+            sorted(uids), sorted(short_id(spec.entry_id, 10) for spec in _searchable_specs(fake))
+        )
         for spec in _searchable_specs(fake):
             self.assertNotIn(spec.short_id, uids)
         normal = fake.item("normal")
-        row = next(row for row in rows if row["uid"] == normal.entry_id)
+        row = next(row for row in rows if row["native_order_key"] == normal.entry_id)
         self.assertIsInstance(row["uid"], str)
-        self.assertEqual(len(row["uid"]), 140)
-        self.assertRegex(row["uid"], r"^[0-9A-F]+$")
+        self.assertEqual(len(row["uid"]), 10)
+        self.assertRegex(row["uid"], r"^[0-9a-z]+$")
+        self.assertEqual(row["uid"], short_id(normal.entry_id.upper(), 10))
         # The metadata comes from the folder tables: no item is opened.
         self.assertEqual(fake.call_log.count(kind="NameSpace", member="GetItemFromID"), 0)
         self.assertEqual(fake.call_log.count(kind="Item"), 0)
@@ -2041,29 +2061,33 @@ class OutlookUidOrderTests(_ItemCase):
         self.assert_read_only(fake)
 
     def test_ol_14_02_same_date_is_ordered_by_uid_as_a_string(self) -> None:
-        """OL-14.02: total order (date_received, uid), uid compared as a string."""
+        """OL-14.02: total order (date_received, native_order_key), the EntryID compared as a string."""
         fake, backend = self.make_items()
         pair = sorted([fake.item("same_date_a").entry_id, fake.item("same_date_b").entry_id])
         self.assertEqual(fake.item("same_date_a").received, fake.item("same_date_b").received)
         ascending = backend.query(self.all_ids(backend), order="asc")
         descending = backend.query(self.all_ids(backend), order="desc")
-        self.assertEqual([row["uid"] for row in ascending if row["uid"] in pair], pair)
-        self.assertEqual([row["uid"] for row in descending if row["uid"] in pair], pair[::-1])
-        keys = [(row["date_received"], row["uid"]) for row in ascending]
+        self.assertEqual(
+            [row["native_order_key"] for row in ascending if row["native_order_key"] in pair], pair
+        )
+        self.assertEqual(
+            [row["native_order_key"] for row in descending if row["native_order_key"] in pair],
+            pair[::-1],
+        )
+        keys = [(row["date_received"], row["native_order_key"]) for row in ascending]
         self.assertEqual(keys, sorted(keys))
-        self.assertEqual([(row["date_received"], row["uid"]) for row in descending], keys[::-1])
+        self.assertEqual(
+            [(row["date_received"], row["native_order_key"]) for row in descending], keys[::-1]
+        )
 
 
 class OutlookUidBoundaryTests(unittest.TestCase):
-    """The uid the core sees is translated at the entry and emission points of the driver."""
-
-    @staticmethod
-    def _complemented(text: str) -> str:
-        """Reversible translation that reverses the order of same-length hex text."""
-        return "".join("0123456789ABCDEF"[15 - int(digit, 16)] for digit in text)
+    """The uid the core sees is the assigned short id; the EntryID stays internal."""
 
     def test_uid_translation_boundary_round_trip(self) -> None:
-        """A reversible uid translation keeps every operation and the row order working."""
+        """Every operation takes the emitted uid part and keeps the EntryID as order key."""
+        from mailquery.native_ids import short_id
+
         fake = fk.FakeOutlook.default()
         normal = fake.item("normal")
         assert normal.folder is not None
@@ -2087,76 +2111,62 @@ class OutlookUidBoundaryTests(unittest.TestCase):
         backend = _backend(fake)
         self.addCleanup(backend.close)
         mailbox_ids = [row["id"] for row in backend.mailboxes()]
-        baseline = backend.query(mailbox_ids)
-        with (
-            mock.patch.object(backend, "_entry_id", new=self._complemented),
-            mock.patch.object(backend, "_uid_part", new=self._complemented),
-        ):
-            translated = backend.query(mailbox_ids)
-            self.assertEqual(
-                [row["uid"] for row in translated],
-                [self._complemented(row["uid"]) for row in baseline],
-            )
-            self.assertEqual(
-                [row["native_order_key"] for row in translated],
-                [row["uid"] for row in baseline],
-            )
-            # The order comes from the EntryID: two rows with the same date keep the
-            # order of the EntryIDs, not the order of the emitted uids.
-            pair = [
-                row["native_order_key"]
-                for row in baseline
-                if row["uid"] in (normal.entry_id, same_date.entry_id)
-            ]
-            pair_uids = [row["uid"] for row in translated if row["native_order_key"] in pair]
-            self.assertEqual(pair_uids, [self._complemented(entry_id) for entry_id in pair])
-            self.assertNotEqual(pair_uids, sorted(pair_uids, reverse=True))
-            self.assertEqual(
-                set(backend._uid_folders), {row["native_order_key"] for row in translated}
-            )
-            normal_uid = self._complemented(normal.entry_id)
-            found, mailbox = backend.find_message(normal_uid)
-            self.assertEqual(found["uid"], normal_uid)
-            self.assertEqual(found["native_order_key"], normal.entry_id)
-            self.assertEqual(mailbox["path"], "INBOX")
-            self.assertEqual(
-                backend.membership([normal_uid]), {normal_uid: {found["mailbox_id"]}}
-            )
-            recipients = backend.recipients([normal_uid])
-            self.assertEqual(
-                recipients[normal_uid],
-                {"to": [{"name": "Ana Pérez", "address": "ana.perez@example.com"}], "cc": []},
-            )
-            self.assertEqual(set(backend._recipient_cache), {normal.entry_id})
-            self.assertEqual(backend.attachment_names(normal_uid), ["factura-2026-10.pdf"])
-            self.assertEqual(
-                [row["name"] for row in backend.attachments(normal_uid)],
-                ["factura-2026-10.pdf"],
-            )
-            body = backend.load_body(found)
-            self.assertTrue(body["readable"])
-            self.assertIn("factura de octubre", body["body_text"])
-            self.assertEqual(body["attachments"], [{"name": "factura-2026-10.pdf"}])
-            header_row = next(
-                row
-                for row in translated
-                if row["native_order_key"] == fake.item("header_only").entry_id
-            )
-            self.assertIn(f"uid {header_row['uid']}", backend.load_body(header_row)["warnings"][0])
-            broken_row = next(
-                row for row in translated if row["native_order_key"] == unopenable.entry_id
-            )
-            self.assertEqual(
-                backend.load_body(broken_row)["warnings"],
-                [
-                    "W_BODY_UNREADABLE: the Outlook item for uid "
-                    f"{self._complemented(unopenable.entry_id)} cannot be opened"
-                ],
-            )
-            self.assertEqual(
-                set(backend._items),
-                {normal.entry_id, fake.item("header_only").entry_id, unopenable.entry_id},
-            )
+        rows = backend.query(mailbox_ids)
+        self.assertEqual(
+            {row["uid"] for row in rows},
+            {short_id(row["native_order_key"], 10) for row in rows},
+        )
+        normal_row = next(row for row in rows if row["native_order_key"] == normal.entry_id)
+        self.assertEqual(normal_row["uid"], short_id(normal.entry_id, 10))
+        found, mailbox = backend.find_message(normal_row["uid"])
+        self.assertEqual(found, normal_row)
+        self.assertEqual(mailbox["path"], "INBOX")
+        self.assertEqual(
+            backend.membership([normal_row["uid"]]),
+            {normal_row["uid"]: {normal_row["mailbox_id"]}},
+        )
+        self.assertEqual(
+            backend.recipients([normal_row["uid"]]),
+            {
+                normal_row["uid"]: {
+                    "to": [{"name": "Ana Pérez", "address": "ana.perez@example.com"}],
+                    "cc": [],
+                }
+            },
+        )
+        self.assertEqual(backend.attachment_names(normal_row["uid"]), ["factura-2026-10.pdf"])
+        self.assertEqual(
+            [row["name"] for row in backend.attachments(normal_row["uid"])],
+            ["factura-2026-10.pdf"],
+        )
+        body = backend.load_body(normal_row)
+        self.assertTrue(body["readable"])
+        self.assertIn("factura de octubre", body["body_text"])
+        self.assertEqual(body["attachments"], [{"name": "factura-2026-10.pdf"}])
+        header_row = next(
+            row for row in rows if row["native_order_key"] == fake.item("header_only").entry_id
+        )
+        self.assertIn(f"uid {header_row['uid']}", backend.load_body(header_row)["warnings"][0])
+        broken_row = next(
+            row for row in rows if row["native_order_key"] == unopenable.entry_id
+        )
+        self.assertEqual(
+            backend.load_body(broken_row)["warnings"],
+            [
+                "W_BODY_UNREADABLE: the Outlook item for uid "
+                f"{short_id(unopenable.entry_id, 10)} cannot be opened"
+            ],
+        )
+        self.assertEqual(
+            set(backend._items),
+            {normal.entry_id, fake.item("header_only").entry_id, unopenable.entry_id},
+        )
+        # An EntryID is not a uid: validation and resolution reject it.
+        with self.assertRaises(MailqueryError) as caught:
+            backend.parse_uid(normal.entry_id)
+        self.assertEqual(caught.exception.code, "E_USAGE")
+        with self.assertRaises(MessageNotFound):
+            backend.find_message(normal.entry_id)
 
 
 class OutlookDateTests(_ItemCase):
@@ -2300,7 +2310,7 @@ class OutlookItemLookupTests(_ItemCase):
     def test_duplicate_counts_by_internet_message_id(self) -> None:
         fake, backend = self.make_items()
         inbox_id = fake.store("exchange").inbox.entry_id
-        rows = {row["uid"]: row for row in backend.query(self.all_ids(backend))}
+        rows = {row["native_order_key"]: row for row in backend.query(self.all_ids(backend))}
         first = rows[fake.item("duplicate_inbox").entry_id]
         second = rows[fake.item("duplicate_facturas").entry_id]
         self.assertTrue(first["global_message_id"])
@@ -2323,7 +2333,7 @@ class OutlookItemLookupTests(_ItemCase):
 
         fake = fk.FakeOutlook.default()
         backend = self.make(fake)
-        uid = fake.item("shared_message").entry_id
+        uid = self.seed_part(fake, backend, fake.item("shared_message").entry_id)
         with self.assertRaises(ExcludedStoreError) as caught:
             backend.find_message(uid)
         self.assertEqual(
@@ -2335,26 +2345,34 @@ class OutlookItemLookupTests(_ItemCase):
         self.assertEqual(fake.mutations.total, 0)
 
     def test_find_message_not_found_cases(self) -> None:
+        from mailquery.backends.base import MessageNotFound
+
         fake, backend = self.make_items()
         normal = fake.item("normal").entry_id
         missing_tail = normal[:40] + "0" * (len(normal) - 40)
         unknown_store = "00000000" + "AB" * 16 + normal[40:]
-        for label, uid in (
+        for label, entry_id in (
             ("receipt", fake.item("delivery_receipt").entry_id),
             ("task", fake.item("task").entry_id),
             ("imap_deleted", fake.item("imap_deleted").entry_id),
-            ("missing item", missing_tail),
             ("unknown store", unknown_store),
-            ("too short", "0000"),
-            ("odd length", normal[:-1]),
         ):
             with self.subTest(case=label):
-                self.assertIsNone(backend.find_message(uid))
+                self.assertIsNone(backend.find_message(self.seed_part(fake, backend, entry_id)))
+        # An EntryID that no longer exists in its mounted store is a confirmed absence.
+        missing = self.seed_part(fake, backend, missing_tail)
+        with self.assertRaises(MessageNotFound) as caught:
+            backend.find_message(missing)
+        self.assertIn("run `mailquery search`", caught.exception.hint)
+        self.assertIsNone(backend._cache().resolve(missing))
         folders = fk.FakeOutlook.folder_matrix()
         folder_backend = self.make(folders)
         for key in ("in_hidden_folder", "in_hidden_subfolder"):
             with self.subTest(case=key):
-                self.assertIsNone(folder_backend.find_message(folders.item(key).entry_id))
+                entry_id = folders.item(key).entry_id
+                self.assertIsNone(
+                    folder_backend.find_message(self.seed_part(folders, folder_backend, entry_id))
+                )
         self.assertEqual(fake.mutations.total + folders.mutations.total, 0)
 
     def test_find_message_of_an_unopenable_item_comes_from_the_folder_table(self) -> None:
@@ -2377,7 +2395,9 @@ class OutlookItemLookupTests(_ItemCase):
         for key in ("smime_encrypted", "smime_signed", "header_only"):
             with self.subTest(item=key):
                 fake.call_log.clear()
-                self.assertEqual(backend.attachment_names(fake.item(key).entry_id), [])
+                self.assertEqual(
+                    backend.attachment_names(self.part_of(fake, backend, key)), []
+                )
                 self.assertEqual(fake.call_log.count(kind="Attachments"), 0)
                 self.assertEqual(fake.call_log.count(kind="Item", member="Body"), 0)
 
@@ -2438,8 +2458,22 @@ class _OutlookCommandCase(_OutlookCliCase):
         uid = _uid(self.fake.item(key).entry_id)
         return next(message for message in payload["messages"] if message["uid"] == uid)
 
-    def show(self, key: str) -> dict:
-        return self.run_json("show", self.fake.item(key).entry_id)
+    def uid_for_entry(self, entry_id: str) -> str:
+        """Uid part of an EntryID, registered in the cache under this home."""
+        backend = _backend(self.fake, tmp_root=self.home / "tmp")
+        try:
+            part = backend._uid_part(entry_id)
+            backend.printed_messages([part])
+        finally:
+            backend.close()
+        return part
+
+    def uid_of(self, key: str) -> str:
+        """Uid part of a fixture item, registered in the cache under this home."""
+        return self.uid_for_entry(self.fake.item(key).entry_id)
+
+    def show(self, key: str, *extra: str) -> dict:
+        return self.run_json("show", self.uid_of(key), *extra)
 
     def content_members(self) -> set[tuple[str, str]]:
         """Body, attachment and download members read so far."""
@@ -2698,30 +2732,29 @@ class OutlookShowHeaderTests(_OutlookCommandCase):
 class OutlookShowUidTests(_OutlookCommandCase):
     def assert_not_found(self, uid: str) -> None:
         error = self.run_error(2, "E_USAGE", "show", uid)
-        self.assertIn(f"message uid '{_uid(uid)}' was not found", error["message"])
+        self.assertIn(f"message uid '{_uid_text(uid)}' was not found", error["message"])
         self.assertIn("excluded_stores", error["hint"])
         self.assertIn("mailboxes", error["hint"])
 
     def test_ol_23_01_lowercase_uid_is_usage_error(self) -> None:
-        """OL-23.01: a lowercase uid ⇒ E_USAGE "expected an uppercase hexadecimal EntryID", before connecting."""
+        """OL-23.01: an EntryID as uid ⇒ E_USAGE "expected a short id", before connecting."""
         fake = self.items()
         uid = fake.item("normal").entry_id.lower()
         error = self.run_error(2, "E_USAGE", "show", uid)
         self.assertEqual(
-            error["message"],
-            f"invalid uid part {uid!r}: expected an uppercase hexadecimal EntryID"
+            error["message"], f"invalid uid part {uid!r}: expected a short id"
         )
         self.assertEqual(len(fake.call_log), 0)
 
     def test_ol_23_02_invalid_uid_with_pywin32_missing_is_usage_error(self) -> None:
         """OL-23.02: invalid uid with pywin32 absent ⇒ E_USAGE before connecting (not E_DEPENDENCY_MISSING)."""
         fake = self.items()
-        for uid in ("00ab", "12G4", "0x1F"):
+        for uid in ("00ab", "12G4", "0x1F", "012345678", "01234567890", "012345678I"):
             with self.subTest(uid=uid):
                 error = self.run_error(
                     2, "E_USAGE", "show", uid, backend=_backend(fake, pywin32=False)
                 )
-                self.assertIn("expected an uppercase hexadecimal EntryID", error["message"])
+                self.assertIn("expected a short id", error["message"])
         blocked = {"win32com": None, "win32com.client": None, "pythoncom": None, "pywintypes": None}
         with mock.patch.dict(sys.modules, blocked):
             backend = _backend(fake, outlook_app=None, pywin32=None, tmp_root=self.home / "tmp")
@@ -2730,21 +2763,16 @@ class OutlookShowUidTests(_OutlookCommandCase):
         self.assertEqual(fake.registry.reads, [])
         # A valid uid does reach detection: pywin32 missing is then reported.
         self.run_error(
-            3, "E_DEPENDENCY_MISSING", "show", fake.item("normal").entry_id,
+            3, "E_DEPENDENCY_MISSING", "show", "0123456789",
             backend=_backend(fake, pywin32=False),
         )
 
     def test_ol_23_03_unknown_uid_is_not_found_with_excluded_stores_hint(self) -> None:
-        """OL-23.03: unknown uid (also an EntryID of no store) ⇒ "was not found", hint to excluded_stores."""
+        """OL-23.03: a registered EntryID of no store ⇒ "was not found", hint to excluded_stores."""
         fake = self.items()
         normal = fake.item("normal").entry_id
-        for label, uid in (
-            ("missing item", normal[:40] + "0" * (len(normal) - 40)),
-            ("unknown store", "00000000" + "AB" * 16 + normal[40:]),
-            ("too short", "00AB"),
-        ):
-            with self.subTest(case=label):
-                self.assert_not_found(uid)
+        entry_id = "00000000" + "AB" * 16 + normal[40:]
+        self.assert_not_found(self.uid_for_entry(entry_id))
         self.assert_read_only()
 
     def test_ol_23_04_item_that_is_not_mail_is_not_found(self) -> None:
@@ -2752,19 +2780,20 @@ class OutlookShowUidTests(_OutlookCommandCase):
         fake = self.items()
         for key in ("delivery_receipt", "task", "imap_deleted"):
             with self.subTest(item=key):
-                self.assert_not_found(fake.item(key).entry_id)
+                self.assert_not_found(self.uid_of(key))
 
     def test_ol_23_05_item_in_a_hidden_folder_is_not_found(self) -> None:
         """OL-23.05: an item in a sync folder (or its subfolder) ⇒ not found."""
         fake = self.use(fk.FakeOutlook.folder_matrix(), '[scope."lucia@example.es"]\n')
         for key in ("in_hidden_folder", "in_hidden_subfolder"):
             with self.subTest(item=key):
-                self.assert_not_found(fake.item(key).entry_id)
+                self.assert_not_found(self.uid_of(key))
 
     def test_ol_23_06_excluded_store_uid_is_account_not_in_scope_with_the_reason(self) -> None:
         """OL-23.06: a uid of an excluded store (by PR_RECORD_KEY) ⇒ E_ACCOUNT_NOT_IN_SCOPE with the reason."""
         fake = self.use(fk.FakeOutlook.default(), '[scope."ana.perez@example.com"]\n')
-        error = self.run_error(2, "E_ACCOUNT_NOT_IN_SCOPE", "show", fake.item("shared_message").entry_id)
+        uid = self.uid_of("shared_message")
+        error = self.run_error(2, "E_ACCOUNT_NOT_IN_SCOPE", "show", uid)
         self.assertIn("Exchange shared (Soporte)", error["message"])
         self.assertIn("shared_mailbox", error["message"])
         self.assertIn("excluded_stores", error["hint"])
@@ -2987,7 +3016,7 @@ class OutlookExcludedStoreTests(_CommandScenarioCase):
             self.use(fake, _matrix_candidate_scope())
             self.run_json("mailboxes")
             self.run_json("search", "--subject", "Mensaje*")
-            self.run_json("show", fake.item("pst_message").entry_id)
+            self.run_json("show", self.uid_of("pst_message"))
             return [
                 (entry.kind, entry.member, entry.action, entry.args)
                 for entry in fake.call_log
@@ -3059,13 +3088,13 @@ class OutlookStoreExcludedWarningTests(_CommandScenarioCase):
             fake,
             _scope_toml("ana.perez@example.com", "Exchange shared (Soporte)", fake.store("shared").uuid),
         )
-        shown = self.run_json("show", fake.item("normal").entry_id)
+        shown = self.show("normal")
         self.assertEqual(shown["warnings"], [self._SHARED])
         mailboxes = self.run_json("mailboxes")
         self.assertEqual(mailboxes["warnings"], [self._SHARED])
         self.assertEqual([a["label"] for a in mailboxes["accounts"]], ["Exchange (ana.perez@example.com)"])
         # The header-only body warning comes after the scope warning.
-        header_only = self.run_json("show", fake.item("header_only").entry_id)
+        header_only = self.show("header_only")
         self.assertEqual(header_only["warnings"][0], self._SHARED)
         self.assertTrue(header_only["warnings"][1].startswith("W_BODY_NOT_LOCAL: "))
 
@@ -3130,8 +3159,8 @@ class OutlookLogTests(_CommandScenarioCase):
         self.run_json("--log-level", "debug", "mailboxes")
         self.run_json("--log-level", "debug", "search", "--subject", "Factura*")
         for key in ("normal", "header_only", "smime_encrypted"):
-            self.run_json("--log-level", "debug", "show", fake.item(key).entry_id)
-        self.run_any("--log-level", "debug", "show", fake.item("shared_message").entry_id)
+            self.run_json("--log-level", "debug", "show", self.uid_of(key))
+        self.run_any("--log-level", "debug", "show", self.uid_of("shared_message"))
         return fake, (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
 
     def test_ol_29_01_log_names_the_outlook_backend(self) -> None:
@@ -3184,7 +3213,7 @@ class OutlookCounterTests(_CommandScenarioCase):
         self.assertEqual(len(tables), 2, tables)
         self.assertNotIn(self._COUNTER_COLUMNS, tables)
         fake.call_log.clear()
-        self.run_json("show", fake.item("normal").entry_id)
+        self.show("normal")
         self.assertEqual(_tables(fake), [])
         fake.call_log.clear()
         payload = self.run_json("mailboxes")
@@ -3352,7 +3381,7 @@ class OutlookRoundTripTests(_CommandScenarioCase):
         runs = {
             "search": ("search", *_SINCE_ALL),
             "new": ("new", "--peek"),
-            "show": ("show", fake.item("first_message").entry_id),
+            "show": ("show", self.uid_of("first_message")),
         }
         for name, argv in runs.items():
             fake.call_log.clear()
@@ -3369,7 +3398,7 @@ class OutlookRoundTripTests(_CommandScenarioCase):
     def test_show_finds_the_folder_without_walking_the_tree_again(self) -> None:
         fake = self.two_accounts()
         fake.call_log.clear()
-        shown = self.run_json("show", fake.item("first_message").entry_id)["message"]
+        shown = self.show("first_message")["message"]
         self.assertEqual(shown["mailbox"]["path"], "INBOX")
         # One walk for the scope; finding the message reuses it.
         self.assertEqual(fake.call_log.count(kind="Store", member="GetRootFolder"), 1)
@@ -3662,6 +3691,18 @@ class OutlookReadOnlyGateTests(_CommandScenarioCase):
                 )
                 for argv in runs
             ]
+            # `show --show-native-id` on a uid the sweep itself printed.
+            printed = next(
+                (
+                    payload["messages"][0]["uid"]
+                    for argv, _code, payload in outcomes
+                    if argv[0] == "search" and payload.get("messages")
+                ),
+                None,
+            )
+            if printed is not None:
+                argv = ("show", str(printed), "--strip-links", "--show-native-id")
+                outcomes.append((argv, *self.run_any(*argv)))
             results.append((fake, outcomes))
         return results
 
@@ -3752,9 +3793,16 @@ _FIRST_RUN = (
     "W_FIRST_RUN: first run: emitted the messages received in the last 10min "
     "before the newest message"
 )
+def _uid_text(native_id: str) -> str:
+    """The prefixed uid the error messages quote (test helper)."""
+    return prefixed_uid(native_id, "outlook")
+
+
 def _uid(entry_id: str) -> str:
-    """The prefixed uid the core emits for an Outlook EntryID (test helper)."""
-    return prefixed_uid(entry_id, "outlook")
+    """The uid the core emits for an Outlook EntryID: its short id (test helper)."""
+    from mailquery.native_ids import short_id
+
+    return prefixed_uid(short_id(entry_id, 10), "outlook")
 
 
 def _all_installed(driver: str) -> bool:
@@ -3762,7 +3810,7 @@ def _all_installed(driver: str) -> bool:
     return bool(driver)
 
 
-_HEX_UID = r"^outlook:[0-9A-F]+$"
+_SHORT_UID = r"^outlook:[0-9a-z]{10}(-(?:[2-9]|[1-9][0-9]+))?$"
 
 
 def _epoch(moment: datetime) -> int:
@@ -3804,9 +3852,9 @@ class OutlookSearchableItemTests(_NewCase):
         out: dict[str, tuple[bool, bool, int]] = {}
         for key in keys:
             uid = fake.item(key).entry_id
-            backend = _backend(fake)
+            backend = _backend(fake, tmp_root=self.home / "tmp")
             self.addCleanup(backend.close)
-            code, stdout, stderr = self.run_main(["show", uid], backend)
+            code, stdout, stderr = self.run_main(["show", self.uid_of(key)], backend)
             payload = json.loads(stdout)
             if code == 0:
                 self.assertEqual(payload["message"]["uid"], _uid(uid))
@@ -3864,7 +3912,7 @@ class OutlookNewTests(_NewCase):
         self.assertEqual(state["cursor"], cursor)
         self.assertEqual(state["emitted_uids"], [_uid(uid)])
         self.assertIsInstance(state["cursor"]["last_uid"], str)
-        self.assertRegex(state["cursor"]["last_uid"], _HEX_UID)
+        self.assertRegex(state["cursor"]["last_uid"], _SHORT_UID)
         loaded = StateStore(self.home, _all_installed).load()
         self.assertEqual(loaded.cursor, Cursor(self._NORMAL_DATE, _uid(uid), 600))
         self.assertEqual(loaded.emitted_uids, (_uid(uid),))
@@ -4249,7 +4297,7 @@ class OutlookNotRunningTests(_OutlookCommandCase):
     def test_exit_6_for_every_data_command_while_doctor_still_exits_0(self) -> None:
         """PRD 12.6: every data command ⇒ E_OUTLOOK_NOT_RUNNING (exit 6); doctor diagnoses it with exit 0."""
         fake = self.use(run_cli.build_fake("not_running"), _scope_toml("ana.perez@example.com"))
-        uid = fake.item("normal").entry_id
+        uid = "0123456789"
         commands = (
             ("mailboxes",),
             ("search",),
@@ -4268,8 +4316,8 @@ class OutlookNotRunningTests(_OutlookCommandCase):
         self.assertFalse((self.home / "state.json").exists())
         log = (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
         self.assertEqual(log.count("code=E_OUTLOOK_NOT_RUNNING"), len(commands))
-        # The uid format is still checked first: a malformed uid is E_USAGE (exit 2).
-        self.run_error(2, "E_USAGE", "show", uid.lower())
+        # The uid format is still checked first: an EntryID as uid is E_USAGE (exit 2).
+        self.run_error(2, "E_USAGE", "show", fake.item("normal").entry_id.lower())
         self.assertEqual(len(fake.call_log), len(commands))
 
         # doctor: outlook fails with the same error and hint, the rest is diagnosed, exit 0.
@@ -4402,11 +4450,6 @@ _EXPECTED_DIR = Path(__file__).resolve().parent / "fixtures" / "expected"
 _ISO_RE = __import__("re").compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}")
 
 
-def _attachment_uid(fake: fk.FakeOutlook, key: str) -> str:
-    """Native EntryID of one attachment fixture item."""
-    return fake.item(key).entry_id
-
-
 _MESSAGE_DIR_RE = __import__("re").compile(r"(/attachments/[a-z0-9_]+/)([^/]+)")
 
 
@@ -4459,7 +4502,7 @@ class _AttachmentCase(_OutlookCommandCase):
         return backend
 
     def metadata(self, key: str) -> list[dict[str, Any]]:
-        return list(self.backend().attachments(_attachment_uid(self.fake, key)))
+        return list(self.backend().attachments(self.uid_of(key)))
 
     def staging_root(self) -> Path:
         return self.home / "tmp" / "staging"
@@ -4481,7 +4524,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
     def test_ut_ol_att_01_01_show_and_attachment_share_index_and_name(self) -> None:
         """UT-OL-ATT-01.01: show and attachment share index 1..N and the original name."""
         self.attachments_fake()
-        uid = _attachment_uid(self.fake, "two_same")
+        uid = self.uid_of("two_same")
         shown = self.run_json("show", uid)["message"]["attachments"]
         self.assertEqual(
             [(entry["index"], entry["name"]) for entry in shown],
@@ -4499,11 +4542,11 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
             ["01_recibo.pdf", "02_recibo.pdf", "03_otros.pdf"],
         )
         # Hidden attachments are never listed nor indexed.
-        hidden = self.run_json("show", _attachment_uid(self.fake, "hidden"))["message"]["attachments"]
+        hidden = self.run_json("show", self.uid_of("hidden"))["message"]["attachments"]
         self.assertEqual([(entry["index"], entry["name"]) for entry in hidden], [(1, "visible.pdf")])
         self.assertEqual(
             [entry["original_name"] for entry in
-             self.run_json("attachment", _attachment_uid(self.fake, "hidden"), "--all")["attachments"]],
+             self.run_json("attachment", self.uid_of("hidden"), "--all")["attachments"]],
             ["visible.pdf"],
         )
 
@@ -4521,7 +4564,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
         self.assertEqual(rows[0]["size_bytes"], len(_LOCAL_CONTENT) + fk.MAPI_SIZE_OVERHEAD)
         self.assertIsNone(rows[0]["unavailable_reason"])
         record = self.run_json(
-            "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+            "attachment", self.uid_of("local"), "--index", "1"
         )["attachments"][0]
         self.assertFalse(record["cached"])
         self.assertEqual(record["size_bytes"], len(_LOCAL_CONTENT))
@@ -4540,7 +4583,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
         because the cache compared ``Attachment.Size`` with the file size.
         """
         self.attachments_fake()
-        uid = _attachment_uid(self.fake, "local")
+        uid = self.uid_of("local")
         first = self.run_json("attachment", uid, "--index", "1")["attachments"][0]
         self.assertFalse(first["cached"])
         self.fake.call_log.clear()
@@ -4555,7 +4598,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
     def test_ut_ol_att_01_03_not_downloaded_is_unavailable_without_downloading(self) -> None:
         """UT-OL-ATT-01.03: a by-reference attachment ⇒ unavailable (not_downloaded), no download."""
         self.attachments_fake()
-        uid = _attachment_uid(self.fake, "by_reference")
+        uid = self.uid_of("by_reference")
         rows = self.metadata("by_reference")
         self.assertEqual(rows[0]["unavailable_reason"], "not_downloaded")
         self.assertIsNone(rows[0]["size_bytes"])
@@ -4574,7 +4617,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
     def test_ut_ol_att_01_04_smime_is_unreadable_and_show_returns_empty(self) -> None:
         """UT-OL-ATT-01.04: S/MIME ⇒ show ``[]``, attachment ⇒ E_ATTACHMENT_UNREADABLE(smime)."""
         self.attachments_fake()
-        uid = _attachment_uid(self.fake, "smime")
+        uid = self.uid_of("smime")
         self.fake.call_log.clear()
         payload = self.run_json("show", uid)
         self.assertEqual(payload["message"]["attachments"], [])
@@ -4596,7 +4639,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
             ("ole", "E_ATTACHMENT_UNAVAILABLE"),
         ):
             with self.subTest(item=key):
-                error = self.run_error(3, code, "attachment", _attachment_uid(self.fake, key), "--index", "1")
+                error = self.run_error(3, code, "attachment", self.uid_of(key), "--index", "1")
                 if key == "corrupt":
                     self.assertIn("corrupt or unreadable", error["message"])
                 if key == "unopenable":
@@ -4626,7 +4669,7 @@ class OutlookAttachmentMetadataTests(_AttachmentCase):
     def test_ut_ol_att_01_07_header_only_show_is_empty_with_the_warning(self) -> None:
         """UT-OL-ATT-01.07: header-only with attachments ⇒ ``[]`` + W_ATTACHMENTS_UNAVAILABLE."""
         self.attachments_fake()
-        uid = _attachment_uid(self.fake, "header_only")
+        uid = self.uid_of("header_only")
         payload = self.run_json("show", uid)
         self.assertEqual(payload["message"]["attachments"], [])
         warnings = " ".join(payload["warnings"])
@@ -4643,7 +4686,7 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
         """UT-OL-ATT-02.01: SaveAsFile writes a 0600 regular file under a 0700 staging session."""
         self.attachments_fake()
         backend = self.backend()
-        uid = _attachment_uid(self.fake, "local")
+        uid = self.uid_of("local")
         stream = backend.attachment_stream(uid, 1)
         first = next(stream)
         self.assertTrue(first)
@@ -4680,7 +4723,7 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
         # The fake materializes a real symlink: hosts without the privilege
         # (Windows without Developer Mode) only run the outside-path half.
         if _symlinks_available(self.home):
-            uid = _attachment_uid(self.fake, "invalid_staging")
+            uid = self.uid_of("invalid_staging")
             error = self.run_error(
                 3, "E_ATTACHMENT_UNAVAILABLE", "attachment", uid, "--index", "1"
             )
@@ -4694,7 +4737,7 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
             outlook_mod, "_create_staging_file", staticmethod(lambda session: outside)
         ):
             with self.assertRaises(Exception) as caught:
-                list(backend.attachment_stream(_attachment_uid(self.fake, "local"), 1))
+                list(backend.attachment_stream(self.uid_of("local"), 1))
         self.assertEqual(getattr(caught.exception, "code", None), "E_ATTACHMENT_UNAVAILABLE")
         self.assertFalse(outside.exists())
         self.assert_staging_clean()
@@ -4703,7 +4746,7 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
         """UT-OL-ATT-02.03: MZ in the materialized file ⇒ message blocked, temp removed."""
         self.attachments_fake()
         error = self.run_error(
-            4, "E_ATTACHMENT_BLOCKED", "attachment", _attachment_uid(self.fake, "executable"), "--index", "1"
+            4, "E_ATTACHMENT_BLOCKED", "attachment", self.uid_of("executable"), "--index", "1"
         )
         self.assertIn("executable content", error["message"])
         self.assertNotIn("\x00", error["message"])
@@ -4713,11 +4756,11 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
     def test_ut_ol_att_02_04_temp_is_removed_on_failure_and_cancellation(self) -> None:
         """UT-OL-ATT-02.04: the staging file is removed when extraction fails or is closed early."""
         self.attachments_fake()
-        self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", _attachment_uid(self.fake, "corrupt"), "--index", "1")
+        self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", self.uid_of("corrupt"), "--index", "1")
         self.assert_cache_empty()
         self.assert_staging_clean()
         backend = self.backend()
-        stream = backend.attachment_stream(_attachment_uid(self.fake, "local"), 1)
+        stream = backend.attachment_stream(self.uid_of("local"), 1)
         next(stream)
         self.assertTrue(any(self.staging_root().iterdir()))
         stream.close()
@@ -4751,7 +4794,7 @@ class OutlookAttachmentMaterializationTests(_AttachmentCase):
         self.assertTrue(checks["object_model_guard"]["ok"])
         self.assertNotIn("materialization", checks["object_model_guard"]["detail"])
         record = self.run_json(
-            "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+            "attachment", self.uid_of("local"), "--index", "1"
         )["attachments"][0]
         self.assertFalse(record["cached"])
         self.assertTrue(Path(record["path"]).is_file())
@@ -4764,7 +4807,7 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
         """UT-OL-ATT-03.01: E_ACCESSDENIED in SaveAsFile ⇒ E_PERMISSION (exit 3)."""
         self.attachments_fake()
         error = self.run_error(
-            3, "E_PERMISSION", "attachment", _attachment_uid(self.fake, "denied"), "--index", "1"
+            3, "E_PERMISSION", "attachment", self.uid_of("denied"), "--index", "1"
         )
         self.assertIn("Outlook", error["message"])
         self.assert_cache_empty()
@@ -4775,7 +4818,7 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
         self.attachments_fake()
         self.fake.reject_next(times=2, kind="Attachment", member="SaveAsFile")
         error = self.run_error(
-            5, "E_CLIENT_BUSY", "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+            5, "E_CLIENT_BUSY", "attachment", self.uid_of("local"), "--index", "1"
         )
         self.assertTrue(error["hint"].strip())
         self.assertEqual(self.fake.call_log.count(kind="Attachment", member="SaveAsFile"), 2)
@@ -4784,13 +4827,21 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
 
     def test_ut_ol_att_03_03_hung_com_call_is_client_timeout(self) -> None:
         """UT-OL-ATT-03.03: a SaveAsFile call over the 30 s watchdog ⇒ E_CLIENT_TIMEOUT (exit 3)."""
-        uid = _attachment_uid(fk.FakeOutlook.attachments_matrix(), "local")
+        entry_id = fk.FakeOutlook.attachments_matrix().item("local").entry_id
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         home = root / ".mailquery"
         home.mkdir()
         (home / "config.toml").write_text(_ATTACHMENT_SCOPE, encoding="utf-8")
+        from mailquery.native_ids import NativeIdCache
+
+        cache = NativeIdCache.open("outlook", home=home)
+        try:
+            uid = cache.assign([entry_id], length=10)[entry_id]
+            cache.register([entry_id])
+        finally:
+            cache.close()
         env = dict(os.environ)
         env["HOME"] = env["USERPROFILE"] = str(root)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -4869,7 +4920,7 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
         )
         with self.assertRaises(Exception) as caught:
             engine.recover(
-                prefixed_uid(_attachment_uid(self.fake, "local"), "outlook"),
+                self.uid_of("local"),
                 [1],
                 deadline=lambda: 10.0,
             )
@@ -4888,7 +4939,7 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
             3,
             "E_ATTACHMENT_UNREADABLE",
             "attachment",
-            _attachment_uid(self.fake, "partial_failure"),
+            self.uid_of("partial_failure"),
             "--all",
         )
         self.assertIn("corrupt or unreadable", error["message"])
@@ -4899,7 +4950,7 @@ class OutlookAttachmentErrorTests(_AttachmentCase):
         """UT-OL-ATT-03.06: a 0-byte attachment is materialized and published with size 0."""
         self.attachments_fake()
         record = self.run_json(
-            "attachment", _attachment_uid(self.fake, "empty"), "--index", "1"
+            "attachment", self.uid_of("empty"), "--index", "1"
         )["attachments"][0]
         self.assertEqual(record["size_bytes"], 0)
         self.assertEqual(
@@ -4914,11 +4965,11 @@ class OutlookAttachmentReadOnlyTests(_AttachmentCase):
     """UT-OL-ATT-04: read-only boundary and log (AC-19, RNF-13)."""
 
     def _exercise(self) -> None:
-        self.run_json("attachment", _attachment_uid(self.fake, "local"), "--index", "1")
-        self.run_json("attachment", _attachment_uid(self.fake, "local"), "--index", "1")
-        self.run_error(4, "E_ATTACHMENT_BLOCKED", "attachment", _attachment_uid(self.fake, "executable"), "--index", "1")
-        self.run_error(3, "E_ATTACHMENT_UNAVAILABLE", "attachment", _attachment_uid(self.fake, "by_reference"), "--index", "1")
-        self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", _attachment_uid(self.fake, "corrupt"), "--index", "1")
+        self.run_json("attachment", self.uid_of("local"), "--index", "1")
+        self.run_json("attachment", self.uid_of("local"), "--index", "1")
+        self.run_error(4, "E_ATTACHMENT_BLOCKED", "attachment", self.uid_of("executable"), "--index", "1")
+        self.run_error(3, "E_ATTACHMENT_UNAVAILABLE", "attachment", self.uid_of("by_reference"), "--index", "1")
+        self.run_error(3, "E_ATTACHMENT_UNREADABLE", "attachment", self.uid_of("corrupt"), "--index", "1")
 
     def test_ut_ol_att_04_01_extractions_never_mutate_the_mailbox(self) -> None:
         """UT-OL-ATT-04.01: 0 mutations/assignments; only whitelisted members are invoked."""
@@ -4955,7 +5006,7 @@ class OutlookAttachmentReadOnlyTests(_AttachmentCase):
     def test_ut_ol_att_04_03_log_has_no_pii(self) -> None:
         """UT-OL-ATT-04.03: the log records no uids, EntryIDs, names, paths or accounts."""
         self.attachments_fake()
-        uid = _attachment_uid(self.fake, "local")
+        uid = self.uid_of("local")
         self.run_json("attachment", uid, "--index", "1")
         log = (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
         self.assertNotIn(uid, log)
@@ -4967,7 +5018,7 @@ class OutlookAttachmentReadOnlyTests(_AttachmentCase):
     def test_ut_ol_att_04_04_event_end_keeps_the_attachment_counts(self) -> None:
         """UT-OL-ATT-04.04: ``event=end`` of attachment keeps count/cached/bytes/duration_ms."""
         self.attachments_fake()
-        self.run_json("attachment", _attachment_uid(self.fake, "local"), "--index", "1")
+        self.run_json("attachment", self.uid_of("local"), "--index", "1")
         log = (self.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
         line = next(
             row for row in log.splitlines()
@@ -4996,6 +5047,16 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
         (self.home / "config.toml").write_text(_ATTACHMENT_SCOPE, encoding="utf-8")
         self.fake = fk.FakeOutlook.attachments_matrix()
 
+    def uid_of(self, key: str) -> str:
+        """Uid part of a fixture item, registered in the cache under this home."""
+        backend = _backend(self.fake, tmp_root=self.home / "tmp")
+        try:
+            part = backend._uid_part(self.fake.item(key).entry_id)
+            backend.printed_messages([part])
+        finally:
+            backend.close()
+        return part
+
     def run_payload(self, *argv: str) -> tuple[int, dict]:
         from mailquery import cli
 
@@ -5013,7 +5074,7 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
     def test_tc_09_01_attachment_saved(self) -> None:
         """TC-09.01: first extraction of a local attachment (golden, cached:false)."""
         code, payload = self.run_payload(
-            "attachment", _attachment_uid(self.fake, "local"), "--index", "1"
+            "attachment", self.uid_of("local"), "--index", "1"
         )
         self.assertEqual(code, 0)
         self.assertFalse(payload["attachments"][0]["cached"])
@@ -5021,7 +5082,7 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
 
     def test_tc_09_02_attachment_cached_after_the_seeding_run(self) -> None:
         """TC-09.02: the second run reports the seeded cache (golden, cached:true)."""
-        uid = _attachment_uid(self.fake, "local")
+        uid = self.uid_of("local")
         first_code, first = self.run_payload("attachment", uid, "--index", "1")
         self.assertEqual(first_code, 0)
         self.assertFalse(first["attachments"][0]["cached"])  # documented seed
@@ -5036,7 +5097,7 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
     def test_tc_09_03_attachment_unavailable_not_downloaded(self) -> None:
         """TC-09.03: a by-reference attachment is unavailable (golden, exit 3)."""
         code, payload = self.run_payload(
-            "attachment", _attachment_uid(self.fake, "by_reference"), "--index", "1"
+            "attachment", self.uid_of("by_reference"), "--index", "1"
         )
         self.assertEqual(code, 3)
         self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_UNAVAILABLE")
@@ -5045,7 +5106,7 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
     def test_tc_09_04_attachment_blocked_executable_content(self) -> None:
         """TC-09.04: executable content blocks the message (golden, exit 4)."""
         code, payload = self.run_payload(
-            "attachment", _attachment_uid(self.fake, "executable"), "--index", "1"
+            "attachment", self.uid_of("executable"), "--index", "1"
         )
         self.assertEqual(code, 4)
         self.assertEqual(payload["error"]["code"], "E_ATTACHMENT_BLOCKED")
@@ -5055,7 +5116,7 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
         """TC-09.05: ``show.attachments`` keeps ``{index, name, cached_path}``; no golden rewrite."""
         for key in ("local", "hidden", "smime"):
             with self.subTest(item=key):
-                code, payload = self.run_payload("show", _attachment_uid(self.fake, key))
+                code, payload = self.run_payload("show", self.uid_of(key))
                 self.assertEqual(code, 0)
                 attachments = payload["message"]["attachments"]
                 for entry in attachments:
@@ -5065,6 +5126,995 @@ class OutlookAttachmentGoldenTests(unittest.TestCase):
                     self.assertNotIn(
                         "W_ATTACHMENTS_UNAVAILABLE", " ".join(payload["warnings"])
                     )
+
+
+
+# --------------------------------------------------------------------------- #
+# OL-31, OL-32, OL-33 — short uid, validation and printed messages
+# --------------------------------------------------------------------------- #
+
+#: A printed Outlook uid: 10 alphabet characters, optionally with the collision suffix.
+_SHORT_UID_RE = re.compile(r"^outlook:[0-9a-z]{10}(-(?:[2-9]|[1-9][0-9]+))?$")
+#: Hint of a uid part whose message is not in the cache.
+_REPEAT_SEARCH_HINT = (
+    "the uid is not in the native id cache or its message no longer exists; run "
+    "`mailquery search` or `mailquery new` again to get its current uid"
+)
+#: Hint of a uid part with an invalid form.
+_SHORT_UID_HINT = (
+    "Outlook uids are short ids as printed by `mailquery search` and `mailquery new`; "
+    "run `mailquery search` to find the uid of a message"
+)
+
+
+def _cache_entries(home: Path) -> list[tuple[str, int, str]]:
+    """Rows of the native id cache of the Outlook driver: (short id, seq, native id)."""
+    path = home / "db" / "cache.db"
+    if not path.is_file():
+        return []
+    connection = sqlite3.connect(str(path))
+    try:
+        return connection.execute(
+            "SELECT short_id, seq, native_id FROM cache_native_ids WHERE driver = 'outlook'"
+        ).fetchall()
+    finally:
+        connection.close()
+
+
+def _key_paths(value: object, prefix: str = "") -> set[str]:
+    """Recursive set of key paths of a JSON value (list items share the ``[]`` path)."""
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            paths.add(path)
+            paths |= _key_paths(item, path)
+    elif isinstance(value, list):
+        for item in value:
+            paths |= _key_paths(item, f"{prefix}[]")
+    return paths
+
+
+class OutlookShortUidTests(_OutlookCommandCase):
+    """OL-31: the uid of an Outlook message is the short id of its EntryID."""
+
+    def test_ol_31_01_every_printed_uid_is_a_short_id(self) -> None:
+        """OL-31.01: search, new and show emit 18-character uids (or with a suffix)."""
+        fake = self.items()
+        searched = self.search()
+        self.assertTrue(searched["messages"])
+        for message in searched["messages"]:
+            self.assertRegex(message["uid"], _SHORT_UID_RE)
+            self.assertEqual(len(message["uid"]), 18)
+        emitted = self.run_json("new", "--fields", "all")
+        self.assertTrue(emitted["messages"])
+        for message in emitted["messages"]:
+            self.assertRegex(message["uid"], _SHORT_UID_RE)
+        self.assertRegex(emitted["cursor"]["current"]["last_uid"], _SHORT_UID_RE)
+        shown = self.run_json("show", searched["messages"][0]["uid"])["message"]
+        self.assertRegex(shown["uid"], _SHORT_UID_RE)
+        self.assertEqual(shown["uid"], searched["messages"][0]["uid"])
+        emitted_uid = emitted["messages"][0]["uid"]
+        self.assertEqual(self.run_json("show", emitted_uid)["message"]["uid"], emitted_uid)
+
+    def test_ol_31_02_same_message_same_uid_across_runs_and_cache_deletion(self) -> None:
+        """OL-31.02: the uid is stable across runs and after deleting cache.db."""
+        self.items()
+        first = self.search()
+        uid = first["messages"][0]["uid"]
+        second = self.search()
+        self.assertEqual(second["messages"][0]["uid"], uid)
+        (self.home / "db" / "cache.db").unlink()
+        third = self.search()
+        self.assertEqual(third["messages"][0]["uid"], uid)
+
+    def test_ol_31_03_show_and_attachment_resolve_printed_uids(self) -> None:
+        """OL-31.03: show and attachment resolve the uids printed by search and new."""
+        fake = self.items()
+        searched = self.message_of(self.search(), "visible_attachment")
+        self.assertEqual(self.run_json("show", searched["uid"])["message"]["uid"], searched["uid"])
+        extracted = self.run_json("attachment", searched["uid"], "--index", "1")
+        self.assertEqual(extracted["uid"], searched["uid"])
+        emitted = self.run_json("new", "--fields", "all")
+        new_uid = emitted["messages"][0]["uid"]
+        self.assertEqual(self.run_json("show", new_uid)["message"]["uid"], new_uid)
+
+    def test_ol_31_04_short_id_derivation_and_order_key(self) -> None:
+        """OL-31.04: uid = short_id(EntryID uppercase, 10); native_order_key stays the EntryID."""
+        from mailquery.native_ids import short_id
+
+        fake = self.items()
+        backend = _backend(fake, tmp_root=self.home / "tmp")
+        self.addCleanup(backend.close)
+        mailbox_ids = [row["id"] for row in backend.mailboxes()]
+        rows = backend.query(mailbox_ids, order="asc")
+        for row in rows:
+            self.assertEqual(row["uid"], short_id(row["native_order_key"], 10))
+        normal = next(row for row in rows if row["native_order_key"] == fake.item("normal").entry_id)
+        self.assertEqual(normal["uid"], short_id(fake.item("normal").entry_id, 10))
+        pair = sorted([fake.item("same_date_a").entry_id, fake.item("same_date_b").entry_id])
+        ascending = [row["native_order_key"] for row in rows if row["native_order_key"] in pair]
+        descending = [
+            row["native_order_key"]
+            for row in backend.query(mailbox_ids, order="desc")
+            if row["native_order_key"] in pair
+        ]
+        self.assertEqual(ascending, pair)
+        self.assertEqual(descending, pair[::-1])
+
+    def test_ol_31_05_json_keys_match_macos(self) -> None:
+        """OL-31.05: the response keys are the macOS ones; no short_id or seq property."""
+        from mailquery import cli
+
+        fx = _apple_fixture(self)
+        apple = _run_apple(self, cli, fx, "search", "--limit", "50", "--fields", "all")
+        self.items()
+        inbox = self.fake.store("exchange").inbox
+        assert inbox is not None
+        inbox.add_message(
+            "complete",
+            subject="Factura completa",
+            sender=("Proveedor", "ventas@proveedor.example"),
+            to=[("Ana", "ana@example.com")],
+            cc=[("Copia", "copia@example.com")],
+            body="Adjuntamos la factura.\r\n",
+            attachments=[fk.AttachmentSpec("factura.pdf")],
+        )
+        windows_search = self.search()
+        complete = self.message_of(windows_search, "complete")["uid"]
+        windows = {
+            "search": windows_search,
+            "new": self.run_json("new", "--peek", "--fields", "all"),
+            "show": self.run_json("show", complete),
+            "mailboxes": self.run_json("mailboxes"),
+            "doctor": self.run_json("doctor", "--json"),
+            "attachment": self.run_json("attachment", complete, "--index", "1"),
+        }
+        apple_payloads = {
+            "search": apple,
+            "new": _run_apple(self, cli, fx, "new", "--peek", "--fields", "all"),
+            "show": _run_apple(self, cli, fx, "show", "2714"),
+            "mailboxes": _run_apple(self, cli, fx, "mailboxes"),
+            "doctor": _run_apple(self, cli, fx, "doctor", "--json"),
+            "attachment": _run_apple(self, cli, fx, "attachment", "2714", "--index", "1"),
+        }
+        for name, payload in windows.items():
+            with self.subTest(command=name):
+                apple_paths = _key_paths(apple_payloads[name])
+                windows_paths = _key_paths(payload)
+                self.assertEqual(
+                    (sorted(apple_paths - windows_paths), sorted(windows_paths - apple_paths)),
+                    ([], []),
+                    name,
+                )
+                self.assertFalse({path for path in windows_paths if path.endswith((".short_id", ".seq"))})
+
+    def test_ol_31_06_cache_created_only_by_the_commands_that_use_it(self) -> None:
+        """OL-31.06: search, new, show and attachment create cache.db; mailboxes, doctor and --version do not."""
+        self.items()
+        for name, argv, expected in (
+            ("search", ("search", "--since", "2026-01-01"), 0),
+            ("search --count", ("search", "--count"), 0),
+            ("new", ("new", "--peek"), 0),
+            ("show", ("show", "0123456789"), 2),
+            ("attachment", ("attachment", "0123456789", "--index", "1"), 2),
+        ):
+            with self.subTest(command=name):
+                home = self._fresh_home(name.replace(" ", "-"))
+                code, _stdout, _stderr = self._run_in(home, argv)
+                self.assertEqual(code, expected, name)
+                self.assertTrue((home / "db" / "cache.db").is_file(), name)
+                if name == "search --count":
+                    self.assertEqual(_cache_entries(home), [])
+        for name, argv in (
+            ("mailboxes", ("mailboxes",)),
+            ("doctor", ("doctor", "--json")),
+            ("--version", ("--version",)),
+        ):
+            with self.subTest(command=name):
+                home = self._fresh_home(name.strip("-"))
+                code, _stdout, _stderr = self._run_in(home, argv)
+                self.assertEqual(code, 0, name)
+                self.assertFalse((home / "db").exists(), name)
+
+    def _fresh_home(self, name: str) -> Path:
+        home = self.root / name
+        home.mkdir()
+        (home / "config.toml").write_text(_ITEM_SCOPE, encoding="utf-8")
+        return home
+
+    def _run_in(self, home: Path, argv) -> tuple[int, str, str]:
+        backend = _backend(self.fake, tmp_root=home / "tmp")
+        self.addCleanup(backend.close)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = self.cli.main(list(argv), home=home, backend=backend)
+        return code, out.getvalue(), err.getvalue()
+
+
+class OutlookUidValidationTests(_OutlookCommandCase):
+    """OL-32: uid validation and cache resolution in Windows."""
+
+    def assert_invalid(self, uid: str) -> None:
+        native = uid.split(":", 1)[1] if uid.startswith("outlook:") else uid
+        expected = f"invalid uid part {native!r}: expected a short id"
+        for command, extra in (("show", ()), ("attachment", ("--index", "1"))):
+            with self.subTest(command=command, uid=uid):
+                code, stdout, stderr = self.run_main(
+                    [command, uid, *extra], _backend(self.fake)
+                )
+                self.assertEqual(code, 2, stdout + stderr)
+                payload = json.loads(stdout)
+                self.assertEqual(payload["error"]["message"], expected)
+                self.assertEqual(payload["error"]["hint"], _SHORT_UID_HINT)
+
+    def test_ol_32_01_entry_id_is_not_a_uid(self) -> None:
+        """OL-32.01: an EntryID as uid, prefixed or not ⇒ E_USAGE without home or cache."""
+        fake = self.use(fk.FakeOutlook.default())
+        entry = fake.item("normal").entry_id
+        missing = self.root / "missing-home"
+        for uid in (entry, entry.lower(), f"outlook:{entry}"):
+            for command, extra in (("show", ()), ("attachment", ("--index", "1"))):
+                with self.subTest(command=command, uid=uid[:14]):
+                    backend = _backend(fake)
+                    self.addCleanup(backend.close)
+                    out, err = io.StringIO(), io.StringIO()
+                    with redirect_stdout(out), redirect_stderr(err):
+                        code = self.cli.main([command, uid, *extra], home=missing, backend=backend)
+                    self.assertEqual(code, 2, out.getvalue() + err.getvalue())
+                    payload = json.loads(out.getvalue())
+                    native = uid.split(":", 1)[1] if uid.startswith("outlook:") else uid
+                    self.assertEqual(
+                        payload["error"]["message"],
+                        f"invalid uid part {native!r}: expected a short id",
+                    )
+                    self.assertEqual(payload["error"]["hint"], _SHORT_UID_HINT)
+        self.assertFalse(missing.exists())
+        self.assertFalse((self.home / "db").exists())
+
+    def test_ol_32_02_other_invalid_forms(self) -> None:
+        """OL-32.02: uppercase, bad suffixes, other lengths or other characters ⇒ E_USAGE."""
+        self.items()
+        for uid in (
+            "ABCDEFGHJK",
+            "0123456789-1",
+            "0123456789-02",
+            "0123456789-0",
+            "012345678",
+            "01234567890",
+            "012345678i",
+            "012345678l",
+            "012345678o",
+            "012345678u",
+        ):
+            self.assert_invalid(uid)
+        self.assertFalse((self.home / "db").exists())
+
+    def test_ol_32_03_legacy_short_uid_is_resolved(self) -> None:
+        """OL-32.03: an unprefixed short id resolves with the native driver, also with a suffix."""
+        fake = self.items()
+        with mock.patch("mailquery.native_ids.short_id", side_effect=lambda text, length: "0123456789"):
+            backend = _backend(fake, tmp_root=self.home / "tmp")
+            self.addCleanup(backend.close)
+            backend._assign_parts(
+                [fake.item("normal").entry_id, fake.item("header_only").entry_id]
+            )
+            backend.printed_messages(["0123456789", "0123456789-2"])
+        shown = self.run_json("show", "0123456789")["message"]
+        self.assertEqual(shown["uid"], "outlook:0123456789")
+        second = self.run_json("show", "outlook:0123456789-2")["message"]
+        self.assertEqual(second["uid"], "outlook:0123456789-2")
+        self.assertNotEqual(shown["subject"], second["subject"])
+
+    def test_ol_32_04_valid_uid_outside_the_cache_is_not_found(self) -> None:
+        """OL-32.04: a valid short id without a row ⇒ E_USAGE with the repeat-the-search hint."""
+        self.items()
+        for command, extra in (("show", ()), ("attachment", ("--index", "1"))):
+            with self.subTest(command=command):
+                error = self.run_error(2, "E_USAGE", command, "0123456789", *extra)
+                self.assertIn("message uid outlook:0123456789 was not found", error["message"].replace("'", ""))
+                self.assertEqual(error["hint"], _REPEAT_SEARCH_HINT)
+
+    def test_ol_32_05_show_without_cache_creates_an_empty_one(self) -> None:
+        """OL-32.05: show and attachment without db or cache.db create both and report not found."""
+        self.items()
+        for command, extra in (("show", ()), ("attachment", ("--index", "1"))):
+            with self.subTest(command=command):
+                import shutil as _shutil
+
+                if (self.home / "db").exists():
+                    _shutil.rmtree(self.home / "db")
+                self.assertFalse((self.home / "db").exists())
+                cache = self.home / "db" / "cache.db"
+                error = self.run_error(2, "E_USAGE", command, "0123456789", *extra)
+                self.assertTrue(cache.is_file())
+                self.assertEqual(_cache_entries(self.home), [])
+                self.assertEqual(error["hint"], _REPEAT_SEARCH_HINT)
+
+    def test_ol_32_06_cache_failures_propagate(self) -> None:
+        """OL-32.06: locked, permission and invalid cache ⇒ E_LOCKED, E_PERMISSION and E_IO."""
+        fake = self.items()
+        self.run_json("search", "--since", "2026-01-01")
+        cache = self.home / "db" / "cache.db"
+        part = self.run_json("search", "--since", "2026-01-01", "--limit", "1")["messages"][0]["uid"]
+
+        with mock.patch("mailquery.native_ids.BUSY_TIMEOUT_SECONDS", 0.2):
+            blocker = sqlite3.connect(str(cache), isolation_level=None, timeout=5)
+            try:
+                blocker.execute("BEGIN EXCLUSIVE")
+                error = self.run_error(5, "E_LOCKED", "search", "--since", "2026-01-01")
+                self.assertEqual(
+                    error["hint"],
+                    "close the process that holds ~/.mailquery/db/cache.db and run the command again",
+                )
+            finally:
+                blocker.execute("ROLLBACK")
+                blocker.close()
+        locked = MailqueryError(
+            "E_LOCKED",
+            "the native id cache is locked by another process",
+            "close the process that holds ~/.mailquery/db/cache.db and run the command again",
+        )
+        for command, argv in (
+            ("show", ("show", part)),
+            ("attachment", ("attachment", part, "--index", "1")),
+        ):
+            with self.subTest(command=command):
+                with mock.patch("mailquery.native_ids.NativeIdCache.resolve", side_effect=locked):
+                    error = self.run_error(5, "E_LOCKED", *argv)
+                self.assertEqual(error["hint"], locked.hint)
+
+        directory = self.home / "db"
+        directory.chmod(0o500)
+        try:
+            for command, argv in (
+                ("search", ("search", "--since", "2026-01-01")),
+                ("show", ("show", part)),
+                ("attachment", ("attachment", part, "--index", "1")),
+            ):
+                with self.subTest(command=command):
+                    error = self.run_error(3, "E_PERMISSION", *argv)
+                    self.assertEqual(
+                        error["hint"],
+                        "check the permissions of ~/.mailquery/db/ and ~/.mailquery/db/cache.db",
+                    )
+        finally:
+            directory.chmod(0o700)
+
+        for command, argv in (
+            ("search", ("search", "--since", "2026-01-01")),
+            ("show", ("show", part)),
+            ("attachment", ("attachment", part, "--index", "1")),
+        ):
+            with self.subTest(command=command):
+                cache = self.home / "db" / "cache.db"
+                if cache.exists():
+                    cache.chmod(0o600)
+                    cache.unlink()
+                cache.write_bytes(b"not a native id cache")
+                error = self.run_error(3, "E_IO", *argv)
+                self.assertIn("cannot use the native id cache: not a valid native id cache", error["message"])
+                self.assertEqual(
+                    error["hint"],
+                    "if you delete ~/.mailquery/db/cache.db, mailquery creates an empty one; uids "
+                    "already printed do not resolve until you repeat the search",
+                )
+
+    def test_ol_32_07_empty_cache_is_initialized(self) -> None:
+        """OL-32.07: a 0-byte cache.db is initialized and search exits 0 and registers rows."""
+        self.items()
+        cache = self.home / "db" / "cache.db"
+        cache.parent.mkdir(parents=True)
+        cache.write_bytes(b"")
+        payload = self.search()
+        self.assertTrue(payload["messages"])
+        self.assertTrue(_cache_entries(self.home))
+
+
+class OutlookPrintedMessagesTests(_OutlookCommandCase):
+    """OL-33: only the printed rows are registered in the native id cache."""
+
+    def test_ol_33_01_limit_registers_the_printed_rows(self) -> None:
+        """OL-33.01: search --limit 2 with more candidates registers exactly the 2 printed."""
+        self.items()
+        payload = self.run_json("search", "--since", "2026-01-01", "--limit", "2", "--fields", "all")
+        uids = [message["uid"] for message in payload["messages"]]
+        self.assertEqual(len(uids), 2)
+        rows = _cache_entries(self.home)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row[2] for row in rows}, {self._entry_of(uid) for uid in uids})
+
+    def test_ol_33_02_group_by_registers_the_printed_groups(self) -> None:
+        """OL-33.02: search --group-by from registers exactly the messages of the printed groups."""
+        self.items()
+        payload = self.run_json("search", "--since", "2026-01-01", "--group-by", "from", "--fields", "all")
+        uids = [message["uid"] for group in payload["groups"] for message in group["messages"]]
+        self.assertTrue(uids)
+        rows = _cache_entries(self.home)
+        self.assertEqual({row[2] for row in rows}, {self._entry_of(uid) for uid in uids})
+
+    def test_ol_33_03_new_registers_the_printed_rows(self) -> None:
+        """OL-33.03: new and new --peek register the printed rows; --peek writes no state."""
+        self.items()
+        peeked = self.run_json("new", "--peek", "--fields", "all")
+        self.assertFalse((self.home / "state.json").exists())
+        self.assertEqual(
+            {row[2] for row in _cache_entries(self.home)},
+            {self._entry_of(message["uid"]) for message in peeked["messages"]},
+        )
+        (self.home / "db" / "cache.db").unlink()
+        emitted = self.run_json("new", "--fields", "all")
+        self.assertEqual(
+            {row[2] for row in _cache_entries(self.home)},
+            {self._entry_of(message["uid"]) for message in emitted["messages"]},
+        )
+
+    def test_ol_33_04_count_and_empty_responses_register_nothing(self) -> None:
+        """OL-33.04: search --count leaves the tables empty; a response without messages registers nothing."""
+        self.items()
+        counted = self.run_json("search", "--since", "2026-01-01", "--count")
+        self.assertGreater(counted["count"], 0)
+        self.assertTrue((self.home / "db" / "cache.db").is_file())
+        self.assertEqual(_cache_entries(self.home), [])
+        empty = self.run_json("search", "--subject", "no such subject", "--fields", "all")
+        self.assertEqual(empty["count"], 0)
+        self.assertEqual(_cache_entries(self.home), [])
+
+    def test_ol_33_05_registration_failure_fails_the_command(self) -> None:
+        """OL-33.05: a failing registration aborts without messages and without state."""
+        self.items()
+        failing = mock.Mock(
+            side_effect=MailqueryError(
+                "E_IO",
+                "cannot use the native id cache: conflicting uid part",
+                "if you delete ~/.mailquery/db/cache.db, mailquery creates an empty one",
+            )
+        )
+        with mock.patch("mailquery.native_ids.NativeIdCache.register", failing):
+            for command in ("search", "new"):
+                with self.subTest(command=command):
+                    error = self.run_error(3, "E_IO", command)
+                    self.assertIn("message", error)
+                    self.assertFalse((self.home / "state.json").exists())
+
+    def test_ol_33_06_filtered_out_messages_are_not_registered(self) -> None:
+        """OL-33.06: a message read by the query but discarded by a filter is not registered."""
+        fake = self.items()
+        payload = self.run_json("search", "--since", "2026-01-01", "--subject", "Factura noviembre", "--fields", "all")
+        self.assertEqual([message["uid"] for message in payload["messages"]], [_uid(fake.item("facturas_recent").entry_id)])
+        rows = _cache_entries(self.home)
+        self.assertEqual([row[2] for row in rows], [fake.item("facturas_recent").entry_id])
+
+    def _entry_of(self, uid: str) -> str:
+        """EntryID of the fixture item whose printed uid is ``uid``."""
+        matches = [
+            spec.entry_id for spec in self.fake.items.values() if _uid(spec.entry_id) == uid
+        ]
+        self.assertEqual(len(matches), 1, uid)
+        return matches[0]
+
+
+# --------------------------------------------------------------------------- #
+# OL-34, OL-35, OL-36 — collisions, confirmed absence and --show-native-id
+# --------------------------------------------------------------------------- #
+
+#: A valid 10-character short id the collision cases give to several EntryIDs.
+_COLLIDING_SHORT_ID = "k3f9q2m7xa"
+#: Hint of an indeterminate "not found": the current one, which points to excluded_stores.
+_NOT_FOUND_HINT = (
+    "run `mailquery search` to find the uid; a message of a store that is not read "
+    "is not found: see excluded_stores in `mailquery mailboxes`"
+)
+
+
+class _OutlookUidCase(_OutlookCommandCase):
+    """Seeding and running commands over an explicit home and its cache."""
+
+    def fresh_home(self, name: str, scope: str = _ITEM_SCOPE) -> Path:
+        home = self.root / name
+        home.mkdir()
+        (home / "config.toml").write_text(scope, encoding="utf-8")
+        return home
+
+    def seed(self, home: Path, entry_id: str) -> str:
+        """Register ``entry_id`` in the cache under ``home``; return its uid part."""
+        backend = _backend(self.fake, tmp_root=home / "tmp")
+        try:
+            part = backend._uid_part(entry_id)
+            backend.printed_messages([part])
+        finally:
+            backend.close()
+        return part
+
+    def run_at(self, home: Path, *argv: str) -> tuple[int, dict]:
+        """One CLI run over ``home`` with the current fake; ``(exit code, payload)``."""
+        backend = _backend(self.fake, tmp_root=home / "tmp")
+        self.addCleanup(backend.close)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = self.cli.main(list(argv), home=home, backend=backend)
+        self.assertTrue(out.getvalue(), err.getvalue())
+        return code, json.loads(out.getvalue())
+
+    def collide(self, *entry_ids: str) -> set[str]:
+        """Make the given EntryIDs share one short id until the test ends.
+
+        Returns the set the patched function consults, so a test can add an
+        EntryID created after the patch started.
+        """
+        from mailquery import native_ids
+
+        real = native_ids.short_id
+        targets = set(entry_ids)
+
+        def patched(text: str, length: int) -> str:
+            return _COLLIDING_SHORT_ID if text in targets else real(text, length)
+
+        patcher = mock.patch.object(native_ids, "short_id", patched)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return targets
+
+
+class OutlookCollisionTests(_OutlookUidCase):
+    """OL-34: two messages with the same short id get distinct uids."""
+
+    _KEYS = ("visible_attachment", "facturas_recent")
+
+    def by_subject(self, payload: dict) -> dict[str, str]:
+        """Subject -> uid of the response rows."""
+        return {message["subject"]: message["uid"] for message in payload["messages"]}
+
+    def ordered_keys(self, fake: fk.FakeOutlook) -> tuple[str, str]:
+        """The two fixture keys ordered by EntryID, ``(first, second)``."""
+        entries = {key: fake.item(key).entry_id for key in self._KEYS}
+        first, _second = sorted(entries.values())
+        keys = sorted(entries, key=lambda key: entries[key])
+        return keys[0], keys[1]
+
+    def test_ol_34_01_collisions_get_sequence_suffixes(self) -> None:
+        """OL-34.01: same short id ⇒ `outlook:<id>` and `outlook:<id>-2` in EntryID order."""
+        fake = self.items()
+        first_key, second_key = self.ordered_keys(fake)
+        self.collide(fake.item(first_key).entry_id, fake.item(second_key).entry_id)
+        found = self.by_subject(self.search())
+        self.assertEqual(
+            found[fake.item(first_key).subject], f"outlook:{_COLLIDING_SHORT_ID}"
+        )
+        self.assertEqual(
+            found[fake.item(second_key).subject],
+            f"outlook:{_COLLIDING_SHORT_ID}-2",
+        )
+        for key in self._KEYS:
+            uid = found[fake.item(key).subject]
+            shown = self.run_json("show", uid)["message"]
+            self.assertEqual(shown["uid"], uid)
+            self.assertEqual(shown["subject"], fake.item(key).subject)
+
+    def test_ol_34_02_attachment_directories_use_the_full_uid_part(self) -> None:
+        """OL-34.02: each collision extracts into `attachments/outlook/<id>[-2]/` only."""
+        fake = self.items()
+        first_key, second_key = self.ordered_keys(fake)
+        self.collide(fake.item(first_key).entry_id, fake.item(second_key).entry_id)
+        found = self.by_subject(self.search())
+        expected = {
+            first_key: (_COLLIDING_SHORT_ID, "contrato.pdf"),
+            second_key: (f"{_COLLIDING_SHORT_ID}-2", "factura-11.pdf"),
+        }
+        for key, (part, name) in expected.items():
+            with self.subTest(item=key):
+                uid = found[fake.item(key).subject]
+                self.assertTrue(uid.endswith(part), uid)
+                payload = self.run_json("attachment", uid, "--index", "1")
+                directory = self.home / "attachments" / "outlook" / part
+                self.assertEqual(Path(payload["output_dir"]), directory)
+                written = payload["attachments"][0]
+                self.assertEqual(written["original_name"], name)
+                files = sorted(
+                    path.name
+                    for path in directory.iterdir()
+                    if not path.name.startswith(".")
+                )
+                self.assertEqual(files, [written["sanitized_name"]])
+                self.assertTrue((directory / written["sanitized_name"]).is_file())
+
+    def test_ol_34_03_first_new_run_keeps_the_uid_of_a_message_it_reads_twice(self) -> None:
+        """OL-34.03: a message read by the query and by its body keeps its uid."""
+        fake = self.use(fk.FakeOutlook.default(), '[scope."ana.perez@example.com"]\n')
+        normal = fake.item("normal").entry_id
+        other = fake.item("header_only").entry_id
+        ordered = sorted((normal, other))
+        self.collide(normal, other)
+        expected = (
+            f"outlook:{_COLLIDING_SHORT_ID}"
+            if normal == ordered[0]
+            else f"outlook:{_COLLIDING_SHORT_ID}-2"
+        )
+        payload = self.run_json("new", "--fields", "all")
+        self.assertEqual(payload["count"], 1)
+        message = payload["messages"][0]
+        self.assertEqual(message["subject"], "Factura octubre 2026")
+        self.assertEqual(message["uid"], expected)
+        self.assertEqual(payload["cursor"]["current"]["last_uid"], expected)
+        shown = self.run_json("show", expected)["message"]
+        self.assertEqual(shown["subject"], "Factura octubre 2026")
+        self.assertEqual(shown["uid"], expected)
+
+    def test_ol_34_04_a_discarded_sequence_is_not_reused(self) -> None:
+        """OL-34.04: after the -2 row is discarded, a third message gets -3 and -2 is gone."""
+        fake = self.items()
+        first_key, second_key = self.ordered_keys(fake)
+        targets = self.collide(
+            fake.item(first_key).entry_id, fake.item(second_key).entry_id
+        )
+        found = self.by_subject(self.search())
+        second_uid = found[fake.item(second_key).subject]
+        self.assertEqual(second_uid, f"outlook:{_COLLIDING_SHORT_ID}-2")
+        # Moving the message gives it another EntryID: the old one is a confirmed absence.
+        moved_from = fake.item(second_key).entry_id
+        fake.move_item(second_key, fake.folder("facturas"))
+        code, payload = self.run_at(self.home, "show", second_uid)
+        self.assertEqual(code, 2, payload)
+        self.assertEqual(payload["error"]["hint"], _REPEAT_SEARCH_HINT)
+        self.assertFalse(any(row[2] == moved_from for row in _cache_entries(self.home)))
+        # Another message with the same short id takes the next sequence number.
+        third = fake.store("exchange").inbox.add_message(
+            "third_collision", subject="Tercera colisión"
+        )
+        targets.add(third.entry_id)
+        after = self.by_subject(self.search())
+        self.assertEqual(
+            after["Tercera colisión"], f"outlook:{_COLLIDING_SHORT_ID}-3"
+        )
+        code, payload = self.run_at(self.home, "show", second_uid)
+        self.assertEqual(code, 2, payload)
+        self.assertEqual(payload["error"]["hint"], _REPEAT_SEARCH_HINT)
+
+
+class OutlookAbsentMessageTests(_OutlookUidCase):
+    """OL-35: only a confirmed absence deletes the cache row."""
+
+    def assert_not_found(self, code: int, payload: dict, hint: str) -> None:
+        self.assertEqual(code, 2, payload)
+        self.assertEqual(payload["error"]["code"], "E_USAGE")
+        self.assertIn("was not found", payload["error"]["message"])
+        self.assertEqual(payload["error"]["hint"], hint)
+
+    def test_ol_35_01_confirmed_absence_discards_the_row_and_keeps_the_directory(self) -> None:
+        """OL-35.01: MAPI_E_NOT_FOUND/E_INVALID_ENTRYID on a mounted store ⇒ not found, row gone."""
+        fake = self.use(fk.FakeOutlook.item_matrix(_ITEMS_NOW))
+        entry_id = fake.item("normal").entry_id
+        for label, hresult in (
+            ("not found", fk.MAPI_E_NOT_FOUND),
+            ("invalid entryid", _oc().MAPI_E_INVALID_ENTRYID),
+        ):
+            for command, extra in (("show", ()), ("attachment", ("--index", "1"))):
+                with self.subTest(cause=label, command=command):
+                    home = self.fresh_home(f"absent-{label.replace(' ', '-')}-{command}")
+                    part = self.seed(home, entry_id)
+                    directory = home / "attachments" / "outlook" / part
+                    directory.mkdir(parents=True)
+                    kept = directory / "kept.pdf"
+                    kept.write_bytes(b"kept")
+                    fake.fail_next(
+                        hresult, kind="NameSpace", member="GetItemFromID"
+                    )
+                    code, payload = self.run_at(
+                        home, command, f"outlook:{part}", *extra
+                    )
+                    self.assert_not_found(code, payload, _REPEAT_SEARCH_HINT)
+                    self.assertEqual(_cache_entries(home), [])
+                    self.assertTrue(kept.is_file())
+
+    def test_ol_35_02_outlook_closed_keeps_the_row(self) -> None:
+        """OL-35.02: Outlook closed ⇒ E_OUTLOOK_NOT_RUNNING and the row stays."""
+        fake = self.use(
+            run_cli.build_fake("not_running"), _scope_toml("ana.perez@example.com")
+        )
+        part = self.uid_of("normal")
+        before = set(_cache_entries(self.home))
+        error = self.run_error(6, "E_OUTLOOK_NOT_RUNNING", "show", f"outlook:{part}")
+        self.assertEqual(error["hint"], "open classic Outlook with the same user, without elevation, and retry")
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_03_busy_outlook_keeps_the_row(self) -> None:
+        """OL-35.03: a repeatedly rejected call ⇒ E_CLIENT_BUSY and the row stays."""
+        fake = self.items()
+        part = self.uid_of("normal")
+        before = set(_cache_entries(self.home))
+        fake.reject_next(times=2, kind="NameSpace", member="Stores")
+        self.run_error(5, "E_CLIENT_BUSY", "show", f"outlook:{part}")
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_04_no_connection_keeps_the_row(self) -> None:
+        """OL-35.04: MAPI_E_NETWORK_ERROR ⇒ today's error for the cause and the row stays."""
+        fake = self.items()
+        part = self.uid_of("normal")
+        before = set(_cache_entries(self.home))
+        fake.fail_next(
+            fk.MAPI_E_NETWORK_ERROR, kind="NameSpace", member="GetItemFromID"
+        )
+        error = self.run_error(1, "E_INTERNAL", "show", f"outlook:{part}")
+        self.assertIn("80040115", error["message"])
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_05_store_not_mounted_keeps_the_row(self) -> None:
+        """OL-35.05: an EntryID of no store of the profile ⇒ current hint, row kept."""
+        fake = self.items()
+        normal = fake.item("normal").entry_id
+        entry_id = "00000000" + "AB" * 16 + normal[40:]
+        part = self.seed(self.home, entry_id)
+        before = set(_cache_entries(self.home))
+        code, payload = self.run_at(self.home, "show", f"outlook:{part}")
+        self.assert_not_found(code, payload, _NOT_FOUND_HINT)
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_06_unreadable_store_keeps_the_row(self) -> None:
+        """OL-35.06: a store whose properties cannot be read ⇒ current behavior, row kept."""
+        fake = self.use(fk.FakeOutlook.store_matrix(), _scope_toml("ana@example.com"))
+        record_key = fake.store("unavailable_named").record_key
+        entry_id = "00000000" + record_key.hex().upper() + "AB" * 50
+        part = self.seed(self.home, entry_id)
+        before = set(_cache_entries(self.home))
+        code, payload = self.run_at(self.home, "show", f"outlook:{part}")
+        self.assert_not_found(code, payload, _NOT_FOUND_HINT)
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_07_unopenable_item_keeps_the_row(self) -> None:
+        """OL-35.07: E_FAIL ⇒ the folder-table row for show, E_ATTACHMENT_UNREADABLE, row kept."""
+        fake = self.items()
+        key = "unopenable_with_attachments"
+        part = self.uid_of(key)
+        before = set(_cache_entries(self.home))
+        shown = self.run_json("show", f"outlook:{part}")
+        self.assertIs(shown["message"]["readable"], False)
+        self.assertEqual(shown["message"]["subject"], fake.item(key).subject)
+        self.assertIn("W_BODY_UNREADABLE", " ".join(shown["warnings"]))
+        self.assertEqual(set(_cache_entries(self.home)), before)
+        code, payload = self.run_at(self.home, "attachment", f"outlook:{part}", "--index", "1")
+        self.assertEqual((code, payload["error"]["code"]), (3, "E_ATTACHMENT_UNREADABLE"))
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_08_item_that_is_not_mail_keeps_the_row(self) -> None:
+        """OL-35.08: a receipt ⇒ not found with the current hint and the row stays."""
+        fake = self.items()
+        part = self.uid_of("delivery_receipt")
+        before = set(_cache_entries(self.home))
+        code, payload = self.run_at(self.home, "show", f"outlook:{part}")
+        self.assert_not_found(code, payload, _NOT_FOUND_HINT)
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_09_hidden_folder_keeps_the_row(self) -> None:
+        """OL-35.09: an item in a hidden folder ⇒ not found with the current hint, row kept."""
+        fake = self.use(fk.FakeOutlook.folder_matrix(), '[scope."lucia@example.es"]\n')
+        part = self.uid_of("in_hidden_folder")
+        before = set(_cache_entries(self.home))
+        code, payload = self.run_at(self.home, "show", f"outlook:{part}")
+        self.assert_not_found(code, payload, _NOT_FOUND_HINT)
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_10_deleted_item_keeps_the_row(self) -> None:
+        """OL-35.10: an item marked for deletion ⇒ not found with the current hint, row kept."""
+        fake = self.items()
+        part = self.uid_of("imap_deleted")
+        before = set(_cache_entries(self.home))
+        code, payload = self.run_at(self.home, "show", f"outlook:{part}")
+        self.assert_not_found(code, payload, _NOT_FOUND_HINT)
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_11_other_com_error_keeps_the_row(self) -> None:
+        """OL-35.11: E_UNEXPECTED ⇒ today's E_INTERNAL and the row stays."""
+        fake = self.items()
+        part = self.uid_of("normal")
+        before = set(_cache_entries(self.home))
+        fake.fail_next(fk.E_UNEXPECTED, kind="NameSpace", member="GetItemFromID")
+        error = self.run_error(1, "E_INTERNAL", "show", f"outlook:{part}")
+        self.assertIn("8000FFFF", error["message"])
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_12_com_timeout_keeps_the_row(self) -> None:
+        """OL-35.12: a hung GetItemFromID ⇒ E_CLIENT_TIMEOUT and the row stays."""
+        fake = self.items()
+        home = self.fresh_home("timeout-home")
+        part = self.seed(home, fake.item("normal").entry_id)
+        before = set(_cache_entries(home))
+        user = self.root / "timeout-user"
+        user.mkdir()
+        env = dict(os.environ)
+        env["HOME"] = env["USERPROFILE"] = str(user)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(_REPO_ROOT / "tests" / "fakes" / "run_cli.py"),
+                "--scenario",
+                "item_matrix",
+                "--home",
+                str(home),
+                "--timeout",
+                "0.2",
+                "--hang",
+                "NameSpace.GetItemFromID",
+                "--hang-timeout",
+                "60",
+                "--",
+                "show",
+                f"outlook:{part}",
+            ],
+            capture_output=True,
+            env=env,
+            cwd=str(self.root),
+            timeout=120,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["error"]["code"], "E_CLIENT_TIMEOUT")
+        self.assertEqual(set(_cache_entries(home)), before)
+
+    def test_ol_35_13_excluded_store_keeps_the_row(self) -> None:
+        """OL-35.13: a uid of an excluded store ⇒ E_ACCOUNT_NOT_IN_SCOPE, row kept."""
+        fake = self.use(fk.FakeOutlook.default(), '[scope."ana.perez@example.com"]\n')
+        part = self.uid_of("shared_message")
+        before = set(_cache_entries(self.home))
+        error = self.run_error(
+            2, "E_ACCOUNT_NOT_IN_SCOPE", "show", f"outlook:{part}"
+        )
+        self.assertIn("shared_mailbox", error["message"])
+        self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_14_every_indeterminate_cause_keeps_every_row(self) -> None:
+        """OL-35.14: no indeterminate cause changes any native_id of the cache."""
+        def unknown_store(fake: fk.FakeOutlook) -> str:
+            normal = fake.item("normal").entry_id
+            return "00000000" + "AB" * 16 + normal[40:]
+
+        def unreadable_store(fake: fk.FakeOutlook) -> str:
+            key = fake.store("unavailable_named").record_key
+            return "00000000" + key.hex().upper() + "AB" * 50
+
+        def busy(fake: fk.FakeOutlook) -> str:
+            fake.reject_next(times=2, kind="NameSpace", member="Stores")
+            return fake.item("normal").entry_id
+
+        def network(fake: fk.FakeOutlook) -> str:
+            fake.fail_next(
+                fk.MAPI_E_NETWORK_ERROR, kind="NameSpace", member="GetItemFromID"
+            )
+            return fake.item("normal").entry_id
+
+        def unexpected(fake: fk.FakeOutlook) -> str:
+            fake.fail_next(fk.E_UNEXPECTED, kind="NameSpace", member="GetItemFromID")
+            return fake.item("normal").entry_id
+
+        ana = _scope_toml("ana.perez@example.com")
+        causes = (
+            ("closed", lambda: run_cli.build_fake("not_running"), ana,
+             lambda fake: fake.item("normal").entry_id),
+            ("busy", fk.FakeOutlook.default, ana, busy),
+            ("network", fk.FakeOutlook.default, ana, network),
+            ("not mounted", lambda: fk.FakeOutlook.item_matrix(_ITEMS_NOW), _ITEM_SCOPE,
+             unknown_store),
+            ("unreadable store", fk.FakeOutlook.store_matrix,
+             _scope_toml("ana@example.com"), unreadable_store),
+            ("unopenable", lambda: fk.FakeOutlook.item_matrix(_ITEMS_NOW), _ITEM_SCOPE,
+             lambda fake: fake.item("unopenable_without_attachments").entry_id),
+            ("not mail", lambda: fk.FakeOutlook.item_matrix(_ITEMS_NOW), _ITEM_SCOPE,
+             lambda fake: fake.item("delivery_receipt").entry_id),
+            ("hidden folder", fk.FakeOutlook.folder_matrix, '[scope."lucia@example.es"]\n',
+             lambda fake: fake.item("in_hidden_folder").entry_id),
+            ("marked for deletion", lambda: fk.FakeOutlook.item_matrix(_ITEMS_NOW),
+             _ITEM_SCOPE, lambda fake: fake.item("imap_deleted").entry_id),
+            ("other error", fk.FakeOutlook.default, ana, unexpected),
+            ("excluded store", fk.FakeOutlook.default, ana,
+             lambda fake: fake.item("shared_message").entry_id),
+        )
+        for label, factory, scope, entry_of in causes:
+            with self.subTest(cause=label):
+                fake = self.use(factory(), scope)
+                entry_id = entry_of(fake)
+                part = self.seed(self.home, entry_id)
+                before = set(_cache_entries(self.home))
+                self.run_at(self.home, "show", f"outlook:{part}")
+                self.assertEqual(set(_cache_entries(self.home)), before)
+
+    def test_ol_35_15_moved_message_is_a_confirmed_absence(self) -> None:
+        """OL-35.15: moving a message invalidates its uid and a search prints another one."""
+        fake = self.items()
+        entry_id = fake.item("normal").entry_id
+        part = self.uid_of("normal")
+        before = set(_cache_entries(self.home))
+        fake.move_item("normal", fake.folder("facturas"))
+        code, payload = self.run_at(self.home, "show", f"outlook:{part}")
+        self.assert_not_found(code, payload, _REPEAT_SEARCH_HINT)
+        moved = fake.item("normal").entry_id
+        self.assertNotEqual(moved, entry_id)
+        remaining = {
+            row for row in before if row[2] != entry_id
+        }
+        self.assertEqual(set(_cache_entries(self.home)), remaining)
+        found = self.by_subject(self.search())
+        self.assertEqual(found[fake.item("normal").subject], _uid(moved))
+
+    def by_subject(self, payload: dict) -> dict[str, str]:
+        return {message["subject"]: message["uid"] for message in payload["messages"]}
+
+
+class OutlookShowNativeIdTests(_OutlookUidCase):
+    """OL-36: `show --show-native-id` prints the EntryID after the driver prefix."""
+
+    def test_ol_36_01_only_the_uid_changes(self) -> None:
+        """OL-36.01: uid `outlook:<EntryID>`; every other value and the cache are the same."""
+        fake = self.items()
+        key = "visible_attachment"
+        part = self.uid_of(key)
+        self.run_json("attachment", f"outlook:{part}", "--index", "1")
+        before_cache = set(_cache_entries(self.home))
+        without = self.run_json("show", f"outlook:{part}", "--fields", "all")
+        self.assertEqual(set(_cache_entries(self.home)), before_cache)
+        with_option = self.run_json(
+            "show", f"outlook:{part}", "--fields", "all", "--show-native-id"
+        )
+        expected = copy.deepcopy(without)
+        expected["message"]["uid"] = f"outlook:{fake.item(key).entry_id}"
+        self.assertEqual(with_option, expected)
+        self.assertEqual(set(_cache_entries(self.home)), before_cache)
+        cached = with_option["message"]["attachments"][0]["cached_path"]
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached, without["message"]["attachments"][0]["cached_path"])
+
+    def test_ol_36_02_the_native_form_is_not_an_input(self) -> None:
+        """OL-36.02: `outlook:<EntryID>` and the bare EntryID ⇒ E_USAGE."""
+        fake = self.items()
+        entry_id = fake.item("normal").entry_id
+        for argv in (
+            ("show", f"outlook:{entry_id}"),
+            ("show", entry_id),
+            ("attachment", f"outlook:{entry_id}", "--index", "1"),
+            ("attachment", entry_id, "--index", "1"),
+        ):
+            with self.subTest(argv=argv):
+                error = self.run_error(2, "E_USAGE", *argv)
+                self.assertIn("expected a short id", error["message"])
+
+    def test_ol_36_03_warnings_and_errors_keep_the_short_uid(self) -> None:
+        """OL-36.03: warnings and errors of the run quote the short uid, never the EntryID."""
+        fake = self.items()
+        part = self.uid_of("header_only")
+        entry_id = fake.item("header_only").entry_id
+        shown = self.run_json(
+            "show", f"outlook:{part}", "--show-native-id"
+        )
+        self.assertEqual(shown["message"]["uid"], f"outlook:{entry_id}")
+        warnings = " ".join(shown["warnings"])
+        self.assertIn(part, warnings)
+        self.assertNotIn(entry_id, warnings)
+        error = self.run_error(
+            2, "E_USAGE", "show", "outlook:0123456789", "--show-native-id"
+        )
+        self.assertIn("outlook:0123456789", error["message"])
+        self.assertEqual(error["hint"], _REPEAT_SEARCH_HINT)
+
+
+def _apple_fixture(case: unittest.TestCase):
+    from tests.fixtures.make_fixtures import build_store, write_config as fixture_config
+
+    fx = build_store()
+    case.addCleanup(fx.cleanup)
+    fixture_config(fx.home)
+    return fx
+
+
+def _run_apple(case: unittest.TestCase, cli, fx, *argv: str) -> dict:
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = cli.main(
+            list(argv), home=fx.home, mail_root=fx.mail_root, accounts_db=fx.accounts_db
+        )
+    case.assertEqual(code, 0, out.getvalue() + err.getvalue())
+    return json.loads(out.getvalue())
+
 
 
 if __name__ == "__main__":  # pragma: no cover

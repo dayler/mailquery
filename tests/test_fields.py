@@ -319,8 +319,10 @@ class NoBodyReadTests(_AppleCase):
                 fake.call_log.count(kind="Item", member=member), 0, member
             )
         # An S/MIME or unopenable item gives no header read and is never opened.
+        from mailquery.native_ids import short_id
+
         unopened = {
-            str(fake.item(key).entry_id)
+            short_id(fake.item(key).entry_id, 10)
             for key in (
                 "smime_encrypted",
                 "smime_signed",

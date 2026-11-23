@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 4 / 2. **Rama del lote:** `feature/id-corto-outlook-lote-2`. **Rama del milestone:** `feature/id-corto-outlook-m06`, creada desde el tip de la rama del lote (con M04 y M05 integrados).
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `c2459ea` (tip de `feature/id-corto-outlook-lote-2`, con M01–M05 integrados). **Línea base de la suite:** en `c2459ea`, `Ran 1525 tests`, `OK (skipped=8)`, 0 fallos; los 8 saltos son casos SMOKE/instalador que no aplican en macOS.
 - **Depende de:** M04 (opción `--show-native-id`), M05 (uid corto, caché y resolución). **Lo usan:** nadie.
 - **ACs:** AC-64 (colisiones de punta a punta y `seq` 3 tras borrar), AC-66 (ausente confirmado e indeterminado, un caso por causa), AC-68 (opción con Outlook), AC-69 (hint de repetir la búsqueda con un mensaje ausente confirmado).
 
@@ -73,11 +73,11 @@ Ninguna nueva (usa la frontera de M02).
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Clasificación ausente confirmado / indeterminado en `find_message` y adjuntos; borrado solo con ausente confirmado | ⚪ |
-| 2 | OL-35 (un caso por causa), con el doble y el subproceso para el timeout | ⚪ |
-| 3 | OL-34 (colisiones) y OL-36 (`--show-native-id`) | ⚪ |
-| 4 | SMOKE-NEW.11 | ⚪ |
-| 5 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
+| 1 | Clasificación ausente confirmado / indeterminado en `find_message` y adjuntos; borrado solo con ausente confirmado | 🟢 |
+| 2 | OL-35 (un caso por causa), con el doble y el subproceso para el timeout | 🟢 |
+| 3 | OL-34 (colisiones) y OL-36 (`--show-native-id`) | 🟢 |
+| 4 | SMOKE-NEW.11 | 🟢 |
+| 5 | Suite completa, cobertura, diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -188,3 +188,8 @@ Los de `protocolo.md`, más: la tabla de causas de OL-35 con el código de error
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `_open_candidate` distingue ausente confirmado (store montado y legible, `GetItemFromID` con `MAPI_E_NOT_FOUND`/`MAPI_E_INVALID_ENTRYID`) de indeterminado; `_discard_absent` borra la fila; `find_message` y `_attachment_item` comparten la clasificación. |
+| 2026-11-23 | 2 | OL-35.01–.15 verdes, un caso por causa; .12 en subproceso con `--hang NameSpace.GetItemFromID` y lectura de `cache.db`. OL-23.03 queda con el caso de store no montado, que es el de su definición; el item inexistente en store montado pasa a OL-35.01. |
+| 2026-11-23 | 3 | OL-34.01–.04 verdes (colisión con `mock.patch` en proceso, ambos directorios de adjuntos, `seq` 3 tras borrar) y OL-36.01–.03 verdes. |
+| 2026-11-23 | 4 | SMOKE-NEW.11 verde en este equipo (macOS): `search` y `show` reales no crean `db/cache.db`; 20 mensajes en la última semana, primer uid de 16 caracteres. |
+| 2026-11-23 | 5 | Suite completa `Ran 1548 tests`, `OK (skipped=7)`; cobertura de `backends/outlook.py` 88.1 % (sobre `tests/test_outlook.py`, suite completa no medida); `git diff --check` limpio y diff dentro del alcance; evidencia cruda en `../../.logs/id-corto-outlook/M06/evidencia-cruda.md`. |

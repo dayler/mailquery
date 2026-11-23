@@ -191,7 +191,7 @@ Requisitos: RF-03, RF-25 · Archivo: `tests/test_outlook.py`
 |---|---|---|
 | .01 | N | [por actualizar] un `EntryID` o un id corto en mayúsculas ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y hint no vacío. |
 | .02 | N | uid inválido con `pywin32` ausente ⇒ `E_USAGE` antes de conectar. |
-| .03 | N | [por actualizar] un uid cuyo `EntryID` resuelto no coincide con ningún store ⇒ `message uid … was not found` con el hint que remite a `excluded_stores`. |
+| .03 | N | un uid cuyo `EntryID` resuelto no coincide con ningún store ⇒ `message uid … was not found` con el hint que remite a `excluded_stores`. |
 | .04 | N | Item que no es correo ⇒ not found. |
 | .05 | N | Item en una carpeta oculta ⇒ not found. |
 | .06 | N | Store excluido identificado por `PR_RECORD_KEY` ⇒ `E_ACCOUNT_NOT_IN_SCOPE` con el motivo, sin abrir items del store. |

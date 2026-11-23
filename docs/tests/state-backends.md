@@ -159,23 +159,4 @@ Requisitos: RF-81, AC-63 · Archivo: `tests/test_uid.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] Con solo `apple_mail`, el uid sigue siendo `apple_mail:<n>` y, tras `search`, `new`, `show` y `attachment`, no existen `~/.mailquery/db/` ni `cache.db`. |
-
-Tests que cambian (el orquestador ya marcó `[por actualizar]` los que tienen ID):
-
-- OL-14.01: el uid es el id corto de 10 caracteres del `EntryID` permanente; `native_order_key` es el `EntryID` permanente en mayúsculas, no el id de la tabla.
-- OL-23.01: un `EntryID` o un id corto en mayúsculas ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y hint no vacío.
-- OL-23.03: un uid cuyo `EntryID` resuelto no coincide con ningún store ⇒ `message uid … was not found` con el hint que remite a `excluded_stores`.
-- OL-25.01: el estado guarda los uids cortos `outlook:<parte del uid>`.
-- UT-UID-01.05: entrada legada en Windows: id corto sin prefijo ⇒ `outlook`.
-- UT-UID-02.03: `show <id corto>` sin prefijo en Windows se resuelve con el driver nativo.
-- UT-ATC-01.04: `show` no crea caché de adjuntos, staging ni `state.json`; con Apple Mail no escribe nada más, y solo un driver que usa la librería puede escribir en la caché de ids nativos.
-- TC-02.02–.06 y TC-09 (goldens de Outlook): solo cambian el uid, `last_uid` y el directorio de `cached_path`.
-- Test sin ID de `tests/test_backends.py` sobre `OutlookBackend.parse_uid`: espera la forma corta.
-- Cualquier otro test de los archivos del alcance que use un `EntryID` como uid de entrada pasa a sembrar la caché o a tomar el uid de un `search` previo; su expectativa no cambia.
-
-Comandos:
-
-- `$PY -B -m unittest discover -s tests -t . -k ol_31 > "$LOG/grupo-ol_31.log" 2>&1`; igual con `-k ol_32`, `-k ol_33`, `-k ut_uid_03`.
-- Goldens: `MAILQUERY_UPDATE_GOLDENS=1 $PY -B -m unittest discover -s tests -t . -k tc_02 > "$LOG/goldens-tc02.log" 2>&1` (y `-k tc_09`), después `git diff --stat tests/fixtures/expected/outlook/` y revisión de cada cambio.
-- Suite completa: la de `protocolo.md`.
+| .01 | P | Con solo `apple_mail`, el uid sigue siendo `apple_mail:<n>` y, tras `search`, `new`, `show` y `attachment`, no existen `~/.mailquery/db/` ni `cache.db`. |

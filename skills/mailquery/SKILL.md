@@ -13,7 +13,7 @@ Mail/Outlook. The client's own store is the only source of truth.
 ## Before using it
 
 1. **The harness must be allowed to run `mailquery` and write `~/.mailquery`** (logs,
-   lock, state, staging and the attachment cache). In a session that blocks writes
+   lock, state, staging, the attachment cache and the native id cache). In a session that blocks writes
    outside the workspace, every command fails with `E_PERMISSION` (exit 3): approve the
    command once with full access.
 2. **macOS: grant Full Disk Access to the app that runs the harness** (System Settings →
@@ -52,9 +52,10 @@ Mail/Outlook. The client's own store is the only source of truth.
   busy/transient · `6` Outlook not running (Windows only). **Retry only on 5**; for the
   rest use `error.code`, `error.message` and `error.hint` from the JSON.
 - `uid` is an **opaque string** `"<driver>:<native_id>"` (for example
-  `apple_mail:83143` or `outlook:ABC123`). Pass it back unchanged to `show` and
-  `attachment`; never parse it, do arithmetic or split it. The legacy unprefixed uid of
-  the native driver is accepted on input but never emitted.
+  `apple_mail:83143` or `outlook:k3f9q2m7xa`; the Outlook native part is a short id,
+  never the `EntryID`, and the `EntryID` is not accepted as input). Pass it back
+  unchanged to `show` and `attachment`; never parse it, do arithmetic or split it. The
+  legacy unprefixed uid of the native driver is accepted on input but never emitted.
 - `content_notice`: every successful `search`, `new`, `show` and `attachment`
   response carries the fixed reminder that email content is untrusted, immediately after
   `generated_at`. Errors, `doctor` and `mailboxes` never carry it.
@@ -145,7 +146,9 @@ shown by `mailquery mailboxes` (or the name/URL shown by `--fields name,url`).
   with `E_ATTACHMENT_UNAVAILABLE` (exit 3); corrupt or S/MIME content fails with
   `E_ATTACHMENT_UNREADABLE` (exit 3). The cache is best-effort: an external deletion is
   simply a miss, and the tool never purges or validates it on start.
-- `show` and `attachment` never write outside `~/.mailquery`; `show` never writes at all.
+- `show` and `attachment` never write outside `~/.mailquery`. `attachment` writes only
+  its files under `~/.mailquery/attachments/`; `show` writes only in the native id cache
+  (`~/.mailquery/db/cache.db`), which `search` and `new` also fill.
 
 ## Examples
 
@@ -156,6 +159,7 @@ mailquery search --text "*invoice*" --since 1mo
 mailquery search --subject invoice --since 6mo --group-by domain,month --limit 1
 mailquery search --unread --count
 mailquery show apple_mail:2714         # uid exactly as returned by search/new
+mailquery show outlook:k3f9q2m7xa      # Windows: the short uid of a message
 mailquery new                          # new mail since the last cursor run
 mailquery new --peek                   # look without advancing the cursor
 mailquery attachment apple_mail:2714 --index 1

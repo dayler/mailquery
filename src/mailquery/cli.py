@@ -256,11 +256,14 @@ _SHOW_EPILOG = """\
 Examples:
   mailquery show 83143
   mailquery show 83143 --fields attachments
+  mailquery show 83143 --show-native-id
 
 Notes:
   The body is truncated to 20,000 characters; headers and attachment names are
   included. Only messages of accounts declared in config.toml can be shown; use
   the uid reported by search or new.
+  --show-native-id is a debugging option: it shows the driver's native id in
+  message.uid instead of the short uid; the native id is not accepted as input.
   The URLs of the subject, the names, the headers and the body are neutralized by
   default ([content].url_display = "keep" keeps the exact text) and --strip-links
   replaces them with [link omitted].
@@ -602,6 +605,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LIST",
         help="selects the fields of message (uid is always included); "
         "comma-separated or repeatable; all selects every field",
+    )
+    show_parser.add_argument(
+        "--show-native-id",
+        action="store_true",
+        help="debugging option: show the driver's native id in message.uid instead of "
+        "the short uid; the native id is not accepted as input",
     )
     # The uid format is validated in main() by _parse_command_uid, not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
@@ -1199,6 +1208,7 @@ def _execute(
         )
     elif command == "show":
         uid_driver = str(getattr(args, "uid_driver", "") or "")
+        show_native_id = bool(getattr(args, "show_native_id", False))
         if backend is None or uid_driver != str(native or ""):
             payload = run_show(
                 backend,
@@ -1209,6 +1219,7 @@ def _execute(
                 native=native,
                 url_mode=_url_mode(config, args),
                 fields=fields,
+                show_native_id=show_native_id,
             )
         else:
             payload = run_show(
@@ -1217,6 +1228,7 @@ def _execute(
                 args.uid,
                 url_mode=_url_mode(config, args),
                 fields=fields,
+                show_native_id=show_native_id,
             )
     else:  # pragma: no cover - argparse prevents this
         raise MailqueryError(

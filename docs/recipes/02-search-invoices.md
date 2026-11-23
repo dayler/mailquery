@@ -151,7 +151,8 @@ De la salida de `search` (estructura completa: PRD §12.5):
 | `generated_at` | Momento de la consulta. |
 
 **`uid` opaco.** Es siempre un string `"<driver>:<native_id>"` (por ejemplo
-`apple_mail:83143` en macOS u `outlook:ABC123` en Windows); el uid legado sin
+`apple_mail:83143` en macOS u `outlook:k3f9q2m7xa` en Windows, donde la parte
+nativa es el id corto y no el `EntryID`); el uid legado sin
 prefijo se acepta en la entrada del driver nativo, pero la salida siempre lleva
 el prefijo. Trátalo como un token opaco: no hagas aritmética con él, no asumas
 su longitud ni lo partas, y devuélvelo tal cual a `show` y `attachment`.
@@ -297,7 +298,7 @@ warnings de macOS:
   "hint": null,
   "messages": [
     {
-      "uid": "outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…",
+      "uid": "outlook:k3f9q2m7xa",
       "message_id": "<factura-2026-10@proveedor.example>",
       "duplicate_count": 1,
       "subject": "Factura octubre 2026",

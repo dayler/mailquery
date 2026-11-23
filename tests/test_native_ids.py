@@ -433,10 +433,10 @@ class CacheOperationsTests(_NativeIdsTestCase):
                     cache.assign([value])  # type: ignore[list-item]
 
     def test_ut_nid_03_02_two_native_ids_with_the_same_short_id(self) -> None:
-        """UT-NID-03.02: a shared short id yields seq 1 and 2 in the given order."""
+        """UT-NID-03.02: a shared short id yields seq 1 and 2 in the native id order."""
         cache = self.open_cache()
         with self.patch_short_id("abc"):
-            parts = cache.assign(["alpha", "bravo"])
+            parts = cache.assign(["bravo", "alpha"])
         self.assertEqual(parts, {"alpha": "abc", "bravo": "abc-2"})
 
     def test_ut_nid_03_03_one_part_per_native_id_across_calls(self) -> None:

@@ -418,19 +418,26 @@ class OutlookBackendContractTest(BackendContractMixin, unittest.TestCase):
         self.assertEqual(paths, ["Proyectos/Pendientes", "Archivo/Pendientes"])
 
     def test_parse_uid_is_static_and_offline(self) -> None:
-        """OutlookBackend.parse_uid: uppercase hex EntryIDs only, E_USAGE otherwise (PRD 12.4)."""
+        """OutlookBackend.parse_uid: short ids only, E_USAGE otherwise (PRD 12.4)."""
         from mailquery.backends.outlook import OutlookBackend
 
+        self.assertEqual(OutlookBackend.parse_uid("0123456789"), "0123456789")
+        self.assertEqual(OutlookBackend.parse_uid("0123456789-2"), "0123456789-2")
         entry_id = self.fake.item("es_inbox_message").entry_id
-        self.assertEqual(OutlookBackend.parse_uid(entry_id), entry_id)
-        for raw in ("", "00ab", "0x00AB", " 00AB", "00AB ", "00-AB", "Z1"):
+        for raw in (
+            "",
+            "00ab",
+            entry_id,
+            entry_id.lower(),
+            "0123456789-1",
+            "0123456789-0",
+            "012345678",
+        ):
             with self.subTest(raw=raw):
                 with self.assertRaises(MailqueryError) as context:
                     OutlookBackend.parse_uid(raw)
                 self.assertEqual(context.exception.code, "E_USAGE")
-                self.assertIn(
-                    "expected an uppercase hexadecimal EntryID", context.exception.message
-                )
+                self.assertIn("expected a short id", context.exception.message)
         self.assertEqual(self.fake.call_log.count(), 0)
 
 

@@ -2,7 +2,8 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 4 / 2. **Rama del lote:** `feature/id-corto-outlook-lote-2`. **Rama del milestone:** `feature/id-corto-outlook-m07`, creada desde el tip de la rama del lote (con M04 y M05 integrados).
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `c2459ea` (tip de `feature/id-corto-outlook-lote-2`, con M01–M05 integrados).
+- **Línea base de la suite:** en `c2459ea`, `Ran 1525 tests`, `OK (skipped=8)`, 0 fallos: los 8 saltos son casos SMOKE/instalador que no aplican en macOS. Sin fallos conocidos.
 - **Depende de:** M04 (ayuda de `show`), M05 (uid corto y caché en la salida real). **Lo usan:** nadie.
 - **ACs:** ninguno de comportamiento; cubre los documentos consumidores (CL-05), los textos obsoletos fuera del PRD (CL-06) y la versión (CL-11), y la parte de README de RF-73 dentro de AC-68.
 
@@ -86,11 +87,11 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Versión `3.0.0a2`: `pyproject.toml`, `__init__.py`, goldens de `doctor`, comentarios de tests | ⚪ |
-| 2 | `README.md` y `README.es.md`, en paralelo y con el mismo contenido | ⚪ |
-| 3 | `SKILL.md`, recetas, `INTERFACES.md`, `threat-model.md` | ⚪ |
-| 4 | DOC-16 y tests DOC existentes | ⚪ |
-| 5 | Búsquedas de CL-06 y CL-11 fuera del PRD; suite completa; evidencia cruda | ⚪ |
+| 1 | Versión `3.0.0a2`: `pyproject.toml`, `__init__.py`, goldens de `doctor`, comentarios de tests | 🟢 |
+| 2 | `README.md` y `README.es.md`, en paralelo y con el mismo contenido | 🟢 |
+| 3 | `SKILL.md`, recetas, `INTERFACES.md`, `threat-model.md` | 🟢 |
+| 4 | DOC-16 y tests DOC existentes | 🟢 |
+| 5 | Búsquedas de CL-06 y CL-11 fuera del PRD; suite completa; evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -157,3 +158,8 @@ Los de `protocolo.md`, más la salida de las búsquedas de CL-06 y CL-11 y la li
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Versión `3.0.0a2` en `pyproject.toml`, `__version__`, goldens `doctor`/`outlook/doctor` y comentarios de versión de los tests; TC-01.01 y TC-02.07 verdes. |
+| 2026-11-23 | 2 | README y README.es al día: `3.0.0a2`, uid corto de Outlook, `--show-native-id`, `show` solo escribe en la caché de ids nativos, `~/.mailquery/db/cache.db`, desinstalación que no la borra y «la caché» → «caché de adjuntos»; el mismo contenido en los dos idiomas. |
+| 2026-11-23 | 3 | `SKILL.md` (uid corto, sin `--show-native-id`), recetas, `INTERFACES.md` (`native_ids.py`, ganchos, `PluginContext.native_ids`, home, uid de Outlook, estado, versión) y `threat-model.md` (versión, activo `cache.db`, T-12). |
+| 2026-11-23 | 4 | DOC-16.01–.04 en `tests/test_packaging.py`, verdes en solitario y con los 77 tests DOC; TC-01.01 y TC-02.07 verdes. |
+| 2026-11-23 | 5 | Búsquedas de CL-06 y CL-11 sin resultados en los documentos consumidores; solo quedan registros históricos, la definición de DOC-16 y `docs/ROADMAP.md` (propuesta). Suite completa: `Ran 1529 tests`, `OK (skipped=8)`, 0 fallos. Evidencia en `../../.logs/id-corto-outlook/M07/evidencia-cruda.md`. |

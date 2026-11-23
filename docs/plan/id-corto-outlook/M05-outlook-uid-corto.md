@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 3 / 2. **Rama del lote:** `feature/id-corto-outlook-lote-2`. **Rama del milestone:** `feature/id-corto-outlook-m05`, creada desde el tip de la rama del lote (con el lote 1 integrado).
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `98e1316`. **Línea base de la suite:** `Ran 1497 tests`, `OK (skipped=7)`, 0 fallos; los 7 saltos son SMOKE/installer que no aplican en macOS.
 - **Depende de:** M01 (`NativeIdCache`), M02 (`_entry_id`/`_uid_part`), M03 (aviso `printed_messages`, `bind_home`, `MessageNotFound`). **Lo usan:** M06 y M07.
 - **ACs:** AC-63 (uid corto, estabilidad, resolución, validación, macOS sin cambios), AC-65 (registro de impresos en Outlook), AC-67 (claves del JSON), AC-69 (caché en Outlook: creación, errores, `show` sin base).
 
@@ -82,12 +82,12 @@ M02 (frontera uid ↔ `EntryID`). En M05 solo cambian `_uid_part`, `_entry_id` y
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Home, apertura perezosa, cierre y `SHORT_ID_LENGTH` | ⚪ |
-| 2 | Asignación en `query`, mapa de la ejecución, `_uid_part`/`_entry_id`, `printed_messages`, `display_native_id` | ⚪ |
-| 3 | Validación corta en `parse_uid`/`parse_native_id`; uid fuera de la caché con `MessageNotFound` | ⚪ |
-| 4 | Actualizar tests y goldens existentes (`MAILQUERY_UPDATE_GOLDENS=1` y revisión del diff de cada golden) | ⚪ |
-| 5 | OL-31, OL-32, OL-33, UT-UID-03 | ⚪ |
-| 6 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
+| 1 | Home, apertura perezosa, cierre y `SHORT_ID_LENGTH` | 🟢 |
+| 2 | Asignación en `query`, mapa de la ejecución, `_uid_part`/`_entry_id`, `printed_messages`, `display_native_id` | 🟢 |
+| 3 | Validación corta en `parse_uid`/`parse_native_id`; uid fuera de la caché con `MessageNotFound` | 🟢 |
+| 4 | Actualizar tests y goldens existentes (`MAILQUERY_UPDATE_GOLDENS=1` y revisión del diff de cada golden) | 🟢 |
+| 5 | OL-31, OL-32, OL-33, UT-UID-03 | 🟢 |
+| 6 | Suite completa, cobertura, diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -204,3 +204,9 @@ Los de `protocolo.md`, más: la lista de goldens regenerados con el tipo de valo
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `bind_home`, caché perezosa con `NativeIdCache.open`/`open_in_memory`, cierre en `close()` y `SHORT_ID_LENGTH = 10`. |
+| 2026-11-23 | 2 | `assign` una vez por `query`, mapa de la ejecución, `_entry_id` con `resolve`, `printed_messages` y `display_native_id`. |
+| 2026-11-23 | 3 | `parse_uid`/`parse_native_id` aceptan solo la forma corta; uid sin fila ⇒ `MessageNotFound` con el hint de repetir la búsqueda. |
+| 2026-11-23 | 4 | Tests y goldens de Outlook actualizados; tc_02 y tc_09 regenerados con `MAILQUERY_UPDATE_GOLDENS=1` y diff revisado. |
+| 2026-11-23 | 5 | OL-31 .01–.06, OL-32 .01–.07, OL-33 .01–.06 y UT-UID-03 .01 en verde, cada uno solo. |
+| 2026-11-23 | 6 | Suite completa `Ran 1517 tests`, `OK (skipped=7)`; cobertura de `backends/outlook.py` 89.1 %; diff limpio. |

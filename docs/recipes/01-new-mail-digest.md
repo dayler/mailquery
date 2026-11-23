@@ -111,7 +111,8 @@ De la salida de `new` (estructura completa: PRD §12.5):
 | `scan` | Informativo: `mode` (`metadata`), `candidates`, `messages_read`, `duration_ms`. |
 
 **`uid` opaco.** Es siempre un string `"<driver>:<native_id>"` (por ejemplo
-`apple_mail:83143` en macOS u `outlook:ABC123` en Windows); el uid legado sin
+`apple_mail:83143` en macOS u `outlook:k3f9q2m7xa` en Windows, donde la parte
+nativa es el id corto y no el `EntryID`); el uid legado sin
 prefijo se acepta en la entrada del driver nativo, pero la salida siempre lleva
 el prefijo. Trátalo como un token opaco: no hagas aritmética con él, no asumas
 su longitud ni lo partas, y devuélvelo tal cual a `show` y `attachment`. Para
@@ -240,7 +241,7 @@ datos de prueba); en macOS la forma es la misma, con `uid` `apple_mail:<n>`:
   "hint": null,
   "messages": [
     {
-      "uid": "outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…",
+      "uid": "outlook:k3f9q2m7xa",
       "subject": "Factura octubre 2026",
       "from": {"name": "Proveedor SA", "address": "facturas@proveedor.example"},
       "date_received": "2026-11-02T09:54:09-04:00",

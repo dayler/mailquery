@@ -477,13 +477,13 @@ Secciones revisadas que no cambian:
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- skills/mailquery/SKILL.md: pendiente
-- docs/INTERFACES.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- skills/mailquery/SKILL.md: actualizado
+- docs/INTERFACES.md: actualizado
 - docs/config.example.toml: sin cambio
-- docs/recipes/: pendiente
-- docs/security/: pendiente
+- docs/recipes/: actualizado
+- docs/security/: actualizado
 - docs/tests/: pendiente
 
 ## Checklist de conciliación

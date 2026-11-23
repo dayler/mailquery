@@ -2159,7 +2159,7 @@ class CanonicalFieldOrderTest(SearchFixtureTest):
         return search.run_show(
             backend,
             load_config(home),
-            fake.item("normal").entry_id,
+            backend._uid_part(fake.item("normal").entry_id),
             driver=backend.driver,
         )["message"]
 
