@@ -1018,7 +1018,9 @@ def _run_command(
     level = args.log_level or config.logging.level
     try:
         _close_logging_handlers()
-        setup_logging(home_path, level, config.logging.max_size_mb)
+        setup_logging(
+            home_path, level, config.logging.max_size_mb, config.logging.json
+        )
     except OSError as exc:
         error = MailqueryError(
             "E_PERMISSION",
@@ -1719,8 +1721,8 @@ def _run_doctor(
     json_output: bool = False,
     failures: bool = False,
 ) -> int:
-    level, max_size_mb = _doctor_log_settings(home_path, log_level)
-    logger = _best_effort_logger(home_path, level, max_size_mb)
+    level, max_size_mb, json_log = _doctor_log_settings(home_path, log_level)
+    logger = _best_effort_logger(home_path, level, max_size_mb, json_log)
     selected = None
     run = _DoctorRun(home_path)
     client = _CLIENT_NAMES["apple_mail"]
@@ -2652,25 +2654,29 @@ def _best_effort_logger(
     home_path: Path,
     level: str | None,
     max_size_mb: int = DEFAULT_MAX_SIZE_MB,
+    json: bool = False,
 ) -> Any:
     try:
         ensure_app_home(home_path)
         _close_logging_handlers()
-        setup_logging(home_path, level or DEFAULT_LOG_LEVEL, max_size_mb)
+        setup_logging(home_path, level or DEFAULT_LOG_LEVEL, max_size_mb, json)
     except Exception:  # noqa: BLE001 - logging is never fatal
         return None
     return get_logger("mailquery.cli")
 
 
-def _doctor_log_settings(home_path: Path, log_level: str | None) -> tuple[str, int]:
+def _doctor_log_settings(
+    home_path: Path, log_level: str | None
+) -> tuple[str, int, bool]:
     """Resolve doctor logging settings: flag > config > defaults."""
     try:
         config = load_config(home_path)
     except Exception:  # noqa: BLE001 - doctor diagnoses broken configs itself
-        return log_level or DEFAULT_LOG_LEVEL, DEFAULT_MAX_SIZE_MB
+        return log_level or DEFAULT_LOG_LEVEL, DEFAULT_MAX_SIZE_MB, False
     return (
         log_level or config.logging.level,
         config.logging.max_size_mb,
+        config.logging.json,
     )
 
 
