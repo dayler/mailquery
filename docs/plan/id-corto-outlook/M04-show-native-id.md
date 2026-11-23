@@ -63,9 +63,9 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | 1 | Opción en el parser y su ayuda; paso a `run_show` | 🟢 |
-| 2 | Sustitución de `message.uid` con el gancho | ⚪ |
-| 3 | UT-SNI-01 completo | ⚪ |
-| 4 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
+| 2 | Sustitución de `message.uid` con el gancho | 🟢 |
+| 3 | UT-SNI-01 completo | 🟢 |
+| 4 | Suite completa, cobertura, diff, evidencia cruda | 🟡 |
 
 ## Tests
 
@@ -132,3 +132,5 @@ Los de `protocolo.md`, más la ayuda de `show --help` resultante (texto completo
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-23 | 1 | Opción `--show-native-id` en el parser de `show`, ayuda y epílogo de depuración; la opción se pasa a `run_show`. |
+| 2026-11-23 | 2 | `run_show` sustituye solo `message.uid` con `display_native_id`; sin gancho no cambia y la forma inválida y el tope de 30 s conservan los errores del protocolo de plugin. |
+| 2026-11-23 | 3 | `tests/test_show_native_id.py`: los 8 casos de UT-SNI-01 pasan por separado y el módulo entero (`Ran 8 tests`, `OK`). |
