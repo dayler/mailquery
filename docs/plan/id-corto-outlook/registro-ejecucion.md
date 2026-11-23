@@ -12,3 +12,4 @@ Lo completa solo el orquestador, al cerrar cada milestone y cada lote, y en cada
 | 2026-11-23 | F0 | 🟢 → 🟢 | `-k doc_15` verde | — | Definiciones `[pendiente]` y `[por actualizar]` en `docs/tests/`; prefijos UT-NID y UT-SNI; AC-63…AC-70 en la matriz |
 | 2026-11-23 | M02 | 🟡 → 🟢 | 1453 tests, `OK (skipped=8)` en `e3a90d3`; `tests.test_outlook` 225, `OK (skipped=1)` | [evidence/M02.md](evidence/M02.md) | Integrado con `--no-ff` en `b4e9e1f`; sin relanzamientos |
 | 2026-11-23 | M01 | 🟡 → 🟢 | 1481 tests, `OK (skipped=7)` en `a48184e`; `-k ut_nid` 29, `OK` | [evidence/M01.md](evidence/M01.md) | Integrado con `--no-ff`; cobertura de `native_ids.py` 90.7 %; marcas `[pendiente]` retiradas; sin relanzamientos |
+| 2026-11-23 | M03 | 🟡 → 🟢 | 1497 tests, `OK (skipped=8)` en `778fa7a`; UT-PL-05 6 `OK`, UT-PL-06 8 `OK` | [evidence/M03.md](evidence/M03.md) | Integrado con `--no-ff`; cobertura de los módulos tocados 93.6 %; marcas retiradas; sin relanzamientos |
