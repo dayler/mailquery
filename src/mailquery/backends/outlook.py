@@ -222,6 +222,8 @@ HIDDEN_DEFAULT_FOLDERS = (
     OL_FOLDER_LOCAL_FAILURES,
     OL_FOLDER_SERVER_FAILURES,
 )
+#: Deepest chain of folders followed from a message's folder up to its store's top level.
+MAX_FOLDER_DEPTH = 64
 OL_MAIL_ITEM = 0  # OlItemType of a mail folder (Folder.DefaultItemType)
 FOLDER_SEARCH = 2  # PR_FOLDER_TYPE of a search folder
 OL_USER_ITEMS = 0  # OlTableContents
@@ -505,6 +507,27 @@ class OutlookBackend(MailBackend):
             _walk_store(info.uuid, info.store, rows, self._folder_objects)
             self._store_folders[info.position] = rows
         return rows
+
+    def _listed_folder(
+        self, info: StoreInfo, folder: outlook_com.ReadOnlyCom, folder_id: str
+    ) -> MailboxRow | None:
+        """Listed row of one folder of a candidate store, or ``None`` when it is not listed.
+
+        A store already walked answers from its walk. Otherwise the folder is
+        located from its ancestors without walking the store, and the store is
+        walked only when that chain does not reach the store's top level.
+        """
+        walked = self._store_folders.get(info.position)
+        if walked is None:
+            assert info.store is not None and info.uuid is not None
+            located, row = _locate_folder(info.uuid, info.store, folder, folder_id)
+            if located:
+                if row is not None:
+                    self._folder_objects.setdefault(folder_id, folder)
+                return row
+            walked = self._walked(info)
+        listed = {row["id"]: row for row in walked}
+        return listed.get(folder_id)
 
     def _folder_object(self, mailbox_id: Any) -> outlook_com.ReadOnlyCom | None:
         """Folder proxy of a listed mailbox ``id``; walks every candidate store if unknown."""
@@ -1114,6 +1137,9 @@ class OutlookBackend(MailBackend):
         hint. Not a searchable item, IMAP-deleted or outside the listed folders
         (hidden, calendar...) ⇒ ``None`` and the row stays. An item that exists
         but cannot be opened gets its row from the folder tables of its store.
+        The folder of an opened item is located from its ancestors; the
+        store's folder tree is walked only when that fails or the item cannot
+        be opened.
         """
         entry_id = self._entry_id(str(uid))
         info = self._store_of(entry_id, candidate=True)
@@ -1125,11 +1151,12 @@ class OutlookBackend(MailBackend):
         item = self._open_candidate(entry_id, info)
         if item is None:
             raise MessageNotFound(REPEAT_SEARCH_HINT)
-        listed = {row["id"]: row for row in self._walked(info)}
         if item is _UNOPENABLE:
+            listed = {row["id"]: row for row in self._walked(info)}
             return self._find_in_tables(entry_id, listed)
-        folder_id = item.Parent.EntryID
-        mailbox = listed.get(folder_id)
+        folder = item.Parent
+        folder_id = folder.EntryID
+        mailbox = self._listed_folder(info, folder, folder_id)
         message_class = item.MessageClass
         if mailbox is None or not is_searchable_class(message_class):
             return None
@@ -1634,13 +1661,83 @@ def _walk_store(
     (``GetDefaultFolder``), never by name, so it works in any language; the
     sync folders and their whole subtrees are skipped without being read.
     """
+    inbox_id, hidden = _store_marks(store)
+    _walk_folder(account_uuid, store.GetRootFolder(), [], inbox_id, hidden, rows, objects)
+
+
+def _store_marks(store: outlook_com.ReadOnlyCom) -> tuple[str | None, set[str]]:
+    """``(inbox EntryID or None, EntryIDs of the sync folders)`` of one store."""
     inbox_id = _default_folder_id(store, OL_FOLDER_INBOX)
     hidden = {
         entry_id
         for entry_id in (_default_folder_id(store, kind) for kind in HIDDEN_DEFAULT_FOLDERS)
         if entry_id is not None
     }
-    _walk_folder(account_uuid, store.GetRootFolder(), [], inbox_id, hidden, rows, objects)
+    return inbox_id, hidden
+
+
+def _listed_row(
+    account_uuid: str, entry_id: str, names: Sequence[str], is_inbox: bool
+) -> MailboxRow:
+    """Listed folder row from its EntryID and its decoded path segments."""
+    return MailboxRow(
+        id=entry_id,
+        account_uuid=account_uuid,
+        name=encode_segment(names[-1]),
+        path="/".join(encode_segment(name) for name in names),
+        url=folder_url(account_uuid, list(names)),
+        is_inbox=is_inbox,
+        is_aggregate=False,
+        total=None,  # type: ignore[typeddict-item]  # counted by mailboxes()
+        unread=None,  # type: ignore[typeddict-item]
+    )
+
+
+def _locate_folder(
+    account_uuid: str,
+    store: outlook_com.ReadOnlyCom,
+    folder: outlook_com.ReadOnlyCom,
+    folder_id: str,
+) -> tuple[bool, MailboxRow | None]:
+    """Listed row of one folder of ``store``, read from the folder up to the store's top level.
+
+    ``(True, row)`` is the row the store walk lists for ``folder``;
+    ``(True, None)`` means the walk does not list it (the root, a folder inside
+    a sync folder, a folder that is not a mail folder or a search folder).
+    ``(False, None)`` means the chain of parents did not reach a top-level
+    folder of the store within :data:`MAX_FOLDER_DEPTH` folders; the caller then
+    walks the store. Only the folder, its ancestors, the store's top-level
+    folders and its inbox and sync default folders are read, and the root's
+    parent never is.
+    """
+    root = store.GetRootFolder()
+    root_id = root.EntryID
+    if folder_id == root_id:
+        return True, None
+    top = root.Folders
+    top_ids = {top.Item(position).EntryID for position in range(1, top.Count + 1)}
+    inbox_id, hidden = _store_marks(store)
+    names: list[str] = []
+    current, entry_id = folder, folder_id
+    for _depth in range(MAX_FOLDER_DEPTH):
+        if entry_id in hidden:
+            return True, None
+        is_inbox = inbox_id is not None and entry_id == inbox_id
+        names.append(INBOX if is_inbox else (current.Name or ""))
+        if entry_id in top_ids:
+            break
+        current = current.Parent
+        entry_id = current.EntryID
+        if entry_id == root_id:
+            return False, None
+    else:
+        return False, None
+    names.reverse()
+    if not _is_mail_folder(folder):
+        return True, None
+    return True, _listed_row(
+        account_uuid, folder_id, names, inbox_id is not None and folder_id == inbox_id
+    )
 
 
 def _walk_folder(
@@ -1662,20 +1759,7 @@ def _walk_folder(
         is_inbox = inbox_id is not None and entry_id == inbox_id
         child_names = [*names, INBOX if is_inbox else (child.Name or "")]
         if _is_mail_folder(child):
-            path = "/".join(encode_segment(name) for name in child_names)
-            rows.append(
-                MailboxRow(
-                    id=entry_id,
-                    account_uuid=account_uuid,
-                    name=encode_segment(child_names[-1]),
-                    path=path,
-                    url=folder_url(account_uuid, child_names),
-                    is_inbox=is_inbox,
-                    is_aggregate=False,
-                    total=None,  # type: ignore[typeddict-item]  # counted by mailboxes()
-                    unread=None,  # type: ignore[typeddict-item]
-                )
-            )
+            rows.append(_listed_row(account_uuid, entry_id, child_names, is_inbox))
             objects[entry_id] = child
         _walk_folder(account_uuid, child, child_names, inbox_id, hidden, rows, objects)
 

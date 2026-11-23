@@ -1472,7 +1472,9 @@ def _run_attachment(
     wrapped = wrap_driver(instance, driver=driver)
     target_config = _config_for_driver(config, driver, str(native or driver))
     excluded: list[dict] = []
-    resolved = _resolved_scope(target_config, wrapped, excluded, native=driver)
+    resolved = _resolved_scope(
+        target_config, wrapped, excluded, native=driver, with_mailboxes=False
+    )
     declared = {_scope_account_uuid(scope) for scope in resolved}
     try:
         found = wrapped.find_message(native_uid)

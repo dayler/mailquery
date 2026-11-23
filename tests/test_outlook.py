@@ -2415,6 +2415,133 @@ _SHOW_FIELDS = [
     "body_text", "body_truncated", "attachments", "partial", "readable", "source",
 ]
 _HEADER_NAMES = ["From", "To", "Cc", "Subject", "Date", "Message-ID"]
+class OutlookFolderLocationTests(_ItemCase):
+    """find_message locates the item's folder from its ancestors, without walking the store."""
+
+    _MATRIX_ITEMS = (
+        "es_inbox_message",
+        "es_factura",
+        "es_proyectos_inbox",
+        "es_slash",
+        "es_nonascii",
+        "es_archivo_factura",
+        "de_inbox_message",
+        "de_rechnung",
+    )
+
+    @staticmethod
+    def _all_folders(folder, found: list) -> list:
+        """Every folder proxy below ``folder``, depth-first (listed or not)."""
+        children = folder.Folders
+        for position in range(1, children.Count + 1):
+            child = children.Item(position)
+            found.append((child.EntryID, child))
+            OutlookFolderLocationTests._all_folders(child, found)
+        return found
+
+    def test_every_folder_located_from_its_ancestors_matches_the_store_walk(self) -> None:
+        from mailquery.backends import outlook
+
+        for name, fake in (
+            ("folder_matrix", fk.FakeOutlook.folder_matrix()),
+            ("item_matrix", fk.FakeOutlook.item_matrix(_ITEMS_NOW)),
+        ):
+            backend = self.make(fake)
+            for info in backend._profile():
+                if info.reason is not None or info.store is None or info.uuid is None:
+                    continue
+                walked = {row["id"]: row for row in backend._walked(info)}
+                root = info.store.GetRootFolder()
+                folders = self._all_folders(root, [(root.EntryID, root)])
+                self.assertGreater(len(folders), len(walked))
+                for entry_id, folder in folders:
+                    with self.subTest(fixture=name, store=info.uuid, folder=entry_id):
+                        located, row = outlook._locate_folder(
+                            info.uuid, info.store, folder, entry_id
+                        )
+                        self.assertTrue(located)
+                        self.assertEqual(row, walked.get(entry_id))
+            self.assertEqual(fake.mutations.total, 0)
+
+    def test_find_message_does_not_walk_the_store(self) -> None:
+        fake = fk.FakeOutlook.folder_matrix()
+        reference = self.make(fk.FakeOutlook.folder_matrix())
+        for key in self._MATRIX_ITEMS:
+            with self.subTest(item=key):
+                backend = self.make(fake)
+                part = self.seed_part(fake, backend, fake.item(key).entry_id)
+                row, mailbox = backend.find_message(part)
+                self.assertEqual(backend._store_folders, {})
+                expected = next(
+                    item
+                    for item in reference.mailboxes_without_counters()
+                    if item["id"] == row["mailbox_id"]
+                )
+                self.assertEqual(mailbox, expected)
+        self.assertEqual(fake.mutations.total, 0)
+
+    def test_hidden_folder_items_stay_unlisted_without_a_walk(self) -> None:
+        fake = fk.FakeOutlook.folder_matrix()
+        for key in ("in_hidden_folder", "in_hidden_subfolder"):
+            with self.subTest(item=key):
+                backend = self.make(fake)
+                part = self.seed_part(fake, backend, fake.item(key).entry_id)
+                self.assertIsNone(backend.find_message(part))
+                self.assertEqual(backend._store_folders, {})
+
+    def test_a_chain_deeper_than_the_limit_falls_back_to_the_walk(self) -> None:
+        from mailquery.backends import outlook
+
+        fake = fk.FakeOutlook.folder_matrix()
+        reference = self.make(fk.FakeOutlook.folder_matrix())
+        backend = self.make(fake)
+        part = self.seed_part(fake, backend, fake.item("es_archivo_factura").entry_id)
+        with mock.patch.object(outlook, "MAX_FOLDER_DEPTH", 1):
+            row, mailbox = backend.find_message(part)
+        self.assertNotEqual(backend._store_folders, {})
+        self.assertEqual(mailbox["path"], "Archivo/Facturas")
+        self.assertIn(mailbox, reference.mailboxes_without_counters())
+
+    def test_a_chain_that_reaches_the_root_without_a_top_level_match_is_not_located(self) -> None:
+        from mailquery.backends import outlook
+
+        class _Stub:
+            def __init__(self, **members) -> None:
+                self.__dict__.update(members)
+
+        class _Root(_Stub):
+            @property
+            def Parent(self):  # noqa: N802 - Outlook member name
+                raise AssertionError("the root's parent is never read")
+
+        def no_default_folder(_kind):
+            raise _oc().ComCallError(_oc().MAPI_E_NOT_FOUND)
+
+        root = _Root(EntryID="root", Folders=_Stub(Count=0, Item=None))
+        folder = _Stub(EntryID="child", Name="Child", Parent=root)
+        store = _Stub(GetRootFolder=lambda: root, GetDefaultFolder=no_default_folder)
+        self.assertEqual(outlook._locate_folder("uuid", store, folder, "child"), (False, None))
+
+    def test_folder_object_of_an_unknown_id_walks_the_stores(self) -> None:
+        fake = fk.FakeOutlook.folder_matrix()
+        backend = self.make(fake)
+        folder_id = fake.folder("es.archivo_facturas").entry_id
+        self.assertEqual(backend._store_folders, {})
+        self.assertEqual(backend._folder_object(folder_id).EntryID, folder_id)
+        self.assertNotEqual(backend._store_folders, {})
+
+    def test_a_walked_store_answers_from_its_walk(self) -> None:
+        fake = fk.FakeOutlook.folder_matrix()
+        backend = self.make(fake)
+        backend.mailboxes_without_counters()
+        part = self.seed_part(fake, backend, fake.item("es_factura").entry_id)
+        fake.call_log.clear()
+        _row, mailbox = backend.find_message(part)
+        self.assertEqual(mailbox["path"], "INBOX/Facturas")
+        self.assertEqual(fake.call_log.count(kind="Folder", member="Parent"), 0)
+        self.assertEqual(fake.call_log.count(kind="Store", member="GetRootFolder"), 0)
+
+
 _SMIME_ENCRYPTED = "W_BODY_UNREADABLE: S/MIME encrypted content is not supported"
 _SMIME_SIGNED = "W_BODY_UNREADABLE: S/MIME signed content is not supported"
 #: Item members that read content or could ask for a download.

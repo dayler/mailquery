@@ -33,7 +33,6 @@ failure can be injected without patching the ``os`` module globally.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -122,6 +121,8 @@ class StagedAttachment:
         self._path = path
         self._handle = handle
         self.size_bytes = 0
+        import hashlib
+
         self._hash = hashlib.sha256()
         self._finished = False
 
@@ -675,6 +676,8 @@ def _parse_manifest(document: object) -> Manifest:
 
 
 def _hash_file(path: Path) -> tuple[str, int]:
+    import hashlib
+
     digest = hashlib.sha256()
     size = 0
     with _open_no_follow(path) as handle:

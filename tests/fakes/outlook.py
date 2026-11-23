@@ -236,6 +236,7 @@ OOM_MEMBERS: dict[str, dict[str, str | None]] = {
         "EntryID": None,
         "DefaultItemType": None,
         "Folders": "Folders",
+        "Parent": "Folder",
         "PropertyAccessor": "PropertyAccessor",
         "GetTable": "Table",
     },
@@ -1377,7 +1378,7 @@ class FakeFolders(_ComObject):
 
 class FakeFolder(_ComObject):
     _KIND = "Folder"
-    _PROPS = ("Name", "EntryID", "DefaultItemType", "Folders", "PropertyAccessor")
+    _PROPS = ("Name", "EntryID", "DefaultItemType", "Folders", "Parent", "PropertyAccessor")
     _METHODS = ("GetTable",)
 
     def __init__(self, runtime: _Runtime, spec: FolderSpec) -> None:
@@ -1386,6 +1387,13 @@ class FakeFolder(_ComObject):
 
     def _get_Name(self) -> str:
         return self._spec.name
+
+    def _get_Parent(self) -> "FakeFolder":
+        # Outlook answers the namespace for a store root, which is not a folder:
+        # the backend must never read it.
+        if self._spec.parent is None:
+            raise AssertionError("Folder.Parent read on a store root")
+        return FakeFolder(self._rt, self._spec.parent)
 
     def _get_EntryID(self) -> str:
         return self._spec.entry_id
