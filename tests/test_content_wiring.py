@@ -194,8 +194,12 @@ def _with_full_row(argv):
     return args
 
 
-def _outlook_payload(case, argv):
-    """Run one command over the in-memory Outlook double (read-only)."""
+def _outlook_payload(case, argv, *, seed_key: str | None = None):
+    """Run one command over the in-memory Outlook double (read-only).
+
+    ``seed_key`` registers that fixture item in the native id cache before the
+    command runs, so a ``show`` can resolve a uid printed by another run.
+    """
     tmp = tempfile.TemporaryDirectory(prefix="mailquery-cw-ol-")
     case.addCleanup(tmp.cleanup)
     home = Path(tmp.name) / "home"
@@ -212,6 +216,10 @@ def _outlook_payload(case, argv):
         pywin32=None,
         tmp_root=home / "tmp",
     )
+    if seed_key is not None:
+        part = backend._uid_part(fake.item(seed_key).entry_id)
+        backend.printed_messages([part])
+        argv = ["show", part, *(arg for arg in argv if arg.startswith("--"))]
     stdout, stderr = io.StringIO(), io.StringIO()
     with (
         mock.patch.object(outlook_com, "get_drive_type", fake.drive_type),
@@ -282,6 +290,13 @@ def _outlook_backend(case, home, build):
     )
     case.addCleanup(backend.close)
     return fake, backend
+
+
+def _outlook_uid(backend, fake, key: str) -> str:
+    """Register a fixture item in the native id cache and return its uid part."""
+    part = backend._uid_part(fake.item(key).entry_id)
+    backend.printed_messages([part])
+    return part
 
 
 def _outlook_cli(case, home, fake, backend, argv):
@@ -901,9 +916,7 @@ class ContentNoticeTests(_AppleCase):
         outlook_search = _outlook_payload(self, ["search", "--since", "2026-01-01"])
         payloads["search-outlook"] = outlook_search
         payloads["new-outlook"] = _outlook_payload(self, ["new", "--peek"])
-        payloads["show-outlook"] = _outlook_payload(
-            self, ["show", outlook_search["messages"][0]["uid"]]
-        )
+        payloads["show-outlook"] = _outlook_payload(self, ["show"], seed_key="normal")
         for command, payload in payloads.items():
             with self.subTest(command=command):
                 self.assertEqual(payload["content_notice"], EXPECTED_NOTICE)
@@ -1282,7 +1295,7 @@ class HiddenContentWarningsTests(_AppleCase):
             home,
             fake,
             backend,
-            ["show", fake.item("hidden").entry_id],
+            ["show", _outlook_uid(backend, fake, "hidden")],
         )
         outlook_codes = _warning_codes(shown_outlook["warnings"])
         self.assertIn("W_HTML_NO_TEXT", outlook_codes)
@@ -1615,7 +1628,7 @@ class SenderSignalTests(_AppleCase):
                 received=_recent(),
             ),
         )
-        outlook_uid = prefixed_uid(fake.item("sender").entry_id, "outlook")
+        outlook_uid = prefixed_uid(_outlook_uid(backend, fake, "sender"), "outlook")
         outlook_auth = (
             f"W_SENDER_AUTH_FAILED: spf=softfail dkim=none dmarc=fail in {outlook_uid}"
         )
@@ -1629,7 +1642,7 @@ class SenderSignalTests(_AppleCase):
             ),
             "new": _outlook_ok(self, home, fake, backend, ["new", "--peek"]),
             "show": _outlook_ok(
-                self, home, fake, backend, ["show", fake.item("sender").entry_id]
+                self, home, fake, backend, ["show", _outlook_uid(backend, fake, "sender")]
             ),
         }
         for command, payload in outlook_payloads.items():
@@ -1687,7 +1700,7 @@ class SenderSignalTests(_AppleCase):
         for key in ("pass", "headerless", "later_failure"):
             with self.subTest(item=key):
                 shown = _outlook_ok(
-                    self, home, fake, backend, ["show", fake.item(key).entry_id]
+                    self, home, fake, backend, ["show", _outlook_uid(backend, fake, key)]
                 )
                 self.assertEqual(shown["warnings"], [])
         new = _outlook_ok(self, home, fake, backend, ["new", "--peek"])
@@ -1731,7 +1744,7 @@ class SenderSignalTests(_AppleCase):
             ),
         )
         shown = _outlook_ok(
-            self, home, fake, backend, ["show", fake.item("internal").entry_id]
+            self, home, fake, backend, ["show", _outlook_uid(backend, fake, "internal")]
         )
         self.assertEqual(shown["warnings"], [])
 
