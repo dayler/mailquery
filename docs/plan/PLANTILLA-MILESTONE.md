@@ -1,7 +1,7 @@
 # M<NN> — <título>
 
-- **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
-- **Oleada / lote:** <n> / <n>. **Rama del lote:** `feature/id-corto-outlook-lote-<n>`. **Rama del milestone:** `feature/id-corto-outlook-m<NN>`, creada desde el tip de la rama del lote.
+- **Unidad:** `docs/changes/<unidad>.md` (<la completa, o contribuye y no la completa sola>).
+- **Oleada / lote:** <n> / <n>. **Rama del lote:** `feature/<plan>-lote-<n>`. **Rama del milestone:** `feature/<plan>-m<NN>`, creada desde el tip de la rama del lote.
 - **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
 - **Depende de:** <milestones y qué usa de cada uno>. **Lo usan:** <milestones>.
 - **ACs:** <IDs y parte que cubre>.
@@ -20,17 +20,17 @@
 
 ## Alcance de escritura
 
-<archivos exactos; siempre su propio archivo de milestone y `docs/plan/id-corto-outlook/work/M<NN>-handoff.md`, `docs/plan/id-corto-outlook/work/M<NN>-propuestas.md`>
+<archivos exactos; siempre su propio archivo de milestone y `docs/plan/<plan>/work/M<NN>-handoff.md`, `docs/plan/<plan>/work/M<NN>-propuestas.md`>
 
 ## Especificación
 
-Rangos de `docs/changes/id-corto-outlook.md` en el commit `384e5a8` (encabezado y líneas):
+Rangos de `docs/changes/<unidad>.md` en el commit `<commit de referencia>` (encabezado y líneas):
 
 <lista>
 
 ## Puntos de entrada en el código
 
-<archivo, función y línea en el commit `384e5a8`; si la línea se movió, búscala por el nombre>
+<archivo, función y línea en el commit `<commit de referencia>`; si la línea se movió, búscala por el nombre>
 
 ## Refactorizaciones previas
 
@@ -38,7 +38,7 @@ Rangos de `docs/changes/id-corto-outlook.md` en el commit `384e5a8` (encabezado 
 
 ## Decisiones aplicables
 
-<IDs de `decisiones.md` copiados con su texto>
+<IDs del archivo de decisiones del plan copiados con su texto>
 
 ## Fases
 
@@ -66,7 +66,7 @@ Rangos de `docs/changes/id-corto-outlook.md` en el commit `384e5a8` (encabezado 
 
 ## Datos crudos de evidencia
 
-Los de la sección "Evidencia cruda" de `protocolo.md`, más: <lo propio del milestone>.
+Los de la sección "Evidencia cruda" del archivo de protocolo del plan, más: <lo propio del milestone>.
 
 ## Definition of Done
 
