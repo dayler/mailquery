@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 1 / 1. **Rama del lote:** `feature/servidor-mcp-lote-1`. **Rama del milestone:** `feature/servidor-mcp-m01`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `f866be8`. **Línea base de la suite:** `Ran 1562 tests`, `failures=3`, `skipped=7`. Los tres fallos son del entorno de este equipo (SMOKE contra Apple Mail real: cambia el `mtime` de `~/.mailquery/tmp`); el resto de la línea base está verde.
 - **Depende de:** nada. **Lo usan:** M02 (`log_event` para los eventos del servidor), M04 (campos estructurados para el formateador JSON).
 - **ACs:** ninguno directamente; prepara AC-77 (RF-88: "Los valores salen del evento, no de partir la línea de texto").
 
@@ -62,10 +62,10 @@ Margen tuyo: el nombre de las claves de `extra` (prefijadas, para no chocar con 
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Antes de tocar nada, escribir el test de regresión que captura, con el código base, la línea de texto de cada una de las 14 llamadas (todas las ramas: `attachment`, `doctor`, error con y sin traceback, `internal_error` con `exc_info`, store, cuentas, Outlook vigilado) y comprobar que pasa en el commit base | ⚪ |
-| 2 | `log_event` en `logging_setup.py`; migrar `logging_setup.py`, `store.py`, `accounts.py` y `outlook_com.py`; test de regresión verde | ⚪ |
-| 3 | Migrar `cli.py` (incluido `_log_error` con `traceback=`); test de regresión, UT-LOG-03 y UT-LOG-04 verdes; búsqueda de llamadas de log de la sección Tests sin resultados fuera de `log_event` | ⚪ |
-| 4 | Suite completa, cobertura de los módulos tocados, evidencia cruda y propuestas | ⚪ |
+| 1 | Antes de tocar nada, escribir el test de regresión que captura, con el código base, la línea de texto de cada una de las 14 llamadas (todas las ramas: `attachment`, `doctor`, error con y sin traceback, `internal_error` con `exc_info`, store, cuentas, Outlook vigilado) y comprobar que pasa en el commit base | 🟢 |
+| 2 | `log_event` en `logging_setup.py`; migrar `logging_setup.py`, `store.py`, `accounts.py` y `outlook_com.py`; test de regresión verde | 🟢 |
+| 3 | Migrar `cli.py` (incluido `_log_error` con `traceback=`); test de regresión, UT-LOG-03 y UT-LOG-04 verdes; búsqueda de llamadas de log de la sección Tests sin resultados fuera de `log_event` | 🟢 |
+| 4 | Suite completa, cobertura de los módulos tocados, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -111,3 +111,7 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Test de regresión añadido antes del refactor; 13 casos verdes en `f866be8` (el evento de `setup_logging` a nivel `debug` no llegaba al archivo en la base por un `LogRecord` sin `run_id`; su caso queda en `StructuredSetupEventTests` y pasa tras el refactor). |
+| 2026-11-23 | 2 | `log_event` con la firma de DP-02; migrados `logging_setup.py`, `store.py`, `accounts.py` y `outlook_com.py`; el adaptador conserva `run_id` y añade los datos del evento. |
+| 2026-11-23 | 3 | Migrado `cli.py`; `_log_error` pasa el traceback como datos y la línea de texto no cambia; la búsqueda no encuentra llamadas directas. |
+| 2026-11-23 | 4 | Suite completa y cobertura en la evidencia. |
