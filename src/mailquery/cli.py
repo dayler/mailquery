@@ -3,13 +3,14 @@
 Only this module writes to ``stdout``/``stderr``. It parses ``argv`` with
 ``argparse`` (``-h``/``--help`` is the documented non-JSON exception), loads
 the configuration, sets up logging, takes the run lock, dispatches one of the
-six commands and renders either success or a JSON error object.
+seven commands and renders either success or a JSON error object.
 """
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import io
 import logging
 import os
 import re
@@ -86,7 +87,7 @@ from mailquery.search import (
 )
 from mailquery.state import RunLock, StateStore
 
-COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
+COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment", "mcp")
 # Backend check that the resolution of the ``[scope]`` blocks depends on, by
 # backend name.
 _RESOLUTION_DEPENDENCY = {"apple_mail": "schema", "outlook": "stores"}
@@ -136,7 +137,8 @@ Examples:
 
 Configuration: ~/.mailquery/config.toml (optional; see README.md)
 Output: one JSON object on stdout for every command, in UTF-8 (this help,
-        --version and the default doctor report are the only non-JSON output);
+        --version, the default doctor report and the MCP protocol of
+        mcp serve are the only non-JSON output);
         logs go to ~/.mailquery/logs/mailquery.log (text) or
         ~/.mailquery/logs/mailquery.jsonl with [logging].json = true
 Exit codes: 0 ok | 2 usage or config error | 3 environment error
@@ -190,6 +192,37 @@ Notes:
   total and unread are added only when requested with --fields. Counters are
   calculated from the mail store only with --fields total or unread, because the
   mail client's own counters are not reliable.
+"""
+
+_MCP_EPILOG = """\
+Examples:
+  mailquery mcp serve
+
+Notes:
+  Starts a JSON-RPC server on stdin and stdout and serves the read commands as
+  MCP tools. Register it once with Claude Code:
+    claude mcp add --scope user mailquery -- mailquery mcp serve
+  Generic mcpServers entry:
+    {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}
+  Each call runs one child `mailquery` process with empty stdin; the server
+  never reads mail, state or drivers itself. It writes its own events to the
+  active log file and never lets a log failure reach stdout or stderr.
+"""
+
+_MCP_SERVE_EPILOG = """\
+Examples:
+  mailquery mcp serve
+
+Notes:
+  Serves initialize, ping, tools/list and tools/call over stdin and stdout.
+  The tools are search, new, show, attachment, mailboxes and doctor; each call
+  is one `mailquery` child process and returns the same JSON as the CLI.
+  Register it once with Claude Code:
+    claude mcp add --scope user mailquery -- mailquery mcp serve
+  Generic mcpServers entry:
+    {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}
+  The harness closes stdin to stop the server. Registration and permissions
+  are documented in README.md.
 """
 
 _SEARCH_EPILOG = """\
@@ -659,6 +692,28 @@ def build_parser() -> argparse.ArgumentParser:
         "the legacy unprefixed uid is accepted for the native driver)",
     )
 
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="serve the read commands as MCP tools over stdio",
+        description="Serve the read commands as MCP tools over stdio.",
+        epilog=_MCP_EPILOG,
+        formatter_class=_HelpFormatter,
+    )
+    mcp_parser.set_defaults(command="mcp")
+    _style_parser(mcp_parser, root=False)
+    mcp_subparsers = mcp_parser.add_subparsers(
+        dest="mcp_command", metavar="<subcommand>", required=True
+    )
+    serve_parser = mcp_subparsers.add_parser(
+        "serve",
+        help="serve MCP over stdin and stdout",
+        description="Serve the read commands as MCP tools over stdin and stdout.",
+        epilog=_MCP_SERVE_EPILOG,
+        formatter_class=_HelpFormatter,
+    )
+    serve_parser.set_defaults(command="mcp", mcp_command="serve")
+    _style_parser(serve_parser, root=False)
+
     return parser
 
 
@@ -754,6 +809,9 @@ def _main(
             log_message="cannot resolve the application home",
         )
         return _report_error(error, command)
+
+    if command == "mcp":
+        return _run_mcp(home_path, args.log_level)
 
     if command == "doctor":
         return _run_doctor(
@@ -991,6 +1049,45 @@ def _validate_command_native_id(
         )
     else:  # pragma: no cover - the API 1 contract requires parse_native_id
         args.uid = str(getattr(args, "uid_native_id", ""))
+
+
+def _run_mcp(home_path: Path, log_level: str | None) -> int:
+    """Run the MCP server over stdin and stdout with its own per-event log."""
+    from mailquery import mcp_server
+    from mailquery.config import load_logging_config
+    from mailquery.logging_setup import setup_server_logging
+
+    settings = load_logging_config(home_path)
+    try:
+        setup_server_logging(
+            home_path,
+            log_level or settings.level,
+            settings.max_size_mb,
+            json=settings.json,
+        )
+    except Exception:  # noqa: BLE001 - the server must start without a log
+        pass
+    logger = get_logger("mailquery.mcp")
+    log_event(logger, logging.INFO, (("command", "mcp"),), text="event=start")
+    stdin, stdout = _mcp_streams()
+    try:
+        mcp_server.serve(stdin, stdout, runner=mcp_server.SubprocessToolRunner())
+    except Exception:  # noqa: BLE001 - never write a traceback to stdout or stderr
+        return 1
+    finally:
+        log_event(logger, logging.INFO, (("command", "mcp"),), text="event=end")
+    return 0
+
+
+def _mcp_streams():
+    """Text streams over the CLI bytes: UTF-8, no newline translation."""
+    stdin = sys.stdin
+    buffer = getattr(stdin, "buffer", None)
+    wrapper = None
+    if buffer is not None:
+        wrapper = io.TextIOWrapper(buffer, encoding="utf-8", errors="strict", newline="")
+        stdin = wrapper
+    return stdin, sys.stdout
 
 
 def _run_command(
