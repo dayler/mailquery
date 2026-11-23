@@ -651,6 +651,40 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("all checks passed", out)
         self.assertEqual(_snapshot(REAL_HOME / ".mailquery"), self.real_mq_before)
 
+    def test_smoke_new_11_short_uid_against_the_real_client(self):
+        """SMOKE-NEW.11: short uids and --show-native-id; no cache.db on macOS."""
+        before = self._counters() if sys.platform == "win32" else None
+        found = self._search("--since", "1w")
+        self.assertTrue(found["messages"], "no message in the last week to show")
+        if sys.platform == "darwin":
+            uid = str(found["messages"][0]["uid"])
+            self._json(["show", uid], "show")
+            self.assertFalse(
+                (self.home / ".mailquery" / "db" / "cache.db").exists(),
+                "Apple Mail must not create the native id cache",
+            )
+            return
+        self.assertEqual(
+            sys.platform, "win32", "SMOKE-NEW.11 applies to Windows and macOS"
+        )
+        short = re.compile(r"^outlook:[0-9a-z]{10}(?:-[1-9][0-9]*)?$")
+        for message in found["messages"]:
+            uid = str(message["uid"])
+            self.assertRegex(uid, short)
+            self.assertEqual(len(uid.split(":", 1)[1].split("-", 1)[0]), 10)
+        uid = str(found["messages"][0]["uid"])
+        self._json(["show", uid], "show")
+        self.assertTrue((self.home / ".mailquery" / "db" / "cache.db").is_file())
+        native = self._json(["show", uid, "--show-native-id"], "show")["message"][
+            "uid"
+        ]
+        self.assertRegex(native, r"^outlook:[0-9A-F]+$")
+        after = self._counters()
+        self.assertEqual(set(after), set(before), "the included folders changed")
+        for url, (total_before, unread_before) in before.items():
+            total_after, unread_after = after[url]
+            self.assertEqual(unread_after - unread_before, total_after - total_before)
+
 
 
 # --------------------------------------------------------------------------- #

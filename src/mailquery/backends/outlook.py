@@ -665,6 +665,32 @@ class OutlookBackend(MailBackend):
         self._last_item = (entry_id, item)
         return item
 
+    def _discard_absent(self, entry_id: str) -> None:
+        """Delete the cache row of an EntryID whose message no longer exists.
+
+        The part also stops resolving in this execution. The highest sequence
+        number its short id reached stays in the cache, so the part is never
+        assigned to another message while the cache exists.
+        """
+        self._cache().discard(entry_id)
+        part = self._entry_parts.pop(entry_id, None)
+        if part is not None:
+            self._part_entries.pop(part, None)
+
+    def _open_candidate(self, entry_id: str, info: StoreInfo) -> Any:
+        """``GetItemFromID`` of an EntryID of a mounted, readable candidate store.
+
+        A not-found HRESULT confirms that the message is absent: its cache row is
+        deleted and the result is ``None``, so the caller reports a missing
+        message with the repeat-the-search hint. Any other result keeps the row:
+        the opened item, :data:`_UNOPENABLE` when it exists but cannot be opened,
+        or the COM error of the cause, which propagates.
+        """
+        item = self._open_item(entry_id, info)
+        if item is None:
+            self._discard_absent(entry_id)
+        return item
+
     def _find_in_tables(
         self, entry_id: str, listed: dict[str, MailboxRow]
     ) -> tuple[MessageRow, MailboxRow] | None:
@@ -1011,7 +1037,12 @@ class OutlookBackend(MailBackend):
             self._attachment_sessions.discard(session)
 
     def _attachment_item(self, uid: Uid) -> Any:
-        """Opened item for the attachment operations; protocol errors when unusable."""
+        """Opened item for the attachment operations; protocol errors when unusable.
+
+        A not-found HRESULT of the EntryID in its mounted, readable store is a
+        confirmed absence: the cache row is deleted and the operation reports a
+        missing message with the repeat-the-search hint.
+        """
         entry_id = self._entry_id(str(uid))
         info = self._store_of(entry_id, candidate=True)
         if info is None:
@@ -1021,10 +1052,12 @@ class OutlookBackend(MailBackend):
             raise usage_error(
                 "the message was not found", "run `mailquery search` to find the uid"
             )
-        item = self._open_item(entry_id, info)
+        item = self._open_candidate(entry_id, info)
         if item is None:
             raise usage_error(
-                "the message was not found", "run `mailquery search` to find the uid"
+                "the message was not found",
+                REPEAT_SEARCH_HINT,
+                "the message was not found",
             )
         if item is _UNOPENABLE:
             raise _attachment_unreadable_error(
@@ -1075,10 +1108,12 @@ class OutlookBackend(MailBackend):
 
         The store comes from the EntryID (bytes 4..20 = ``PR_RECORD_KEY``).
         A uid of an excluded store raises :class:`ExcludedStoreError`
-        without opening anything of that store. Not found, not a searchable item,
-        IMAP-deleted or outside the listed folders (hidden, calendar...) ⇒
-        ``None``. An item that exists but cannot be opened gets its row from the
-        folder tables of its store.
+        without opening anything of that store. A failed ``GetItemFromID`` of a
+        mounted, readable candidate store is a confirmed absence: the cache row
+        is deleted and :class:`MessageNotFound` carries the repeat-the-search
+        hint. Not a searchable item, IMAP-deleted or outside the listed folders
+        (hidden, calendar...) ⇒ ``None`` and the row stays. An item that exists
+        but cannot be opened gets its row from the folder tables of its store.
         """
         entry_id = self._entry_id(str(uid))
         info = self._store_of(entry_id, candidate=True)
@@ -1087,10 +1122,10 @@ class OutlookBackend(MailBackend):
             if excluded is not None:
                 raise ExcludedStoreError(excluded.excluded_entry())
             return None
-        listed = {row["id"]: row for row in self._walked(info)}
-        item = self._open_item(entry_id, info)
+        item = self._open_candidate(entry_id, info)
         if item is None:
-            return None
+            raise MessageNotFound(REPEAT_SEARCH_HINT)
+        listed = {row["id"]: row for row in self._walked(info)}
         if item is _UNOPENABLE:
             return self._find_in_tables(entry_id, listed)
         folder_id = item.Parent.EntryID
