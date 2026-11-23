@@ -11,8 +11,8 @@ meant for an agent harness to invoke it **on demand** and consume its output.
   Exceptions: `--help`, `--version` and the `doctor` text report.
 - **Read-only** (invariant I-1): it does not mark as read, move, delete, send,
   download bodies from the server or **launch** Mail.app or Outlook. It only
-  writes inside `~/.mailquery` (state, logs, locks, staging and the attachment
-  cache).
+  writes inside `~/.mailquery` (state, logs, locks, staging, the attachment
+  cache and the native id cache).
 - **No network, no daemon and no scheduler** from the core: the harness decides
   when to run it. External backend plugins declare their own capabilities
   (`network`, `readonly`, `body_local`, `attachments`, `native_order`) and
@@ -21,11 +21,13 @@ meant for an agent harness to invoke it **on demand** and consume its output.
   structural (SQLite and `.emlx` opened read-only); on Windows it is enforced by a
   whitelist proxy over Outlook's object model.
 - **Opaque `uid` string:** every message id is `"<driver>:<native_id>"`, for the
-  built-in drivers and for plugins. The legacy unprefixed uid is accepted on
-  input for the platform's native driver.
+  built-in drivers and for plugins. In Outlook the native part is a short id of
+  10 characters, so a uid is 18 characters (`outlook:k3f9q2m7xa`) or 20 and
+  more with a sequence suffix; the `EntryID` is never accepted as a uid. The
+  legacy unprefixed uid is accepted on input for the platform's native driver.
 
 The attachment and multi-driver features are part of the future 3.0.0, not
-yet released. `develop` reports the pre-release `3.0.0a1` (3.0.0-alpha.1) from
+yet released. `develop` reports the pre-release `3.0.0a2` (3.0.0-alpha.2) from
 `--version`, but publishes nothing: no tag, no release and no `main` merge.
 
 References: [`docs/prd/`](docs/prd/00-indice.md) (product contract, v2.3),
@@ -90,13 +92,15 @@ mailquery -v            # lists the installed drivers
 git pull && pipx reinstall mailquery    # upgrade; then: mailquery doctor
 pipx uninject mailquery <plugin-package>  # uninstall a plugin
 pipx uninstall mailquery                # uninstall the command
-rm -rf ~/.mailquery                     # optional: remove state, logs and cache
+rm -rf ~/.mailquery                     # optional: remove state, logs and both caches
 ```
 
 On Windows the optional removal is `Remove-Item -Recurse -Force $HOME\.mailquery`
 (or `.\scripts\install.ps1 -Uninstall -Purge`; on macOS,
 `scripts/install.sh --uninstall --purge`). `pipx uninstall` does not touch
-`~/.mailquery`. To run without installing, see
+`~/.mailquery`: it keeps the attachment cache and the native id cache
+(`~/.mailquery/db/cache.db`), including the rows of an uninstalled plugin, as
+`pipx uninject` does. To run without installing, see
 [`docs/INTERFACES.md` §8](docs/INTERFACES.md).
 
 ### Security update of `css-inline`
@@ -370,7 +374,7 @@ reminder that email content is untrusted; it is not a control.
 
 ```text
 $ mailquery -v          # no side effects: does not create ~/.mailquery nor open the client
-mailquery 3.0.0a1 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a1)
+mailquery 3.0.0a2 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a2)
 ```
 
 The line keeps `backend <native driver>` and adds `; drivers: <driver>
@@ -400,7 +404,7 @@ Generated at: 2026-11-13T09:15:00-04:00
 Checks:
   [ok]   python              3.14.7
   [ok]   home                …\.mailquery (writable)
-  [ok]   driver              outlook (api=1; pkg 3.0.0a1; network=false; readonly=structural;
+  [ok]   driver              outlook (api=1; pkg 3.0.0a2; network=false; readonly=structural;
                              body_local=true; attachments=local; native_order=text)
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)
@@ -534,7 +538,7 @@ Output of `mailquery search --since 1w` (default row; `uid` trimmed):
   "hint": null,
   "messages": [
     {
-      "uid": "outlook:00000000D70DBCF61C2A4B6E9A51E0C3B2A49F10…",
+      "uid": "outlook:k3f9q2m7xa",
       "subject": "October 2026 invoice",
       "from": {"name": "Supplier Inc", "address": "invoices@supplier.example"},
       "date_received": "2026-11-02T09:54:09-04:00",
@@ -653,15 +657,24 @@ with `body_truncated` and `W_BODY_TRUNCATED`) and attachments. `--fields`
 with `--fields all`, the whole message is returned; `show <uid> --fields
 attachments` returns only `uid` and `attachments`; it reads the body only to
 apply the S/MIME and unreadable-body rules and does not deliver it. The `uid` is an **opaque string** `"<driver>:<native_id>"`: pass it
-through as-is, no arithmetic. The legacy unprefixed uid is accepted for the
+through as-is, no arithmetic. In Outlook the native part is the short id; an
+`EntryID` is not a valid uid. The legacy unprefixed uid is accepted for the
 native driver. It only shows messages from declared accounts
 (`E_ACCOUNT_NOT_IN_SCOPE` otherwise). An invalid or nonexistent uid gives `E_USAGE`
-(exit 2). `show` never writes to disk. `--strip-links` forces `strip` for that
-run, over `[content].url_display`.
+(exit 2). `show` writes only in the native id cache of Outlook (see below); it
+never writes anywhere else. `--strip-links` forces `strip` for that run, over
+`[content].url_display`.
+
+`--show-native-id` is a debugging option: it shows the driver's native id in
+`message.uid` instead of the short uid. In Outlook the result is
+`outlook:<EntryID>`; the native id is not accepted as input by any command.
+With a driver that does not provide a native form, such as Apple Mail, the
+output is the same with and without the option.
 
 ```bash
 mailquery show apple_mail:2714
 mailquery show apple_mail:2714 --fields attachments
+mailquery show outlook:k3f9q2m7xa --show-native-id   # debugging: outlook:<EntryID>
 ```
 
 ```json
@@ -688,10 +701,22 @@ mailquery show apple_mail:2714 --fields attachments
 
 `attachments[]` carries `index` (the stable 1..N position shared with
 `mailquery attachment`), `name` (the original file name) and `cached_path` (the
-absolute cached file path, or `null` when there is no regular file in the cache
-or the name is unsafe). A driver with `attachments: "none"` returns
+absolute cached file path, or `null` when there is no regular file in the
+attachment cache or the name is unsafe). A driver with `attachments: "none"` returns
 `attachments: []`. In S/MIME, `show` returns `attachments: []` (the technical
 `smime.p7m` name is never listed) and only the unreadable-body warning remains.
+
+**Native id cache.** In Outlook a short uid resolves through
+`~/.mailquery/db/cache.db`, a SQLite file that maps each printed short id to
+the `EntryID` of its message and stores no subject, address, body or attachment
+name. `search` and `new` add the rows of the messages they print, `show` and
+`attachment` resolve the uid there, and `show` writes only in that file: it
+creates it if it is missing and deletes the row of a message that Outlook
+confirms as absent. It is not the attachment cache and it is not ephemeral:
+unlike that cache, no cleanup should delete it. If the file is deleted, the
+uids already printed stop resolving until `search` or `new` prints the message
+again, with the same short id. On macOS the `~/.mailquery/db/` directory is
+0700 and `cache.db` and its auxiliary files are 0600.
 
 ### `mailquery attachment <uid> (--index N | --all) [--force]`
 
@@ -741,12 +766,12 @@ mailquery attachment apple_mail:83301 --index 2 --force
   name, a dangerous extension or executable *magic bytes*, nothing is written:
   `E_ATTACHMENT_BLOCKED` (exit 4), both with `--index` and `--all`. The harness
   must not retry the same message and must not open the email's attachments.
-- **Cache:** an existing regular file is served with `cached: true` and
+- **Attachment cache:** an existing regular file is served with `cached: true` and
   `saved: true` (same `size_bytes`/`sha256`); `--force` re-extracts it. A cache
   file that is not a regular file is treated as a miss. A file deleted by an
   external cleanup is a miss and is extracted once. Nothing is written outside
-  `~/.mailquery/tmp/` (staging) and the cache; staging and cache live on the same
-  file system and publication is atomic.
+  `~/.mailquery/tmp/` (staging) and the attachment cache; staging and the
+  attachment cache live on the same file system and publication is atomic.
 - **Limits:** `max_count` (only `--all`, including cache hits),
   `max_file_size_mb` and `max_total_size_mb` from `[attachments]`; exceeding them
   gives `E_ATTACHMENT_TOO_LARGE` (exit 4).
@@ -765,9 +790,9 @@ mailquery attachment apple_mail:83301 --index 2 --force
   exit code stays 0; the warning carries only the index, the type and the
   message uid (`W_ATTACHMENT_ACTIVE_CONTENT: attachment <index> contains <type>
   in <uid>`). It is a signal, not a block, and it does not replace the name and content blocking.
-- **Cleanup:** the cache is best-effort and not application state. There is no
-  purge on start: use an external cron/cleanup if needed. The app tolerates
-  concurrent deletions.
+- **Cleanup:** the attachment cache is best-effort and not application state,
+  unlike the native id cache. There is no purge on start: use an external
+  cron/cleanup if needed. The app tolerates concurrent deletions.
 
 ### `mailquery <command> --help`
 
@@ -938,10 +963,13 @@ tokens are never read.
   Model Guard): it must show `[ok]`; if the prompt appears, the call aborts after
   30 s with `E_CLIENT_TIMEOUT` (exit 3). Check the antivirus or the Outlook
   policy.
-- **Attachment cache and staging:** `~/.mailquery/attachments/` and
-  `~/.mailquery/tmp/` are user-owned (0700 directories, 0600 files on POSIX); on
-  Windows the profile ACL applies. Never make them world-readable. `attachment`
-  only publishes regular files and never follows a symlink.
+- **Attachment cache, native id cache and staging:** `~/.mailquery/attachments/`,
+  `~/.mailquery/db/` and `~/.mailquery/tmp/` are user-owned (0700 directories,
+  0600 files on POSIX); on Windows the profile ACL applies. Never make them
+  world-readable. `attachment` only publishes regular files and never follows a
+  symlink. A missing permission on the native id cache fails with
+  `E_PERMISSION` (exit 3); a cache locked by another process fails with
+  `E_LOCKED` (exit 5); any other cache failure fails with `E_IO` (exit 3).
 - Run `mailquery doctor` after upgrading the interpreter, the system or the mail
   client.
 
@@ -960,11 +988,11 @@ recovered files.
 | `count: 0` and `W_NO_ACCOUNTS` | No declared accounts | Declare an account in `config.toml` (see `mailquery mailboxes`) |
 | `count: 0` with no warnings | Date range, pattern or folder | Check `--since`/`--until`, try a shorter pattern and check `included` in `mailboxes`; the `hint` says how many folders and accounts were searched, and `mailquery mailboxes` or `--include-mailbox` widen the scope; `new` does not emit history: use `search` |
 | `W_STORE_EXCLUDED` (Windows) | The declared account is an excluded store (shared, online, network path…) | See the reason in `mailboxes` → `excluded_stores` |
-| `E_PERMISSION` (3, macOS) | FDA missing | See [Permissions](#permissions) |
+| `E_PERMISSION` (3) | FDA missing on macOS, or no permission on the home or on a cache | See [Permissions](#permissions) |
 | `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | `pywin32` missing / not classic Outlook 16.0 | `pipx reinstall mailquery` / install classic Outlook |
 | `E_OUTLOOK_NOT_RUNNING` (6) | Outlook closed, or different session or integrity level | Open classic Outlook with the same user and without elevation; retry |
 | `E_CLIENT_TIMEOUT` (3) | A driver's metadata operation took more than 30 s (in Outlook, possibly a security prompt), a plugin call exceeded its hard timeout, or an attachment exceeded `[attachments].timeout_seconds` (60 s by default) | Check `mailquery doctor`; for a slow remote plugin raise `timeout_seconds` (10–600); do not retry in a loop |
-| `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store, lock or Outlook busy | Retry once after a pause; do not run concurrent invocations |
+| `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store, lock (including the native id cache) or Outlook busy | Retry once after a pause; do not run concurrent invocations |
 | `E_STATE_CORRUPT` (3) | Damaged `state.json`, failed migration, or a cursor uid whose driver is not installed (only affects `new`) | Rename it (the next `new` run is a first run and emits the `lookback` window again) or reinstall the plugin |
 | `E_DRIVER_UNKNOWN` (2) | The driver prefix of a `[scope]` block or of the uid is not installed | `mailquery -v` lists installed drivers; `pipx inject mailquery <plugin-package>`; check the spelling `[a-z0-9_]{1,64}` |
 | `E_PLUGIN_INCOMPATIBLE` / `E_PLUGIN_FAILED` (3) | The plugin does not satisfy API 1 or failed at runtime | Reinstall/upgrade the plugin; `mailquery doctor` shows the `driver` detail |
@@ -973,7 +1001,7 @@ recovered files.
 | `E_ATTACHMENT_TOO_LARGE` (4) | An `[attachments]` limit was exceeded | Raise the limit or recover only one attachment with `--index` |
 | `E_ATTACHMENT_UNAVAILABLE` (3) | The attachment is not available (`not_local`, `not_downloaded`, `unsupported`, `network`); a `"remote"` plugin gets its bytes from its origin, so `network` means that origin failed | Open the message in the mail client for a local driver; for a `"remote"` plugin check its network and configuration, then retry |
 | `E_ATTACHMENT_UNREADABLE` (3) | The attachment is corrupt or S/MIME-protected | Inspect it in the mail client; S/MIME attachments cannot be extracted |
-| `E_IO` (3) | I/O failure writing the cache or staging (space, quota, file system) | Check free space and permissions of `~/.mailquery`, then retry |
+| `E_IO` (3) | I/O failure of the attachment cache, the native id cache or staging (space, quota, file system) | Check free space and permissions of `~/.mailquery`, then retry |
 | `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` without narrowing / too many candidates | Add `--since` or another filter, or raise `search.max_scan` (max 50000) |
 | `E_INTERNAL` (1) | Unexpected failure | Check `~/.mailquery/logs/mailquery.log` with `--log-level debug` |
 

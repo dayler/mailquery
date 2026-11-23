@@ -88,8 +88,8 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | 1 | Versión `3.0.0a2`: `pyproject.toml`, `__init__.py`, goldens de `doctor`, comentarios de tests | 🟢 |
-| 2 | `README.md` y `README.es.md`, en paralelo y con el mismo contenido | 🟡 |
-| 3 | `SKILL.md`, recetas, `INTERFACES.md`, `threat-model.md` | ⚪ |
+| 2 | `README.md` y `README.es.md`, en paralelo y con el mismo contenido | 🟢 |
+| 3 | `SKILL.md`, recetas, `INTERFACES.md`, `threat-model.md` | 🟡 |
 | 4 | DOC-16 y tests DOC existentes | ⚪ |
 | 5 | Búsquedas de CL-06 y CL-11 fuera del PRD; suite completa; evidencia cruda | ⚪ |
 
@@ -159,3 +159,4 @@ Los de `protocolo.md`, más la salida de las búsquedas de CL-06 y CL-11 y la li
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-23 | 1 | Versión `3.0.0a2` en `pyproject.toml`, `__version__`, goldens `doctor`/`outlook/doctor` y comentarios de versión de los tests; TC-01.01 y TC-02.07 verdes. |
+| 2026-11-23 | 2 | README y README.es al día: `3.0.0a2`, uid corto de Outlook, `--show-native-id`, `show` solo escribe en la caché de ids nativos, `~/.mailquery/db/cache.db`, desinstalación que no la borra y «la caché» → «caché de adjuntos»; el mismo contenido en los dos idiomas. |
