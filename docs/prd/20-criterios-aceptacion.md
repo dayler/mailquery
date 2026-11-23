@@ -9,7 +9,7 @@ El producto se acepta cuando cumple todo lo siguiente:
 
 1. **Solo lectura en macOS:** tras ejecutar todos los comandos sobre un store, ningún archivo del store cambia de contenido ni de `mtime` y no aparece ningún archivo nuevo en él.
 2. **Solo lectura en Windows:** ningún comando modifica items, carpetas ni stores de Outlook, lo lanza ni provoca descargas; toda operación fuera de la lista blanca se rechaza antes de llegar a Outlook (§9.3); y tras ejecutar todos los comandos contra el Outlook real, los contadores de no leídos del alcance no cambian.
-3. **Plugins, adjuntos, contenido no confiable y salida a medida:** los criterios AC-01…AC-62.
+3. **Plugins, adjuntos, contenido no confiable y salida a medida:** los criterios AC-01…AC-70.
 
 **AC-01.** `apple_mail` y `outlook` se registran como drivers con `driver` válido y único (`[a-z0-9_]{1,64}`) y `plugin_api = 1`; un plugin externo que cumpla el contrato se registra por la misma vía; un driver duplicado, reservado, inválido o con `plugin_api ≠ 1` ⇒ `E_PLUGIN_INCOMPATIBLE` (exit 3).
 
@@ -23,7 +23,7 @@ El producto se acepta cuando cumple todo lo siguiente:
 
 **AC-06.** Un `state.json` `schema: 1` con uids enteros o hexadecimales en mayúsculas se migra de forma determinista por el tipo del valor, sin depender de la plataforma, y se persiste atómicamente en la siguiente corrida de `new` sin `--peek` que emite al menos un mensaje (`doctor` informa `schema: 1 (migration pending)` hasta entonces); un estado inválido ⇒ `E_STATE_CORRUPT` con hint; los anillos con drivers no instalados se podan y `doctor` lo reporta.
 
-**AC-07.** `show` expone `attachments: [{"index", "name", "cached_path"}]` con `index` estable 1..N y `cached_path` calculado con el nombre sanitizado (o `null`); `show` nunca escribe.
+**AC-07.** `show` expone `attachments: [{"index", "name", "cached_path"}]` con `index` estable 1..N y `cached_path` calculado con el nombre sanitizado (o `null`); `show` no escribe nada salvo en la caché de ids nativos: la crea si no existe (RF-80) y borra la fila de un mensaje *ausente confirmado* (RF-81).
 
 **AC-08.** `attachment` exige `--index` o `--all` mutuamente excluyentes; valida los casos de §12.11 en el orden indicado con los textos de referencia de §12.11 y el ejemplo G (incluido `--index 0`, mensaje inexistente, sin adjuntos, índice fuera de rango).
 
@@ -134,6 +134,22 @@ El producto se acepta cuando cumple todo lo siguiente:
 **AC-61.** Con un plugin falso declarado, `doctor --json` da `plugins` con su `driver`, los chequeos de su `doctor_checks()` sin cambios y después `config` con la resolución de sus bloques `[scope]` (un bloque que no resuelve da el código y el hint del error); `checks[]` del primer nivel es igual que sin el plugin, salvo el detalle de `driver` y que `config` no lista sus bloques; sin plugins declarados, `plugins: []` y el texto no muestra `Plugins:`; un plugin que no pasa `driver` solo da `config` con `not evaluated: driver failed`; un `doctor_checks()` que lanza una excepción, devuelve algo inválido o no responde en 30 s da el chequeo `plugin` con `ok: false`; el texto muestra la sección `Plugins:`; `Result:` cuenta todos los chequeos y el exit es 0.
 
 **AC-62.** Con `--failures`, solo salen los plugins con algún chequeo que falla o sin evaluar, con sus `checks` que fallan y su `not_evaluated`; si solo falla un plugin, el texto muestra solo `Plugins:` y el JSON da `checks: []` y `not_evaluated: []`; si no falla nada, `plugins: []` y el texto `all checks passed`.
+
+**AC-63.** En Windows, todo `uid` que emite el driver `outlook` es `outlook:` más un id corto de 10 caracteres, con o sin sufijo; el mismo mensaje da el mismo `uid` en corridas sucesivas y, si ningún otro mensaje con su id corto se lee ni se registra después del borrado, también después de borrar `cache.db`; `show` y `attachment` lo resuelven; un `EntryID` como uid, con prefijo o sin él, un id corto en mayúsculas o los sufijos `-1` y `-02` ⇒ `E_USAGE` sin abrir ni crear la caché. En macOS el `uid` no cambia y, con solo el driver `apple_mail`, `cache.db` no se crea.
+
+**AC-64.** Dos `native_id` del mismo driver con el mismo id corto reciben `seq` 1 y 2 y los uids `<driver>:<short_id>` y `<driver>:<short_id>-2`, también cuando llegan en la misma consulta; un `native_id` leído en dos consultas de una misma ejecución conserva su uid; cada uid resuelve a su mensaje, y `attachment` extrae los adjuntos de cada uno en su propio directorio, sin servir los del otro. Si se borra la fila del `seq` 2, un tercer `native_id` con ese id corto recibe el `seq` 2 otra vez.
+
+**AC-65.** `search` (también con `--group-by`) y `new` (también con `--peek`) registran en la caché de ids nativos solo los mensajes que imprimen; `search --count` no registra filas; una respuesta sin mensajes no avisa al driver; si el registro falla, el comando falla sin imprimir mensajes ni escribir estado.
+
+**AC-66.** Un `uid` cuyo mensaje está ausente confirmado (RF-81) ⇒ `message uid … was not found` y su fila desaparece de la caché. Con cada causa de *indeterminado* de RF-81, la fila sigue en la caché: hay un caso de prueba por cada causa. Ninguna fila cambia de `native_id`.
+
+**AC-67.** Ninguna salida JSON tiene una propiedad `short_id` ni `seq`: las claves de las respuestas de `search`, `new`, `show`, `attachment`, `mailboxes` y `doctor` en Windows son las que fija la sección 12.5, las mismas que en macOS con solo el driver `apple_mail`.
+
+**AC-68.** `show --show-native-id` muestra en Windows `outlook:<EntryID>` en `message.uid`; las claves del JSON, los demás valores, la caché de ids nativos y `cached_path` son los mismos que sin la opción; ese id nativo como entrada de `show` o de `attachment` ⇒ `E_USAGE`; `search`, `new`, `attachment`, `mailboxes` y `doctor` rechazan la opción con `E_USAGE`. Un plugin que devuelve una forma nativa que no cumple RF-38 ⇒ `E_PLUGIN_FAILED`. En macOS la salida de `show` es la misma con la opción y sin ella.
+
+**AC-69.** El texto `mailquery` con 10 caracteres da el id corto `pmw3w06f5e`. Con el driver `outlook`: base bloqueada por otro proceso más de 5 s ⇒ `E_LOCKED` (exit 5); sin permiso sobre `cache.db` ⇒ `E_PERMISSION`; archivo que no es una base válida de la librería o conflicto al registrar ⇒ `E_IO`, con el hint de RF-80; archivo vacío ⇒ se inicializa. Desde el aviso de un plugin que no captura el error, los mismos fallos dan `E_CLIENT_BUSY`, `E_PERMISSION` y `E_PLUGIN_FAILED`. Un uid que no está en la caché o cuyo mensaje está ausente confirmado lleva el hint de repetir la búsqueda. `show` sin la carpeta `~/.mailquery/db/` ni `cache.db` ⇒ crea las dos, con la base vacía, y responde `message uid … was not found`. En macOS, la carpeta tiene permisos 0700, y `cache.db` y sus archivos auxiliares, 0600. La tabla de `cache.db` solo tiene las columnas de su estructura. `mailboxes`, `doctor` y `--version` no crean `cache.db`.
+
+**AC-70.** Un plugin recibe en su contexto el acceso a la base de su driver, que se abre en su primera operación: con él registra y resuelve sus filas, también dentro de un gancho vigilado por el tope de 30 s, y no ve ni cambia las filas de otro driver. Un plugin sin los ganchos opcionales funciona igual: no recibe el aviso y `show --show-native-id` muestra su uid sin cambios. Un gancho de un plugin que supera el tope de 30 s ⇒ `E_CLIENT_TIMEOUT`, sin imprimir mensajes.
 
 ---
 

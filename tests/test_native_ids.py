@@ -178,7 +178,7 @@ class ShortIdTests(_NativeIdsTestCase):
 class CacheOpenTests(_NativeIdsTestCase):
     """UT-NID-02: opening, creation and format of the cache file."""
 
-    def test_ut_nid_02_01_open_creates_directory_file_tables_and_version(self) -> None:
+    def test_ut_nid_02_01_open_creates_directory_file_table_and_version(self) -> None:
         """UT-NID-02.01: a missing db/ and cache.db are created, empty, format 1."""
         self.assertFalse(self.home.exists())
         cache = self.open_cache()
@@ -223,8 +223,8 @@ class CacheOpenTests(_NativeIdsTestCase):
         )
         self.assertGreater(self.cache_file.stat().st_size, 0)
 
-    def test_ut_nid_02_03_tables_have_only_the_documented_columns(self) -> None:
-        """UT-NID-02.03: columns, types, NOT NULL, primary keys and unique constraint."""
+    def test_ut_nid_02_03_table_has_only_the_documented_columns(self) -> None:
+        """UT-NID-02.03: columns, types, NOT NULL, primary key and unique constraint."""
         self.open_cache()
         ids_columns = [
             (row[1], row[2], row[3], row[5])
@@ -358,7 +358,7 @@ class CacheOpenTests(_NativeIdsTestCase):
                 self.assertEqual(context.exception.exit_code, 3)
 
     def test_ut_nid_02_08_locked_database_is_locked_error(self) -> None:
-        """UT-NID-02.08: a write blocked beyond BUSY_TIMEOUT_SECONDS is E_LOCKED."""
+        """UT-NID-02.08: a write or an open blocked beyond BUSY_TIMEOUT_SECONDS is E_LOCKED."""
         self.assertEqual(native_ids.BUSY_TIMEOUT_SECONDS, 5.0)
         with mock.patch("mailquery.native_ids.BUSY_TIMEOUT_SECONDS", 0.2):
             cache = self.open_cache()
@@ -370,6 +370,22 @@ class CacheOpenTests(_NativeIdsTestCase):
                 blocker.execute("BEGIN IMMEDIATE")
                 with self.assertRaises(MailqueryError) as context:
                     cache.register(["alpha"])
+            finally:
+                try:
+                    blocker.execute("ROLLBACK")
+                finally:
+                    blocker.close()
+        self.assert_locked_error(context.exception)
+        cache.close()
+        with mock.patch("mailquery.native_ids.BUSY_TIMEOUT_SECONDS", 0.2):
+            blocker = sqlite3.connect(
+                str(self.cache_file), isolation_level=None, timeout=5
+            )
+            try:
+                blocker.execute("PRAGMA locking_mode = EXCLUSIVE")
+                blocker.execute("BEGIN EXCLUSIVE")
+                with self.assertRaises(MailqueryError) as context:
+                    NativeIdCache.open("outlook", home=self.home)
             finally:
                 try:
                     blocker.execute("ROLLBACK")
@@ -441,7 +457,7 @@ class CacheOperationsTests(_NativeIdsTestCase):
         self.assertEqual(len({"abc", "abc-2", "abc-3"}), 3)
 
     def test_ut_nid_03_04_register_saves_all_pending_rows_once(self) -> None:
-        """UT-NID-03.04: register stores all pending rows and the highest seq per pair."""
+        """UT-NID-03.04: register stores all pending rows in one transaction."""
         cache = self.open_cache()
         parts = cache.assign(["alpha", "bravo"])
         cache.register(["alpha", "bravo"])
@@ -578,7 +594,7 @@ class CacheOperationsTests(_NativeIdsTestCase):
             self.assertEqual(cache.resolve("abc-10"), "item-9")
 
     def test_ut_nid_03_10_only_the_documented_values_are_stored(self) -> None:
-        """UT-NID-03.10: after register the tables hold only the documented values."""
+        """UT-NID-03.10: after register the table holds only the documented values."""
         cache = self.open_cache()
         with self.patch_short_id("abc"):
             cache.assign(["alpha", "bravo", "charlie"])

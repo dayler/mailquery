@@ -76,6 +76,14 @@ tags: [prd]
 | Sin contadores, el agente no sabe qué carpetas están vacías y puede proponer una que no tiene correo | Media | Bajo | El `search` con `--include-mailbox` responde con `count: 0` y el hint de RF-76; quien necesita los contadores los pide con `--fields total,unread`. |
 | Un plugin que no responde alarga `doctor` hasta 30 s por cada llamada (`doctor_checks()`, `accounts()`, `resolve_mailbox()`) | Baja | Bajo | Corte duro de RNF-21 y chequeo `plugin` con `ok: false`; el resto de `doctor` se muestra igual. |
 | Los chequeos de un plugin son tan fiables como el plugin (puede dar `ok` sin comprobar nada) | Media | Bajo | Responsabilidad del plugin (ADR-22); el `config` de su sección lo calcula el núcleo y sí detecta cuentas y carpetas que no resuelven. |
+| Borrado o pérdida de `cache.db` | Baja | Bajo | Los uids de Outlook ya impresos dejan de resolverse hasta que una búsqueda vuelve a imprimir el mensaje, con el mismo id corto (§11.4). |
+| `cache.db` crece con filas de mensajes borrados que nadie vuelve a pedir | Media | Bajo | Solo se registran los mensajes impresos y cada fila guarda dos identificadores; las filas tienen borrado a demanda (RF-81). Riesgo aceptado. |
+| Un mensaje cuya fila se borró vuelve a imprimirse (Outlook da por ausente un mensaje que luego reaparece) | Muy baja | Bajo | El mensaje recibe el `seq` siguiente al mayor de las filas que quedan del par: su uid puede cambiar y `new` puede emitirlo otra vez. Riesgo aceptado. |
+| Dos mensajes con el mismo id corto | Baja | Bajo | Cada uno tiene su `seq` y su uid (RF-80); el `seq` de una fila borrada puede pasar a otro mensaje con el mismo id corto. Riesgo aceptado. |
+| Se borra la fila de un mensaje y otro con el mismo id corto toma su sufijo: un uid guardado por el harness abre entonces el otro mensaje; `attachment` puede servir un adjunto ya extraído del mensaje anterior con el mismo nombre e índice; y `new` puede no emitir un mensaje nuevo cuyo uid ya estaba en su anillo | Muy baja | Medio | Exige una colisión de 10 caracteres y que la fila borrada fuera la del mayor `seq` del par, o el borrado manual del archivo. Riesgo aceptado. |
+| `cache.db` guarda el `EntryID` de los mensajes impresos | Media | Bajo | Es un archivo privado del usuario (RNF-05), sin `Message-ID`, asuntos, direcciones ni cuerpos. |
+| Un uid que solo salió en un warning abre otro mensaje | Muy baja | Bajo | Ese uid no se registra (RF-82): si en una ejecución posterior otro mensaje con el mismo id corto se imprime antes, recibe esa misma parte del `uid`. Riesgo aceptado. |
+| Un uid de Outlook guardado por el harness deja de resolverse (mensaje movido, `cache.db` borrada) | Media | Bajo | Se vuelve a buscar el mensaje; el hint de "no encontrado" lo indica (RF-81). |
 
 ### 23.1 Riesgos aceptados de plugins y adjuntos
 
@@ -97,7 +105,7 @@ tags: [prd]
 | Caché manipulada o sustituida por el usuario | Baja | Medio | Directorio `0700` del usuario; un archivo cuyo SHA-256 no coincide con el manifiesto del mensaje no se sirve y se re-extrae (§10.3.4); el manifiesto vive en el mismo directorio, así que quien puede escribir la caché puede rehacerlo; riesgo aceptado. |
 | Cron externo borra archivos en mitad de la ejecución | Media | Bajo | Miss ⇒ re-extracción una vez; si falla, el comando falla con el código de ese fallo (§10.4); la app nunca asume la caché. |
 | Migración de `state.json` interrumpida | Baja | Alto | Validar todo en memoria y escribir con el mecanismo atómico (RF-21); el original queda intacto hasta el reemplazo. |
-| Rutas largas en Windows (EntryID largo) | Baja | Medio | Fallback determinista a un identificador de 32 hex derivado de `uid`; límite de 240 bytes de ruta. |
+| Rutas largas en Windows (home de ruta muy larga, o plugin con un `<native_id>` largo) | Baja | Medio | En Outlook es excepcional: el directorio se nombra con la parte del `uid` (RF-81) y solo un home de ruta muy larga supera el límite. Fallback determinista a un identificador de 32 hex derivado de `uid`; límite de 240 bytes de ruta. |
 | Un plugin remoto en una red lenta no termina un adjunto grande en 60 s (100 MiB, el máximo por defecto, necesita unos 14 Mbit/s) | Media | Bajo | `E_CLIENT_TIMEOUT` con un hint que pide subir `[attachments].timeout_seconds` (hasta 600 s). |
 | `--all` con muchos adjuntos tarda hasta N veces el tope | Baja | Medio | El tope es por adjunto (ADR-40) y `max_count` acota N; si el tiempo del harness es menor, usa `--index`. |
 | Con un tope bajo, Outlook lo supera en una llamada COM lenta | Baja | Bajo | Mínimo de 10 s; la llamada sigue acotada por RF-31 y el error es `E_CLIENT_TIMEOUT`. |

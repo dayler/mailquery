@@ -46,7 +46,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 
 `3.0.0` (mayor). El cambio de tipo y forma de `uid` (incluido `cursor.*.last_uid`), la forma de `show.attachments`, el esquema de `[scope]` y la semántica de errores son incompatibles para un harness que consume la 2.0.x. El formato de `--version` es aditivo. Se aplica la misma regla que justificó `2.0.0`, cuyos cambios (§22.2) eran incompatibles para un harness que ya consumía la 1.x en macOS.
 
-**Estado:** `develop` anuncia la pre-release `3.0.0a1` (forma PEP 440 normalizada de `3.0.0-alpha.1`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`; se usa la forma normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance del `3.0.0`.
+**Estado:** `develop` anuncia la pre-release `3.0.0a2` (forma PEP 440 normalizada de `3.0.0-alpha.2`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`; se usa la forma normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance del `3.0.0`.
 
 ### 22.4 Cambios visibles en 3.0.0 (amplían §22.2)
 
@@ -66,7 +66,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 | Dependencias instaladas | macOS: ninguna; Windows: `pywin32` | macOS y Windows: `css-inline` `~=0.23.1` (parches: §13.3); Windows: además `pywin32` |
 | Respuestas de éxito de `search`, `new`, `show` y `attachment` | — | Campo `content_notice` con un texto fijo de contenido no confiable |
 | Fila de `search` y `new` | 16 campos, con `snippet` | `uid`, `subject`, `from`, `date_received`, `is_read` y `has_attachments`; el resto, con `--fields` (`--fields all` da la fila anterior) |
-| Opciones de `search`, `new` y `show` | — | `--strip-links` y `--fields` en los tres; `--group-by` y `--count` en `search` |
+| Opciones de `search`, `new` y `show` | — | `--strip-links` y `--fields` en los tres; `--group-by` y `--count` en `search`; `--show-native-id`, opción de depuración, en `show` |
 | Opciones de `doctor` | `--json` | `--json` y `--failures` |
 | `hint` de `search` sin resultados | `null` | Cuántas carpetas y cuentas se buscaron y cómo ampliar el alcance |
 | Skill y ayuda de `doctor` | `doctor` y `mailboxes` antes de usar `mailquery` en cada sesión; `doctor` como *preflight* | Sin *preflight*: `doctor` y `mailboxes` solo para diagnosticar; `doctor` como diagnóstico |
@@ -101,7 +101,8 @@ Todo lo demás de macOS debe quedar idéntico.
 | Cambio | Antes (2.0.x) | Después (3.0.0) |
 |---|---|---|
 | `[scope]` | `[scope."<cuenta>"]` | `[scope."<driver>:<cuenta>"]` (el prefijo puede omitirse; nativo `outlook`) |
-| `uid` | String `EntryID` hexadecimal | String `"<driver>:<native_id>"` |
+| `uid` | String `EntryID` hexadecimal | String `"outlook:<parte del uid>"`, de 18 caracteres, o 20 o más con sufijo (RF-81); el `EntryID` no se acepta como uid |
+| Archivos de `~/.mailquery` | — | Carpeta `db/` con `cache.db`, la caché de ids nativos, desde el primer `search`, `new`, `show` o `attachment` con el driver `outlook` que lee un mensaje o resuelve un uid (§11.4) |
 | `uid` en `state.json` | String `EntryID` | String prefijado, `schema: 2` (migrado automáticamente) |
 | `show.message.attachments[]` | `[{"name": "..."}]` | `[{"index", "name", "cached_path"}]` |
 | `doctor` | `python`, `home`, chequeos, `config`, `state`, `lock` | `python`, `home`, `driver`, chequeos, `config`, `state`, `lock` |

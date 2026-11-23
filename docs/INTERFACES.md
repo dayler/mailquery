@@ -66,7 +66,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   └── backends/
 │       ├── __init__.py             # get_backend(...), backend_class(...), BackendRegistry
 │       ├── registry.py             # descubrimiento/validación/carga perezosa de drivers
-│       ├── base.py                 # MailBackend (protocolo v1), filas TypedDict, ExcludedStoreError
+│       ├── base.py                 # MailBackend (protocolo v1), filas TypedDict, ExcludedStoreError, MessageNotFound
 │       ├── apple_mail.py           # AppleMailBackend (SQL + helpers de Apple Mail)
 │       ├── outlook.py              # OutlookBackend: stores, carpetas, items y cuerpos (sin win32com)
 │       └── outlook_com.py          # único módulo que importa win32com: detección, proxy, vigilante
@@ -84,9 +84,10 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     │   └── run_cli.py              # lanzador en subprocess: fake + cli.main(argv, backend=…)
     ├── test_attachments.py         # UT-ATT-01..11: bloqueo, sanitización, límites, staging y caché
     ├── test_multidriver.py         # UT-MD-01..07: merge, orden total y cursor multi-driver
-    ├── test_plugins.py             # UT-PL-01..04: API 1, registro de drivers, --version, ficheros de plugin
-    ├── test_uid.py                 # UT-UID-01: formato y parseo del uid prefijado
+    ├── test_plugins.py             # UT-PL-01..06: API 1, registro de drivers, --version, ficheros de plugin
+    ├── test_uid.py                 # UT-UID-01..03: formato y parseo del uid prefijado
     ├── test_native_ids.py          # UT-NID: ids cortos, caché, concurrencia y errores
+    ├── test_show_native_id.py      # UT-SNI: --show-native-id en show
     ├── test_backends.py            # contrato de MailBackend, get_backend, AppleMailBackend
     ├── test_outlook.py             # backend Outlook sobre el fake (casos OL-*)
     ├── test_config.py
@@ -153,11 +154,11 @@ Reglas globales:
 ```text
 errors  logging_setup  output          (base, sin imports internos)
    ↑          ↑           ↑
-   │       backends/base (solo stdlib: MailBackend, ExcludedStoreError,
+   │       backends/base (solo stdlib: MailBackend, ExcludedStoreError, MessageNotFound,
    │       │             Uid/LegacyUid, filas TypedDict; importa plugins/api)
    │       ↑
 plugins/api, plugins/__init__ (SQL/CLIENTE ajenos al núcleo: PLUGIN_API, Reason,
-   │       PluginError, PluginContext y tipos de capacidades; solo stdlib)
+   │       PluginError, PluginContext y tipos de capacidades; stdlib y native_ids)
    │       ↑
    │    backends/registry (→ plugins/api, errors; importlib.metadata; sin importar
    │       │               implementaciones de backend, store ni cli)
@@ -173,11 +174,11 @@ accounts, store, emlx   (Apple Mail; → errors, logging_setup, output)
 backends/apple_mail (→ base, emlx, accounts, store, errors)
 backends/outlook_com (→ errors, logging_setup; win32com/pythoncom/pywintypes perezosos;
                       config y cli solo dentro de funciones)
-backends/outlook (→ base, outlook_com, output, errors)
+backends/outlook (→ base, outlook_com, output, errors, native_ids, plugins)
         ↑
 backends/__init__ ──→ apple_mail | outlook (import perezoso solo en win32)
         ↑
-       cli ──→ backends, config, errors, logging_setup, output, search, state
+       cli ──→ backends, config, errors, logging_setup, native_ids, output, search, state
 
 search (→ config, output, errors, state, backends/base [ExcludedStoreError];
         MailBackend solo en TYPE_CHECKING)
@@ -219,9 +220,12 @@ Reglas:
   (y `--version`) no importa sus módulos.
 - `uid.py` importa solo `errors` y stdlib: se puede validar un `uid` antes de
   crear el home, leer `config.toml` o abrir el store.
-- `native_ids.py` importa solo `errors`, `uid` y stdlib (`hashlib`, `sqlite3`):
-  ningún comando del núcleo la llama; la usan los drivers que asignan ids
-  cortos, hoy `outlook`, y `plugins/api.py` para el acceso de un plugin.
+- `native_ids.py` importa solo `errors`, `uid` y stdlib (`hashlib`, `sqlite3`),
+  y `plugins/api.py` de forma perezosa para traducir un fallo al protocolo de
+  plugin: ningún comando del núcleo la llama; la usan los drivers que asignan
+  ids cortos, hoy `outlook`, y `plugins/api.py` para el acceso de un plugin.
+  `cli.py` crea el `PluginContext` de cada plugin con su `PluginNativeIds` y lo
+  cierra al terminar el comando.
 - `attachments/**` importa solo stdlib, `errors`, `uid` y sus propios módulos.
   La política (catálogo, bloqueo, sanitización, rutas y pantalla) es pura (sin
   E/S); `engine.py`/`cache.py` toman
@@ -429,7 +433,7 @@ store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
   `E_PLUGIN_FAILED`.
 - `PluginContext(home, tmp_dir, native_ids=None)`: dataclass congelado con las
   rutas que el núcleo entrega al plugin (`home` = `~/.mailquery`, `tmp_dir` =
-  `~/.mailquery/tmp`) y la caché de ids nativos ya abierta para el driver del
+  `~/.mailquery/tmp`) y el acceso a la caché de ids nativos, que se abre en su primera operación, para el driver del
   plugin (`PluginNativeIds`), que el núcleo cierra al terminar; `None` cuando
   no se ofrece, como en los chequeos de `doctor`. El plugin no abre la base ni
   puede elegir otro driver.
@@ -451,6 +455,13 @@ paso por el módulo usa una única envoltura:
   ejecuta la operación, aplica el plazo y traduce los fallos. `operation` es el
   nombre del método de `MailBackend`. `internal` se deduce de los nombres
   nativos (`apple_mail`/`outlook`) y un plugin es siempre externo.
+- `OPTIONAL_OPERATIONS` (`display_native_id`, `printed_messages`) y
+  `call_optional_operation(operation, backend, *args, driver, internal=None,
+  timeout=None)`: llaman a un gancho opcional del driver por `call_driver`, con
+  el plazo de metadatos y el protocolo de errores; un driver que no define el
+  gancho no recibe nada y la llamada devuelve `None`. El `display_native_id`
+  de un driver externo debe devolver un `<native_id>` válido; si no,
+  `E_PLUGIN_FAILED`.
 - `wrap_driver(backend, *, driver=None, internal=None, timeout=None)`: proxy
   transparente que enruta cada operación de `METADATA_OPERATIONS` por
   `call_driver`; envolver dos veces es no-op. Lo usa el pool de `search.py`.
@@ -598,6 +609,10 @@ mantiene para `BodyRow`; `AttachmentMetadataRow(index, name, size_bytes,
 native_order_key, unavailable_reason)` es la lista ordenada de adjuntos.
 No hay `StateUidError` (el estado valida sus uids en `state.py`);
 `ExcludedStoreError(entry)` (subclase de `LookupError`) sigue igual.
+`MessageNotFound(hint="")` (subclase de `LookupError`): la lanza `find_message`
+cuando el driver sabe que el mensaje no existe; `hint` es el texto que el comando
+muestra con su error de "no encontrado", y el núcleo conserva el código
+`E_USAGE` y el mensaje. Lanzada por un plugin se informa como `E_PLUGIN_FAILED`.
 
 `BodyRow` lleva además tres claves **opcionales** (`NotRequired`): `hidden_chars`
 (caracteres que omitieron los elementos ocultos del HTML del cuerpo),
@@ -740,9 +755,10 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 
 ### `native_ids.py`
 Librería de ids cortos y caché de ids nativos (RF-80). Importa solo `errors`,
-`uid` y stdlib; ningún comando del núcleo la llama: la usan los drivers que lo
-deciden, hoy `outlook`, y `plugins/api.py` para el acceso de un plugin. No
-guarda contenido de correos.
+`uid` y stdlib, y `plugins/api.py` de forma perezosa; ningún comando del núcleo
+la llama: la usan los drivers que lo deciden, hoy `outlook`, y `plugins/api.py`
+para el acceso de un plugin, que `cli.py` crea en el `PluginContext` de cada
+plugin y cierra al terminar el comando. No guarda contenido de correos.
 
 - `short_id(text, length) -> str`: base32 del `SHA-256` del texto en UTF-8,
   grupos de 5 bits desde el bit de mayor peso, sin relleno, con el alfabeto
@@ -755,7 +771,8 @@ guarda contenido de correos.
   archivos en POSIX, y solo da acceso a las filas de ese driver.
 - `assign(native_ids, *, length=10) -> dict[str, str]` no escribe: devuelve la
   parte del uid de cada `native_id`, con una parte por ejecución y el `seq`
-  siguiente al mayor de las filas del par. `register(native_ids)` guarda todas
+  siguiente al mayor de las filas del par y al mayor ya asignado en la
+  ejecución. `register(native_ids)` guarda todas
   las filas nuevas en una transacción, o ninguna si hay conflicto.
   `resolve(uid_part) -> str | None` devuelve el `native_id` de una parte del
   uid, o `None`; `discard(native_id)` borra su fila; `close()` cierra.
@@ -772,8 +789,9 @@ guarda contenido de correos.
   o un conflicto al registrar. Un archivo vacío se inicializa como uno nuevo.
 - Tabla: `cache_native_ids` relaciona `driver`, `short_id` y `seq` con el
   `native_id`, con clave `(driver, short_id, seq)` y `(driver, native_id)`
-  única. El `seq` siguiente al mayor de las filas del par queda libre al
-  borrarse esa fila.
+  única. Un `seq` nuevo es el siguiente al mayor de las filas del par y al
+  mayor ya asignado en la ejecución; al borrarse la fila con el mayor `seq`,
+  ese número queda libre.
 
 ### `backends/outlook.py`
 `OutlookBackend(*, outlook_app=None, registry=None, security_center=None,
@@ -1200,7 +1218,9 @@ url_mode="neutralize", fields=None, group_by=None, count=False)`,
 `run_new(backend, config, state_store, *, peek=False, limit=None, clock=None,
 drivers=None, native=None, url_mode="neutralize", fields=None)`,
 `run_show(backend, config, uid, *, driver=None, drivers=None, native=None,
-url_mode="neutralize", fields=None)`,
+url_mode="neutralize", fields=None, show_native_id=False)` (`show_native_id`
+solo sustituye el uid impreso por la forma nativa que da el gancho opcional
+`display_native_id`),
 `run_mailboxes(backend, config, *, drivers=None, native=None, fields=None)`.
 Solo usan la interfaz `MailBackend`. `backend` es el driver nativo (puede ser
 `None` cuando la config no lo declara); `drivers` es el mapping

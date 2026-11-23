@@ -5680,7 +5680,7 @@ class OutlookPrintedMessagesTests(_OutlookCommandCase):
         )
 
     def test_ol_33_04_count_and_empty_responses_register_nothing(self) -> None:
-        """OL-33.04: search --count leaves the tables empty; a response without messages registers nothing."""
+        """OL-33.04: search --count leaves the table empty; a response without messages registers nothing."""
         self.items()
         counted = self.run_json("search", "--since", "2026-01-01", "--count")
         self.assertGreater(counted["count"], 0)

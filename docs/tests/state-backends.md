@@ -128,6 +128,8 @@ POSIX, con los originales en 0644.
 
 Requisitos: AC-05, RF-38 · Archivo: `tests/test_uid.py`
 
+**Tabla: Casos de UT-UID-01**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `apple_mail:83143` ⇒ driver `apple_mail`, nativo `83143`; `outlook:ABC123` ⇒ driver `outlook`, nativo `ABC123`. |
@@ -141,6 +143,8 @@ Requisitos: AC-05, RF-38 · Archivo: `tests/test_uid.py`
 #### UT-UID-02 — uid prefijado en comandos
 
 Requisitos: AC-05 · Archivo: `tests/test_uid.py`
+
+**Tabla: Casos de UT-UID-02**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

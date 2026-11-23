@@ -30,9 +30,9 @@ Ejemplo `01-new-mail-digest.md`:
 
 ### 21.3 Idempotencia y concurrencia
 
-- `search`/`show`/`mailboxes`/`doctor`: sin efectos sobre el correo ni sobre el estado de `new`. Como cualquier comando, pueden crear `~/.mailquery`, escribir en el log y tomar el lock.
-- `attachment`: sin efectos sobre el correo ni sobre el estado de `new`; solo escribe en `~/.mailquery/tmp/` y `~/.mailquery/attachments/`. Como cualquier comando, puede crear `~/.mailquery`, escribir en el log y tomar el lock.
-- `new`: exactamente-una-vez por corrida (cursor + dedupe); `--peek` para inspección.
+- `search`/`show`/`mailboxes`/`doctor`: sin efectos sobre el correo ni sobre el estado de `new`. Como cualquier comando, pueden crear `~/.mailquery`, escribir en el log y tomar el lock. Con un driver que usa la caché de ids nativos, `search` y `show` pueden escribir además en ella (RF-81, RF-82).
+- `attachment`: sin efectos sobre el correo ni sobre el estado de `new`; solo escribe en `~/.mailquery/tmp/`, en `~/.mailquery/attachments/` y, con un driver que la usa, en la caché de ids nativos (RF-81). Como cualquier comando, puede crear `~/.mailquery`, escribir en el log y tomar el lock.
+- `new`: exactamente-una-vez por corrida (cursor + dedupe); `--peek` para inspección. Con un driver que usa la caché de ids nativos, `new` puede escribir además en ella, también con `--peek` (RF-82).
 
 ---
 

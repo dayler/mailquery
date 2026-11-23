@@ -403,7 +403,7 @@ class OutlookBackend(MailBackend):
         self._tmp_root = Path(tmp_root) if tmp_root is not None else None
         #: Application home bound by the core; ``None`` keeps the cache in memory.
         self._home: Path | None = None
-        #: Native id cache, opened on the first query or resolution and on ``close``.
+        #: Native id cache, opened on the first query or resolution.
         self._native_ids: NativeIdCache | None = None
         #: Uid part of each EntryID read in this execution.
         self._entry_parts: dict[str, str] = {}
@@ -691,9 +691,9 @@ class OutlookBackend(MailBackend):
     def _discard_absent(self, entry_id: str) -> None:
         """Delete the cache row of an EntryID whose message no longer exists.
 
-        The part also stops resolving in this execution. The highest sequence
-        number its short id reached stays in the cache, so the part is never
-        assigned to another message while the cache exists.
+        The part also stops resolving in this execution. Its sequence number
+        becomes free when it was the highest of its short id, so another message
+        with the same short id can receive the same part later.
         """
         self._cache().discard(entry_id)
         part = self._entry_parts.pop(entry_id, None)

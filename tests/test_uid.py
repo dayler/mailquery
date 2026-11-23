@@ -101,7 +101,7 @@ class UidFormatTests(unittest.TestCase):
                 _assert_error(self, "E_USAGE", lambda: parse_uid(f"apple_mail:{native}"))
 
     def test_ut_uid_01_05_legacy_uid_uses_the_platform_native_driver(self) -> None:
-        """UT-UID-01.05: unprefixed integer on macOS ⇒ apple_mail; uppercase hex on Windows ⇒ outlook."""
+        """UT-UID-01.05: unprefixed integer on macOS ⇒ apple_mail; short id on Windows ⇒ outlook."""
         with mock.patch.object(sys, "platform", "darwin"):
             parsed = parse_uid("83143")
         self.assertEqual((parsed.driver, parsed.native_id), ("apple_mail", "83143"))

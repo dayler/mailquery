@@ -74,5 +74,11 @@ F3 hace que lo barato sea lo que sale por defecto y añade formas de pedir solo 
 
 `new` y `search --unread` se mantienen (ADR-45).
 
+**Id corto de mensaje en Outlook.**
+
+1. **`uid` corto:** en Windows el `uid` es `outlook:` más un id corto de 10 caracteres, en lugar de los 140 del `EntryID` (RF-81).
+2. **Caché de ids nativos:** `~/.mailquery/db/cache.db` relaciona cada id corto impreso con su id nativo. El núcleo ofrece la librería y cada driver decide si la usa (RF-80, RF-82).
+3. **`--show-native-id`:** opción de depuración de `show`, que muestra el id nativo en lugar del id corto (RF-83).
+
 ---
 

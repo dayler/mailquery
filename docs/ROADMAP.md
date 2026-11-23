@@ -283,10 +283,10 @@ requiere la app en Entra ID.
 
 ## 10. Para publicar 3.0.0
 
-Las features de `3.0.0` están en `develop` con la versión `3.0.0a1`, sin tag ni
+Las features de `3.0.0` están en `develop` con la versión `3.0.0a2`, sin tag ni
 merge a `main`. Falta:
 
-1. Subir la versión de `3.0.0a1` a `3.0.0` en `pyproject.toml`,
+1. Subir la versión de `3.0.0a2` a `3.0.0` en `pyproject.toml`,
    `mailquery.__version__`, los goldens `doctor` y la documentación; reinstalar el
    paquete y comprobar TC-06, PKG-01, PKG-02 y DOC-03
    ([`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md)).

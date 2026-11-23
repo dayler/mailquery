@@ -4,6 +4,8 @@
 
 Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 
+**Tabla: Casos de TC-01**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | El golden `doctor` cambia a `pkg 3.0.0a2` (solo la versión). |
@@ -23,6 +25,8 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 Requisitos: RF-28 · Archivo: `tests/test_integration.py`
 
 Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaje normal con adjunto, uno solo con cabeceras y uno S/MIME cifrado) y un buzón compartido excluido. Cada caso compara con el golden `outlook/<nombre>`.
+
+**Tabla: Casos de TC-02**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
