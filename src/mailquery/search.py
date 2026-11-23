@@ -943,6 +943,7 @@ def run_show(
     native: str | None = None,
     url_mode: str = "neutralize",
     fields: Sequence[str] | None = None,
+    show_native_id: bool = False,
 ) -> dict:
     """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
