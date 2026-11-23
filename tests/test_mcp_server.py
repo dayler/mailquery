@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -679,3 +680,340 @@ class ImportTests(_ServerCase):
 
 if __name__ == "__main__":  # pragma: no cover - manual runs
     unittest.main()
+
+
+# --------------------------------------------------------------------------- #
+# UT-MCP-09 to UT-MCP-12 — the real server and child processes
+# --------------------------------------------------------------------------- #
+
+_SERVER_SCRIPT = [sys.executable, "-B", "-P", "-m", "mailquery"]
+
+
+def _process_env(home: Path, extra: dict | None = None) -> dict:
+    env = dict(os.environ)
+    env["HOME"] = env["USERPROFILE"] = str(home)
+    env["PYTHONPATH"] = str(_REPO_ROOT / "src")
+    env.pop("PYTHONWARNINGS", None)
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _write_config(home: Path, text: str) -> None:
+    app_home = home / ".mailquery"
+    app_home.mkdir(parents=True, exist_ok=True)
+    (app_home / "config.toml").write_text(text, encoding="utf-8")
+
+
+class _ProcessCase(unittest.TestCase):
+    """One temporary HOME per case and helpers for real server subprocesses."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(prefix="mailquery-mcp-")
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.home = self.root / "home"
+        self.home.mkdir()
+
+    def start(self, *, args=(), env=None, cwd=None):
+        proc = subprocess.Popen(
+            [*_SERVER_SCRIPT, *args, "mcp", "serve"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env=env or _process_env(self.home),
+            cwd=str(cwd or _REPO_ROOT),
+        )
+        self.addCleanup(self._terminate, proc)
+        return proc
+
+    def _terminate(self, proc) -> None:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                if stream is not None and not stream.closed:
+                    stream.close()
+            except OSError:
+                pass
+
+    def request(self, proc, request_id, method, params=None) -> dict:
+        message = {"jsonrpc": "2.0", "id": request_id, "method": method}
+        if params is not None:
+            message["params"] = params
+        proc.stdin.write(json.dumps(message) + "\n")
+        proc.stdin.flush()
+        line = proc.stdout.readline()
+        self.assertTrue(line, "the server closed stdout")
+        return json.loads(line)
+
+    def call(self, proc, tool, arguments=None, request_id=1) -> dict:
+        return self.request(
+            proc, request_id, "tools/call", {"name": tool, "arguments": arguments or {}}
+        )
+
+    def tool_payload(self, reply) -> dict:
+        return json.loads(reply["result"]["content"][0]["text"])
+
+    def stop(self, proc) -> tuple[int, str]:
+        proc.stdin.close()
+        code = proc.wait(timeout=120)
+        return code, proc.stderr.read()
+
+    def run_cli(self, *argv, env=None, cwd=None):
+        return subprocess.run(
+            [*_SERVER_SCRIPT, *argv],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env or _process_env(self.home),
+            cwd=str(cwd or _REPO_ROOT),
+            timeout=120,
+        )
+
+
+class RealServerTests(_ProcessCase):
+    """UT-MCP-09 — the real server process."""
+
+    def test_ut_mcp_09_01_starts_without_config(self) -> None:
+        """UT-MCP-09.01: without config.toml the server answers initialize and tools/list."""
+        proc = self.start()
+        initialized = self.request(proc, 1, "initialize", {})
+        self.assertEqual(initialized["result"]["serverInfo"]["name"], "mailquery")
+        tools = self.request(proc, 2, "tools/list")
+        self.assertEqual(len(tools["result"]["tools"]), 6)
+        self.assertEqual(self.stop(proc)[0], 0)
+
+    def test_ut_mcp_09_02_invalid_config_is_fixed_without_restart(self) -> None:
+        """UT-MCP-09.02: an invalid config is reported and fixed without restarting."""
+        _write_config(self.home, "broken = = toml\n")
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        self.assertEqual(len(self.request(proc, 2, "tools/list")["result"]["tools"]), 6)
+        reply = self.call(proc, "search", {"since": "bogus"}, 3)
+        self.assertTrue(reply["result"]["isError"])
+        self.assertEqual(self.tool_payload(reply)["error"]["code"], "E_CONFIG_INVALID")
+        _write_config(self.home, "")
+        reply = self.call(proc, "search", {"since": "bogus"}, 4)
+        self.assertNotEqual(self.tool_payload(reply)["error"]["code"], "E_CONFIG_INVALID")
+        self.assertEqual(self.stop(proc)[0], 0)
+
+    def test_ut_mcp_09_03_real_executor_matches_the_cli(self) -> None:
+        """UT-MCP-09.03: search --since=bogus matches the CLI, also with a local json.py."""
+        cwd = self.root / "cwd"
+        cwd.mkdir()
+        (cwd / "json.py").write_text("raise RuntimeError('shadow json')\n", encoding="utf-8")
+        direct = self.run_cli("search", "--since=bogus", cwd=cwd)
+        self.assertNotEqual(direct.returncode, 0, direct.stderr)
+        expected = json.loads(direct.stdout)
+        expected.pop("generated_at", None)
+        proc = self.start(cwd=cwd)
+        self.request(proc, 1, "initialize", {})
+        reply = self.call(proc, "search", {"since": "bogus"}, 2)
+        self.assertTrue(reply["result"]["isError"])
+        observed = self.tool_payload(reply)
+        observed.pop("generated_at", None)
+        self.assertEqual(observed, expected)
+        self.assertEqual(self.stop(proc)[0], 0)
+
+    def test_ut_mcp_09_04_closing_stdin_with_a_call_in_progress(self) -> None:
+        """UT-MCP-09.04: closing stdin during a call answers it and exits 0 with empty stderr."""
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        proc.stdin.write(
+            json.dumps(_call("search", {"since": "1w"}, 2)) + "\n"
+        )
+        proc.stdin.flush()
+        proc.stdin.close()
+        reply = json.loads(proc.stdout.readline())
+        self.assertEqual(reply["id"], 2)
+        code = proc.wait(timeout=120)
+        self.assertEqual(code, 0)
+        self.assertEqual(proc.stderr.read(), "")
+
+    def test_ut_mcp_09_05_stdout_lines_end_in_lf(self) -> None:
+        """UT-MCP-09.05: every stdout line ends in LF without CR."""
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        self.request(proc, 2, "tools/list")
+        self.call(proc, "search", {"since": "bogus"}, 3)
+        self.stop(proc)
+        # The child sessions were consumed line by line; a raw run checks the bytes.
+        raw = subprocess.run(
+            [*_SERVER_SCRIPT, "mcp", "serve"],
+            input=json.dumps(_request(1, "ping")) + "\n",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=_process_env(self.home),
+            cwd=str(_REPO_ROOT),
+        )
+        self.assertEqual(raw.returncode, 0)
+        self.assertNotIn("\r", raw.stdout)
+        for line in raw.stdout.splitlines(keepends=True):
+            self.assertTrue(line.endswith("\n"))
+
+    def test_ut_mcp_09_06_cross_option_validation_happens_in_the_child(self) -> None:
+        """UT-MCP-09.06: attachment with index and all returns the CLI E_USAGE."""
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        reply = self.call(proc, "attachment", {"uid": "apple_mail:1", "index": 1, "all": True}, 2)
+        self.assertTrue(reply["result"]["isError"])
+        observed = self.tool_payload(reply)
+        self.assertEqual(observed["error"]["code"], "E_USAGE")
+        direct = self.run_cli("attachment", "apple_mail:1", "--index", "1", "--all")
+        expected = json.loads(direct.stdout)
+        self.assertEqual(observed["error"], expected["error"])
+        self.assertEqual(self.stop(proc)[0], 0)
+
+    def test_ut_mcp_09_07_two_servers_share_the_same_home(self) -> None:
+        """UT-MCP-09.07: two servers on the same HOME answer independently."""
+        first = self.start()
+        second = self.start()
+        for index, proc in enumerate((first, second), start=1):
+            with self.subTest(server=index):
+                self.assertEqual(
+                    self.request(proc, 1, "initialize", {})["result"]["serverInfo"]["name"],
+                    "mailquery",
+                )
+                self.assertEqual(len(self.request(proc, 2, "tools/list")["result"]["tools"]), 6)
+        self.assertEqual(self.stop(first)[0], 0)
+        self.assertEqual(self.stop(second)[0], 0)
+
+
+class FailingPluginTests(_ProcessCase):
+    """UT-MCP-10 — a plugin that cannot be loaded does not break the server."""
+
+    def test_ut_mcp_10_01_server_starts_with_a_broken_plugin_installed(self) -> None:
+        """UT-MCP-10.01: a failing plugin still leaves initialize and tools/list working."""
+        plugin_root = self.root / "plugin"
+        plugin_root.mkdir()
+        (plugin_root / "mq_broken_plugin.py").write_text(
+            "raise ImportError('broken plugin')\n", encoding="utf-8"
+        )
+        dist_info = plugin_root / "graph-0.1.0.dist-info"
+        dist_info.mkdir()
+        (dist_info / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: graph\nVersion: 0.1.0\n", encoding="utf-8"
+        )
+        (dist_info / "entry_points.txt").write_text(
+            "[mailquery.backends]\ngraph = mq_broken_plugin:Broken\n", encoding="utf-8"
+        )
+        env = _process_env(self.home)
+        env["PYTHONPATH"] = os.pathsep.join([str(_REPO_ROOT / "src"), str(plugin_root)])
+        proc = self.start(env=env)
+        self.assertEqual(self.request(proc, 1, "initialize", {})["result"]["serverInfo"]["name"], "mailquery")
+        self.assertEqual(len(self.request(proc, 2, "tools/list")["result"]["tools"]), 6)
+        self.assertEqual(self.stop(proc)[0], 0)
+
+
+class ServerLogTests(_ProcessCase):
+    """UT-MCP-11 — the server log."""
+
+    def log_text(self, name: str = "mailquery.log") -> str:
+        path = self.home / ".mailquery" / "logs" / name
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def test_ut_mcp_11_01_start_call_and_end_lines(self) -> None:
+        """UT-MCP-11.01: start, one call line per call and end are logged."""
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        self.call(proc, "search", {"since": "bogus"}, 2)
+        self.assertEqual(self.stop(proc)[0], 0)
+        text = self.log_text()
+        self.assertIn("event=start command=mcp", text)
+        self.assertRegex(text, r"event=call tool=search exit_code=\d+ duration_ms=\d+")
+        self.assertIn("event=end command=mcp", text)
+
+    def test_ut_mcp_11_02_parameter_values_are_not_logged(self) -> None:
+        """UT-MCP-11.02: the server log never contains a parameter value."""
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        self.call(proc, "search", {"subject": ["SECRET-SMOKE-VALUE"]}, 2)
+        self.stop(proc)
+        self.assertNotIn("SECRET-SMOKE-VALUE", self.log_text())
+
+    def test_ut_mcp_11_03_the_log_file_is_not_open_between_events(self) -> None:
+        """UT-MCP-11.03: the active log can be renamed between two events."""
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        log = self.home / ".mailquery" / "logs" / "mailquery.log"
+        moved = log.with_name("mailquery.log.moved")
+        log.rename(moved)
+        self.request(proc, 2, "tools/list")
+        self.assertEqual(self.stop(proc)[0], 0)
+        self.assertTrue(moved.is_file())
+        self.assertIn("event=end command=mcp", self.log_text())
+
+    def test_ut_mcp_11_04_level_json_and_the_config_snapshot(self) -> None:
+        """UT-MCP-11.04: --log-level, JSON output and the config read once at start."""
+        _write_config(self.home, '[logging]\njson = true\n')
+        proc = self.start(args=("--log-level", "debug"))
+        self.request(proc, 1, "initialize", {})
+        _write_config(self.home, '[logging]\njson = false\n')
+        self.call(proc, "search", {"since": "bogus"}, 2)
+        self.assertEqual(self.stop(proc)[0], 0)
+        jsonl = self.log_text("mailquery.jsonl")
+        self.assertIn('"event": "start"', jsonl)
+        self.assertIn('"event": "end"', jsonl)
+        text_log = self.log_text()
+        self.assertNotIn("event=start command=mcp", text_log)
+        events = [
+            json.loads(line)["fields"]["event"]
+            for line in jsonl.splitlines()
+            if "event" in json.loads(line)["fields"]
+        ]
+        self.assertIn("start", events)
+        self.assertIn("call", events)
+        self.assertIn("end", events)
+
+    def test_ut_mcp_11_05_a_log_write_failure_does_not_break_the_server(self) -> None:
+        """UT-MCP-11.05: a log failure is silent and the server keeps answering."""
+        app_home = self.home / ".mailquery"
+        app_home.mkdir()
+        (app_home / "logs").write_text("not a directory", encoding="utf-8")
+        proc = self.start()
+        self.assertEqual(self.request(proc, 1, "initialize", {})["id"], 1)
+        self.assertEqual(len(self.request(proc, 2, "tools/list")["result"]["tools"]), 6)
+        code, stderr = self.stop(proc)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+
+
+class RotationTests(_ProcessCase):
+    """UT-MCP-12 — rotation with the server running."""
+
+    def _preload(self, path: Path, payload: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    def test_ut_mcp_12_01_text_rotation(self) -> None:
+        """UT-MCP-12.01: text rotation leaves event=call in the new active file."""
+        _write_config(self.home, "[logging]\nmax_size_mb = 1\n")
+        log = self.home / ".mailquery" / "logs" / "mailquery.log"
+        self._preload(log, b"x" * (1024 * 1024 - 64))
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        self.call(proc, "search", {"since": "bogus"}, 2)
+        self.assertEqual(self.stop(proc)[0], 0)
+        self.assertTrue((log.parent / "mailquery.log.1").is_file())
+        self.assertIn("event=call tool=search", log.read_text(encoding="utf-8"))
+
+    def test_ut_mcp_12_02_json_rotation(self) -> None:
+        """UT-MCP-12.02: JSON rotation leaves event=call in the new active file."""
+        _write_config(self.home, "[logging]\nmax_size_mb = 1\njson = true\n")
+        log = self.home / ".mailquery" / "logs" / "mailquery.jsonl"
+        pad = "x" * (1024 * 1024 - 80)
+        self._preload(log, (json.dumps({"pad": pad}) + "\n").encode("utf-8"))
+        proc = self.start()
+        self.request(proc, 1, "initialize", {})
+        self.call(proc, "search", {"since": "bogus"}, 2)
+        self.assertEqual(self.stop(proc)[0], 0)
+        self.assertTrue((log.parent / "mailquery.jsonl.1").is_file())
+        payloads = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(payload.get("fields", {}).get("event") == "call" for payload in payloads))

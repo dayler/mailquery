@@ -1883,6 +1883,8 @@ _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
         r"solo biblioteca\s+estándar", re.IGNORECASE
     ),
     "preflight": re.compile(r"\bpreflight\b", re.IGNORECASE),
+    "six commands": re.compile(r"\bsix commands\b", re.IGNORECASE),
+    "seis comandos": re.compile(r"\bseis comandos\b", re.IGNORECASE),
 }
 
 #: Text the README must document (DOC-01.03/05, AC-21).
@@ -2166,13 +2168,17 @@ class HelpDocumentationTest(_DocumentationCase):
             with self.subTest(note=note):
                 self.assertIn(note, normalized)
 
-    def test_doc_05_03_seven_help_invocations_parse(self) -> None:
-        """DOC-05.03: the root help and the six subcommand helps (7 invocations) parse."""
-        for argv in (["--help"], *([command, "--help"] for command in COMMANDS)):
+    def test_doc_05_03_nine_help_invocations_parse(self) -> None:
+        """DOC-05.03: the root help, seven subcommand helps and mcp serve (9) parse."""
+        for argv in (
+            ["--help"],
+            *([command, "--help"] for command in COMMANDS),
+            ["mcp", "serve", "--help"],
+        ):
             with self.subTest(argv=argv):
                 text = _help_text(argv)
                 self.assertTrue(text.strip())
-        self.assertEqual(len(COMMANDS), 6)
+        self.assertEqual(len(COMMANDS), 7)
 
     def test_doc_05_04_help_has_no_stale_terms(self) -> None:
         """DOC-05.04: no help mentions five commands or an integer uid (module docstring included)."""
@@ -2281,10 +2287,14 @@ class ConfigExampleTest(_DocumentationCase):
 class UserDocumentationTest(_DocumentationCase):
     """TC-07: documentation and helps are coherent with the 2.1 contract."""
 
-    def test_tc_07_01_root_and_six_helps_parse(self) -> None:
-        """TC-07.01: the root help and the six subcommand helps (7 invocations) parse."""
-        self.assertEqual(len(COMMANDS), 6)
-        for argv in (["--help"], *([command, "--help"] for command in COMMANDS)):
+    def test_tc_07_01_root_and_all_helps_parse(self) -> None:
+        """TC-07.01: the root help, seven subcommand helps and mcp serve (9) parse."""
+        self.assertEqual(len(COMMANDS), 7)
+        for argv in (
+            ["--help"],
+            *([command, "--help"] for command in COMMANDS),
+            ["mcp", "serve", "--help"],
+        ):
             with self.subTest(argv=argv):
                 self.assertTrue(_help_text(argv).strip())
 

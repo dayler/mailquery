@@ -802,9 +802,52 @@ mailquery attachment apple_mail:83301 --index 2 --force
   unlike the native id cache. There is no purge on start: use an external
   cron/cleanup if needed. The app tolerates concurrent deletions.
 
+### `mailquery mcp serve`
+
+Starts an MCP server over stdin and stdout for a harness: one tool per read
+command (`search`, `new`, `show`, `attachment`, `mailboxes` and `doctor`). This
+is the same executable and the same JSON contract as the CLI:
+
+```text
+$ mailquery mcp serve
+```
+
+Register it once with Claude Code (user scope, available in every session):
+
+```bash
+claude mcp add --scope user mailquery -- mailquery mcp serve
+```
+
+For other harnesses, the equivalent `mcpServers` entry is:
+
+```json
+{"mcpServers": {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}}
+```
+
+Each tool parameter is one option of its command, with the leading dashes
+removed and `-` replaced by `_`: `include_mailbox` is `--include-mailbox`,
+`has_attachments` is `--has-attachments` and `log_level` is `--log-level`.
+`uid` is the positional argument of `show` and `attachment` and is required.
+`doctor` always runs with `--json`; `json` is not a parameter. The call
+`{"since": "1w", "unread": true, "fields": ["snippet"]}` on `search` is exactly
+`mailquery search --since=1w --unread --fields=snippet`.
+
+The server never reads mail, the state or a driver: every call runs one
+`mailquery` child process with the same environment and working directory,
+empty stdin and discarded stderr, and returns its stdout as one `text` block.
+`isError` is true when the child exits non-zero; the JSON keeps the CLI
+contract, so the exit code is deduced from `error.code`. The server writes
+`event=start command=mcp`, one `event=call tool=… exit_code=… duration_ms=…`
+line per call (never parameter values) and `event=end` to the active log file,
+and it does not keep that file open between events.
+
+Permissions apply to the app that launches the server, not to the terminal: on
+macOS it needs **Full Disk Access**, and on Windows it must run in the same
+session and with the same integrity level as classic Outlook.
+
 ### `mailquery <command> --help`
 
-Each subcommand documents its own options; `mailquery --help` lists the six
+Each subcommand documents its own options; `mailquery --help` lists the seven
 commands and the exit code line below.
 
 ## Body and warnings

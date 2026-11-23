@@ -130,6 +130,93 @@ def setup_logging(
     return _current_run_id
 
 
+class _PerEventRotatingHandler(logging.Handler):
+    """Rotating handler that opens, writes and closes the file on every event.
+
+    Keeping no open handle between events lets the child processes rotate the
+    same file on any platform. A write failure is swallowed: the server keeps
+    serving and nothing reaches stdout or stderr.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        max_bytes: int,
+        backup_count: int,
+        formatter: logging.Formatter,
+    ) -> None:
+        super().__init__()
+        self._path = Path(path)
+        self._max_bytes = int(max_bytes)
+        self._backup_count = int(backup_count)
+        self.setFormatter(formatter)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            handler = _PrivateRotatingFileHandler(
+                self._path,
+                maxBytes=self._max_bytes,
+                backupCount=self._backup_count,
+                encoding="utf-8",
+                delay=True,
+            )
+            handler.setFormatter(self.formatter)
+            handler.emit(record)
+            handler.close()
+        except Exception:  # noqa: BLE001 - a log failure is never fatal
+            pass
+
+    def handleError(self, record: logging.LogRecord) -> None:  # pragma: no cover
+        """Never write logging errors to stderr: stdout is the protocol."""
+        return
+
+
+def setup_server_logging(
+    home: Path,
+    level: str = "info",
+    max_size_mb: int = DEFAULT_MAX_SIZE_MB,
+    json: bool = False,
+) -> str:
+    """Configure the MCP server log with a per-event, rotation-aware handler.
+
+    The handler opens the active file, writes the event, checks the rotation
+    and closes the file on every event, so child processes can rotate it in
+    Windows too. ``json`` selects the same ``mailquery.jsonl`` JSON Lines file
+    as the rest of the core.
+    """
+    global _current_run_id, _active_log_filename
+
+    log_dir = Path(home) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _chmod_dir(log_dir)
+    log_path = log_dir / (JSON_LOG_FILENAME if json else TEXT_LOG_FILENAME)
+
+    logger = logging.getLogger("mailquery")
+    _close_handlers(logger)
+    logger.setLevel(LEVELS.get(level, logging.INFO))
+    logger.propagate = False
+    logger.addHandler(
+        _PerEventRotatingHandler(
+            log_path,
+            int(max_size_mb) * 1024 * 1024,
+            BACKUP_COUNT,
+            JsonFormatter() if json else logging.Formatter(LOG_FORMAT),
+        )
+    )
+    _active_log_filename = log_path.name
+
+    import uuid  # lazy: only needed once per run
+
+    _current_run_id = uuid.uuid4().hex[:12]
+    log_event(
+        get_logger("mailquery"),
+        logging.DEBUG,
+        (("level", level), ("max_size_mb", max_size_mb)),
+        text="logging initialized",
+    )
+    return _current_run_id
+
+
 def current_run_id() -> str:
     return _current_run_id
 

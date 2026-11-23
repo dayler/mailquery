@@ -256,7 +256,7 @@ _ATTACHMENT_HELP_EXPECTED = "\n".join(
 ) + "\n"
 
 #: Every subcommand of the six-command CLI.
-ALL_COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment")
+ALL_COMMANDS = ("doctor", "mailboxes", "search", "new", "show", "attachment", "mcp")
 
 
 class HelpContractTests(_CliTestCase):
@@ -271,7 +271,7 @@ class HelpContractTests(_CliTestCase):
             )
 
     def help_text(self, command: str | None) -> str:
-        argv = ["--help"] if command is None else [command, "--help"]
+        argv = ["--help"] if command is None else [*command.split(), "--help"]
         code, stdout, stderr = self.run_cli(argv)
         self.assertEqual((code, stderr), (0, ""))
         return stdout
@@ -350,12 +350,13 @@ class HelpContractTests(_CliTestCase):
             "new": ("--peek", "--limit"),
             "show": ("uid",),
             "attachment": ("--index", "--all", "--force", "<uid>"),
+            "mcp": ("serve",),
         }
         parser = cli_mod.build_parser()
         seen = 0
         for command in (None, *ALL_COMMANDS):
             with self.subTest(command=command):
-                argv = ["--help"] if command is None else [command, "--help"]
+                argv = ["--help"] if command is None else [*command.split(), "--help"]
                 stdout = io.StringIO()
                 with (
                     redirect_stdout(stdout),
@@ -439,6 +440,7 @@ class HelpContractTests(_CliTestCase):
             "new": "mailquery new --peek",
             "show": "mailquery show 83143",
             "attachment": "mailquery attachment apple_mail:83143 --index 1",
+            "mcp": "mailquery mcp serve",
         }
         for command, example in examples.items():
             with self.subTest(command=command):
@@ -450,6 +452,60 @@ class HelpContractTests(_CliTestCase):
             2, self.run_cli(["attachment", "--index", "1"]), "E_USAGE", "attachment"
         )
         self.assertIn("uid", payload["error"]["message"].lower())
+
+    def test_ut_cli_14_01_root_help_lists_mcp_and_the_mcp_output_line(self) -> None:
+        """UT-CLI-14.01: the root help lists mcp and says it speaks MCP on stdout."""
+        _, stdout, _ = self.run_cli(["--help"])
+        self.assertRegex(stdout, r"(?m)^  mcp\s+serve the read commands as MCP tools over stdio")
+        flat = " ".join(stdout.split())
+        self.assertIn("mcp serve", flat)
+        self.assertIn("MCP protocol", flat)
+        self.assertIn("only non-JSON output", flat)
+
+    def test_ut_cli_14_02_mcp_without_subcommand_is_usage(self) -> None:
+        """UT-CLI-14.02: mailquery mcp is E_USAGE with command mcp."""
+        payload = self.assert_error(2, self.run_cli(["mcp"]), "E_USAGE", "mcp")
+        self.assertIn("subcommand", payload["error"]["message"])
+
+    def test_ut_cli_14_03_mcp_serve_with_extra_argument_is_usage(self) -> None:
+        """UT-CLI-14.03: mailquery mcp serve extra is E_USAGE with command mcp."""
+        self.assert_error(2, self.run_cli(["mcp", "serve", "extra"]), "E_USAGE", "mcp")
+
+    def test_ut_cli_14_04_mcp_helps_show_registration(self) -> None:
+        """UT-CLI-14.04: mcp and mcp serve helps show the registration command and mcpServers."""
+        for command in ("mcp", "mcp serve"):
+            with self.subTest(command=command):
+                text = self.help_text(command)
+                self.assertIn(
+                    "claude mcp add --scope user mailquery -- mailquery mcp serve", text
+                )
+                self.assertIn("mcpServers", text)
+                self.assertIn("Examples:", text)
+                self.assertIn("Options:", text)
+                self.assertIn("Notes:", text)
+                self.assert_human_readable(text)
+
+    def test_ut_cli_14_05_log_level_before_mcp_serve_is_accepted(self) -> None:
+        """UT-CLI-14.05: --log-level before mcp serve is accepted."""
+        args = cli_mod.build_parser().parse_args(["--log-level", "debug", "mcp", "serve"])
+        self.assertEqual((args.command, args.mcp_command, args.log_level), ("mcp", "serve", "debug"))
+
+    def test_ut_cli_14_06_main_serves_mcp_in_process(self) -> None:
+        """UT-CLI-14.06: cli.main with mcp serve answers initialize and returns 0 at EOF."""
+        message = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        )
+        stdin = io.StringIO(message + "\n")
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(sys, "stdin", stdin),
+            redirect_stdout(stdout),
+            redirect_stderr(io.StringIO()),
+        ):
+            code = cli_mod.main(["mcp", "serve"], home=self.fx.home)
+        self.assertEqual(code, 0)
+        reply = json.loads(stdout.getvalue())
+        self.assertEqual(reply["result"]["serverInfo"]["name"], "mailquery")
 
     def test_help_has_no_undeclared_flags(self) -> None:
         _, stdout, _ = self.run_cli(["--help"])

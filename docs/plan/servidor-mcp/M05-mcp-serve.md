@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 3 / 2. **Rama del lote:** `feature/servidor-mcp-lote-2`. **Rama del milestone:** `feature/servidor-mcp-m05`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `ce19b37` (tip de `feature/servidor-mcp-lote-1` con M01–M04). **Línea base de la suite:** la del lote; los fallos conocidos son los SMOKE del entorno local.
 - **Depende de:** M02 (`mcp_server.py`: `serve`, `tool_definitions`, `build_argv`, ejecutor real), M03 (versión `3.0.0a3` en el paquete y en los README), M04 (`load_logging_config`, `setup_logging(…, json=…)`, archivo activo). **Lo usan:** M06 (documentos técnicos), M07 (SMOKE).
 - **ACs:** AC-72 (ejecutor real), AC-74 (proceso real), AC-75 (todo salvo la línea de logs de la ayuda, hecha en M04), AC-76 (plugin que no carga), AC-78; AC-71 (fin de línea del proceso real en Windows).
 
@@ -90,11 +90,11 @@ Margen tuyo: la redacción de los epílogos de ayuda (en inglés, ≤ 100 column
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Parser `mcp` / `serve`, despacho, ayudas (raíz, `Output:`, `mcp --help`, `mcp serve --help`), sin añadir todavía un ejemplo `mailquery mcp serve` a la ayuda raíz (UT-ATC-09.03 exige que cada ejemplo sea de un comando de `ALL_COMMANDS`; el ejemplo entra en la fase 4); UT-CLI-14.01, .04, .05 y .06 | ⚪ |
-| 2 | Log del servidor (DP-07), `event=start`/`event=end`, nivel y formato; UT-MCP-11 | ⚪ |
-| 3 | Pruebas con procesos reales: UT-MCP-09, UT-MCP-10, UT-MCP-12 (en la matriz de CI de macOS y Windows) | ⚪ |
-| 4 | `COMMANDS` y `ALL_COMMANDS` con `mcp`, y el ejemplo de la ayuda raíz; UT-CLI-14.02 y .03 (necesitan `mcp` en `COMMANDS`); tests de DP-18; README (los dos, mismo contenido, mismo commit): registro de Claude Code y genérico, herramientas, equivalencia parámetro-opción, permisos de la app que lanza el servidor, fila de problemas; `SKILL.md` y `skills/README.md`; DOC-17 | ⚪ |
-| 5 | Suite completa, cobertura de `cli.py`, `mcp_server.py` y `logging_setup.py`, evidencia cruda y propuestas | ⚪ |
+| 1 | Parser `mcp` / `serve`, despacho, ayudas (raíz, `Output:`, `mcp --help`, `mcp serve --help`), sin añadir todavía un ejemplo `mailquery mcp serve` a la ayuda raíz (UT-ATC-09.03 exige que cada ejemplo sea de un comando de `ALL_COMMANDS`; el ejemplo entra en la fase 4); UT-CLI-14.01, .04, .05 y .06 | 🟢 |
+| 2 | Log del servidor (DP-07), `event=start`/`event=end`, nivel y formato; UT-MCP-11 | 🟢 |
+| 3 | Pruebas con procesos reales: UT-MCP-09, UT-MCP-10, UT-MCP-12 (en la matriz de CI de macOS y Windows) | 🟢 |
+| 4 | `COMMANDS` y `ALL_COMMANDS` con `mcp`, y el ejemplo de la ayuda raíz; UT-CLI-14.02 y .03 (necesitan `mcp` en `COMMANDS`); tests de DP-18; README (los dos, mismo contenido, mismo commit): registro de Claude Code y genérico, herramientas, equivalencia parámetro-opción, permisos de la app que lanza el servidor, fila de problemas; `SKILL.md` y `skills/README.md`; DOC-17 | 🟢 |
+| 5 | Suite completa, cobertura de `cli.py`, `mcp_server.py` y `logging_setup.py`, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -144,3 +144,8 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Parser `mcp`/`serve`, despacho, ayuda raíz con `mcp` y `Output:`, ayudas de `mcp` y `mcp serve`; UT-CLI-14.01, .04, .05 y .06 verdes. |
+| 2026-11-23 | 2 | Log del servidor con manejador por evento, `event=start`/`event=end`, nivel y formato; UT-MCP-11 verde. |
+| 2026-11-23 | 3 | Pruebas con procesos reales: UT-MCP-09, UT-MCP-10 y UT-MCP-12, también en macOS. |
+| 2026-11-23 | 4 | `COMMANDS` y `ALL_COMMANDS` con `mcp`, ejemplo de la ayuda raíz, tests de DP-18, README (dos), `SKILL.md` y `skills/README.md`; DOC-17. |
+| 2026-11-23 | 5 | Suite, cobertura, evidencia y propuestas. |
