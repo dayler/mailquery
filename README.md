@@ -525,7 +525,7 @@ date_received, mailbox, is_read, is_flagged, has_attachments, size_bytes,
 snippet, body`). The body is read only when `snippet` or `body` is requested, or
 when `--text` needs it to filter.
 
-Output of `mailquery search --since 1w` (default row; `uid` trimmed):
+Output of `mailquery search --since 1w` (default row):
 
 ```json
 {
@@ -710,9 +710,9 @@ attachment cache or the name is unsafe). A driver with `attachments: "none"` ret
 `~/.mailquery/db/cache.db`, a SQLite file that maps each printed short id to
 the `EntryID` of its message and stores no subject, address, body or attachment
 name. `search` and `new` add the rows of the messages they print, `show` and
-`attachment` resolve the uid there, and `show` writes only in that file: it
-creates it if it is missing and deletes the row of a message that Outlook
-confirms as absent. It is not the attachment cache and it is not ephemeral:
+`attachment` resolve the uid there: they create the file if it is missing and
+delete the row of a message that Outlook confirms as absent, and `show` writes
+nowhere else. It is not the attachment cache and it is not ephemeral:
 unlike that cache, no cleanup should delete it. If the file is deleted, the
 uids already printed stop resolving until `search` or `new` prints the message
 again, with the same short id. On macOS the `~/.mailquery/db/` directory is

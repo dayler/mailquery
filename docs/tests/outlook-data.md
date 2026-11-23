@@ -97,6 +97,8 @@ Requisitos: RF-07, RF-13 · Archivo: `tests/test_outlook.py`
 
 Requisitos: RF-25, RNF-04 · Archivo: `tests/test_outlook.py`
 
+**Tabla: Casos de OL-14**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | el uid es el id corto de 10 caracteres del `EntryID` permanente; `native_order_key` es el `EntryID` permanente en mayúsculas, no el id de la tabla. |
@@ -186,6 +188,8 @@ Requisitos: RF-03, PRD §11.3 · Archivo: `tests/test_outlook.py`
 #### OL-23 — `show`: resolución del uid
 
 Requisitos: RF-03, RF-25 · Archivo: `tests/test_outlook.py`
+
+**Tabla: Casos de OL-23**
 
 | Caso | Tipo | Verifica |
 |---|---|---|

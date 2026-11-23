@@ -43,7 +43,7 @@ En todas las plataformas, `last_uid` y los elementos de `emitted_uids` son strin
 - **Migración `schema 1 → 2`:** al cargar un `state.json` con `schema: 1`, el núcleo convierte los uids legados de forma determinista **según el tipo del valor, sin depender del SO**: entero ≥ 1 ⇒ `"apple_mail:<n>"`; string hexadecimal en mayúsculas ⇒ `"outlook:<HEX>"`; `0`, negativos, cualquier otro valor o formato ⇒ `E_STATE_CORRUPT` (exit 3) con hint de renombrar el archivo. El resultado se persiste como `schema: 2` en la siguiente escritura de estado (una corrida de `new` sin `--peek` que emite al menos un mensaje; una corrida sin mensajes no escribe estado). `--peek` migra en memoria y no escribe. La validación de `schema: 2` (punto siguiente) aplica la cota de 1024 caracteres; un valor migrado que la exceda ⇒ `E_STATE_CORRUPT` con hint; un uid migrado cuyo driver no está instalado se valida después como en el punto siguiente. Mientras la migración no se haya persistido, el chequeo `state` de `doctor` muestra `schema: 1 (migration pending)`.
 - **Validación de `schema: 2`:** un uid que no sea `string` con formato válido ⇒ `E_STATE_CORRUPT`. Un `cursor.last_uid` cuyo driver no está instalado ⇒ `E_STATE_CORRUPT` (hint: reinstalar el plugin o renombrar el estado). Los elementos de `emitted_uids` cuyo driver no está instalado se **podan** en silencio (no rompen `new`) y se informa en `doctor` (`state`).
 - **Cursor multi-driver:** el cursor es global (un solo `last_date_received`/`last_uid`) y el anillo almacena uids prefijados. Cada driver declarado se consulta con el mismo `last_date_received` y `lookback`; el anillo global filtra duplicados por `uid`. La primera corrida emite la ventana `[más reciente − lookback, más reciente]` sobre el conjunto fusionado, como en el §12.3. Si el driver del `last_uid` está instalado pero ya no declarado, el cursor se conserva y se usa `last_date_received` como marca (no es `E_STATE_CORRUPT`); los uids de drivers no declarados permanecen en el anillo y no se comparan.
-- **Ciclo de vida del plugin:** actualizar un plugin dentro de la API 1 no cambia `config.toml`, `state.json` ni la caché. Desinstalarlo deja sus bloques `[scope]` en `E_DRIVER_UNKNOWN` y su cursor en `E_STATE_CORRUPT` (el anillo se poda y la caché se conserva). `plugin_api = 1` está cerrada para la línea 3.x; un cambio incompatible requiere una nueva versión de API y un PRD/ADR nuevo.
+- **Ciclo de vida del plugin:** actualizar un plugin dentro de la API 1 no cambia `config.toml`, `state.json` ni la caché de adjuntos. Desinstalarlo deja sus bloques `[scope]` en `E_DRIVER_UNKNOWN` y su cursor en `E_STATE_CORRUPT` (el anillo se poda, y la caché de adjuntos y sus filas de la caché de ids nativos se conservan). `plugin_api = 1` está cerrada para la línea 3.x; un cambio incompatible requiere una nueva versión de API y un PRD/ADR nuevo.
 - Si está corrupto, `new` falla con `E_STATE_CORRUPT` (exit 3) y un hint que sugiere renombrarlo y avisa de que la siguiente corrida será una primera corrida (§12.3). `search`/`show`/`mailboxes` no se ven afectadas; `doctor` lo reporta en el chequeo `state` con `ok=false`.
 
 ### 11.3 Correspondencia de cada backend con el modelo común
@@ -52,7 +52,7 @@ En todas las plataformas, `last_uid` y los elementos de `emitted_uids` son strin
 
 | Concepto | Apple Mail (macOS) | Outlook clásico (Windows) |
 |----------|--------------------|---------------------------|
-| `uid` | `"apple_mail:<n>"`: identificador del mensaje en el `Envelope Index` (entero) con el prefijo del driver. | `"outlook:<EntryID>"`: identificador permanente del item en Outlook (`EntryID`), en hexadecimal en mayúsculas, con el prefijo del driver; cambia si el mensaje se mueve de carpeta (§18). |
+| `uid` | `"apple_mail:<n>"`: identificador del mensaje en el `Envelope Index` (entero) con el prefijo del driver. | `"outlook:<parte del uid>"`: el id corto de 10 caracteres del `EntryID` permanente del item, con su sufijo cuando lo lleva (RF-80, RF-81) y el prefijo del driver; cambia si el mensaje se mueve de carpeta (§18). |
 | `message_id` | Message-ID del mensaje. | Message-ID de Internet. |
 | Clave de dedupe (RF-06) | Identificador global del mensaje en Mail; nulo o 0 ⇒ mensaje único. | Message-ID; ausente o vacío ⇒ mensaje único. |
 | `account.uuid` | Identificador de la cuenta en Mail (el mismo que en `Accounts4.sqlite`). | Identificador del store con forma de UUID en mayúsculas (`8-4-4-4-12`): único por store y estable aunque se mueva un PST. |
@@ -81,8 +81,38 @@ Todas las fechas del JSON (incluido `generated_at`) son ISO 8601 con el offset l
 **Plugins externos y semántica multi-driver:**
 
 - **`account.label`:** sin cambios respecto a la tabla anterior para los backends internos (`iCloud (you@icloud.com)`, `PST (Archivo 2025)`, …). Para un plugin, `label` es un string opaco estable definido por el plugin; `uuid` es un identificador opaco estable (no se exige forma de UUID a los plugins).
-- **Orden total:** en `search` es `(date_received DESC, driver ASC, native_order_key DESC)`; en `new`, `(date_received ASC, driver ASC, native_order_key ASC)`; un mensaje sin fecha cuenta como fecha 0. `native_order_key` lo define el driver: Apple Mail entero, Outlook texto hexadecimal en mayúsculas, plugins según `native_order`. No hay deduplicación cross-driver: si dos drivers ven el mismo correo, aparecen dos resultados con `duplicate_count` calculado dentro de cada driver. El avance del cursor y del anillo usan este mismo orden total, no la comparación lexicográfica del uid.
+- **Orden total:** en `search` es `(date_received DESC, driver ASC, native_order_key DESC)`; en `new`, `(date_received ASC, driver ASC, native_order_key ASC)`; un mensaje sin fecha cuenta como fecha 0. `native_order_key` lo define el driver: Apple Mail entero, Outlook el `EntryID` como texto hexadecimal en mayúsculas (no el id corto), plugins según `native_order`. No hay deduplicación cross-driver: si dos drivers ven el mismo correo, aparecen dos resultados con `duplicate_count` calculado dentro de cada driver. El avance del cursor y del anillo usan este mismo orden total, no la comparación lexicográfica del uid.
 - **Composición JSON multi-driver:** `mailboxes` concatena drivers en el orden de aparición de sus bloques en la config; dentro de cada driver, `accounts[]` sigue el orden de RF-77, y las `mailboxes[]` de cada cuenta y `excluded_stores[]`, el orden del driver (un plugin devuelve `excluded_stores: []`). En `search`/`new`, `--limit` se aplica tras el merge, `scan.candidates` suma por driver, y `truncated`/`hint` siguen el §12.5. `duplicate_count` es por driver; no hay dedupe cross-driver.
+
+### 11.4 Caché de ids nativos: `~/.mailquery/db/cache.db`
+
+Base SQLite de la librería de ids cortos (RF-80). La escriben solo los drivers que usan la librería; de los internos, solo `outlook`.
+
+**Tabla: Estructura de la tabla `cache_native_ids`**
+
+| Columna | Tipo | Nulo | Contenido |
+|---|---|---|---|
+| `driver` | texto | no | Driver dueño de la fila |
+| `short_id` | texto | no | Id corto del `native_id`, sin sufijo |
+| `seq` | entero ≥ 1 | no | Se calcula al asignar, con la regla de RF-80 |
+| `native_id` | texto | no | Id del mensaje en su driver; en `outlook`, el `EntryID` |
+
+- **Clave primaria:** `driver`, `short_id` y `seq`: no hay dos filas con los mismos tres valores.
+- **Única:** `driver` y `native_id`: un `native_id` tiene como mucho una fila por driver.
+- **Versión de formato:** la base guarda una versión de formato; la de esta estructura es la 1.
+
+Reglas del archivo:
+
+- **Ubicación:** el archivo está en la carpeta `~/.mailquery/db/`.
+- **No es efímera:** no es la caché de adjuntos de RF-51: no es best-effort y ninguna limpieza externa debe borrarla.
+- **Qué comandos la abren:** el driver `outlook` la abre en `search`, `new`, `show` y `attachment`, al asignar el uid de las primeras filas que lee de una carpeta o al resolver un uid; una ejecución que no lee ninguna fila ni resuelve ningún uid (sin cuentas declaradas, o con una ventana sin mensajes) no la abre. `mailboxes`, `doctor` y `--version` no la abren ni la crean.
+- **Creación:** al abrir la base, la librería comprueba la carpeta y la crea si no existe; si no encuentra el archivo, lo crea siempre, con su tabla y una versión de formato, aunque el comando no llegue a registrar nada; también `search --count`, que no registra filas. Con solo el driver `apple_mail`, nadie usa la librería y el archivo no se crea.
+- Un archivo recién creado no tiene filas: ningún uid se resuelve hasta que `search` o `new` vuelven a imprimir el mensaje.
+- Un archivo vacío se inicializa como uno nuevo. Uno con otra versión de formato no es una base válida de la librería.
+- Las filas de mensajes solo se insertan y se borran; el `seq` de un par es el siguiente al mayor de sus filas.
+- Si el archivo se borra, los uids ya impresos dejan de resolverse hasta que `search` o `new` vuelven a imprimir el mensaje, con el mismo id corto. `new` y su estado no dependen de este archivo, salvo cuando se borra con dos mensajes que comparten id corto (§23).
+- Si el archivo no se puede abrir, leer o escribir, o no es una base válida, el comando que lo necesita falla con el error de RF-80.
+- En macOS la carpeta tiene permisos 0700, y el archivo y los archivos auxiliares de la base, 0600 (RNF-05).
 
 ---
 

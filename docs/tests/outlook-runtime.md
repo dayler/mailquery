@@ -149,6 +149,8 @@ Requisitos: RNF-01 · Archivo: `tests/test_outlook.py`
 
 Barrido de los comandos con todos sus flags —incluido `--strip-links` en cada `search`, `new` y `show`, `show --show-native-id`, `search --group-by from,month`, `search --count`, `mailboxes`, `mailboxes --fields total,unread` y `mailboxes --fields name,url`, y `doctor`, `doctor --json`, `doctor --failures` y `doctor --json --failures`— sobre el fake de Outlook; bloqueante.
 
+**Tabla: Casos de OL-30**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Miembros invocados ⊆ lista blanca; el barrido incluye `show --show-native-id` y la expectativa no cambia. |
@@ -180,12 +182,12 @@ Requisitos: RF-81, RF-25, RF-38, AC-63, AC-69 · Archivo: `tests/test_outlook.py
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | Un `EntryID` como uid, con prefijo o sin él, en `show` y en `attachment` ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y el hint de D-05, sin crear el home ni la caché. |
+| .01 | N | Un `EntryID` como uid, con prefijo o sin él, en `show` y en `attachment` ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y un hint que remite a `mailquery search`, sin crear el home ni la caché. |
 | .02 | N | Id corto en mayúsculas, sufijos `-1`, `-02` y `-0`, 9 u 11 caracteres o un carácter fuera del alfabeto (`i`, `l`, `o`, `u`) ⇒ el mismo `E_USAGE`, sin crear la caché. |
 | .03 | P | El uid legado sin prefijo (id corto) se resuelve con el driver nativo y `show` devuelve el uid prefijado; la forma con sufijo `-2` es válida. |
 | .04 | N | Una forma válida que no está en la caché ⇒ `E_USAGE` con `message uid … was not found` y el hint de repetir la búsqueda, en `show` y en `attachment`. |
 | .05 | N | `show` y `attachment` sin `~/.mailquery/db/` ni `cache.db` ⇒ crean los dos, con la base vacía, y responden `message uid … was not found` con el hint de repetir la búsqueda. |
-| .06 | N | Con el driver `outlook`, en `search`, `show` y `attachment`: base bloqueada (tope acortado) ⇒ `E_LOCKED` (exit 5); sin permiso ⇒ `E_PERMISSION` (exit 3); archivo que no es una base válida ⇒ `E_IO` (exit 3) con el hint de D-05. |
+| .06 | N | Con el driver `outlook`, en `search`, `show` y `attachment`: base bloqueada (tope acortado) ⇒ `E_LOCKED` (exit 5); sin permiso ⇒ `E_PERMISSION` (exit 3); archivo que no es una base válida ⇒ `E_IO` (exit 3) con el hint de RF-80. |
 | .07 | B | Con el driver `outlook`, un `cache.db` vacío (0 bytes) se inicializa y `search` responde con exit 0 y registra los impresos. |
 
 #### OL-33 — Registro de impresos en Outlook
@@ -199,8 +201,8 @@ Requisitos: RF-82, RF-80, AC-65 · Archivo: `tests/test_outlook.py`
 | .01 | P | `search --limit 2` con 5 candidatos registra exactamente los 2 impresos. |
 | .02 | P | `search --group-by from` registra exactamente los mensajes de los grupos impresos. |
 | .03 | P | `new` registra los impresos; `new --peek` también y no escribe `state.json`. |
-| .04 | N | `search --count` no registra filas (el archivo existe y sus tablas están vacías); una respuesta sin mensajes no registra nada. |
-| .05 | N | Si el registro falla (conflicto inyectado o base bloqueada), el comando falla con `E_IO` o `E_LOCKED`, la salida no tiene mensajes y `new` no escribe `state.json`. |
+| .04 | N | `search --count` no registra filas (el archivo existe y su tabla está vacía); una respuesta sin mensajes no registra nada. |
+| .05 | N | Si el registro falla (conflicto inyectado), `search` y `new` fallan con `E_IO`, la salida no tiene mensajes y `new` no escribe `state.json`. |
 | .06 | N | Un mensaje leído pero descartado por un filtro (`--from`) no se registra. |
 
 #### OL-34 — Colisiones de id corto en Outlook
@@ -230,7 +232,7 @@ Requisitos: RF-81, AC-66, AC-69 · Archivo: `tests/test_outlook.py`
 | .04 | N | Sin conexión (`MAPI_E_NETWORK_ERROR`) ⇒ su error actual; la fila sigue. |
 | .05 | N | Store del `EntryID` no montado (fuera del perfil) ⇒ `message uid … was not found` con el hint actual; la fila sigue. |
 | .06 | N | Store ilegible ⇒ el comportamiento actual; la fila sigue. |
-| .07 | N | Item que existe pero no se puede abrir (`E_FAIL`) ⇒ como hoy: `show` responde con la fila de las tablas de su carpeta y `attachment` con `E_ATTACHMENT_UNREADABLE` (D-18); la fila sigue. |
+| .07 | N | Item que existe pero no se puede abrir (`E_FAIL`) ⇒ como hoy: `show` responde con la fila de las tablas de su carpeta y `attachment` con `E_ATTACHMENT_UNREADABLE`; la fila sigue. |
 | .08 | N | Item que no es un correo ⇒ "no encontrado" con el hint actual; la fila sigue. |
 | .09 | N | Item en una carpeta oculta ⇒ "no encontrado" con el hint actual; la fila sigue. |
 | .10 | N | Item marcado para borrar ⇒ "no encontrado" con el hint actual; la fila sigue. |

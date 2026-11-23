@@ -15,7 +15,7 @@ tags: [prd]
 
 - Cero telemetría o analytics. El núcleo y los backends internos no abren red; un plugin externo puede hacerlo si declara `network: true` (§4).
 - Permisos de `~/.mailquery`: RNF-05.
-- El estado no guarda contenido de correos (§11.2); los logs tampoco (§14).
+- El estado no guarda contenido de correos (§11.2); los logs tampoco (§14); la caché de ids nativos tampoco: solo guarda identificadores (§11.4).
 - Las fuentes de cuentas (`Accounts4.sqlite`, cuentas del perfil de Outlook) se leen solo para identificadores, proveedor y email visible (§4, regla 1).
 - Nunca se versiona correo en el repositorio.
 

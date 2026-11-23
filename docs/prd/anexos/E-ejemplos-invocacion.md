@@ -32,7 +32,7 @@ mailquery search --include-mailbox "Archivo,Facturas" --since 1mo
 
 # Detalle de un mensaje (uid tomado de search/new)
 mailquery show apple_mail:83143       # macOS (uid legado también aceptado: mailquery show 83143)
-mailquery show outlook:00000000A1B2C3D4…   # Windows (uid legado: mailquery show 00000000A1B2C3D4…)
+mailquery show outlook:k3f9q2m7xa   # Windows (uid legado: mailquery show k3f9q2m7xa)
 
 # Recuperar adjuntos locales a la caché
 mailquery attachment apple_mail:83143 --index 2

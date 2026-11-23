@@ -28,9 +28,9 @@ Después de instalar, declara al menos una cuenta en `~/.mailquery/config.toml` 
 
 ### 13.3 Actualización y desinstalación
 
-Se actualiza con `pipx reinstall mailquery` tras actualizar el repositorio y se desinstala con `pipx uninstall mailquery`. Desinstalar no borra `~/.mailquery` (estado, logs, caché de adjuntos y configuración); el usuario puede borrarlo a mano o con `scripts/install.sh --uninstall --purge` (macOS/Linux) o `scripts\install.ps1 -Uninstall -Purge` (Windows).
+Se actualiza con `pipx reinstall mailquery` tras actualizar el repositorio y se desinstala con `pipx uninstall mailquery`. Desinstalar no borra `~/.mailquery` (estado, logs, caché de adjuntos, caché de ids nativos y configuración); el usuario puede borrarlo a mano o con `scripts/install.sh --uninstall --purge` (macOS/Linux) o `scripts\install.ps1 -Uninstall -Purge` (Windows).
 
-Actualizar un plugin dentro de la API 1 no cambia `config.toml`, `state.json` ni la caché. Desinstalarlo deja sus bloques `[scope]` en `E_DRIVER_UNKNOWN` y su cursor en `E_STATE_CORRUPT`; el anillo se poda y la caché se conserva (§11.2).
+Actualizar un plugin dentro de la API 1 no cambia `config.toml`, `state.json` ni la caché de adjuntos. Desinstalarlo deja sus bloques `[scope]` en `E_DRIVER_UNKNOWN` y su cursor en `E_STATE_CORRUPT`; el anillo se poda, y la caché de adjuntos y sus filas de la caché de ids nativos se conservan (§11.2).
 
 **Actualización de seguridad de `css-inline`** (contenido de los README, RF-65). Ante un aviso de seguridad de `css-inline`, el usuario sigue estos pasos. La fuente de los avisos es la página de avisos del repositorio (<https://github.com/Stranger6667/css-inline/security/advisories>), y la versión que corrige cada uno, la sección "Security" del changelog (<https://github.com/Stranger6667/css-inline/blob/master/CHANGELOG.md>): un aviso del repositorio puede no aparecer en PyPI ni en las bases de vulnerabilidades que consulta `pip-audit`, y puede no indicar la versión corregida.
 

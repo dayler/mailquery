@@ -56,6 +56,8 @@ Requisitos: AC-12, RNF-13 · Archivo: `tests/test_integration.py`
 
 Requisitos: AC-07 · Archivo: `tests/test_cli.py`
 
+**Tabla: Casos de UT-ATC-01**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Tres adjuntos ⇒ `[{index:1,name:"factura.pdf",cached_path:null}, …]` con índices estables 1..N. |
@@ -73,6 +75,8 @@ Requisitos: AC-07 · Archivo: `tests/test_cli.py`
 
 Requisitos: AC-08 · Archivo: `tests/test_cli.py`
 
+**Tabla: Casos de UT-ATC-02**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | N | Sin modo o con ambos ⇒ `E_USAGE` "attachment requires exactly one of --index or --all". |
@@ -82,7 +86,7 @@ Requisitos: AC-08 · Archivo: `tests/test_cli.py`
 | .05 | N | `enabled = false` ⇒ `E_ATTACHMENTS_DISABLED` (exit 2) antes de abrir el store; `show` no se ve afectado. |
 | .06 | N | Driver instalado pero no declarado ⇒ `E_ACCOUNT_NOT_IN_SCOPE` (exit 2) sin cargar el driver; el hint indica declarar la cuenta. |
 | .07 | N | `attachments: "none"` ⇒ `E_ATTACHMENT_UNAVAILABLE` (`unsupported`) antes de abrir el store. |
-| .08 | P | Entrada con uid legado sin prefijo: `attachment 83143 --index 1` en macOS y `attachment <EntryID> --index 1` en Windows se resuelven con el driver nativo y devuelven `uid` prefijado. |
+| .08 | P | Entrada con uid legado sin prefijo: `attachment 83143 --index 1` en macOS y `attachment <id corto> --index 1` en Windows se resuelven con el driver nativo y devuelven `uid` prefijado. |
 | .09 | N | Precedencia de filas adyacentes de la tabla de §12.11, table-driven: `--index 9` sobre mensaje con nombre bloqueado ⇒ `E_USAGE` (fila 10 antes que 11); `enabled=false` + `attachments:none` ⇒ `E_ATTACHMENTS_DISABLED` (fila 4 antes que 5); S/MIME + `--index 9` ⇒ `E_ATTACHMENT_UNREADABLE` (fila 8 antes que 10); uid con driver no instalado + `enabled=false` ⇒ `E_DRIVER_UNKNOWN` (fila 2 antes que 4). |
 
 #### UT-ATC-03 — Validaciones con el store

@@ -30,6 +30,7 @@ mailquery/
 ├── src/mailquery/
 │   ├── __init__.py, __main__.py
 │   ├── cli.py, config.py, search.py, state.py, uid.py
+│   ├── native_ids.py               # librería de ids cortos y caché de ids nativos
 │   ├── output.py, logging_setup.py, errors.py
 │   ├── store.py, emlx.py, accounts.py      # acceso Apple Mail
 │   ├── plugins/
@@ -55,6 +56,8 @@ mailquery/
 ~/.mailquery/                        # macOS: 0700 | Windows: %USERPROFILE%\.mailquery
 ├── config.toml                      # opcional; esquema cerrado de §15
 ├── state.json                       # schema 2: cursor + anillo de uids "<driver>:<native_id>"
+├── db/                              # carpeta de la caché de ids nativos (0700); la crea el driver que la usa
+│   └── cache.db                     # caché de ids nativos (0600, §11.4)
 ├── <driver>.toml                    # OPCIONAL: configuración de un plugin externo (propiedad del plugin; el núcleo no la lee)
 ├── attachments/                     # caché efímera de adjuntos (0700) — la limpia un cron externo
 │   └── <driver>/                    # "apple_mail" | "outlook" | clave del plugin

@@ -223,7 +223,7 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
   caché de ids nativos (`~/.mailquery/db/cache.db`) también es del usuario
   (directorio 0700, archivos 0600) y no es efímera: guarda el `EntryID` de los
   mensajes impresos, sin contenido. La
-  publicación es atómica y no sigue symlinks; la caché es efímera y no se valida ni
+  publicación es atómica y no sigue symlinks; la caché de adjuntos es efímera y no se valida ni
   purga al arrancar (limpieza externa). Cada archivo publicado se registra en el
   manifiesto del mensaje (`.manifest.json`: nombre, tamaño y SHA-256 de los bytes
   que pasaron la pantalla); `attachment` solo sirve un archivo cuyo SHA-256

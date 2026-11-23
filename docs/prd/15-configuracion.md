@@ -240,7 +240,7 @@ Los valores configurables están en §15.1. Estos son los que se mantienen fijos
 
 | Aspecto | Valor fijo | Nota |
 |---------|-----------|------|
-| Home de la app | `~/.mailquery` | Config, estado, logs, locks, temporales y caché de adjuntos. En Windows, `%USERPROFILE%\.mailquery`. |
+| Home de la app | `~/.mailquery` | Config, estado, logs, locks, temporales, caché de adjuntos y la carpeta `db/` con la caché de ids nativos. En Windows, `%USERPROFILE%\.mailquery`. |
 | Backend nativo | Por plataforma (RF-24) | Sin flag ni configuración para cambiarlo; los demás drivers se eligen por `[scope]` (RF-34). |
 | Store de Apple Mail | La versión que usa Mail (`~/Library/Mail/V9`/`V10`/`V11`) | Sin override. |
 | Stores de Outlook | stores locales del perfil cargado en el Outlook en ejecución | §15.7; sin selección de perfil. |

@@ -27,10 +27,10 @@ Requisitos: RF-80, RNF-05, AC-69 · Archivo: `tests/test_native_ids.py`
 | .02 | B | Un `cache.db` vacío (0 bytes) se inicializa como uno nuevo. |
 | .03 | P | La tabla tiene solo las columnas de su estructura, con sus tipos, `NOT NULL`, la clave primaria (`driver`, `short_id`, `seq`) y la restricción única (`driver`, `native_id`); no hay otras tablas de usuario. |
 | .04 | P | En POSIX, la carpeta tiene permisos 0700, `cache.db` 0600 y el archivo auxiliar de la base que exista durante una escritura, 0600 (aserción condicional fuera de POSIX). |
-| .05 | N | Archivo con otra versión de formato ⇒ `E_IO` (exit 3) con el mensaje y el hint de D-05; el archivo no cambia. |
-| .06 | N | Archivo que no es una base SQLite ⇒ `E_IO` (exit 3) con el mensaje y el hint de D-05; el archivo no cambia. |
-| .07 | N | Sin permiso sobre la carpeta o el archivo ⇒ `E_PERMISSION` (exit 3) con los textos de D-05: con `chmod` real en POSIX y con un fallo de permiso inyectado en los tres sistemas. |
-| .08 | N | Base bloqueada por otra conexión más allá de `BUSY_TIMEOUT_SECONDS` (acortado en el test) ⇒ `E_LOCKED` (exit 5) con los textos de D-05; el valor por defecto de `BUSY_TIMEOUT_SECONDS` es 5. |
+| .05 | N | Archivo con otra versión de formato ⇒ `E_IO` (exit 3) con el mensaje `cannot use the native id cache: not a valid native id cache` y el hint de RF-80; el archivo no cambia. |
+| .06 | N | Archivo que no es una base SQLite ⇒ `E_IO` (exit 3) con el mensaje `cannot use the native id cache: not a valid native id cache` y el hint de RF-80; el archivo no cambia. |
+| .07 | N | Sin permiso sobre la carpeta o el archivo ⇒ `E_PERMISSION` (exit 3) con el mensaje `no permission to read or write the native id cache` y su hint: con `chmod` real en POSIX y con un fallo de permiso inyectado en los tres sistemas. |
+| .08 | N | Base bloqueada por otra conexión más allá de `BUSY_TIMEOUT_SECONDS` (acortado en el test), al escribir o al abrirla ⇒ `E_LOCKED` (exit 5) con el mensaje y el hint de RF-80; el valor por defecto de `BUSY_TIMEOUT_SECONDS` es 5. |
 | .09 | P | Reabrir un archivo existente conserva sus filas y su versión. |
 
 #### UT-NID-03 — Asignar, registrar, resolver y descartar

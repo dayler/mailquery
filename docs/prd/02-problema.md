@@ -35,8 +35,9 @@ Con el endurecimiento del contenido (F1), la corrección de defectos (F2) y la s
 4. **Salida proporcional a la pregunta (F3):** elegir qué mensaje abrir no debe exigir leer ni entregar cuerpos, que cuestan tokens y meten texto del remitente en el contexto del LLM; "las últimas facturas de cada proveedor" o "cuántos no leídos tengo" deben responderse en una llamada, sin el límite de 200 filas (RF-14).
 5. **Diagnóstico tras un fallo (F3):** `doctor` debe mostrar solo lo que falla e incluir los plugins mal configurados; el harness no debe ejecutar `doctor` y `mailboxes` en cada conversación, y un `search` con `count: 0` porque el correo está en otra carpeta debe explicar el alcance buscado.
 6. **`mailboxes` para elegir carpetas (F3):** ver qué carpetas existen para `--include-mailbox` y `mailbox_list` sin repetir la cuenta en cada carpeta ni recontar todos los mensajes (`PERFORMANCE-BACKLOG.md`).
+7. **`uid` corto en Outlook:** con un `EntryID` de Exchange u OST, el `uid` de Outlook mide 148 caracteres (`outlook:` más 140 hexadecimales) y se repite en cada fila, en cada warning de mensaje y en el cursor de `new`; en una fila mínima de `search` es cerca de un tercio de la fila. El `uid` de Apple Mail mide unos 16.
 
-Las razones de cada decisión, con sus mediciones, están en ADR-29–ADR-49.
+Las razones de cada decisión, con sus mediciones, están en ADR-29–ADR-50.
 
 ---
 

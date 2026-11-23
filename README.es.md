@@ -536,7 +536,7 @@ date_received, mailbox, is_read, is_flagged, has_attachments, size_bytes,
 snippet, body`). El cuerpo solo se lee si se pide `snippet` o `body`, o si
 `--text` lo necesita para filtrar.
 
-Salida de `mailquery search --since 1w` (fila por defecto; `uid` recortado):
+Salida de `mailquery search --since 1w` (fila por defecto):
 
 ```json
 {
@@ -725,9 +725,9 @@ técnico `smime.p7m` nunca se lista) y solo queda el warning de cuerpo ilegible.
 `~/.mailquery/db/cache.db`, un archivo SQLite que relaciona cada id corto
 impreso con el `EntryID` de su mensaje y no guarda asunto, dirección, cuerpo ni
 nombre de adjunto. `search` y `new` añaden las filas de los mensajes que
-imprimen, `show` y `attachment` resuelven ahí el uid, y `show` solo escribe en
-ese archivo: lo crea si falta y borra la fila de un mensaje que Outlook confirma
-como ausente. No es la caché de adjuntos y no es efímera: a diferencia de esa
+imprimen, `show` y `attachment` resuelven ahí el uid: crean el archivo si falta y borran
+la fila de un mensaje que Outlook confirma como ausente, y `show` no escribe en
+ningún otro sitio. No es la caché de adjuntos y no es efímera: a diferencia de esa
 caché, ninguna limpieza debe borrarla. Si el archivo se borra, los uids ya
 impresos dejan de resolverse hasta que `search` o `new` vuelva a imprimir el
 mensaje, con el mismo id corto. En macOS el directorio `~/.mailquery/db/` es

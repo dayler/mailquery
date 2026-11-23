@@ -17,9 +17,17 @@ Cuentas declaradas en config y carpetas que se leen (INBOX siempre dentro de cad
 
 Implementación de la interfaz de backend (§9.2) para un origen de correo concreto: `apple_mail`, `outlook` o un plugin externo.
 
+### Caché de ids nativos (`cache.db`)
+
+Base SQLite de `~/.mailquery` que relaciona cada id corto impreso con su `native_id`.
+
 ### Cursor
 
 Marca de agua `(fecha de recepción, uid)` que da a `new` su semántica de procesamiento único.
+
+### Id corto
+
+Alias de un `native_id` largo: el principio de la codificación en base32 de su `SHA-256`, sin sufijo. En Outlook tiene 10 caracteres. Con el sufijo `-<seq>`, que llevan desde el segundo `native_id` del mismo driver con el mismo id corto, forma la parte del `uid` posterior al prefijo (RF-80, RF-81).
 
 ### Manifiesto (`.manifest.json`)
 
