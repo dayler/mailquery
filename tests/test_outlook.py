@@ -2054,6 +2054,111 @@ class OutlookUidOrderTests(_ItemCase):
         self.assertEqual([(row["date_received"], row["uid"]) for row in descending], keys[::-1])
 
 
+class OutlookUidBoundaryTests(unittest.TestCase):
+    """The uid the core sees is translated at the entry and emission points of the driver."""
+
+    @staticmethod
+    def _complemented(text: str) -> str:
+        """Reversible translation that reverses the order of same-length hex text."""
+        return "".join("0123456789ABCDEF"[15 - int(digit, 16)] for digit in text)
+
+    def test_uid_translation_boundary_round_trip(self) -> None:
+        """A reversible uid translation keeps every operation and the row order working."""
+        fake = fk.FakeOutlook.default()
+        normal = fake.item("normal")
+        assert normal.folder is not None
+        same_date = normal.folder.add_message(
+            "same_date_boundary",
+            subject="Same day boundary",
+            sender=("Proveedor SA", "facturas@proveedor.example"),
+            to=[("Ana Pérez", "ana.perez@example.com")],
+            received=normal.received,
+            sent=normal.sent,
+        )
+        unopenable = normal.folder.add_message(
+            "unopenable_boundary",
+            subject="Unopenable boundary",
+            sender=("Proveedor SA", "facturas@proveedor.example"),
+            to=[("Ana Pérez", "ana.perez@example.com")],
+            received=normal.received,
+            sent=normal.sent,
+            openable=False,
+        )
+        backend = _backend(fake)
+        self.addCleanup(backend.close)
+        mailbox_ids = [row["id"] for row in backend.mailboxes()]
+        baseline = backend.query(mailbox_ids)
+        with (
+            mock.patch.object(backend, "_entry_id", new=self._complemented),
+            mock.patch.object(backend, "_uid_part", new=self._complemented),
+        ):
+            translated = backend.query(mailbox_ids)
+            self.assertEqual(
+                [row["uid"] for row in translated],
+                [self._complemented(row["uid"]) for row in baseline],
+            )
+            self.assertEqual(
+                [row["native_order_key"] for row in translated],
+                [row["uid"] for row in baseline],
+            )
+            # The order comes from the EntryID: two rows with the same date keep the
+            # order of the EntryIDs, not the order of the emitted uids.
+            pair = [
+                row["native_order_key"]
+                for row in baseline
+                if row["uid"] in (normal.entry_id, same_date.entry_id)
+            ]
+            pair_uids = [row["uid"] for row in translated if row["native_order_key"] in pair]
+            self.assertEqual(pair_uids, [self._complemented(entry_id) for entry_id in pair])
+            self.assertNotEqual(pair_uids, sorted(pair_uids, reverse=True))
+            self.assertEqual(
+                set(backend._uid_folders), {row["native_order_key"] for row in translated}
+            )
+            normal_uid = self._complemented(normal.entry_id)
+            found, mailbox = backend.find_message(normal_uid)
+            self.assertEqual(found["uid"], normal_uid)
+            self.assertEqual(found["native_order_key"], normal.entry_id)
+            self.assertEqual(mailbox["path"], "INBOX")
+            self.assertEqual(
+                backend.membership([normal_uid]), {normal_uid: {found["mailbox_id"]}}
+            )
+            recipients = backend.recipients([normal_uid])
+            self.assertEqual(
+                recipients[normal_uid],
+                {"to": [{"name": "Ana Pérez", "address": "ana.perez@example.com"}], "cc": []},
+            )
+            self.assertEqual(set(backend._recipient_cache), {normal.entry_id})
+            self.assertEqual(backend.attachment_names(normal_uid), ["factura-2026-10.pdf"])
+            self.assertEqual(
+                [row["name"] for row in backend.attachments(normal_uid)],
+                ["factura-2026-10.pdf"],
+            )
+            body = backend.load_body(found)
+            self.assertTrue(body["readable"])
+            self.assertIn("factura de octubre", body["body_text"])
+            self.assertEqual(body["attachments"], [{"name": "factura-2026-10.pdf"}])
+            header_row = next(
+                row
+                for row in translated
+                if row["native_order_key"] == fake.item("header_only").entry_id
+            )
+            self.assertIn(f"uid {header_row['uid']}", backend.load_body(header_row)["warnings"][0])
+            broken_row = next(
+                row for row in translated if row["native_order_key"] == unopenable.entry_id
+            )
+            self.assertEqual(
+                backend.load_body(broken_row)["warnings"],
+                [
+                    "W_BODY_UNREADABLE: the Outlook item for uid "
+                    f"{self._complemented(unopenable.entry_id)} cannot be opened"
+                ],
+            )
+            self.assertEqual(
+                set(backend._items),
+                {normal.entry_id, fake.item("header_only").entry_id, unopenable.entry_id},
+            )
+
+
 class OutlookDateTests(_ItemCase):
     def test_ol_15_01_utc_times_are_emitted_with_the_local_offset(self) -> None:
         """OL-15.01: delivery/submit times read in UTC, ISO 8601 with the local offset (zone != UTC)."""

@@ -387,17 +387,17 @@ class OutlookBackend(MailBackend):
         self._folder_objects: dict[str, outlook_com.ReadOnlyCom] = {}
         #: ``(total, unread)`` of each listed mailbox counted so far, by its ``id``.
         self._counters: dict[str, tuple[int, int]] = {}
-        #: Folder ``id`` of each uid returned by ``query``/``find_message``.
+        #: Folder ``id`` of each item EntryID returned by ``query``/``find_message``.
         self._uid_folders: dict[str, str] = {}
         #: Dedupe key of each Internet Message-ID (``global_message_id`` > 0).
         self._message_keys: dict[str, int] = {}
         #: ``GetItemFromID`` result (item or :data:`_UNOPENABLE`) of the first
-        #: :data:`ITEM_CACHE_SIZE` uids opened, plus the last one opened.
+        #: :data:`ITEM_CACHE_SIZE` EntryIDs opened, plus the last one opened.
         self._items: dict[str, Any] = {}
         self._last_item: tuple[str, Any] | None = None
-        #: Uids whose item was opened (``scan.messages_read``).
+        #: Item EntryIDs whose item was opened (``scan.messages_read``).
         self._opened: set[str] = set()
-        #: ``recipients`` result of each uid read so far.
+        #: ``recipients`` result of each item EntryID read so far.
         self._recipient_cache: dict[str, dict[str, list[dict[str, str]]]] = {}
         #: ``doctor`` progress: finished checks by name and the running one.
         self._doctor_done: dict[str, dict[str, Any]] = {}
@@ -481,6 +481,16 @@ class OutlookBackend(MailBackend):
             folder = self._folder_objects.get(mailbox_id)
         return folder
 
+    # -- uid boundary -------------------------------------------------------- #
+
+    def _entry_id(self, uid_part: str) -> str:
+        """EntryID the driver uses for the uid part the core hands in."""
+        return uid_part
+
+    def _uid_part(self, entry_id: str) -> str:
+        """Uid part the core sees for an item EntryID."""
+        return entry_id
+
     # -- items --------------------------------------------------------------- #
 
     def _message_key(self, message_id: Any) -> int:
@@ -491,13 +501,16 @@ class OutlookBackend(MailBackend):
         return self._message_keys.setdefault(text, len(self._message_keys) + 1)
 
     def _message_row(
-        self, uid: str, props: dict[str, Any], mailbox_id: str, message_class: Any
+        self, entry_id: str, props: dict[str, Any], mailbox_id: str, message_class: Any
     ) -> MessageRow:
-        """Common-model row from the item properties (a table row or an opened item)."""
+        """Common-model row from the item properties (a table row or an opened item).
+
+        ``uid`` is the uid part of the EntryID; ``native_order_key`` is the EntryID.
+        """
         message_id = _text(props.get(PR_INTERNET_MESSAGE_ID))
         return MessageRow(
-            uid=uid,
-            native_order_key=uid,
+            uid=self._uid_part(entry_id),
+            native_order_key=entry_id,
             global_message_id=self._message_key(message_id),
             subject=_text(props.get(PR_SUBJECT)),
             sender_name=_text(props.get(PR_SENDER_NAME)),
@@ -518,14 +531,14 @@ class OutlookBackend(MailBackend):
             message_class=_text(message_class),
         )
 
-    def _store_of(self, uid: str, *, candidate: bool) -> StoreInfo | None:
-        """Candidate (or excluded) store whose ``PR_RECORD_KEY`` is in the uid.
+    def _store_of(self, entry_id: str, *, candidate: bool) -> StoreInfo | None:
+        """Candidate (or excluded) store whose ``PR_RECORD_KEY`` is in the EntryID.
 
         Only store-level data is compared; an unreadable store has no record key
         and never matches (its uids are "not found").
         """
         try:
-            key = bytes.fromhex(uid)[ENTRYID_STORE_KEY]
+            key = bytes.fromhex(entry_id)[ENTRYID_STORE_KEY]
         except ValueError:
             return None
         if len(key) != 16:
@@ -535,23 +548,23 @@ class OutlookBackend(MailBackend):
                 return info
         return None
 
-    def _open_item(self, uid: str, info: StoreInfo | None = None) -> Any:
-        """``GetItemFromID`` on the uid's candidate store.
+    def _open_item(self, entry_id: str, info: StoreInfo | None = None) -> Any:
+        """``GetItemFromID`` on the EntryID's candidate store.
 
         ``None`` when the store or the item does not exist, :data:`_UNOPENABLE`
         when the item exists but cannot be opened; other COM errors propagate.
-        Each uid is opened once per command while it stays cached (the first
-        :data:`ITEM_CACHE_SIZE` uids and the last one).
+        Each EntryID is opened once per command while it stays cached (the first
+        :data:`ITEM_CACHE_SIZE` EntryIDs and the last one).
         """
-        if uid in self._items:
-            return self._items[uid]
-        if self._last_item is not None and self._last_item[0] == uid:
+        if entry_id in self._items:
+            return self._items[entry_id]
+        if self._last_item is not None and self._last_item[0] == entry_id:
             return self._last_item[1]
-        info = info if info is not None else self._store_of(uid, candidate=True)
+        info = info if info is not None else self._store_of(entry_id, candidate=True)
         if info is None or not info.store_id:
             return None
         try:
-            item = self._app().Session.GetItemFromID(uid, info.store_id)
+            item = self._app().Session.GetItemFromID(entry_id, info.store_id)
         except outlook_com.ComCallError as exc:
             if exc.hresult in ITEM_NOT_FOUND_HRESULTS:
                 return None
@@ -559,14 +572,14 @@ class OutlookBackend(MailBackend):
                 raise
             item = _UNOPENABLE
         else:
-            self._opened.add(uid)
+            self._opened.add(entry_id)
         if len(self._items) < ITEM_CACHE_SIZE:
-            self._items[uid] = item
-        self._last_item = (uid, item)
+            self._items[entry_id] = item
+        self._last_item = (entry_id, item)
         return item
 
     def _find_in_tables(
-        self, uid: str, listed: dict[str, MailboxRow]
+        self, entry_id: str, listed: dict[str, MailboxRow]
     ) -> tuple[MessageRow, MailboxRow] | None:
         """Row of an item that cannot be opened, from the tables of its store's listed folders."""
         for mailbox_id, mailbox in listed.items():
@@ -574,12 +587,12 @@ class OutlookBackend(MailBackend):
             if folder is None:
                 continue
             for message_class, props in _table_rows(folder, "", MESSAGE_COLUMNS):
-                if _hex(props[PR_LONGTERM_ENTRYID_FROM_TABLE]) != uid:
+                if _hex(props[PR_LONGTERM_ENTRYID_FROM_TABLE]) != entry_id:
                     continue
                 if not _is_searchable(message_class, props):
                     return None
-                self._uid_folders[uid] = mailbox_id
-                row = self._message_row(uid, props, mailbox_id, message_class)
+                self._uid_folders[entry_id] = mailbox_id
+                row = self._message_row(entry_id, props, mailbox_id, message_class)
                 return row, MailboxRow(**mailbox)
         return None
 
@@ -683,11 +696,12 @@ class OutlookBackend(MailBackend):
     ) -> list[MessageRow]:
         """Searchable items of the folders, read from ``Folder.GetTable``.
 
-        No item is opened. ``uid`` is the permanent EntryID, dates come
-        from the MAPI UTC properties; the DASL date pre-filter is widened
-        by whole minutes and ``since`` (inclusive) / ``until`` (exclusive) are cut
-        to the second here. Total order ``(date_received, uid)``, ``uid``
-        compared as a string; ``order="desc"`` reverses it.
+        No item is opened. ``uid`` is the uid part of the permanent EntryID, the
+        ``native_order_key``; dates come from the MAPI UTC properties; the DASL
+        date pre-filter is widened by whole minutes and ``since`` (inclusive) /
+        ``until`` (exclusive) are cut to the second here. Total order
+        ``(date_received, native_order_key)``, the EntryID compared as a string;
+        ``order="desc"`` reverses it.
         """
         filter_text = _date_filter(since, until)
         rows: list[MessageRow] = []
@@ -698,10 +712,10 @@ class OutlookBackend(MailBackend):
             for message_class, props in _table_rows(folder, filter_text, MESSAGE_COLUMNS):
                 if not _is_searchable(message_class, props):
                     continue
-                uid = _hex(props[PR_LONGTERM_ENTRYID_FROM_TABLE])
-                if not uid:
+                entry_id = _hex(props[PR_LONGTERM_ENTRYID_FROM_TABLE])
+                if not entry_id:
                     continue
-                row = self._message_row(uid, props, mailbox_id, message_class)
+                row = self._message_row(entry_id, props, mailbox_id, message_class)
                 received = row["date_received"]
                 if since is not None and (received is None or received < since):
                     continue
@@ -711,16 +725,19 @@ class OutlookBackend(MailBackend):
                     continue
                 if has_attachments and not row["has_attachments"]:
                     continue
-                self._uid_folders[uid] = mailbox_id
+                self._uid_folders[entry_id] = mailbox_id
                 rows.append(row)
         rows.sort(key=_order_key, reverse=order == "desc")
         return rows
 
     def membership(self, uids: Sequence[Uid]) -> dict[Uid, set[Any]]:
         """The folder of each known uid: an Outlook item lives in exactly one folder."""
-        return {
-            uid: {self._uid_folders[uid]} for uid in dict.fromkeys(uids) if uid in self._uid_folders
-        }
+        result: dict[Uid, set[Any]] = {}
+        for uid in dict.fromkeys(uids):
+            entry_id = self._entry_id(str(uid))
+            if entry_id in self._uid_folders:
+                result[uid] = {self._uid_folders[entry_id]}
+        return result
 
     def duplicate_counts(self, mailbox_ids: Sequence[Any]) -> dict[Any, int]:
         """Searchable copies per Internet Message-ID in the folders.
@@ -751,11 +768,12 @@ class OutlookBackend(MailBackend):
         """
         result: dict[Uid, Any] = {}
         for uid in dict.fromkeys(uids):
-            cached = self._recipient_cache.get(str(uid))
+            entry_id = self._entry_id(str(uid))
+            cached = self._recipient_cache.get(entry_id)
             if cached is not None:
                 result[uid] = cached
                 continue
-            item = self._open_item(str(uid))
+            item = self._open_item(entry_id)
             if item is None or item is _UNOPENABLE:
                 continue
             bucket: dict[str, list[dict[str, str]]] = {"to": [], "cc": []}
@@ -770,7 +788,7 @@ class OutlookBackend(MailBackend):
                     "address": _recipient_address(recipient.PropertyAccessor),
                 }
                 bucket["to" if kind == OL_TO else "cc"].append(entry)
-            self._recipient_cache[str(uid)] = bucket
+            self._recipient_cache[entry_id] = bucket
             result[uid] = bucket
         return result
 
@@ -780,7 +798,7 @@ class OutlookBackend(MailBackend):
         Nothing is read from an S/MIME item or a header-only one (its content is
         not local), nor from one that cannot be found or opened: ``[]``.
         """
-        item = self._open_item(str(uid))
+        item = self._open_item(self._entry_id(str(uid)))
         if item is None or item is _UNOPENABLE:
             return []
         if is_smime_class(item.MessageClass) or item.DownloadState == OL_HEADER_ONLY:
@@ -902,16 +920,16 @@ class OutlookBackend(MailBackend):
 
     def _attachment_item(self, uid: Uid) -> Any:
         """Opened item for the attachment operations; protocol errors when unusable."""
-        text = str(uid)
-        info = self._store_of(text, candidate=True)
+        entry_id = self._entry_id(str(uid))
+        info = self._store_of(entry_id, candidate=True)
         if info is None:
-            excluded = self._store_of(text, candidate=False)
+            excluded = self._store_of(entry_id, candidate=False)
             if excluded is not None:
                 raise ExcludedStoreError(excluded.excluded_entry())
             raise usage_error(
                 "the message was not found", "run `mailquery search` to find the uid"
             )
-        item = self._open_item(text, info)
+        item = self._open_item(entry_id, info)
         if item is None:
             raise usage_error(
                 "the message was not found", "run `mailquery search` to find the uid"
@@ -970,19 +988,19 @@ class OutlookBackend(MailBackend):
         ``None``. An item that exists but cannot be opened gets its row from the
         folder tables of its store.
         """
-        text = str(uid)
-        info = self._store_of(text, candidate=True)
+        entry_id = self._entry_id(str(uid))
+        info = self._store_of(entry_id, candidate=True)
         if info is None:
-            excluded = self._store_of(text, candidate=False)
+            excluded = self._store_of(entry_id, candidate=False)
             if excluded is not None:
                 raise ExcludedStoreError(excluded.excluded_entry())
             return None
         listed = {row["id"]: row for row in self._walked(info)}
-        item = self._open_item(text, info)
+        item = self._open_item(entry_id, info)
         if item is None:
             return None
         if item is _UNOPENABLE:
-            return self._find_in_tables(text, listed)
+            return self._find_in_tables(entry_id, listed)
         folder_id = item.Parent.EntryID
         mailbox = listed.get(folder_id)
         message_class = item.MessageClass
@@ -992,8 +1010,8 @@ class OutlookBackend(MailBackend):
         props = {schema: _get_property(accessor, schema) for schema in MESSAGE_COLUMNS[1:]}
         if _as_int(props[PR_MSG_STATUS]) & MSGSTATUS_DELMARKED:
             return None
-        self._uid_folders[text] = folder_id
-        return self._message_row(text, props, folder_id, message_class), MailboxRow(**mailbox)
+        self._uid_folders[entry_id] = folder_id
+        return self._message_row(entry_id, props, folder_id, message_class), MailboxRow(**mailbox)
 
     def load_body(self, row: MessageRow) -> BodyRow:
         """Body of one item, in this order (never downloads).
@@ -1029,7 +1047,7 @@ class OutlookBackend(MailBackend):
         if is_smime_class(row.get("message_class")):
             return _unread_headers()
         try:
-            item = self._open_item(uid) if uid else None
+            item = self._open_item(self._entry_id(uid)) if uid else None
             if item is None or item is _UNOPENABLE:
                 return _unread_headers()
             raw = _get_property(item.PropertyAccessor, PR_TRANSPORT_MESSAGE_HEADERS)
@@ -1046,14 +1064,18 @@ class OutlookBackend(MailBackend):
     def _load_body(self, row: MessageRow, *, details: bool) -> BodyRow:
         """:meth:`load_body`; without ``details`` the attachment names are not read."""
         uid = str(row.get("uid") or "")
+        entry_id = self._entry_id(uid)
         message_class = row.get("message_class")
         if is_smime_class(message_class):
             return _smime_body(message_class)
-        item = self._open_item(uid) if uid else None
+        item = self._open_item(entry_id) if uid else None
         if item is None:
-            return _unavailable_body(f"W_BODY_UNREADABLE: the Outlook item for uid {uid} was not found")
+            return _unavailable_body(
+                f"W_BODY_UNREADABLE: the Outlook item for uid {self._uid_part(entry_id)} "
+                "was not found"
+            )
         if item is _UNOPENABLE:
-            return _unavailable_body(_unopenable_warning(uid))
+            return _unavailable_body(_unopenable_warning(self._uid_part(entry_id)))
         if message_class is None:
             message_class = item.MessageClass
             if is_smime_class(message_class):
@@ -1061,7 +1083,8 @@ class OutlookBackend(MailBackend):
         try:
             if item.DownloadState == OL_HEADER_ONLY:
                 return _unavailable_body(
-                    f"W_BODY_NOT_LOCAL: only the headers of uid {uid} are stored locally; "
+                    f"W_BODY_NOT_LOCAL: only the headers of uid "
+                    f"{self._uid_part(entry_id)} are stored locally; "
                     "the body is never downloaded"
                 )
             body_text, warnings, hidden_chars = _item_text(item)
@@ -1073,7 +1096,7 @@ class OutlookBackend(MailBackend):
                 attachments = [{"name": name} for name in _visible_attachment_names(item)]
         except outlook_com.ComCallError as exc:
             if exc.hresult in ITEM_UNOPENABLE_HRESULTS:
-                return _unavailable_body(_unopenable_warning(uid))
+                return _unavailable_body(_unopenable_warning(self._uid_part(entry_id)))
             raise
         return _body(
             True,
@@ -2023,6 +2046,6 @@ def _date_filter(since: float | None, until: float | None) -> str:
 
 
 def _order_key(row: MessageRow) -> tuple[bool, int, str]:
-    """``(date_received, uid)``; a row without date sorts first, like SQL ``NULL``."""
+    """``(date_received, native_order_key)``; a row without date sorts first, like SQL ``NULL``."""
     received = row["date_received"]
-    return received is not None, int(received or 0), str(row["uid"])
+    return received is not None, int(received or 0), str(row["native_order_key"])
