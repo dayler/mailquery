@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 1 / 1. **Rama del lote:** `feature/id-corto-outlook-lote-1`. **Rama del milestone:** `feature/id-corto-outlook-m01`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `ba07a59`. **Línea base de la suite:** commit `4361e96`, `Ran 1452 tests`, `OK (skipped=8)`, 0 fallos; los 8 saltos son casos SMOKE/instalador que no aplican en macOS.
 - **Depende de:** nada. **Lo usan:** M03 (acceso de un plugin), M05 y M06 (driver `outlook`).
 - **ACs:** AC-64 (reglas de `seq` en la librería), AC-69 (cálculo, creación, formato, errores, permisos y columnas), AC-70 (acceso de un plugin desde un hilo vigilado).
 
@@ -80,11 +80,11 @@ Reglas de RF-80 que la implementación debe respetar literalmente: alfabeto `012
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `short_id` y constantes; UT-NID-01 | ⚪ |
-| 2 | Apertura: carpeta, archivo, tablas, versión, permisos, base vacía, base inválida, sin permiso, base bloqueada; UT-NID-02 | ⚪ |
-| 3 | `assign`, `register`, `resolve`, `discard`, `open_in_memory` y aislamiento por driver; UT-NID-03 | ⚪ |
-| 4 | `PluginNativeIds`: apertura perezosa, hilos, conversión de errores; UT-NID-04 | ⚪ |
-| 5 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
+| 1 | `short_id` y constantes; UT-NID-01 | 🟢 |
+| 2 | Apertura: carpeta, archivo, tablas, versión, permisos, base vacía, base inválida, sin permiso, base bloqueada; UT-NID-02 | 🟢 |
+| 3 | `assign`, `register`, `resolve`, `discard`, `open_in_memory` y aislamiento por driver; UT-NID-03 | 🟢 |
+| 4 | `PluginNativeIds`: apertura perezosa, hilos, conversión de errores; UT-NID-04 | 🟢 |
+| 5 | Suite completa, cobertura, diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -199,3 +199,8 @@ Los de `protocolo.md`, más el tiempo de `-k ut_nid` (para vigilar R-07).
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `short_id` y constantes en `src/mailquery/native_ids.py`; UT-NID-01 (4 casos) en verde, uno a uno. |
+| 2026-11-23 | 2 | Apertura, creación, formato, permisos, base inválida y bloqueada; UT-NID-02 (9 casos) en verde, uno a uno. |
+| 2026-11-23 | 3 | `assign`, `register`, `resolve`, `discard` e `open_in_memory`; UT-NID-03 (11 casos) en verde, uno a uno. |
+| 2026-11-23 | 4 | `PluginNativeIds` con apertura perezosa, hilos y protocolo de RF-50; UT-NID-04 (5 casos) en verde, uno a uno. |
+| 2026-11-23 | 5 | `-k ut_nid` (29 casos) en verde; suite completa 1481 tests `OK (skipped=7)`; cobertura de `native_ids.py` 90.7 %; diff y evidencia. |
