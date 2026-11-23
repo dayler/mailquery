@@ -28,7 +28,7 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-18 | `doctor` con `driver`; `--version` con drivers | UT-PL-03, UT-DRV-05, PKG-02 | `doctor` |
 | AC-19 | Logs `backend=`/`drivers=`, conteos de `attachment`, sin datos personales | UT-MD-06, UT-ERR-02, UT-ATC-08, UT-OL-ATT-04 | — |
 | AC-20 | Caché best-effort, borrado concurrente, sin barrido ni purga | UT-ATT-10, SMOKE-ATT-AM, SMOKE-ATT-OL | — |
-| AC-21 | Ayuda raíz con seis comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, DOC-01 a DOC-06, TC-07 | — |
+| AC-21 | Ayuda raíz con siete comandos, ayuda de `attachment` y línea de exits | UT-ATC-09, UT-CLI-14, DOC-01 a DOC-06, DOC-17, TC-07 | — |
 | AC-22 | A2 en los campos de contenido; identificadores intactos | UT-CNT-01 (parcial; completa con UT-CW-01, UT-CW-02) | — |
 | AC-23 | `\n`/`\t`, CRLF, idempotencia y determinismo | UT-CNT-01, UT-CNT-06, UT-CW-13 | — |
 | AC-24 | Búsqueda con A2 a ambos lados; bloqueo, `sanitized_name` y caché sin cambios con nombres con `Cf` o controles | UT-CW-03, UT-CW-04 | — |
@@ -78,3 +78,11 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-68 | `--show-native-id` en Windows y macOS; mismas claves y valores; el id nativo no es entrada; otros comandos ⇒ `E_USAGE`; forma nativa inválida ⇒ `E_PLUGIN_FAILED` | UT-PL-06.08, UT-SNI-01.01–.08, OL-36.01–.03, OL-30 (barrido con la opción), DOC-16.01, SMOKE-NEW.11 | `show_*` |
 | AC-69 | Cálculo `pmw3w06f5e`; `E_LOCKED`, `E_PERMISSION`, `E_IO` y sus versiones en un plugin; base vacía; hint de repetir la búsqueda; `show` sin base; permisos; columnas; `mailboxes`, `doctor` y `--version` no crean `cache.db` | UT-NID-01.01, UT-NID-02.01–.08, UT-NID-03.05, UT-NID-04.01; UT-PL-05.05, .06; OL-31.06, OL-32.04–.07; OL-33.05; OL-35.01 | — |
 | AC-70 | Base abierta en el contexto del plugin, también en un gancho vigilado, sin ver otro driver; plugin sin ganchos igual; gancho > 30 s ⇒ `E_CLIENT_TIMEOUT` sin mensajes | UT-NID-04.02–.04; UT-PL-05.01–.03, .06; UT-PL-06.04, .06; UT-SNI-01.03 | — |
+| AC-71 | `initialize`, versiones, `ping`, herramientas y esquemas, solo JSON-RPC en stdout, errores JSON-RPC, lotes y fin de línea | UT-MCP-01, UT-MCP-02, UT-MCP-03, UT-MCP-09.05 | — |
+| AC-72 | argv equivalente a la CLI, resultado e `isError`, ejecutor real con `json.py` en el cwd | UT-MCP-04, UT-MCP-05, UT-MCP-09.03, SMOKE-MCP | — |
+| AC-73 | Validación previa sin proceso hijo y `-32602` | UT-MCP-04.07, UT-MCP-06 | — |
+| AC-74 | Arranque sin config, `E_INTERNAL` recuperable, config corregida sin reiniciar, serie, cierre de stdin, stderr vacío | UT-MCP-05, UT-MCP-07, UT-MCP-09, SMOKE-MCP | — |
+| AC-75 | Ayudas, `E_USAGE` de `mcp`, README, skill y log del servidor | UT-CLI-14, UT-LOG-06.03, DOC-17, UT-MCP-11 | — |
+| AC-76 | Sin dependencias nuevas, importaciones y plugin que no carga | UT-MCP-08, UT-MCP-10 | — |
+| AC-77 | Log JSON, `hint` con el archivo activo y errores de configuración en texto | UT-LOG-05, UT-LOG-06, UT-CFG-05, DOC-18 | — |
+| AC-78 | Rotación con el servidor en marcha en los dos formatos | UT-MCP-12 | — |

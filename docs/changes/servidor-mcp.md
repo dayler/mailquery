@@ -409,6 +409,8 @@ Ninguna
 - docs/tests/end-to-end.md: pendiente
 - docs/tests/acceptance-matrix.md: pendiente
 - docs/tests/smoke.md: pendiente
+- docs/tests/attachments-command.md: pendiente
+- docs/tests/infrastructure.md: pendiente
 
 ## Checklist de conciliación
 

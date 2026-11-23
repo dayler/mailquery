@@ -60,5 +60,6 @@ Son las únicas pruebas que leen el Apple Mail o el Outlook instalado; el resto 
 
 - SMOKE-INSTALL y SMOKE-NEW: instalación con `pipx` y comandos de lectura contra el cliente real. SMOKE-NEW.08–.10 cubren `content_notice` y las opciones de salida, el cuerpo desde el HTML y `doctor --failures` sin plugins; SMOKE-NEW.11, el uid corto de Outlook y `show --show-native-id`.
 - SMOKE-ATT-AM (macOS) y SMOKE-ATT-OL (Windows): recuperación real de un adjunto local. No imponen umbrales de tiempo.
+- SMOKE-MCP: el servidor MCP instalado con `pipx`, hablado por un cliente JSON-RPC de prueba, contra el cliente real; el plugin de prueba se pone en el `PYTHONPATH` del servidor.
 - Los presupuestos de rendimiento de §19 se miden en los equipos del dueño (SMOKE-NEW.07): `doctor`, `mailboxes` sin contadores, `search` con la fila mínima, `search --fields snippet`, `new`, `show` y `search --text`; `mailboxes --fields total,unread` se mide de forma informativa, sin aserción. Los resultados y la deuda abierta están en [`PERFORMANCE-BACKLOG.md`](../PERFORMANCE-BACKLOG.md).
 - La materialización COM de Outlook (`Attachment.SaveAsFile`) solo se verifica en un equipo Windows real; en CI se usa el doble.
