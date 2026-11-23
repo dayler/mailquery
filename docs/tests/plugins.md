@@ -249,7 +249,7 @@ Requisitos: RF-80, RF-36, AC-69, AC-70 · Archivo: `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | El plugin recibe en su `PluginContext` la base abierta para su driver; con ella asigna en `query`, registra en el aviso y resuelve en `find_message`: `show` de un uid impreso por `search` devuelve su mensaje. |
+| .01 | P | El plugin recibe en su `PluginContext` el acceso a la base de su driver, que se abre en su primera operación; con él asigna en `query`, registra en el aviso y resuelve en `find_message`: `show` de un uid impreso por `search` devuelve su mensaje. |
 | .02 | N | El plugin no ve ni cambia las filas de otro driver ya presentes en `cache.db`; dos plugins declarados reciben accesos distintos, cada uno a su driver. |
 | .03 | P | El registro funciona dentro del gancho de aviso, que corre vigilado por el tope de 30 s en un hilo trabajador; al terminar el comando, el acceso está cerrado y `cache.db` se puede borrar. |
 | .04 | P | `from mailquery.plugins import short_id` funciona y es la función de la librería, importando primero `mailquery.plugins` o primero `mailquery.native_ids`; `PLUGIN_API` sigue siendo 1. |

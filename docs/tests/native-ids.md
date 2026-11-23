@@ -32,6 +32,7 @@ Requisitos: RF-80, RNF-05, AC-69 · Archivo: `tests/test_native_ids.py`
 | .07 | N | Sin permiso sobre la carpeta o el archivo ⇒ `E_PERMISSION` (exit 3) con el mensaje `no permission to read or write the native id cache` y su hint: con `chmod` real en POSIX y con un fallo de permiso inyectado en los tres sistemas. |
 | .08 | N | Base bloqueada por otra conexión más allá de `BUSY_TIMEOUT_SECONDS` (acortado en el test), al escribir o al abrirla ⇒ `E_LOCKED` (exit 5) con el mensaje y el hint de RF-80; el valor por defecto de `BUSY_TIMEOUT_SECONDS` es 5. |
 | .09 | P | Reabrir un archivo existente conserva sus filas y su versión. |
+| .10 | B | Una apertura que leyó el archivo vacío, o a medio inicializar (tabla creada y versión 0), y encuentra, al ir a crear la tabla, que otra apertura ya lo inicializó, conserva la tabla, sus filas y la versión, y no falla; si lo que encuentra es otra base, falla con `E_IO` y no la cambia. |
 
 #### UT-NID-03 — Asignar, registrar, resolver y descartar
 

@@ -109,7 +109,7 @@ Reglas del archivo:
 - **Creación:** al abrir la base, la librería comprueba la carpeta y la crea si no existe; si no encuentra el archivo, lo crea siempre, con su tabla y una versión de formato, aunque el comando no llegue a registrar nada; también `search --count`, que no registra filas. Con solo el driver `apple_mail`, nadie usa la librería y el archivo no se crea.
 - Un archivo recién creado no tiene filas: ningún uid se resuelve hasta que `search` o `new` vuelven a imprimir el mensaje.
 - Un archivo vacío se inicializa como uno nuevo. Uno con otra versión de formato no es una base válida de la librería.
-- Las filas de mensajes solo se insertan y se borran; el `seq` de un par es el siguiente al mayor de sus filas.
+- Las filas de mensajes solo se insertan y se borran; el `seq` de un par es el siguiente al mayor de sus filas y al mayor ya asignado en la ejecución.
 - Si el archivo se borra, los uids ya impresos dejan de resolverse hasta que `search` o `new` vuelven a imprimir el mensaje, con el mismo id corto. `new` y su estado no dependen de este archivo, salvo cuando se borra con dos mensajes que comparten id corto (§23).
 - Si el archivo no se puede abrir, leer o escribir, o no es una base válida, el comando que lo necesita falla con el error de RF-80.
 - En macOS la carpeta tiene permisos 0700, y el archivo y los archivos auxiliares de la base, 0600 (RNF-05).

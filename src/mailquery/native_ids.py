@@ -236,9 +236,22 @@ def _read_format(connection: sqlite3.Connection) -> tuple[int, set[str]]:
     return version, tables
 
 
-def _create_schema(connection: sqlite3.Connection) -> None:
+def _create_schema(connection: sqlite3.Connection, *, recheck: bool = False) -> None:
+    """Create the table and store the format version in one transaction.
+
+    With ``recheck`` the format is read again once the write lock is held: a
+    database that another connection initialized in the meantime is left as it
+    is, and one that holds anything else is rejected.
+    """
     try:
         connection.execute("BEGIN IMMEDIATE")
+        if recheck:
+            version, tables = _read_format(connection)
+            if version == FORMAT_VERSION and _IDS_TABLE in tables:
+                connection.execute("COMMIT")
+                return
+            if version != 0 or tables:
+                raise _invalid_cache()
         connection.execute(_CREATE_IDS)
         connection.execute(f"PRAGMA user_version = {FORMAT_VERSION}")
         connection.execute("COMMIT")
@@ -250,9 +263,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
 def _prepare_file_cache(connection: sqlite3.Connection) -> None:
     version, tables = _read_format(connection)
     if version == 0:
-        if tables:
-            raise _invalid_cache()
-        _create_schema(connection)
+        _create_schema(connection, recheck=True)
     elif version == FORMAT_VERSION:
         if _IDS_TABLE not in tables:
             raise _invalid_cache()
@@ -448,7 +459,7 @@ class NativeIdCache:
             return None if row is None else str(row[0])
 
     def discard(self, native_id: str) -> None:
-        """Delete the row of ``native_id``; its ``seq`` can be assigned again."""
+        """Delete the row of ``native_id``; the highest ``seq`` of a pair becomes free."""
         with self._lock:
             self._ensure_open()
             try:
