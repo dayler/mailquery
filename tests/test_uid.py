@@ -107,9 +107,9 @@ class UidFormatTests(unittest.TestCase):
         self.assertEqual((parsed.driver, parsed.native_id), ("apple_mail", "83143"))
         self.assertEqual(parsed.uid, "apple_mail:83143")
         with mock.patch.object(sys, "platform", "win32"):
-            parsed = parse_uid("ABC123")
-        self.assertEqual((parsed.driver, parsed.native_id), ("outlook", "ABC123"))
-        self.assertEqual(parsed.uid, "outlook:ABC123")
+            parsed = parse_uid("k3f9q2m7xa")
+        self.assertEqual((parsed.driver, parsed.native_id), ("outlook", "k3f9q2m7xa"))
+        self.assertEqual(parsed.uid, "outlook:k3f9q2m7xa")
         # The native driver can be given explicitly (tests and non-standard hosts).
         parsed = parse_uid("83143", native_driver="apple_mail")
         self.assertEqual(parsed.uid, "apple_mail:83143")
@@ -285,7 +285,7 @@ class CommandUidTests(unittest.TestCase):
         )
 
     def test_ut_uid_02_03_legacy_input_is_resolved_with_the_native_driver(self) -> None:
-        """UT-UID-02.03: ``show 83143`` / ``show <EntryID>`` return the prefixed uid."""
+        """UT-UID-02.03: ``show 83143`` / ``show <short id>`` return the prefixed uid."""
         from tests.fixtures.make_fixtures import prefixed_uid
 
         fx = self._fixture()
@@ -296,6 +296,7 @@ class CommandUidTests(unittest.TestCase):
         self.assertEqual(payload["message"]["uid"], prefixed_uid(83143))
 
         from mailquery.backends import get_backend
+        from mailquery.native_ids import NativeIdCache
         from tests.fakes import outlook as fake_outlook
         from tests.fixtures.make_fixtures import write_config
 
@@ -312,9 +313,18 @@ class CommandUidTests(unittest.TestCase):
             )
             self.addCleanup(backend.close)
             entry_id = fake.item("normal").entry_id
-            code, payload, _ = _run_cli(["show", entry_id], home=home, backend=backend)
+            cache = NativeIdCache.open("outlook", home=home)
+            try:
+                part = cache.assign([entry_id], length=10)[entry_id]
+                cache.register([entry_id])
+            finally:
+                cache.close()
+            code, payload, _ = _run_cli(["show", part], home=home, backend=backend)
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["message"]["uid"], prefixed_uid(part, "outlook"))
+            code, payload, _ = _run_cli(["show", f"outlook:{part}"], home=home, backend=backend)
         self.assertEqual(code, 0)
-        self.assertEqual(payload["message"]["uid"], prefixed_uid(entry_id, "outlook"))
+        self.assertEqual(payload["message"]["uid"], prefixed_uid(part, "outlook"))
 
     def test_ut_uid_02_04_malformed_and_unknown_uid_fail_before_home(self) -> None:
         """UT-UID-02.04: malformed ⇒ E_USAGE; unknown driver ⇒ E_DRIVER_UNKNOWN; no home."""
@@ -369,6 +379,53 @@ class CommandUidTests(unittest.TestCase):
                 )
                 self.assertEqual(code, 0, stderr)
                 self.assertEqual(path.read_bytes(), before)
+
+
+
+# --------------------------------------------------------------------------- #
+# UT-UID-03: Apple Mail does not use the native id cache
+# --------------------------------------------------------------------------- #
+
+
+class AppleMailWithoutNativeIdCacheTests(unittest.TestCase):
+    """UT-UID-03: with only apple_mail, no native id cache is created."""
+
+    def test_ut_uid_03_01_apple_mail_keeps_its_uid_and_writes_no_cache(self) -> None:
+        """UT-UID-03.01: the uid stays apple_mail:<n>; search, new, show and attachment create no cache."""
+        import io
+
+        from tests.fixtures.make_fixtures import build_store, prefixed_uid, write_config
+
+        fx = build_store()
+        self.addCleanup(fx.cleanup)
+        write_config(fx.home)
+
+        def run(argv):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+                code = cli_mod.main(
+                    list(argv),
+                    home=fx.home,
+                    mail_root=fx.mail_root,
+                    accounts_db=fx.accounts_db,
+                )
+            self.assertEqual(code, 0, stdout.getvalue())
+            return json.loads(stdout.getvalue())
+
+        searched = run(["search", "--limit", "20", "--fields", "all"])
+        self.assertTrue(searched["messages"])
+        self.assertEqual(searched["messages"][0]["uid"], prefixed_uid(83170))
+        emitted = run(["new", "--peek", "--fields", "all"])
+        self.assertTrue(emitted["messages"])
+        for message in emitted["messages"]:
+            self.assertRegex(message["uid"], r"^apple_mail:[0-9]+$")
+        shown = run(["show", "2714"])
+        self.assertEqual(shown["message"]["uid"], prefixed_uid(2714))
+        extracted = run(["attachment", "2714", "--index", "1"])
+        self.assertEqual(extracted["uid"], prefixed_uid(2714))
+        self.assertFalse((fx.home / "db").exists())
+        self.assertFalse((fx.home / "db" / "cache.db").exists())
+
 
 
 if __name__ == "__main__":  # pragma: no cover - manual runs

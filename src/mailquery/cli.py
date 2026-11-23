@@ -26,7 +26,7 @@ from mailquery.attachments import W_ATTACHMENT_ACTIVE_CONTENT, active_content_ty
 from mailquery.attachments.engine import AttachmentsEngine
 from mailquery.attachments.paths import message_dir
 from mailquery.backends import backend_class, get_backend
-from mailquery.backends.base import ExcludedStoreError
+from mailquery.backends.base import ExcludedStoreError, MessageNotFound
 from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.config import (
     APP_HOME_SUBDIRS,
@@ -46,6 +46,7 @@ from mailquery.config import (
 )
 from mailquery.errors import MailqueryError, error_detail
 from mailquery.logging_setup import get_logger, setup_logging
+from mailquery.native_ids import PluginNativeIds
 from mailquery.output import (
     CONTENT_NOTICE,
     configure_streams,
@@ -255,11 +256,14 @@ _SHOW_EPILOG = """\
 Examples:
   mailquery show 83143
   mailquery show 83143 --fields attachments
+  mailquery show 83143 --show-native-id
 
 Notes:
   The body is truncated to 20,000 characters; headers and attachment names are
   included. Only messages of accounts declared in config.toml can be shown; use
   the uid reported by search or new.
+  --show-native-id is a debugging option: it shows the driver's native id in
+  message.uid instead of the short uid; the native id is not accepted as input.
   The URLs of the subject, the names, the headers and the body are neutralized by
   default ([content].url_display = "keep" keeps the exact text) and --strip-links
   replaces them with [link omitted].
@@ -602,6 +606,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="selects the fields of message (uid is always included); "
         "comma-separated or repeatable; all selects every field",
     )
+    show_parser.add_argument(
+        "--show-native-id",
+        action="store_true",
+        help="debugging option: show the driver's native id in message.uid instead of "
+        "the short uid; the native id is not accepted as input",
+    )
     # The uid format is validated in main() by _parse_command_uid, not by argparse.
     show_parser.add_argument("uid", metavar="UID", help="message uid (see `mailquery search`)")
 
@@ -855,12 +865,30 @@ def _bind_command(backend: Any, command: str) -> None:
         bind(command)
 
 
+def _bind_home(backend: Any, home_path: Path) -> None:
+    """Tell a built-in backend the application home (the native id cache lives there)."""
+    bind = getattr(backend, "bind_home", None)
+    if callable(bind):
+        bind(home_path)
+
+
 def _close_backend(backend: Any) -> None:
     """Release the backend; closing must never mask the result."""
     if backend is None:
         return
     try:
         backend.close()
+    except Exception:  # noqa: BLE001 - best effort
+        pass
+
+
+def _close_native_id_access(context: PluginContext) -> None:
+    """Close the native id access of a plugin context; closing must never mask the result."""
+    access = context.native_ids
+    if access is None:
+        return
+    try:
+        access.close()
     except Exception:  # noqa: BLE001 - best effort
         pass
 
@@ -895,31 +923,40 @@ def _open_drivers(
     native_name: str,
     registry: BackendRegistry,
     describe: bool = True,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, PluginContext]]:
     """Open the drivers the command consults.
 
     The native driver is the injected/platform backend; every other declared
     driver is loaded and instantiated by the registry (API 1: the entry point is
-    a class or a factory invoked with one positional ``PluginContext``). Drivers
-    are opened before ``event=start`` and closed by the caller in a ``finally``;
-    a declared driver that does not load aborts the command here, without
-    partial results.
+    a class or a factory invoked with one positional ``PluginContext``). Every
+    plugin gets its own context, with the native id cache of its driver; the
+    caller closes the drivers and those accesses in a ``finally``. Drivers are
+    opened before ``event=start``; a declared driver that does not load aborts
+    the command here, without partial results.
     """
     opened: dict[str, Any] = {}
     plugins: list[str] = []
+    contexts: dict[str, PluginContext] = {}
     for name in names:
         if name == native_name:
-            opened[name] = _make_backend(home_path, mail_root, accounts_db, backend)
+            instance = _make_backend(home_path, mail_root, accounts_db, backend)
+            _bind_home(instance, home_path)
+            opened[name] = instance
         else:
             plugins.append(name)
-    if plugins:
-        context = PluginContext(home=home_path, tmp_dir=home_path / "tmp")
-        opened.update(registry.open_drivers(plugins, context=context))
+    for name in plugins:
+        context = PluginContext(
+            home=home_path,
+            tmp_dir=home_path / "tmp",
+            native_ids=PluginNativeIds(home_path, name),
+        )
+        contexts[name] = context
+        opened.update(registry.open_drivers([name], context=context))
     for instance in opened.values():
         _bind_command(instance, command)
         if describe:
             _log_backend_connection(instance)
-    return opened
+    return opened, contexts
 
 
 def _validate_command_native_id(
@@ -995,6 +1032,7 @@ def _run_command(
     started = time.perf_counter()
     native_name = _native_driver_name(mail_root, accounts_db, backend)
     opened: dict[str, Any] = {}
+    contexts: dict[str, PluginContext] = {}
     try:
         if command == "show":
             _require_command_driver_in_scope(args, config, native_name)
@@ -1006,7 +1044,7 @@ def _run_command(
                 names = (str(getattr(args, "uid_driver", "") or native_name),)
             else:
                 names = _declared_driver_names(config, native_name)
-            opened = _open_drivers(
+            opened, contexts = _open_drivers(
                 names,
                 command,
                 home_path=home_path,
@@ -1073,6 +1111,8 @@ def _run_command(
     finally:
         for instance in opened.values():
             _close_backend(instance)
+        for context in contexts.values():
+            _close_native_id_access(context)
 
     write_json(_success_payload(command, payload))
     duration_ms = int((time.perf_counter() - started) * 1000)
@@ -1168,6 +1208,7 @@ def _execute(
         )
     elif command == "show":
         uid_driver = str(getattr(args, "uid_driver", "") or "")
+        show_native_id = bool(getattr(args, "show_native_id", False))
         if backend is None or uid_driver != str(native or ""):
             payload = run_show(
                 backend,
@@ -1178,6 +1219,7 @@ def _execute(
                 native=native,
                 url_mode=_url_mode(config, args),
                 fields=fields,
+                show_native_id=show_native_id,
             )
         else:
             payload = run_show(
@@ -1186,6 +1228,7 @@ def _execute(
                 args.uid,
                 url_mode=_url_mode(config, args),
                 fields=fields,
+                show_native_id=show_native_id,
             )
     else:  # pragma: no cover - argparse prevents this
         raise MailqueryError(
@@ -1366,12 +1409,13 @@ def _attachment_stream_guard(driver: str) -> AttachmentStreamGuard | None:
     return AttachmentStreamGuard(driver)
 
 
-def _attachment_not_found(uid: str) -> MailqueryError:
+def _attachment_not_found(uid: str, hint: str | None = None) -> MailqueryError:
     """``E_USAGE`` for an attachment uid that does not resolve to a visible message."""
     return MailqueryError(
         "E_USAGE",
         f"message uid {uid} was not found",
-        "run `mailquery search` to find the uid; deleted messages and orphan "
+        hint
+        or "run `mailquery search` to find the uid; deleted messages and orphan "
         ".emlx files are not shown",
         "message uid was not found",
     )
@@ -1432,6 +1476,8 @@ def _run_attachment(
     declared = {_scope_account_uuid(scope) for scope in resolved}
     try:
         found = wrapped.find_message(native_uid)
+    except MessageNotFound as exc:
+        raise _attachment_not_found(show_uid, exc.hint) from None
     except ExcludedStoreError as exc:
         raise _excluded_store_error(show_uid, exc.entry) from None
     if found is None:
@@ -2173,7 +2219,9 @@ def _plugin_checks(
     """Checks of one declared plugin: its ``doctor_checks()``, then ``config``."""
     checks: list[dict] = []
     instance: Any = None
-    context = PluginContext(home=home_path, tmp_dir=home_path / "tmp")
+    context = PluginContext(
+        home=home_path, tmp_dir=home_path / "tmp", native_ids=None
+    )
     try:
         instance = registry.open_drivers([driver], context=context)[driver]
     except Exception as exc:  # noqa: BLE001 - diagnostics only

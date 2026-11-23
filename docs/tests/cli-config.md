@@ -193,3 +193,20 @@ Requisitos: RNF-09, RF-52 · Archivo: `tests/test_output.py`
 |---|---|---|
 | .01 | P | Caracteres de control en `snippet` ⇒ eliminados. |
 | .02 | P | Secuencias ANSI en `body_text` de `show` ⇒ eliminadas. |
+
+#### UT-SNI-01 — `--show-native-id` en `show`
+
+Requisitos: RF-83, RF-73, AC-68, AC-70 · Archivo: `tests/test_show_native_id.py`
+
+**Tabla: Casos de UT-SNI-01**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Con Apple Mail, `show <uid> --show-native-id` da la misma salida que sin la opción (salvo `generated_at`). |
+| .02 | P | Con un plugin con `display_native_id`, `message.uid` es `<driver>:<forma nativa>`; las demás claves y valores, los textos de los warnings y `cached_path` son los mismos que sin la opción, y `cache.db` no cambia. |
+| .03 | P | Con un plugin sin el gancho, la salida es la misma con la opción y sin ella. |
+| .04 | N | Un plugin cuya forma nativa no cumple las reglas de un `<native_id>` ⇒ `E_PLUGIN_FAILED` (exit 3) y sin mensaje en la salida. |
+| .05 | N | `search`, `new`, `attachment`, `mailboxes` y `doctor` con `--show-native-id` ⇒ `E_USAGE` (exit 2), sin crear el home. |
+| .06 | N | Un `display_native_id` que supera el tope de 30 s (acortado en el test) ⇒ `E_CLIENT_TIMEOUT`. |
+| .07 | P | `show --help` describe `--show-native-id` como opción de depuración. |
+| .08 | B | Con `--fields subject`, el `uid` que siempre se entrega muestra la forma nativa. |

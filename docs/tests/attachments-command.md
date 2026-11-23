@@ -61,7 +61,7 @@ Requisitos: AC-07 · Archivo: `tests/test_cli.py`
 | .01 | P | Tres adjuntos ⇒ `[{index:1,name:"factura.pdf",cached_path:null}, …]` con índices estables 1..N. |
 | .02 | P | Con un archivo en caché (regular) ⇒ `cached_path` absoluto y correcto; sin caché ⇒ `null`. |
 | .03 | N | Nombre no seguro ⇒ `cached_path: null` aunque exista un archivo con ese nombre calculado; `show` no bloquea por contenido. |
-| .04 | N | `show` nunca escribe: no crea caché, staging ni `state.json`; el `~/.mailquery` solo puede cambiar como en 2.0.1 (log/lock/estado de `new`). |
+| .04 | N | `show` no crea caché de adjuntos, staging ni `state.json`; con Apple Mail no escribe nada más, y solo un driver que usa la librería puede escribir en la caché de ids nativos. |
 | .05 | N | Driver con `attachments: "none"` ⇒ `attachments: []`. |
 | .06 | N | S/MIME cifrado ⇒ `attachments: []`, sin `W_ATTACHMENTS_UNAVAILABLE`, conservando el warning de cuerpo de 2.0.1. |
 | .07 | P | El `index` de `show` coincide con el de `attachment` para el mismo mensaje. |

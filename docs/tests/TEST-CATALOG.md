@@ -34,6 +34,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito del [PRD]
 | UT-MBX | Salida de `mailboxes` agrupada por cuenta, su `--fields` y el recuento diferido | `tests/test_mailboxes.py` | [`output-shape.md`](output-shape.md) |
 | UT-DR | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | `tests/test_doctor.py`, `tests/test_outlook.py` | [`doctor.md`](doctor.md) |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` | [`cli-config.md`](cli-config.md) |
+| UT-SNI | `--show-native-id` en `show` | `tests/test_show_native_id.py` | [`cli-config.md`](cli-config.md) |
 | UT-CFG | Configuración | `tests/test_config.py` | [`cli-config.md`](cli-config.md) |
 | UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py` | [`cli-config.md`](cli-config.md) |
 | UT-INS | Instalador de Windows | `tests/test_install_scripts.py` | [`cli-config.md`](cli-config.md) |
@@ -43,6 +44,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito del [PRD]
 | UT-BE | Selección e interfaz de backend | `tests/test_backends.py` | [`state-backends.md`](state-backends.md) |
 | UT-PL | Registro de drivers, capacidades y API de plugin | `tests/test_plugins.py` | [`plugins.md`](plugins.md) |
 | UT-UID | uid prefijado | `tests/test_uid.py` | [`state-backends.md`](state-backends.md) |
+| UT-NID | Librería de ids cortos y caché de ids nativos: cálculo, apertura, formato, errores, asignación y acceso de plugin | `tests/test_native_ids.py` | [`native-ids.md`](native-ids.md) |
 | UT-DRV | `[scope]`, `[attachments]` y chequeo `driver` | `tests/test_config.py`, `tests/test_cli.py` | [`plugins.md`](plugins.md) |
 | UT-MD | Ejecución multi-driver | `tests/test_multidriver.py` | [`plugins.md`](plugins.md) |
 | UT-ERR | Errores y timeouts de plugin | `tests/test_plugins.py`, `tests/test_multidriver.py` | [`plugins.md`](plugins.md) |

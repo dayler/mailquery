@@ -61,3 +61,13 @@ Con la instalación y la config de SMOKE-INSTALL.
 | .08 | P | `search`, `new`, `show` y, si hay un adjunto local recuperable, `attachment` llevan `content_notice` justo después de `generated_at`; las filas de `search`/`new` tienen los seis campos; `search --count` y `search --group-by from --limit 1` salen con exit 0; los contadores de no leídos no cambian. |
 | .09 | P | `show` de un mensaje con una parte HTML en el `.emlx` devuelve `body_text` no vacío y `readable: true` sin error; repetir la lectura no cambia los contadores de no leídos. |
 | .10 | P | `doctor --json --failures` con todo correcto ⇒ exit 0, `checks: []`, `not_evaluated: []` y `plugins: []`; el informe de texto dice `all checks passed`; no lleva `content_notice`. |
+
+#### SMOKE-NEW.11 — uid corto contra el cliente real
+
+Requisitos: AC-63, AC-68, AC-69 · Archivo: `tests/test_smoke.py`
+
+**Tabla: Casos de SMOKE-NEW.11**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .11 | P | En Windows con Outlook abierto: los uids de `search --since 1w` son `outlook:` más 10 caracteres del alfabeto (o con sufijo); `show` del primero responde con exit 0; existe `db/cache.db` en el HOME temporal; `show --show-native-id` da `outlook:` más hexadecimal en mayúsculas; los no leídos no cambian. En macOS: tras `search` y `show`, no existe `db/cache.db`. Donde no aplica, se salta con el motivo de la sección 6 de `infrastructure.md`. |

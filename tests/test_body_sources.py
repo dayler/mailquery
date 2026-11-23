@@ -498,17 +498,21 @@ class _OutlookBodyCase(unittest.TestCase):
         fields.setdefault("to", [("Ana", "ana@example.com")])
         return self.inbox.add_message(key, **fields)
 
+    def part(self, key: str) -> str:
+        """The uid part the backend assigns to a fixture item (test helper)."""
+        return self.backend._uid_part(self.fake.item(key).entry_id)
+
     def row(self, key: str) -> dict:
-        found = self.backend.find_message(self.fake.item(key).entry_id)
+        found = self.backend.find_message(self.part(key))
         self.assertIsNotNone(found, f"item {key} is not in the fake profile")
         return found[0]
 
     def query_row(self, key: str) -> dict:
         """Metadata row read from the folder table, without opening the item."""
-        uid = self.fake.item(key).entry_id
+        entry_id = self.fake.item(key).entry_id
         inbox = next(mailbox for mailbox in self.backend.mailboxes() if mailbox["is_inbox"])
         rows = self.backend.query([inbox["id"]])
-        return next(row for row in rows if row["uid"] == uid)
+        return next(row for row in rows if row["native_order_key"] == entry_id)
 
 
 class OutlookBodySourceTests(_OutlookBodyCase):
@@ -813,8 +817,9 @@ class BodySourceCommandTests(unittest.TestCase):
         )
 
         fake, backend = self.outlook_backend()
-        uid = fake.item("body_html").entry_id
-        emitted = prefixed_uid(uid, "outlook")
+        emitted = prefixed_uid(
+            backend._uid_part(fake.item("body_html").entry_id), "outlook"
+        )
         found = self.payload(
             "search", "--text", "Factura", "--since", "1y", backend=backend
         )
@@ -832,7 +837,7 @@ class BodySourceCommandTests(unittest.TestCase):
 
         fake, backend = self.outlook_backend()
         shown = self.payload(
-            "show", fake.item("body_html").entry_id, backend=backend
+            "show", backend._uid_part(fake.item("body_html").entry_id), backend=backend
         )
         self.assertEqual(shown["message"]["body_text"], "Factura adjunta.")
 

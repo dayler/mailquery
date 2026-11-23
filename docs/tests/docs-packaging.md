@@ -215,3 +215,16 @@ Requisitos: AC-36 · Archivo: `tests/test_packaging.py`
 | .01 | P | La entrada de `css-inline` es literalmente `css-inline~=0.23.1`: rango de parches `0.23.x` desde `0.23.1`, sin `==`, sin `>=` abierto y sin marcador de plataforma. |
 | .02 | N | `pywin32` es la única dependencia con marcador `sys_platform == "win32"`. |
 | .03 | P | `[tool.coverage.report].fail_under = 85` y `[tool.coverage.run].branch = true`; `coverage` no está en `[project].dependencies`. |
+
+#### DOC-16 — Documentos del uid corto de Outlook y de la versión
+
+Requisitos: RF-73, RF-81, RF-83, AC-68 · Archivo: `tests/test_packaging.py`
+
+**Tabla: Casos de DOC-16**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `README.md` y `README.es.md` describen `--show-native-id` como opción de depuración de `show`; `SKILL.md` no la menciona. |
+| .02 | N | `README.md`, `README.es.md`, `SKILL.md`, `docs/INTERFACES.md`, `docs/recipes/` y `docs/security/` no contienen los textos obsoletos de CL-06: `expected an uppercase hexadecimal EntryID`, `mailquery show outlook:00000000A1B2C3D4`, "`show` never writes" / "`show` nunca escribe", "EntryID largo" / "long EntryID" como riesgo vigente de Outlook, "EntryID hexadecimal" como uid legado de Windows, ni un uid de ejemplo `outlook:` seguido de hexadecimal en mayúsculas; se admite el marcador `outlook:<EntryID>` solo en la descripción de `--show-native-id`. |
+| .03 | P | `pyproject.toml` y `mailquery.__version__` dicen `3.0.0a2`, y los README anuncian `3.0.0a2` (`3.0.0-alpha.2`) sin mencionar `3.0.0a1`. |
+| .04 | P | Los dos README describen la carpeta `~/.mailquery/db/` con `cache.db` y dicen que desinstalar no la borra. |

@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 3 / 2. **Rama del lote:** `feature/id-corto-outlook-lote-2`. **Rama del milestone:** `feature/id-corto-outlook-m04`, creada desde el tip de la rama del lote (con el lote 1 integrado).
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `98e1316` (tip de `feature/id-corto-outlook-lote-2`, con el lote 1 integrado). **Línea base de la suite:** en `98e1316`, `Ran 1497 tests`, `OK (skipped=7)`, 0 fallos con el venv del plan. Los 7 saltos son casos SMOKE/instalador que no aplican en macOS. Sin fallos conocidos.
 - **Depende de:** M03 (llamada a `display_native_id` con validación). **Lo usan:** M06 (prueba de la opción con Outlook), M07 (ayuda copiada en los README).
 - **ACs:** AC-68 (opción, presentación, rechazo en otros comandos, forma nativa inválida de un plugin, macOS sin cambios), AC-70 (plugin sin el gancho).
 
@@ -62,10 +62,10 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Opción en el parser y su ayuda; paso a `run_show` | ⚪ |
-| 2 | Sustitución de `message.uid` con el gancho | ⚪ |
-| 3 | UT-SNI-01 completo | ⚪ |
-| 4 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
+| 1 | Opción en el parser y su ayuda; paso a `run_show` | 🟢 |
+| 2 | Sustitución de `message.uid` con el gancho | 🟢 |
+| 3 | UT-SNI-01 completo | 🟢 |
+| 4 | Suite completa, cobertura, diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -131,3 +131,7 @@ Los de `protocolo.md`, más la ayuda de `show --help` resultante (texto completo
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Opción `--show-native-id` en el parser de `show`, ayuda y epílogo de depuración; la opción se pasa a `run_show`. |
+| 2026-11-23 | 2 | `run_show` sustituye solo `message.uid` con `display_native_id`; sin gancho no cambia y la forma inválida y el tope de 30 s conservan los errores del protocolo de plugin. |
+| 2026-11-23 | 3 | `tests/test_show_native_id.py`: los 8 casos de UT-SNI-01 pasan por separado y el módulo entero (`Ran 8 tests`, `OK`). |
+| 2026-11-23 | 4 | Suite completa: `Ran 1505 tests`, `OK (skipped=8)`, 0 fallos. Cobertura: `cli.py` 93,0 %, `search.py` 94,4 %. `git diff --check` limpio y diff dentro del alcance. Evidencia cruda en `../../.logs/id-corto-outlook/M04/evidencia-cruda.md` (desde la raíz del worktree). |

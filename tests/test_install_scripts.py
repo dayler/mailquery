@@ -35,9 +35,9 @@ GOOD_VERSION = (
     f"mailquery {mailquery.__version__} (backend outlook; Python 3.14.0; "
     f"Windows 10.0.26200 AMD64; drivers: outlook {mailquery.__version__})"
 )
-#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a1``).
+#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a2``).
 _VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
-#: ``3.0.0`` as the final release (the ``3.0.0a1`` pre-release is not published 3.0.0).
+#: ``3.0.0`` as the final release (the ``3.0.0a2`` pre-release is not published 3.0.0).
 _FINAL_3_0_0 = r"\b3\.0\.0(?!(?:a|b|rc)\d)"
 
 SH = shutil.which("sh")

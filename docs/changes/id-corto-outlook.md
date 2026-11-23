@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-aprobado
+implementado
 
 ## Contexto
 
@@ -156,7 +156,7 @@ Condiciones:
 - **Hint de "no encontrado".** Un uid que no está en la caché o cuyo mensaje está *ausente confirmado* lleva un hint que remite a repetir la búsqueda. Los demás casos de "no encontrado" conservan el hint actual.
 - **Resultado de la consulta al cliente.** *Encontrado*; *ausente confirmado*, solo cuando el store del mensaje está montado y Outlook, al abrir el `EntryID` en ese store, responde que no existe o que no es válido; o *indeterminado*, en cualquier otro caso: Outlook cerrado o que no responde, sin conexión, store no montado o ilegible, item que existe pero no se puede abrir, item que no es un correo, que está en una carpeta oculta o que está marcado para borrar, otro error o timeout.
 - **Borrado a demanda.** Solo *ausente confirmado* borra la fila; el comando responde entonces como a un mensaje inexistente.
-- **Garantía.** Con *indeterminado* la fila se conserva. El comando falla con el error de la causa; si la causa no tiene error propio (store no montado, item que no se puede abrir, que no es un correo, que está en una carpeta oculta o que está marcado para borrar), con `message uid … was not found`, como hoy.
+- **Garantía.** Con *indeterminado* la fila se conserva. El comando falla con el error de la causa; si la causa no tiene error propio (store no montado, item que no es un correo, que está en una carpeta oculta o que está marcado para borrar), con `message uid … was not found`, como hoy. Un item que existe pero no se puede abrir es *indeterminado* y responde como hoy: `show` arma la fila desde las tablas de su carpeta y, si no aparece, con "no encontrado" y el hint actual; `attachment` responde `E_ATTACHMENT_UNREADABLE`.
 - **Sin actualizar ni buscar.** Nunca se cambia el `native_id` de una fila ni se busca el mensaje en otras carpetas. Un mensaje movido tiene otro `EntryID` y, por tanto, otro uid.
 - **Sin otra purga.** No se borran filas por antigüedad ni al arrancar. Borrar una fila no borra el directorio de la caché de adjuntos de su parte del `uid` (RF-51), que ningún otro mensaje recibe mientras exista `cache.db`; queda sin uso hasta que lo borra el cron externo.
 - **Adjuntos con colisión.** El directorio de la caché de adjuntos de un mensaje se nombra con su parte del `uid`, sufijo incluido: dos mensajes con el mismo id corto tienen directorios distintos, `attachments/outlook/k3f9q2m7xa/` y `attachments/outlook/k3f9q2m7xa-2/`.
@@ -418,44 +418,44 @@ Ninguna
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Resumen del producto | `01-resumen.md` | después de `` `new` y `search --unread` se mantienen `` | Bloque nuevo "Id corto de mensaje en Outlook" con los tres puntos del resumen del requerimiento. | pendiente |
-| RC-02 | uid legado de Windows | `06-requisitos-funcionales.md` | RF-25; RF-38 | El uid legado sin prefijo de Windows es el id corto (RF-81). | pendiente |
-| RC-03 | Forma del `uid` de Outlook | `11-modelo-de-datos.md` | `` `uid` `` | `"outlook:<parte del uid>"`: el id corto del `EntryID`, con su sufijo cuando lo lleva; cambia si el mensaje se mueve de carpeta. | pendiente |
-| RC-04 | Ejemplos de `show` con uid de Outlook | `12.04-show.md` | `mailquery show apple_mail:83143` | Los ejemplos de Windows usan el id corto, con prefijo y sin él. | pendiente |
-| RC-05 | Ejemplo de invocación con uid de Outlook | `anexos/E-ejemplos-invocacion.md` | `mailquery show outlook:00000000A1B2C3D4…` | El ejemplo usa el id corto. | pendiente |
-| RC-06 | Requisitos nuevos | `06-requisitos-funcionales.md` | después de RF-79 | Subsección nueva 6.10 con RF-80…RF-83. | pendiente |
-| RC-07 | Ayuda de `show` | `06-requisitos-funcionales.md` | RF-73 | `show --help` y los README describen `--show-native-id` como opción de depuración. | pendiente |
-| RC-08 | Privacidad y permisos | `07-requisitos-no-funcionales.md` | RNF-05 | La carpeta `~/.mailquery/db/` entre los subdirectorios con permisos 0700, y la caché de ids nativos entre los archivos con permisos 0600. | pendiente |
-| RC-09 | Decisiones de arquitectura | `08-adr.md` | ADR-02; después de ADR-49 | ADR-02: el único estado de `new` sigue siendo el cursor; la caché de ids nativos es una base SQLite con identificadores y el mayor `seq` de cada par, y ADR-50 supera en ese punto el descarte de "SQLite de estado". ADR-50 nueva. | pendiente |
-| RC-10 | Módulos | `09-arquitectura.md` | `### 9.1 Vista de componentes`; `` `cli.py` ``; `` `search.py` ``; `` `backends/outlook.py` ``; después de `` `uid.py` ``; `` `plugins/api.py` ``; `` `plugins/__init__.py` `` | Diagrama: `native_ids.py` y `~/.mailquery/db/cache.db`, usados por `backends/outlook.py`. `cli.py`: opción de depuración de `show`. `search.py`: aviso de mensajes impresos. `backends/outlook.py`: id corto y su resolución. Fila nueva de `native_ids.py`. `plugins/api.py`: las llamadas a los dos ganchos opcionales siguen las reglas de las demás llamadas a un plugin. `plugins/__init__.py`: reexporta el cálculo del id corto; el contexto de plugin da la base abierta para su driver. | pendiente |
-| RC-11 | Árbol de fuentes y home | `10-carpetas-y-cache.md` | `│   ├── cli.py, config.py`; `├── state.json` | `native_ids.py` en el árbol de fuentes. Carpeta nueva `db/` con `cache.db` en el del home. | pendiente |
-| RC-12 | Orden total | `11-modelo-de-datos.md` | `- **Orden total:**` | Aclara que `native_order_key` de Outlook es el `EntryID`, no el id corto. | pendiente |
-| RC-13 | Caché de ids nativos | `11-modelo-de-datos.md` | después de `- **Composición JSON multi-driver:**` | Subsección nueva 11.4 con las estructuras de las tablas `cache_native_ids` y `cache_native_seq` y las reglas del archivo. | pendiente |
-| RC-14 | Opciones de `show` | `12.04-show.md` | `` Opciones: `--fields LISTA` `` | Añade `--show-native-id`, opción de depuración (RF-83). | pendiente |
-| RC-15 | Validación del uid | `12.04-show.md` | `**Tabla: Resolución del uid (igual en ambas plataformas)**`; `` `uid` con formato inválido ``; `` `uid` que no existe, está borrado ``; `` `uid` cuyo `EntryID` identifica `` | Título: la resolución en la caché de ids nativos depende del driver. Formato inválido en Windows: no es un id corto, con el mensaje `expected a short id`. No encontrado: también un uid que no está en la caché de ids nativos, incluida una base recién creada, o cuyo mensaje está ausente confirmado, con el hint de repetir la búsqueda. La forma se valida antes de abrir la caché. Store excluido: el `EntryID` es el resuelto en la caché de ids nativos. | pendiente |
-| RC-16 | Errores `E_PERMISSION` y `E_IO` | `12.06-errores.md` | `**Tabla: Errores propios de cada plataforma**`; `**Tabla: Errores de drivers, plugins y adjuntos, con su dueño y su hint**` | Filas `E_PERMISSION` de las dos tablas y fila `E_IO`: cubren también la caché de ids nativos; el hint de `E_IO` para ella dice qué pasa si se borra el archivo (RF-80). | pendiente |
-| RC-17 | Mensaje movido de carpeta | `18-procesamiento-unico.md` | `Mensaje movido a otra carpeta del alcance` | Cambia su `EntryID` y, con él, su `uid`. | pendiente |
-| RC-18 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-62; `3. **Plugins, adjuntos, contenido no confiable y salida a medida:**` | AC-63…AC-70. El rango del grupo 3 llega hasta AC-70. | pendiente |
-| RC-19 | Cambios visibles: opciones | `22-versiones.md` | `` Opciones de `search`, `new` y `show` `` | Añade `--show-native-id` en `show`. | pendiente |
-| RC-20 | Cambios visibles en Windows | `22-versiones.md` | `**Tabla: Cambios visibles de 3.0.0 solo en Windows**` | Fila `uid`: `"outlook:<parte del uid>"`, de 18 caracteres, o 20 o más con sufijo; el `EntryID` no se acepta como uid. Fila nueva: carpeta `db/` con `cache.db` en `~/.mailquery`. | pendiente |
-| RC-21 | Riesgos | `23-riesgos.md` | después de `Los chequeos de un plugin son tan fiables como el plugin`; `Rutas largas en Windows (EntryID largo)` | Los ocho riesgos nuevos del requerimiento. "Rutas largas en Windows (EntryID largo)" pasa a ser excepcional en Outlook y sigue valiendo para los plugins con un `<native_id>` largo. | pendiente |
-| RC-22 | Problema | `02-problema.md` | después de `` 6. **`mailboxes` para elegir carpetas (F3):** ``; `Las razones de cada decisión` | Necesidad 7: el `uid` de Outlook mide 148 caracteres y se repite en cada fila, warning y cursor. El rango de ADR llega hasta ADR-50. | pendiente |
-| RC-23 | Validación de `attachment` | `12.11-attachment.md` | `` **Tabla: Precedencia de validaciones y errores de `attachment`** `` | Fila 7, existencia del mensaje: incluye la resolución en la caché de ids nativos; un fallo de `cache.db` da `E_LOCKED`, `E_PERMISSION` o `E_IO`. Las menciones a la caché a secas pasan a "caché de adjuntos". | pendiente |
-| RC-24 | Privacidad | `16-seguridad.md` | `- El estado no guarda contenido de correos` | La caché de ids nativos tampoco: solo guarda identificadores. | pendiente |
-| RC-25 | Desinstalación | `13-despliegue.md` | `### 13.3 Actualización y desinstalación` | Lo que desinstalar no borra de `~/.mailquery` incluye la caché de ids nativos. Al desinstalar un plugin, sus filas de la caché de ids nativos se conservan. "La caché" a secas pasa a "caché de adjuntos". | pendiente |
-| RC-26 | Contrato de plugin | `06-requisitos-funcionales.md` | RF-36 | Los dos ganchos opcionales (aviso de mensajes impresos y forma nativa), el cálculo del id corto en la superficie pública y la base abierta para su driver en el contexto de plugin. | pendiente |
-| RC-27 | `show` no escribe | `20-criterios-aceptacion.md` | AC-07 | `show` no escribe nada salvo en la caché de ids nativos: la crea si no existe y borra la fila de un mensaje ausente confirmado. | pendiente |
-| RC-28 | Efectos de cada comando | `21-harness.md` | `` - `search`/`show`/`mailboxes`/`doctor`: ``; `` - `attachment`: ``; `` - `new`: `` | `search`, `new` (también con `--peek`), `show` y `attachment` pueden escribir además en la caché de ids nativos. | pendiente |
-| RC-29 | Lock ocupado | `17-comportamiento-errores.md` | `Lock ocupado` | También la caché de ids nativos bloqueada por otro proceso más de 5 s, con el mensaje y el hint de RF-80. | pendiente |
-| RC-30 | Ciclo de vida del plugin | `11-modelo-de-datos.md` | `- **Ciclo de vida del plugin:**` | Al desinstalar un plugin, sus filas de la caché de ids nativos se conservan; "la caché" a secas pasa a "caché de adjuntos". | pendiente |
-| RC-31 | Versión en `develop` | `22-versiones.md` | `**Estado:**` | `develop` anuncia la pre-release `3.0.0a2` (`3.0.0-alpha.2`). | pendiente |
-| RC-32 | Formato de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es la pre-release `3.0.0a2`. | pendiente |
-| RC-33 | Versión mayor | `08-adr.md` | ADR-27 | En `develop` se anuncia la pre-release `3.0.0a2`. | pendiente |
-| RC-34 | Caché de adjuntos | `06-requisitos-funcionales.md` | RF-51 | "La caché" a secas pasa a "caché de adjuntos"; la caché de ids nativos no es efímera. | pendiente |
-| RC-35 | `show` no escribe en disco | `06-requisitos-funcionales.md` | RF-41 | `show` no escribe en disco salvo en la caché de ids nativos: la crea si no existe y borra la fila de un mensaje ausente confirmado. | pendiente |
-| RC-36 | Home de la app | `15-configuracion.md` | `Home de la app` | El contenido del home incluye la carpeta `db/` con la caché de ids nativos. | pendiente |
-| RC-37 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | En `develop` se anuncia la pre-release `3.0.0a2`. | pendiente |
-| RC-38 | Flujo de `show` | `09-arquitectura.md` | `` ### 9.4 Flujo de `show` y `attachment` `` | La parte 1 deja de ser "sin escritura": `show` puede crear la caché de ids nativos y borrar la fila de un mensaje ausente confirmado. | pendiente |
+| RC-01 | Resumen del producto | `01-resumen.md` | después de `` `new` y `search --unread` se mantienen `` | Bloque nuevo "Id corto de mensaje en Outlook" con los tres puntos del resumen del requerimiento. | implementado |
+| RC-02 | uid legado de Windows | `06-requisitos-funcionales.md` | RF-25; RF-38 | El uid legado sin prefijo de Windows es el id corto (RF-81). | implementado |
+| RC-03 | Forma del `uid` de Outlook | `11-modelo-de-datos.md` | `` `uid` `` | `"outlook:<parte del uid>"`: el id corto del `EntryID`, con su sufijo cuando lo lleva; cambia si el mensaje se mueve de carpeta. | implementado |
+| RC-04 | Ejemplos de `show` con uid de Outlook | `12.04-show.md` | `mailquery show apple_mail:83143` | Los ejemplos de Windows usan el id corto, con prefijo y sin él. | implementado |
+| RC-05 | Ejemplo de invocación con uid de Outlook | `anexos/E-ejemplos-invocacion.md` | `mailquery show outlook:00000000A1B2C3D4…` | El ejemplo usa el id corto. | implementado |
+| RC-06 | Requisitos nuevos | `06-requisitos-funcionales.md` | después de RF-79 | Subsección nueva 6.10 con RF-80…RF-83. | implementado |
+| RC-07 | Ayuda de `show` | `06-requisitos-funcionales.md` | RF-73 | `show --help` y los README describen `--show-native-id` como opción de depuración. | implementado |
+| RC-08 | Privacidad y permisos | `07-requisitos-no-funcionales.md` | RNF-05 | La carpeta `~/.mailquery/db/` entre los subdirectorios con permisos 0700, y la caché de ids nativos entre los archivos con permisos 0600. | implementado |
+| RC-09 | Decisiones de arquitectura | `08-adr.md` | ADR-02; después de ADR-49 | ADR-02: el único estado de `new` sigue siendo el cursor; la caché de ids nativos es una base SQLite con identificadores y el mayor `seq` de cada par, y ADR-50 supera en ese punto el descarte de "SQLite de estado". ADR-50 nueva. | implementado |
+| RC-10 | Módulos | `09-arquitectura.md` | `### 9.1 Vista de componentes`; `` `cli.py` ``; `` `search.py` ``; `` `backends/outlook.py` ``; después de `` `uid.py` ``; `` `plugins/api.py` ``; `` `plugins/__init__.py` `` | Diagrama: `native_ids.py` y `~/.mailquery/db/cache.db`, usados por `backends/outlook.py`. `cli.py`: opción de depuración de `show`. `search.py`: aviso de mensajes impresos. `backends/outlook.py`: id corto y su resolución. Fila nueva de `native_ids.py`. `plugins/api.py`: las llamadas a los dos ganchos opcionales siguen las reglas de las demás llamadas a un plugin. `plugins/__init__.py`: reexporta el cálculo del id corto; el contexto de plugin da la base abierta para su driver. | implementado |
+| RC-11 | Árbol de fuentes y home | `10-carpetas-y-cache.md` | `│   ├── cli.py, config.py`; `├── state.json` | `native_ids.py` en el árbol de fuentes. Carpeta nueva `db/` con `cache.db` en el del home. | implementado |
+| RC-12 | Orden total | `11-modelo-de-datos.md` | `- **Orden total:**` | Aclara que `native_order_key` de Outlook es el `EntryID`, no el id corto. | implementado |
+| RC-13 | Caché de ids nativos | `11-modelo-de-datos.md` | después de `- **Composición JSON multi-driver:**` | Subsección nueva 11.4 con las estructuras de las tablas `cache_native_ids` y `cache_native_seq` y las reglas del archivo. | implementado |
+| RC-14 | Opciones de `show` | `12.04-show.md` | `` Opciones: `--fields LISTA` `` | Añade `--show-native-id`, opción de depuración (RF-83). | implementado |
+| RC-15 | Validación del uid | `12.04-show.md` | `**Tabla: Resolución del uid (igual en ambas plataformas)**`; `` `uid` con formato inválido ``; `` `uid` que no existe, está borrado ``; `` `uid` cuyo `EntryID` identifica `` | Título: la resolución en la caché de ids nativos depende del driver. Formato inválido en Windows: no es un id corto, con el mensaje `expected a short id`. No encontrado: también un uid que no está en la caché de ids nativos, incluida una base recién creada, o cuyo mensaje está ausente confirmado, con el hint de repetir la búsqueda. La forma se valida antes de abrir la caché. Store excluido: el `EntryID` es el resuelto en la caché de ids nativos. | implementado |
+| RC-16 | Errores `E_PERMISSION` y `E_IO` | `12.06-errores.md` | `**Tabla: Errores propios de cada plataforma**`; `**Tabla: Errores de drivers, plugins y adjuntos, con su dueño y su hint**` | Filas `E_PERMISSION` de las dos tablas y fila `E_IO`: cubren también la caché de ids nativos; el hint de `E_IO` para ella dice qué pasa si se borra el archivo (RF-80). | implementado |
+| RC-17 | Mensaje movido de carpeta | `18-procesamiento-unico.md` | `Mensaje movido a otra carpeta del alcance` | Cambia su `EntryID` y, con él, su `uid`. | implementado |
+| RC-18 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-62; `3. **Plugins, adjuntos, contenido no confiable y salida a medida:**` | AC-63…AC-70. El rango del grupo 3 llega hasta AC-70. | implementado |
+| RC-19 | Cambios visibles: opciones | `22-versiones.md` | `` Opciones de `search`, `new` y `show` `` | Añade `--show-native-id` en `show`. | implementado |
+| RC-20 | Cambios visibles en Windows | `22-versiones.md` | `**Tabla: Cambios visibles de 3.0.0 solo en Windows**` | Fila `uid`: `"outlook:<parte del uid>"`, de 18 caracteres, o 20 o más con sufijo; el `EntryID` no se acepta como uid. Fila nueva: carpeta `db/` con `cache.db` en `~/.mailquery`. | implementado |
+| RC-21 | Riesgos | `23-riesgos.md` | después de `Los chequeos de un plugin son tan fiables como el plugin`; `Rutas largas en Windows (EntryID largo)` | Los ocho riesgos nuevos del requerimiento. "Rutas largas en Windows (EntryID largo)" pasa a ser excepcional en Outlook y sigue valiendo para los plugins con un `<native_id>` largo. | implementado |
+| RC-22 | Problema | `02-problema.md` | después de `` 6. **`mailboxes` para elegir carpetas (F3):** ``; `Las razones de cada decisión` | Necesidad 7: el `uid` de Outlook mide 148 caracteres y se repite en cada fila, warning y cursor. El rango de ADR llega hasta ADR-50. | implementado |
+| RC-23 | Validación de `attachment` | `12.11-attachment.md` | `` **Tabla: Precedencia de validaciones y errores de `attachment`** `` | Fila 7, existencia del mensaje: incluye la resolución en la caché de ids nativos; un fallo de `cache.db` da `E_LOCKED`, `E_PERMISSION` o `E_IO`. Las menciones a la caché a secas pasan a "caché de adjuntos". | implementado |
+| RC-24 | Privacidad | `16-seguridad.md` | `- El estado no guarda contenido de correos` | La caché de ids nativos tampoco: solo guarda identificadores. | implementado |
+| RC-25 | Desinstalación | `13-despliegue.md` | `### 13.3 Actualización y desinstalación` | Lo que desinstalar no borra de `~/.mailquery` incluye la caché de ids nativos. Al desinstalar un plugin, sus filas de la caché de ids nativos se conservan. "La caché" a secas pasa a "caché de adjuntos". | implementado |
+| RC-26 | Contrato de plugin | `06-requisitos-funcionales.md` | RF-36 | Los dos ganchos opcionales (aviso de mensajes impresos y forma nativa), el cálculo del id corto en la superficie pública y la base abierta para su driver en el contexto de plugin. | implementado |
+| RC-27 | `show` no escribe | `20-criterios-aceptacion.md` | AC-07 | `show` no escribe nada salvo en la caché de ids nativos: la crea si no existe y borra la fila de un mensaje ausente confirmado. | implementado |
+| RC-28 | Efectos de cada comando | `21-harness.md` | `` - `search`/`show`/`mailboxes`/`doctor`: ``; `` - `attachment`: ``; `` - `new`: `` | `search`, `new` (también con `--peek`), `show` y `attachment` pueden escribir además en la caché de ids nativos. | implementado |
+| RC-29 | Lock ocupado | `17-comportamiento-errores.md` | `Lock ocupado` | También la caché de ids nativos bloqueada por otro proceso más de 5 s, con el mensaje y el hint de RF-80. | implementado |
+| RC-30 | Ciclo de vida del plugin | `11-modelo-de-datos.md` | `- **Ciclo de vida del plugin:**` | Al desinstalar un plugin, sus filas de la caché de ids nativos se conservan; "la caché" a secas pasa a "caché de adjuntos". | implementado |
+| RC-31 | Versión en `develop` | `22-versiones.md` | `**Estado:**` | `develop` anuncia la pre-release `3.0.0a2` (`3.0.0-alpha.2`). | implementado |
+| RC-32 | Formato de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es la pre-release `3.0.0a2`. | implementado |
+| RC-33 | Versión mayor | `08-adr.md` | ADR-27 | En `develop` se anuncia la pre-release `3.0.0a2`. | implementado |
+| RC-34 | Caché de adjuntos | `06-requisitos-funcionales.md` | RF-51 | "La caché" a secas pasa a "caché de adjuntos"; la caché de ids nativos no es efímera. | implementado |
+| RC-35 | `show` no escribe en disco | `06-requisitos-funcionales.md` | RF-41 | `show` no escribe en disco salvo en la caché de ids nativos: la crea si no existe y borra la fila de un mensaje ausente confirmado. | implementado |
+| RC-36 | Home de la app | `15-configuracion.md` | `Home de la app` | El contenido del home incluye la carpeta `db/` con la caché de ids nativos. | implementado |
+| RC-37 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | En `develop` se anuncia la pre-release `3.0.0a2`. | implementado |
+| RC-38 | Flujo de `show` | `09-arquitectura.md` | `` ### 9.4 Flujo de `show` y `attachment` `` | La parte 1 deja de ser "sin escritura": `show` puede crear la caché de ids nativos y borrar la fila de un mensaje ausente confirmado. | implementado |
 
 Secciones revisadas que no cambian:
 
@@ -477,14 +477,14 @@ Secciones revisadas que no cambian:
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- skills/mailquery/SKILL.md: pendiente
-- docs/INTERFACES.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- skills/mailquery/SKILL.md: actualizado
+- docs/INTERFACES.md: actualizado
 - docs/config.example.toml: sin cambio
-- docs/recipes/: pendiente
-- docs/security/: pendiente
-- docs/tests/: pendiente
+- docs/recipes/: actualizado
+- docs/security/: actualizado
+- docs/tests/: actualizado
 
 ## Checklist de conciliación
 
@@ -506,4 +506,8 @@ Secciones revisadas que no cambian:
 
 ## Desviaciones aprobadas
 
-Ninguna
+**Tabla: Desviaciones aprobadas de la unidad**
+
+| ID | Fecha | Dueño | Condición | Desviación |
+|---|---|---|---|---|
+| H-03 | 2026-11-23 | dueño del producto | RF-81, condición "Garantía" | Un item que existe pero no se puede abrir es *indeterminado* y responde como hoy: `show` arma la fila desde las tablas de su carpeta y, si no aparece, con "no encontrado" y el hint actual; `attachment` responde `E_ATTACHMENT_UNREADABLE`. No sale con `message uid … was not found`. |

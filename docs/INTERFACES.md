@@ -2,7 +2,7 @@
 
 > **Estado del contrato:** implementado en `develop` (plugins de backend y
 > adjuntos, contenido no confiable y salida a medida; [PRD](prd/00-indice.md) v2.3) y **no publicado**. El paquete anuncia
-> `mailquery.__version__` = 3.0.0a1 (3.0.0-alpha.1, PEP 440) en `develop`, todavía sin tag de release ni
+> `mailquery.__version__` = 3.0.0a2 (3.0.0-alpha.2, PEP 440) en `develop`, todavía sin tag de release ni
 > merge a `main`. Este documento describe el contrato tal como está
 > implementado.
 
@@ -13,6 +13,8 @@ concretos entre módulos, el layout del repositorio y las reglas de trabajo
 (pruebas, fixtures, goldens, git, CI).
 
 ## 1. Layout del repositorio (layout `src/`)
+
+**Figura: Layout del repositorio**
 
 ```text
 mailquery/                          # raíz del repo (https://github.com/dayler/mailquery)
@@ -39,6 +41,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   ├── __main__.py                 # python3 -m mailquery
 │   ├── errors.py                   # MailqueryError + 32 códigos E_* / exit codes
 │   ├── uid.py                      # uid prefijado `<driver>:<native_id>`: formato, parseo y hash estable
+│   ├── native_ids.py               # ids cortos y caché de ids nativos: short_id, NativeIdCache, PluginNativeIds
 │   ├── output.py                   # JSON formateado, snippets, fechas ISO, sanetización, html_to_text
 │   ├── logging_setup.py            # log texto con rotación por tamaño
 │   ├── config.py                   # config.toml + resolución de alcance (vía MailBackend)
@@ -53,13 +56,13 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
 │   │   ├── catalog.py              # catálogo de extensiones peligrosas (§10.3.2)
 │   │   ├── blocking.py             # bloqueo de nombre y magic bytes (§10.3.1)
 │   │   ├── sanitize.py             # sanitized_name determinista (§10.3.3)
-│   │   ├── paths.py                # message_dir/attachment_path + fallback 32 hex
+│   │   ├── paths.py                # message_dir/attachment_path + fallback 32 hex (excepcional en Outlook)
 │   │   ├── screening.py            # pantalla del mensaje completo (§12.11 filas 11–14)
 │   │   ├── engine.py               # AttachmentsEngine.recover
 │   │   └── cache.py                # staging, publicación atómica y --force
 │   ├── plugins/                    # API pública de plugin (API 1; lo único que importa un plugin externo)
 │   │   ├── __init__.py             # reexporta la API 1 (estable)
-│   │   └── api.py                  # PLUGIN_API, Reason, PluginError, PluginContext, capacidades
+│   │   └── api.py                  # PLUGIN_API, Reason, PluginError, PluginContext, PluginNativeIds, capacidades
 │   └── backends/
 │       ├── __init__.py             # get_backend(...), backend_class(...), BackendRegistry
 │       ├── registry.py             # descubrimiento/validación/carga perezosa de drivers
@@ -83,6 +86,7 @@ mailquery/                          # raíz del repo (https://github.com/dayler/
     ├── test_multidriver.py         # UT-MD-01..07: merge, orden total y cursor multi-driver
     ├── test_plugins.py             # UT-PL-01..04: API 1, registro de drivers, --version, ficheros de plugin
     ├── test_uid.py                 # UT-UID-01: formato y parseo del uid prefijado
+    ├── test_native_ids.py          # UT-NID: ids cortos, caché, concurrencia y errores
     ├── test_backends.py            # contrato de MailBackend, get_backend, AppleMailBackend
     ├── test_outlook.py             # backend Outlook sobre el fake (casos OL-*)
     ├── test_config.py
@@ -107,6 +111,20 @@ registran por el mismo grupo de entry points que un plugin. Los **seis**
 comandos (`doctor`, `mailboxes`, `search`, `new`, `show`, `attachment`) tienen
 todos sus flags en ambos backends; `attachment` solo recupera adjuntos ya
 presentes en el store local.
+
+**Figura: Contenido del home `~/.mailquery`**
+
+```text
+~/.mailquery/
+├── config.toml
+├── state.json                  # 0600
+├── logs/mailquery.log
+├── locks/mailquery.lock
+├── tmp/                        # 0700, staging
+├── attachments/<driver>/<native_id>/   # caché de adjuntos, 0700/0600
+└── db/                         # 0700
+    └── cache.db                # caché de ids nativos, 0600
+```
 
 Reglas globales:
 
@@ -201,6 +219,9 @@ Reglas:
   (y `--version`) no importa sus módulos.
 - `uid.py` importa solo `errors` y stdlib: se puede validar un `uid` antes de
   crear el home, leer `config.toml` o abrir el store.
+- `native_ids.py` importa solo `errors`, `uid` y stdlib (`hashlib`, `sqlite3`):
+  ningún comando del núcleo la llama; la usan los drivers que asignan ids
+  cortos, hoy `outlook`, y `plugins/api.py` para el acceso de un plugin.
 - `attachments/**` importa solo stdlib, `errors`, `uid` y sus propios módulos.
   La política (catálogo, bloqueo, sanitización, rutas y pantalla) es pura (sin
   E/S); `engine.py`/`cache.py` toman
@@ -406,9 +427,14 @@ store (RNF-12). `plugins/__init__.py` reexporta `plugins/api.py`:
   `.detail`, `.log_message`. El plugin **nunca** elige `code`/`exit`: un
   `reason` desconocido se conserva para que el núcleo lo mapee a
   `E_PLUGIN_FAILED`.
-- `PluginContext(home, tmp_dir)`: dataclass congelado con las rutas que el
-  núcleo entrega al plugin (`home` = `~/.mailquery`, `tmp_dir` =
-  `~/.mailquery/tmp`).
+- `PluginContext(home, tmp_dir, native_ids=None)`: dataclass congelado con las
+  rutas que el núcleo entrega al plugin (`home` = `~/.mailquery`, `tmp_dir` =
+  `~/.mailquery/tmp`) y la caché de ids nativos ya abierta para el driver del
+  plugin (`PluginNativeIds`), que el núcleo cierra al terminar; `None` cuando
+  no se ofrece, como en los chequeos de `doctor`. El plugin no abre la base ni
+  puede elegir otro driver.
+- `short_id(text, length)`: reexportado de `mailquery.native_ids`; cálculo del
+  id corto de un `<native_id>`.
 - Tipos de capacidades: `Capabilities` (`TypedDict`) y los alias
   `ReadOnlyMode`, `AttachmentsMode`, `NativeOrder`; constantes
   `CAPABILITY_KEYS`, `READONLY_MODES`, `ATTACHMENTS_MODES`, `NATIVE_ORDERS`,
@@ -674,8 +700,7 @@ validar antes de crear el home, leer `config.toml` o abrir el store.
   split en el **primer** `:`; driver `[a-z0-9_]{1,64}`; `native_id`
   `[A-Za-z0-9._=-]{1,1024}`, sin punto inicial, sin `..` y sin espacios. Un
   uid sin prefijo se resuelve con el driver nativo del SO (`native_driver`
-  permite forzarlo en tests): entero para Apple Mail, `EntryID` hex en
-  mayúsculas para Outlook. Un formato inválido ⇒ `E_USAGE` (2); con
+  permite forzarlo en tests): entero para Apple Mail, el id corto para Outlook. Un formato inválido ⇒ `E_USAGE` (2); con
   `is_installed` (el registro), un driver válido no instalado ⇒
   `E_DRIVER_UNKNOWN` (2). Solo se entrega `<native_id>` al driver, que lo valida
   con `parse_native_id`.
@@ -688,7 +713,9 @@ validar antes de crear el home, leer `config.toml` o abrir el store.
 - `stable_identifier(uid) -> str`: 32 hex en minúsculas = primeros 32
   caracteres de `SHA-256(uid UTF-8)`; determinista entre plataformas. Las rutas
   de caché de adjuntos lo usan cuando `<native_id>` o la ruta de caché exceden el límite del sistema
-  de ficheros (§10.3.3).
+  de ficheros (§10.3.3); en Outlook el fallback ya solo ocurre con un home de
+  ruta muy larga, y el directorio habitual usa la parte del uid, sufijo
+  incluido.
 - Constantes `DRIVER_PATTERN`, `NATIVE_ID_PATTERN`, `DRIVER_NAME_MAX_LENGTH`,
   `NATIVE_ID_MAX_LENGTH`.
 
@@ -707,7 +734,46 @@ núcleo los busca con `getattr` y Apple Mail no los tiene):
 | `items_opened` (propiedad) | `search.run_search`, `search.run_new` | Outlook: items distintos abiertos por la instancia; `scan.messages_read` = la diferencia durante el comando (en Apple Mail sigue siendo los cuerpos leídos) |
 | `load_snippet(row)` | `search.run_search`, `search.run_new` | Outlook: `load_body` sin nombres de adjuntos, con el cuerpo y las cabeceras de transporte (incluida la primera `Authentication-Results` y `Reply-To`; PRD §19) |
 | `load_headers(row)` | `search.run_search`, `search.run_new`, `search.run_show` | Backends internos: solo las cabeceras de `show`, la primera `Authentication-Results` y `Reply-To`, sin leer el cuerpo (Apple Mail: bloque del `.emlx`; Outlook: `PR_TRANSPORT_MESSAGE_HEADERS`, y S/MIME no se abre) |
+| `printed_messages(native_ids)` | `search.run_search`, `search.run_new` | Aviso de RF-82: recibe los `<native_id>` de los mensajes del driver que van en las filas de la respuesta; el núcleo ignora lo que devuelve. Outlook registra en la caché de ids nativos los que aún no tienen fila |
+| `display_native_id(native_id)` | `search.run_show` | Forma nativa de RF-83 para `--show-native-id`: Outlook devuelve el `EntryID` de la parte del uid. Un driver sin el gancho (Apple Mail) muestra el uid sin cambios |
 | `bind_doctor_timeout(finish)` | `cli._run_doctor` | Outlook: al vencer el plazo COM durante `doctor`, el vigilante llama a `finish(backend_checks, detail)` (ver `cli.py`) |
+
+### `native_ids.py`
+Librería de ids cortos y caché de ids nativos (RF-80). Importa solo `errors`,
+`uid` y stdlib; ningún comando del núcleo la llama: la usan los drivers que lo
+deciden, hoy `outlook`, y `plugins/api.py` para el acceso de un plugin. No
+guarda contenido de correos.
+
+- `short_id(text, length) -> str`: base32 del `SHA-256` del texto en UTF-8,
+  grupos de 5 bits desde el bit de mayor peso, sin relleno, con el alfabeto
+  `0123456789abcdefghjkmnpqrstvwxyz`. `length` fuera de 1…51 o un `text` que no
+  es `str` ⇒ `ValueError`.
+- `cache_path(home) -> Path` = `<home>/db/cache.db`.
+- `NativeIdCache.open(driver, *, home)` y
+  `NativeIdCache.open_in_memory(driver)`: abren las filas de un driver. `open`
+  crea la carpeta y el archivo si faltan, aplica 0700 al directorio y 0600 a los
+  archivos en POSIX, y solo da acceso a las filas de ese driver.
+- `assign(native_ids, *, length=10) -> dict[str, str]` no escribe: devuelve la
+  parte del uid de cada `native_id`, con una parte por ejecución y el `seq`
+  siguiente al mayor registrado del par. `register(native_ids)` guarda todas
+  las filas nuevas en una transacción, o ninguna si hay conflicto.
+  `resolve(uid_part) -> str | None` devuelve el `native_id` de una parte del
+  uid, o `None`; `discard(native_id)` borra su fila; `close()` cierra.
+- `PluginNativeIds(home, driver)`: el mismo acceso para un plugin, abierto en
+  su primera operación y seguro entre hilos. Traduce sus fallos al protocolo de
+  RF-50: base ocupada ⇒ `PluginError(Reason.BUSY)`, sin permiso ⇒
+  `PluginError(Reason.PERMISSION)` y cualquier otro ⇒ una excepción que el
+  núcleo convierte en `E_PLUGIN_FAILED`.
+- Constantes: `ALPHABET`, `FORMAT_VERSION = 1` (en `PRAGMA user_version`) y
+  `BUSY_TIMEOUT_SECONDS = 5.0`, leída en cada apertura.
+- Fallos: `E_PERMISSION` (3) si `mkdir`/`chmod` o `os.access` niegan el acceso;
+  `E_LOCKED` (5) si SQLite sigue ocupada al vencer el plazo; `E_IO` (3)
+  cualquier otro, incluido un archivo que no es una base válida de la librería
+  o un conflicto al registrar. Un archivo vacío se inicializa como uno nuevo.
+- Tablas: `cache_native_ids` relaciona `driver`, `short_id` y `seq` con el
+  `native_id`, con clave `(driver, short_id, seq)` y `(driver, native_id)`
+  única; `cache_native_seq` guarda el mayor `seq` de cada par y solo crece. Un
+  `seq` registrado no se reutiliza mientras exista el archivo.
 
 ### `backends/outlook.py`
 `OutlookBackend(*, outlook_app=None, registry=None, security_center=None,
@@ -716,9 +782,11 @@ pywin32=None, tmp_root=None, watchdog=None)`: lo construye `get_backend` en
 tests). No abre nada hasta el primer uso; toda llamada COM pasa por
 `outlook_com`. Declara `driver = "outlook"`, `plugin_api = 1` y capacidades
 `network=false, readonly="structural", body_local=true, attachments="local",
-native_order="text"`; cada fila de listado lleva `native_order_key = uid` (hex
-en mayúsculas). `parse_uid` y `parse_native_id` validan el `EntryID` hexadecimal
-en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §11.3 y §15.7:
+native_order="text"`. Cada fila de listado lleva `uid` = la parte del uid (el id
+corto del `EntryID`, con sufijo si lo lleva) y `native_order_key` = el `EntryID`
+permanente en hex mayúsculas, que sigue siendo la clave de orden.
+`parse_uid` y `parse_native_id` validan el id corto (10 caracteres del alfabeto,
+seguidos o no de `-<seq>`) sin abrir COM. Implementa §9.2 con la correspondencia de PRD §11.3 y §15.7:
 
 - Stores (PRD §15.7): el perfil se clasifica una sola vez leyendo solo propiedades
   del store; candidatos vía `Account.DeliveryStore`; `account.uuid` = los 16
@@ -734,8 +802,9 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
   (clases no buscables o borrados IMAP) clasificadas en Python;
   `mailboxes_without_counters()` y `resolve_mailbox` no leen tablas. Las
   lecturas de tablas usan `Table.GetArray` por bloques de `TABLE_CHUNK_ROWS`.
-- Items (PRD §11.3): `query` con `Folder.GetTable` (uid = `EntryID` permanente,
-  fechas UTC, prefiltro DASL ensanchado y corte exacto en Python);
+- Items (PRD §11.3): `query` con `Folder.GetTable` (el `EntryID` permanente de
+  cada item, del que se deriva el uid corto; fechas UTC, prefiltro DASL
+  ensanchado y corte exacto en Python);
   `find_message` identifica el store por los bytes 4..20 del `EntryID`;
   `load_body` nunca descarga (S/MIME y solo cabeceras sin leer contenido) y elige
   el cuerpo con `BodyFormat`: con `olFormatHTML` (2) convierte `HTMLBody` y
@@ -749,9 +818,18 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
   Por comando, cada item se abre una vez mientras siga en caché (los 200
   primeros abiertos y el último) y los destinatarios de cada uid se leen una
   vez; `close()` vacía las cachés.
-- `parse_uid(raw) -> str` (estático): hex en mayúsculas o `E_USAGE`; puro.
+- `parse_uid(raw) -> str` (estático): valida el id corto o `E_USAGE`; puro.
 - `parse_native_id(native_id) -> str` (estático): valida la parte nativa de
-  un uid prefijado (hex en mayúsculas) o `E_USAGE`; puro y offline.
+  un uid prefijado (id corto de 10 caracteres, con sufijo opcional) o
+  `E_USAGE`; puro y offline. Un `EntryID` no es un uid.
+- Resolución: `show` y `attachment` resuelven el uid en la caché de ids nativos
+  y abren el item por su `EntryID`. Un uid sin fila se trata como mensaje
+  inexistente. Solo *ausente confirmado* (el store está montado y Outlook
+  responde que el `EntryID` no existe o no es válido) borra la fila; cualquier
+  otro fallo es *indeterminado* y la conserva.
+- `printed_messages(native_ids)` registra todos a la vez los `EntryID` de los
+  mensajes impresos que aún no tienen fila; `display_native_id(native_id)`
+  devuelve el `EntryID` de la parte del uid.
 - `attachments(uid) -> list[AttachmentMetadataRow]` (RF-41/RF-45): lista
   ordenada de los adjuntos **visibles** (los `PR_ATTACHMENT_HIDDEN` no se
   listan), `index` 1..N compartido con `show` y `attachment`, `name` original
@@ -799,9 +877,9 @@ en mayúsculas sin abrir COM. Implementa §9.2 con la correspondencia de PRD §1
 - `describe()` conecta y devuelve `{backend: "outlook", version, strategy:
   "com_readonly", schema_ok: True}` para el log.
 - `new`: lo resuelve el núcleo (`search.run_new`) con la interfaz común; el
-  estado guarda los uids prefijados `outlook:<EntryID>` de `schema: 2`. Un
-  mensaje movido por el usuario cambia de `EntryID` y se reemite una vez con su
-  uid nuevo (PRD §12.3, §18).
+  estado guarda los uids prefijados `outlook:<parte del uid>` de `schema: 2`,
+  con uids cortos. Un mensaje movido por el usuario cambia de `EntryID` y, con
+  él, de id corto; se reemite una vez con su uid nuevo (PRD §12.3, §18).
 - `doctor_checks() -> list[dict]`: `pywin32`, `outlook`, `stores`,
   `readonly_strategy` y `object_model_guard`, devueltos en el orden de PRD
   §12.8 (`DOCTOR_CHECKS`) y evaluados en este otro orden: primero los que no llaman
@@ -1900,8 +1978,8 @@ Resumen de coordinación; el contrato completo es el PRD §12.5. Los ejemplos
 están compactados en una línea por brevedad: la salida real es JSON
 **formateado** (2 espacios, `output.dumps_json`) y siempre UTF-8. Los ejemplos
 con `imap://` son los de Apple Mail; en Outlook `mailbox.url` es
-`outlook://...` y el uid es `"outlook:<EntryID>"` (PRD §11.3, tabla de
-diferencias).
+`outlook://...` y el uid es `"outlook:<parte del uid>"` (el id corto) (PRD
+§11.3, tabla de diferencias).
 
 ### Éxito (base)
 ```json
@@ -1928,8 +2006,8 @@ transforman.
  "messages": [<message>],
  "scan": {"mode": "metadata", "candidates": 1, "messages_read": 1, "duration_ms": 211}}
 ```
-Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<EntryID>"`
-(Windows). `hint` (RF-14) es `null` cuando hay resultados y `truncated=false`; cuando
+Cada `<message>.uid` es `"apple_mail:<n>"` (macOS) o `"outlook:<parte del
+uid>"` (Windows). `hint` (RF-14) es `null` cuando hay resultados y `truncated=false`; cuando
 `truncated=true` es un string accionable, p. ej. `"refina los filtros o sube
 --limit (máx. 200)"`, y además se emite
 `W_RESULTS_TRUNCATED: <N> more messages match; refine the filters or raise --limit`. Con
@@ -1990,7 +2068,9 @@ Igual que `search` más:
 nombre original del driver y `cached_path` la ruta absoluta del archivo de caché
 (regular) o `null` (sin caché, nombre no seguro o entrada no regular). En S/MIME
 `attachments` es `[]` y solo queda el `W_BODY_UNREADABLE` de 2.0.1. Un
-driver con `attachments: "none"` devuelve `[]`; `show` nunca escribe.
+driver con `attachments: "none"` devuelve `[]`; `show` solo escribe en la
+caché de ids nativos: la crea si falta y borra la fila de un mensaje *ausente
+confirmado*.
 
 ### `attachment`
 ```json
@@ -2067,7 +2147,7 @@ después de `schema` (macOS) / `stores` (Windows) como hasta ahora. `detail`: po
 de declaración (nativo primero si hay bloques sin prefijo),
 `<driver> (api=<1>; pkg <versión>; network=<true|false>; readonly=<structural|promise>;
 body_local=<true|false>; attachments=<local|remote|none>; native_order=<numeric|text>)`, unidos por
-`; `; la versión es la de la distribución (`package_version()`, `3.0.0a1` en `develop`) y el nativo se
+`; `; la versión es la de la distribución (`package_version()`, `3.0.0a2` en `develop`) y el nativo se
 obtiene del backend seleccionado (así el fake de Outlook sobre `platform="win32"` reporta `outlook` en
 cualquier host). Sufijos: sin `config.toml` o sin ningún bloque `[scope]` ⇒ `; no declared drivers`
 (valida solo el nativo); config que no parsea o no supera la validación (también `E_DRIVER_UNKNOWN` por un
