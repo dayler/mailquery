@@ -2285,23 +2285,23 @@ class AttachmentArgumentTests(AttachmentTestBase):
         self.assertEqual(code, 0)
         payload = self.json_object(stdout)
         self.assertEqual(payload["uid"], f"apple_mail:{ATTACHMENT_NATIVE_UID}")
-        # The Windows form: an uppercase hexadecimal EntryID with the outlook driver.
+        # The Windows form: a short id with the outlook driver.
         outlook_caps = {"network": False, "readonly": "structural", "body_local": True,
                         "attachments": "local", "native_order": "text"}
         outlook_backend = self.attachment_backend(
             driver="outlook",
             capabilities=outlook_caps,
-            native_uid="ABCDEF1234",
+            native_uid="k3f9q2m7xa",
             account_label="PST (Fake)",
         )
         code, stdout, _ = self.run_attachment(
-            ["attachment", "ABCDEF1234", "--index", "1"],
+            ["attachment", "k3f9q2m7xa", "--index", "1"],
             outlook_backend,
             config=_attachment_scope(driver="outlook", account="PST (Fake)"),
         )
         self.assertEqual(code, 0)
         self.assertEqual(
-            self.json_object(stdout)["uid"], "outlook:ABCDEF1234"
+            self.json_object(stdout)["uid"], "outlook:k3f9q2m7xa"
         )
 
     def test_ut_atc_02_09_adjacent_row_precedence(self) -> None:

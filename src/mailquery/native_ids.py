@@ -143,10 +143,10 @@ def _access_denied(path: Path | None) -> bool:
 
 def _classify_sqlite_error(exc: sqlite3.Error, path: Path | None) -> MailqueryError:
     """Map a SQLite failure to ``E_LOCKED``, ``E_PERMISSION`` or ``E_IO``."""
+    if _is_busy(exc):
+        return _locked()
     code = getattr(exc, "sqlite_errorcode", -1)
     base = code & 0xFF if isinstance(code, int) else -1
-    if base in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
-        return _locked()
     if base in (
         sqlite3.SQLITE_PERM,
         sqlite3.SQLITE_READONLY,
@@ -214,11 +214,24 @@ def _user_tables(connection: sqlite3.Connection) -> set[str]:
     return {row[0] for row in rows}
 
 
+def _is_busy(exc: sqlite3.Error) -> bool:
+    code = getattr(exc, "sqlite_errorcode", -1)
+    base = code & 0xFF if isinstance(code, int) else -1
+    return base in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+
+
 def _read_format(connection: sqlite3.Connection) -> tuple[int, set[str]]:
+    """Return the format version and the user tables of the database.
+
+    A database that another process keeps locked past the busy timeout fails
+    with ``E_LOCKED``; any other read failure means the file is not a cache.
+    """
     try:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         tables = _user_tables(connection)
     except sqlite3.Error as exc:
+        if _is_busy(exc):
+            raise _locked() from exc
         raise _invalid_cache() from exc
     return version, tables
 
