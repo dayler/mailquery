@@ -898,6 +898,8 @@ are a rejection (4), not a transient error.
 Line: `0 ok | 2 usage or config error | 3 environment error | 4 rejected query
 or blocked attachments | 5 busy or transient error | 6 mail client not running`.
 
+**Table: Exit codes, their meaning and the `E_*` codes of each one**
+
 | Exit | Meaning | `E_*` codes |
 |------|---------|-------------|
 | 0 | Success (includes 0 results, `--help` and `--version`) | — |

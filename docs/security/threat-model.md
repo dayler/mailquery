@@ -4,7 +4,7 @@
 **Documento:** anexo técnico de seguridad (no forma parte del alcance del PRD).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** implementado en `develop` (plugins de backend y adjuntos, PRD v2.3), **no publicado**: el paquete anuncia la pre-release 3.0.0a1 (3.0.0-alpha.1) en `develop`, todavía sin tag de release ni merge a `main`.
+**Estado:** implementado en `develop` (plugins de backend y adjuntos, PRD v2.3), **no publicado**: el paquete anuncia la pre-release 3.0.0a2 (3.0.0-alpha.2) en `develop`, todavía sin tag de release ni merge a `main`.
 **Ámbito:** amenazas derivadas del **contenido** del correo (texto, HTML, URLs, imágenes, firmas, adjuntos) y del uso de la salida de `mailquery` por un harness de agentes. No cubre la seguridad del proveedor de correo, del cliente de escritorio ni del endpoint; esas capas se mencionan solo como mitigaciones externas.
 
 **Documentos relacionados:** [PRD](../prd/00-indice.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); §6.5–§6.7, §10.3, §10.4 y §23.1 (plugins y adjuntos); §6.8 y §12.12 (feature F1: opciones A2–A7); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
@@ -29,6 +29,8 @@ Esta separación es deliberada: `mailquery` no puede resolver la inyección de p
 
 ### 2.1 Activos
 
+**Tabla: Activos del producto y por qué importan**
+
 | Activo | Por qué importa |
 |---|---|
 | Contenido del buzón (cuerpos, asuntos, remitentes, firmas, adjuntos) | Privacidad y prompt injection: el atacante controla el texto que verá el LLM. |
@@ -36,6 +38,7 @@ Esta separación es deliberada: `mailquery` no puede resolver la inyección de p
 | Host del usuario y datos locales | Una URL o un adjunto abierto pueden intentar ejecutar código o exfiltrar archivos. |
 | Confianza del usuario en el asistente | Una respuesta manipulada puede inducir acciones dañinas o decisiones equivocadas. |
 | Integridad de la caché y del `state.json` | Un atacante local podría alterar adjuntos cacheados o el cursor. |
+| `cache.db`, la caché de ids nativos (`~/.mailquery/db/cache.db`) | Relaciona cada id corto de Outlook impreso con el `EntryID` de su mensaje; guarda dos identificadores y ningún contenido de correo, con permisos 0700/0600. Un atacante local podría alterar la relación y hacer que un uid abra otro mensaje. |
 | Trazabilidad (logs) | Sin auditoría no se puede investigar un incidente. |
 
 ### 2.2 Adversarios y capacidades
@@ -152,7 +155,7 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 | T-09 | Inyección visual o QR en imágenes/firmas | Imagen con texto “ignora…” o QR a URL maliciosa | Inyección o redirección | `mailquery` no carga imágenes ni extrae `src`/`alt`; una imagen solo sale con `attachment` (orden explícita) y nunca se analiza; harness: no analizar imágenes no solicitadas, confirmar antes de decodificar QR/OCR | Bajo (solo tras una extracción explícita; el análisis es decisión del harness) |
 | T-10 | Spoofing de remitente o dominio | Nombre visible de banco con dominio parecido; `pаypal.com` con una "а" cirílica (homoglifo) | Confianza indebida, phishing | PRD F1: `W_NON_ASCII_DOMAIN` cuenta los dominios no ASCII en URLs y direcciones, y `neutralize` muestra el dominio de la URL en punycode (`xn--pypal-4ve.com`); A6: `W_SENDER_AUTH_FAILED` repite el SPF/DKIM/DMARC fallido de la primera `Authentication-Results` y `W_REPLY_TO_MISMATCH` avisa de un `Reply-To` de otro dominio; harness: no confiar en `from.name`; verificar dominio | Medio (dominios ASCII parecidos, como `paypa1.com`, no se señalan; sin la cabecera o con una falsificada con `pass` no hay aviso) |
 | T-11 | Plugin externo malicioso o comprometido | Paquete que lee red, devuelve datos falsos o deja pasar texto oculto en el cuerpo | Compromiso del proceso y de la salida | Consentimiento al instalar; capacidades en `doctor`; revisar paquete; sandbox del OS; el plugin es responsable de entregar el cuerpo sin contenido oculto (§9) | Aceptado |
-| T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/` | El agente lee datos alterados | Permisos `0700/0600`; manifiesto por mensaje con el SHA-256 de los bytes que pasaron la pantalla: `attachment` nunca sirve un archivo sin verificar y lo re-extrae o elimina; directorios de caché enlazados ⇒ `E_IO`; usuario monousuario. Residual: quien tenga la misma cuenta puede reescribir archivo y manifiesto a la vez (un HMAC no ayuda: la clave viviría en el mismo `~/.mailquery`); `show` no valida (`cached_path` solo comprueba el archivo regular); TOCTOU entre el hash y la lectura del agente | Aceptado |
+| T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/`, o fila alterada en `~/.mailquery/db/cache.db` | El agente lee datos alterados o un uid resuelve a otro mensaje | Permisos `0700/0600`; manifiesto por mensaje con el SHA-256 de los bytes que pasaron la pantalla: `attachment` nunca sirve un archivo sin verificar y lo re-extrae o elimina; directorios de caché enlazados ⇒ `E_IO`; usuario monousuario. Residual: quien tenga la misma cuenta puede reescribir archivo y manifiesto a la vez (un HMAC no ayuda: la clave viviría en el mismo `~/.mailquery`); `show` no valida (`cached_path` solo comprueba el archivo regular); TOCTOU entre el hash y la lectura del agente | Aceptado |
 | T-13 | Abuso de la excepción COM de materialización (Outlook) | `SaveAsFile` escribiendo fuera del staging o materializando un adjunto no local | Escritura arbitraria o descarga forzada | Solo `Attachment.SaveAsFile` en la lista blanca; path propio en staging `0700`/`0600`; solo adjuntos `OL_FULL_ITEM`/`olByValue`; validación regular/dentro de sesión (D12); borrado siempre | Aceptado (§4.1) |
 
 ---
@@ -217,6 +220,9 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 - **Caché y staging:** los adjuntos recuperados viven bajo
   `~/.mailquery/attachments/<driver>/<native_id>/` (directorios 0700, archivos 0600
   en POSIX, ACL del perfil en Windows) y el staging bajo `~/.mailquery/tmp/`. La
+  caché de ids nativos (`~/.mailquery/db/cache.db`) también es del usuario
+  (directorio 0700, archivos 0600) y no es efímera: guarda el `EntryID` de los
+  mensajes impresos, sin contenido. La
   publicación es atómica y no sigue symlinks; la caché es efímera y no se valida ni
   purga al arrancar (limpieza externa). Cada archivo publicado se registra en el
   manifiesto del mensaje (`.manifest.json`: nombre, tamaño y SHA-256 de los bytes

@@ -917,6 +917,8 @@ adjuntos bloqueados son un rechazo (4), no un error transitorio.
 Línea: `0 ok | 2 usage or config error | 3 environment error | 4 rejected query
 or blocked attachments | 5 busy or transient error | 6 mail client not running`.
 
+**Tabla: Códigos de salida, su significado y los códigos `E_*` de cada uno**
+
 | Exit | Significado | Códigos `E_*` |
 |------|-------------|---------------|
 | 0 | Éxito (incluye 0 resultados, `--help` y `--version`) | — |

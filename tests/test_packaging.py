@@ -1,4 +1,4 @@
-"""TC-06, PKG-01, PKG-02, PKG-03 and DOC-07: packaging, dependencies and READMEs.
+"""TC-06, PKG-01, PKG-02, PKG-03, DOC-07 and DOC-16: packaging, dependencies and consumer documents.
 
 ``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a2),
 not yet released: the tests derive every expected version from the package
@@ -266,6 +266,94 @@ class ReadmeCssInlineTests(unittest.TestCase):
             flat = " ".join(_readme(name).lower().split())
             self.assertNotIn("standard library only", flat, name)
             self.assertNotIn("solo biblioteca estándar", flat, name)
+
+
+#: Obsolete Outlook uid texts that the consumer documents must not carry.
+OBSOLETE_UID_TEXTS = (
+    "expected an uppercase hexadecimal EntryID",
+    "mailquery show outlook:00000000A1B2C3D4",
+    "`show` never writes",
+    "`show` nunca escribe",
+    "show never writes",
+    "EntryID largo",
+    "long EntryID",
+    "EntryID hexadecimal",
+)
+#: An example uid must not print the EntryID as an uppercase hexadecimal string.
+UPPERCASE_UID_EXAMPLE = re.compile(r"outlook:[0-9A-F]{6,}")
+#: Placeholder for the native form, admitted only where the option is documented.
+NATIVE_ID_MARKER = "outlook:<EntryID>"
+
+
+class ConsumerDocumentsTests(unittest.TestCase):
+    """DOC-16: the consumer documents of the Outlook short uid and of the version."""
+
+    @staticmethod
+    def _consumer_documents() -> list[tuple[str, str]]:
+        paths = [
+            ROOT / "README.md",
+            ROOT / "README.es.md",
+            ROOT / "skills" / "mailquery" / "SKILL.md",
+            ROOT / "docs" / "INTERFACES.md",
+        ]
+        paths += sorted((ROOT / "docs" / "recipes").glob("*.md"))
+        paths += sorted((ROOT / "docs" / "security").glob("*.md"))
+        return [
+            (str(path.relative_to(ROOT)), path.read_text(encoding="utf-8"))
+            for path in paths
+        ]
+
+    def test_doc_16_01_readmes_document_the_native_id_debugging_option(self) -> None:
+        """DOC-16.01: both READMEs present ``--show-native-id`` as a debugging option; the skill omits it."""
+        for name, phrase in (
+            ("README.md", "debugging option"),
+            ("README.es.md", "opción de depuración"),
+        ):
+            show = _subsection(_readme(name), "mailquery show")
+            self.assertTrue(show, name)
+            self.assertIn("--show-native-id", show, name)
+            self.assertIn(phrase, show, name)
+            self.assertIn("EntryID", show, name)
+        skill = (ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertNotIn("show-native-id", skill)
+
+    def test_doc_16_02_consumer_documents_drop_the_obsolete_uid_texts(self) -> None:
+        """DOC-16.02: consumer documents carry no obsolete uid text; the native marker only documents the option."""
+        for name, text in self._consumer_documents():
+            for phrase in OBSOLETE_UID_TEXTS:
+                self.assertNotIn(phrase, text, f"{name}: {phrase}")
+            self.assertIsNone(UPPERCASE_UID_EXAMPLE.search(text), name)
+            for match in re.finditer(re.escape(NATIVE_ID_MARKER), text):
+                window = text[max(0, match.start() - 400):match.start()]
+                self.assertIn(
+                    "--show-native-id",
+                    window,
+                    f"{name}: {NATIVE_ID_MARKER} outside the option description",
+                )
+
+    def test_doc_16_03_version_is_3_0_0a2_in_package_and_readmes(self) -> None:
+        """DOC-16.03: pyproject, ``mailquery.__version__`` and both READMEs announce 3.0.0a2."""
+        self.assertEqual(_load()["project"]["version"], "3.0.0a2")
+        self.assertEqual(mailquery.__version__, "3.0.0a2")
+        for name in ("README.md", "README.es.md"):
+            text = _readme(name)
+            self.assertIn("3.0.0a2", text, name)
+            self.assertIn("3.0.0-alpha.2", text, name)
+            self.assertNotIn("3.0.0a1", text, name)
+
+    def test_doc_16_04_readmes_describe_the_native_id_cache(self) -> None:
+        """DOC-16.04: both READMEs document ``~/.mailquery/db/cache.db`` and that uninstalling keeps it."""
+        for name, section_heading, cache_phrase in (
+            ("README.md", "Install, upgrade and uninstall", "native id cache"),
+            ("README.es.md", "Instalar, actualizar y desinstalar", "caché de ids nativos"),
+        ):
+            text = _readme(name)
+            self.assertIn("~/.mailquery/db/", text, name)
+            self.assertIn("cache.db", text, name)
+            self.assertIn(cache_phrase, text, name)
+            section = _section(text, section_heading)
+            self.assertIn("pipx uninstall", section, name)
+            self.assertIn("cache.db", section, name)
 
 
 if __name__ == "__main__":
