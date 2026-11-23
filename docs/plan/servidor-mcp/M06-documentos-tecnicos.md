@@ -65,7 +65,7 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | 1 | `docs/INTERFACES.md` | 🟢 |
-| 2 | `docs/security/threat-model.md` y `docs/ROADMAP.md` | ⚪ |
+| 2 | `docs/security/threat-model.md` y `docs/ROADMAP.md` | 🟢 |
 | 3 | Recetas: revisión y, si hace falta, la frase de MCP; TC-04 verde | ⚪ |
 | 4 | Barrido: `grep -rniE "six commands\|seis comandos\|3\.0\.0a2\|3\.0\.0-alpha\.2" README.md README.es.md skills docs/INTERFACES.md docs/ROADMAP.md docs/recipes docs/security docs/config.example.toml` y búsqueda de `mailquery.log` como único archivo del log del núcleo en esos documentos; DOC-16.02 y DOC-03 verdes; suite completa, evidencia cruda y propuestas | ⚪ |
 
@@ -110,3 +110,4 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-23 | 1 | `docs/INTERFACES.md`: layout, dirección de dependencias, `mcp_server.py`, `logging_setup.py`, `config.py`, `cli.py` y prueba manual del servidor. |
+| 2026-11-23 | 2 | `docs/security/threat-model.md`: superficie del servidor por stdio, T-14, matriz, checklist y privacidad de `mailquery.jsonl`; `docs/ROADMAP.md`: servidor MCP y log JSON como hechos de 3.0.0. |
