@@ -135,4 +135,4 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 | 2026-11-23 | 2 | `active_log_filename`, `JsonFormatter`, `setup_logging(json=)` y el cableado de `cli.py`; UT-LOG-05.03–.05 y .07–.12 verdes (el `.08` y el `.11` también usan `cli.main`). |
 | 2026-11-23 | 3 | `hint` de `E_INTERNAL` y de Outlook con el archivo activo, línea de logs de la ayuda raíz; UT-LOG-05.01, .02 y .06 y UT-LOG-06.01–.03 verdes. |
 | 2026-11-23 | 4 | `[logging].json` en `config.example.toml` y en los dos README, fila `E_INTERNAL` con los dos archivos; DOC-18.01–.02 y DOC-06 verdes. |
-| 2026-11-23 | 5 | Cobertura de `logging_setup.py` y `config.py`; suite del lote y evidencia. |
+| 2026-11-23 | 5 | Suite completa `Ran 1598 tests` con solo los fallos SMOKE conocidos; gates `-k ut_log_0`, `-k ut_cfg_0`, `-k doc_06`, `-k doc_18`, `-k test_core_event` y `-k test_logging` verdes; `git diff --check` limpio; cobertura dirigida 94.4 % (`config.py`) y 94.0 % (`logging_setup.py`). Evidencia en `$LOGS/evidencia-cruda.md` y propuestas en `work/M04-propuestas.md`. |
