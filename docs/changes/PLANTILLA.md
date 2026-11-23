@@ -21,7 +21,7 @@ borrador
 
 ## Requerimiento
 
-{Lo que cambia en el producto: comportamiento, reglas, casos, límites, errores, datos y ejemplos, en las subsecciones que el cambio necesite. Se escribe en párrafos y listas; una tabla solo para datos que se leen comparando columnas. De cada elemento del PRD que cambia se dice qué cambia, citándolo por su ID o por su sección. No es el texto del PRD.}
+{Lo que cambia en el producto: comportamiento, reglas, casos, límites, errores, datos y ejemplos, en las subsecciones que el cambio necesite. Se escribe en párrafos y listas; una tabla solo para datos que se leen comparando columnas. De cada elemento del PRD que cambia se dice qué cambia, citándolo por su ID o por su sección. Incluye el diseño que el cambio necesita (estructuras de tablas y datos, contratos de interfaces con nombres y firmas, diagramas), pero no código implementado ni pasos de implementación. No es el texto del PRD.}
 
 ### Requerimientos
 
