@@ -156,7 +156,7 @@ Condiciones:
 - **Hint de "no encontrado".** Un uid que no está en la caché o cuyo mensaje está *ausente confirmado* lleva un hint que remite a repetir la búsqueda. Los demás casos de "no encontrado" conservan el hint actual.
 - **Resultado de la consulta al cliente.** *Encontrado*; *ausente confirmado*, solo cuando el store del mensaje está montado y Outlook, al abrir el `EntryID` en ese store, responde que no existe o que no es válido; o *indeterminado*, en cualquier otro caso: Outlook cerrado o que no responde, sin conexión, store no montado o ilegible, item que existe pero no se puede abrir, item que no es un correo, que está en una carpeta oculta o que está marcado para borrar, otro error o timeout.
 - **Borrado a demanda.** Solo *ausente confirmado* borra la fila; el comando responde entonces como a un mensaje inexistente.
-- **Garantía.** Con *indeterminado* la fila se conserva. El comando falla con el error de la causa; si la causa no tiene error propio (store no montado, item que no se puede abrir, que no es un correo, que está en una carpeta oculta o que está marcado para borrar), con `message uid … was not found`, como hoy.
+- **Garantía.** Con *indeterminado* la fila se conserva. El comando falla con el error de la causa; si la causa no tiene error propio (store no montado, item que no es un correo, que está en una carpeta oculta o que está marcado para borrar), con `message uid … was not found`, como hoy. Un item que existe pero no se puede abrir es *indeterminado* y responde como hoy: `show` arma la fila desde las tablas de su carpeta y, si no aparece, con "no encontrado" y el hint actual; `attachment` responde `E_ATTACHMENT_UNREADABLE`.
 - **Sin actualizar ni buscar.** Nunca se cambia el `native_id` de una fila ni se busca el mensaje en otras carpetas. Un mensaje movido tiene otro `EntryID` y, por tanto, otro uid.
 - **Sin otra purga.** No se borran filas por antigüedad ni al arrancar. Borrar una fila no borra el directorio de la caché de adjuntos de su parte del `uid` (RF-51), que ningún otro mensaje recibe mientras exista `cache.db`; queda sin uso hasta que lo borra el cron externo.
 - **Adjuntos con colisión.** El directorio de la caché de adjuntos de un mensaje se nombra con su parte del `uid`, sufijo incluido: dos mensajes con el mismo id corto tienen directorios distintos, `attachments/outlook/k3f9q2m7xa/` y `attachments/outlook/k3f9q2m7xa-2/`.
@@ -506,4 +506,8 @@ Secciones revisadas que no cambian:
 
 ## Desviaciones aprobadas
 
-Ninguna
+**Tabla: Desviaciones aprobadas de la unidad**
+
+| ID | Fecha | Dueño | Condición | Desviación |
+|---|---|---|---|---|
+| H-03 | 2026-11-23 | dueño del producto | RF-81, condición "Garantía" | Un item que existe pero no se puede abrir es *indeterminado* y responde como hoy: `show` arma la fila desde las tablas de su carpeta y, si no aparece, con "no encontrado" y el hint actual; `attachment` responde `E_ATTACHMENT_UNREADABLE`. No sale con `message uid … was not found`. |
