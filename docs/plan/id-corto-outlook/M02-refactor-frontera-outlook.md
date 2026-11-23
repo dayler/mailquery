@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 1 / 1. **Rama del lote:** `feature/id-corto-outlook-lote-1`. **Rama del milestone:** `feature/id-corto-outlook-m02`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `ba07a59` (tip of branch `feature/id-corto-outlook-lote-1`). **Línea base de la suite:** commit `4361e96` con el venv del plan, `Ran 1452 tests`, `OK (skipped=8)`, 0 fallos (los 8 saltos son casos SMOKE/installer que no aplican en macOS; sin fallos conocidos).
 - **Depende de:** nada. **Lo usan:** M05 y M06.
 - **ACs:** ninguno. Refactor sin cambio de comportamiento.
 
@@ -68,9 +68,9 @@ Ninguna de `decisiones.md` le aplica. Regla: ningún comportamiento observable c
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Inventario de los usos del uid en `outlook.py` (lista en la evidencia cruda) | ⚪ |
-| 2 | `_entry_id`/`_uid_part`, traducción en cada operación de entrada y en la emisión; cachés por `EntryID` | ⚪ |
-| 3 | Test sin ID con traducción reversible; suite completa sin cambios en tests existentes | ⚪ |
+| 1 | Inventario de los usos del uid en `outlook.py` (lista en la evidencia cruda) | 🟢 |
+| 2 | `_entry_id`/`_uid_part`, traducción en cada operación de entrada y en la emisión; cachés por `EntryID` | 🟢 |
+| 3 | Test sin ID con traducción reversible; suite completa sin cambios en tests existentes | 🟡 |
 | 4 | Diff, evidencia cruda | ⚪ |
 
 ## Tests
@@ -110,3 +110,5 @@ Los de `protocolo.md`, más el inventario de la fase 1 (función, línea y si re
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Inventario de los usos del uid en `outlook.py`, en la evidencia cruda. |
+| 2026-11-23 | 2 | `_entry_id`/`_uid_part` añadidos; entrada y emisión traducidas; cachés por `EntryID`; `_order_key` por `native_order_key`. |
