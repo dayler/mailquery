@@ -55,6 +55,22 @@ nombraba `mailquery.log` como único archivo del log del núcleo (CL-06).
   servidor no añade campos: `event=call` lleva herramienta, código de salida y
   duración, nunca valores de parámetros.
 
+### 2.4 Barrido de CL-06 y CL-11 (documentos consumidores)
+
+Sin coincidencias vigentes tras el milestone:
+
+- `grep -rniE "six commands|seis comandos|3\.0\.0a2|3\.0\.0-alpha\.2"` en
+  `README.md`, `README.es.md`, `skills/`, `docs/INTERFACES.md`,
+  `docs/ROADMAP.md`, `docs/recipes/`, `docs/security/` y
+  `docs/config.example.toml`: exit 1 (sin resultados).
+- `grep -rniE "logs? en texto plano|log en texto por ejecución|texto por
+  ejecución"` en los mismos documentos: exit 1.
+- Ningún documento que nombra `mailquery.log` deja de nombrar
+  `mailquery.jsonl`.
+- Solo quedaba una coincidencia antes de empezar (`docs/INTERFACES.md:1452`,
+  "los seis comandos"), corregida en la fase 1, y la fila `E_INTERNAL` de las
+  dos recetas, que nombraba solo el log de texto y se corrigió en la fase 3.
+
 ## 3. Desviaciones
 
 Ninguna.
