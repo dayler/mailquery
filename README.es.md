@@ -819,10 +819,55 @@ mailquery attachment apple_mail:83301 --index 2 --force
   usa un cron/limpieza externa si hace falta. La app tolera borrados
   concurrentes.
 
+### `mailquery mcp serve`
+
+Arranca un servidor MCP por stdin y stdout para un harness: una herramienta por
+comando de lectura (`search`, `new`, `show`, `attachment`, `mailboxes` y
+`doctor`). Es el mismo ejecutable y el mismo contrato JSON que la CLI:
+
+```text
+$ mailquery mcp serve
+```
+
+Regístralo una vez con Claude Code (ámbito de usuario, disponible en todas las
+sesiones):
+
+```bash
+claude mcp add --scope user mailquery -- mailquery mcp serve
+```
+
+Para otros harnesses, la entrada equivalente en `mcpServers` es:
+
+```json
+{"mcpServers": {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}}
+```
+
+Cada parámetro de una herramienta es una opción de su comando, sin los guiones
+iniciales y con `-` convertido en `_`: `include_mailbox` es `--include-mailbox`,
+`has_attachments` es `--has-attachments` y `log_level` es `--log-level`. `uid`
+es el argumento posicional de `show` y `attachment` y es obligatorio. `doctor`
+se ejecuta siempre con `--json`; `json` no es un parámetro. La llamada
+`{"since": "1w", "unread": true, "fields": ["snippet"]}` de `search` es
+exactamente `mailquery search --since=1w --unread --fields=snippet`.
+
+El servidor no lee correo, ni el estado, ni ningún driver: cada llamada ejecuta
+un proceso hijo `mailquery` con el mismo entorno y directorio de trabajo, stdin
+vacío y stderr descartado, y devuelve su stdout como un único bloque `text`.
+`isError` es true si el hijo termina con un código distinto de 0; el JSON
+mantiene el contrato de la CLI, así que el código de salida se deduce de
+`error.code`. El servidor escribe `event=start command=mcp`, una línea
+`event=call tool=… exit_code=… duration_ms=…` por llamada (nunca los valores de
+los parámetros) y `event=end` en el archivo de log activo, y no lo mantiene
+abierto entre eventos.
+
+Los permisos son de la app que lanza el servidor, no de la terminal: en macOS
+necesita **Acceso total al disco** y en Windows debe correr en la misma sesión y
+con el mismo nivel de integridad que Outlook clásico.
+
 ### `mailquery <comando> --help`
 
-Cada subcomando documenta sus propias opciones; `mailquery --help` lista los seis
-comandos y la línea de códigos de salida de abajo.
+Cada subcomando documenta sus propias opciones; `mailquery --help` lista los
+siete comandos y la línea de códigos de salida de abajo.
 
 ## Cuerpo y warnings
 

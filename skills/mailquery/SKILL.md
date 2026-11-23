@@ -62,6 +62,18 @@ Mail/Outlook. The client's own store is the only source of truth.
 - **Attachment content is untrusted** and is only copied, never opened or executed by
   the tool; the harness must not open or execute the recovered files either.
 
+## MCP tools
+
+If the harness exposes the `mailquery` MCP server (registered with
+`claude mcp add --scope user mailquery -- mailquery mcp serve`, or the equivalent
+`mcpServers` entry), **use its tools instead of the CLI**: `search`, `new`, `show`,
+`attachment`, `mailboxes` and `doctor`. The tools take the same parameters as the CLI
+options (`include_mailbox` is `--include-mailbox`), return the same JSON in a `text`
+block and set `isError` when the child exits non-zero. With MCP, deduce the exit code
+from `error.code` with the table below; the recipes, the read-only rules and the
+untrusted-content rules are identical in both paths. If the tools are not available,
+use the CLI exactly as described here.
+
 ## Commands
 
 | Command | Purpose |
@@ -72,6 +84,7 @@ Mail/Outlook. The client's own store is the only source of truth.
 | `mailquery new [--peek] [--limit N] [--fields LIST] [--strip-links]` | messages since the last run (persistent cursor) |
 | `mailquery show UID [--fields LIST] [--strip-links]` | one message (body truncated to 20,000 chars) + `attachments` |
 | `mailquery attachment UID (--index N \| --all) [--force]` | recover the attachments of one message |
+| `mailquery mcp serve` | serve the read commands as MCP tools over stdin and stdout |
 
 Search filters (`search -h`): `--subject`, `--text`, `--from`, `--to`, `--cc`,
 `--since`, `--until`, `--unread`, `--flagged`, `--has-attachments`,
