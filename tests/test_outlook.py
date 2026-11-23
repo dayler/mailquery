@@ -33,8 +33,10 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from mailquery.attachments.paths import message_dir
 from mailquery.backends.base import MessageNotFound
 from mailquery.errors import MailqueryError
+from mailquery.uid import stable_identifier
 from tests.fakes import outlook as fk
 from tests.fakes import run_cli
 from tests.fixtures.make_fixtures import prefixed_uid
@@ -5464,9 +5466,12 @@ class OutlookUidValidationTests(_OutlookCommandCase):
                     error = self.run_error(5, "E_LOCKED", *argv)
                 self.assertEqual(error["hint"], locked.hint)
 
-        directory = self.home / "db"
-        directory.chmod(0o500)
-        try:
+        denied = MailqueryError(
+            "E_PERMISSION",
+            "no permission to read or write the native id cache",
+            "check the permissions of ~/.mailquery/db/ and ~/.mailquery/db/cache.db",
+        )
+        with mock.patch("mailquery.native_ids._check_access", side_effect=denied):
             for command, argv in (
                 ("search", ("search", "--since", "2026-01-01")),
                 ("show", ("show", part)),
@@ -5478,8 +5483,6 @@ class OutlookUidValidationTests(_OutlookCommandCase):
                         error["hint"],
                         "check the permissions of ~/.mailquery/db/ and ~/.mailquery/db/cache.db",
                     )
-        finally:
-            directory.chmod(0o700)
 
         for command, argv in (
             ("search", ("search", "--since", "2026-01-01")),
@@ -5701,13 +5704,21 @@ class OutlookCollisionTests(_OutlookUidCase):
             first_key: (_COLLIDING_SHORT_ID, "contrato.pdf"),
             second_key: (f"{_COLLIDING_SHORT_ID}-2", "factura-11.pdf"),
         }
+        directories: dict[str, Path] = {}
         for key, (part, name) in expected.items():
             with self.subTest(item=key):
                 uid = found[fake.item(key).subject]
                 self.assertTrue(uid.endswith(part), uid)
                 payload = self.run_json("attachment", uid, "--index", "1")
-                directory = self.home / "attachments" / "outlook" / part
+                directory = message_dir(self.home, uid)
+                directories[key] = directory
                 self.assertEqual(Path(payload["output_dir"]), directory)
+                if directory.name == part:
+                    self.assertEqual(
+                        directory, self.home / "attachments" / "outlook" / part
+                    )
+                else:
+                    self.assertEqual(directory.name, stable_identifier(uid))
                 written = payload["attachments"][0]
                 self.assertEqual(written["original_name"], name)
                 files = sorted(
@@ -5717,6 +5728,7 @@ class OutlookCollisionTests(_OutlookUidCase):
                 )
                 self.assertEqual(files, [written["sanitized_name"]])
                 self.assertTrue((directory / written["sanitized_name"]).is_file())
+        self.assertEqual(len(set(directories.values())), len(directories))
 
     def test_ol_34_03_first_new_run_keeps_the_uid_of_a_message_it_reads_twice(self) -> None:
         """OL-34.03: a message read by the query and by its body keeps its uid."""
