@@ -287,11 +287,13 @@ docs/
     PLANTILLA.md
     <nombre>.md              una unidad por archivo, en cualquier estado
   plan/
+    PLANTILLA-MILESTONE.md   plantilla del brief de un milestone
     <nombre-del-plan>/       un plan por carpeta
 ```
 
 - **`docs/changes/` es plana.** Todas las unidades están en su primer nivel, sin subcarpetas. Una unidad no cambia de nombre ni de carpeta al cambiar de estado.
 - **Un plan por carpeta.** Cada plan vive en `docs/plan/<nombre-del-plan>/`, con su plan maestro, su archivo de reglas para subagentes, sus briefs y su evidencia. Varios planes abiertos no comparten archivos.
+- **Plantilla de milestone.** `docs/plan/PLANTILLA-MILESTONE.md` es el punto de partida del brief de cada milestone: un plan la copia a su carpeta y la adapta. No pertenece a ningún plan y no se elimina con ellos.
 - **Unidades sin plan.** No dejan nada en `docs/plan/`.
 - **Ramas.** Una unidad sin plan se implementa en su propia rama; las unidades de un plan, en las ramas que el plan define. Las ramas que avanzan a la vez usan un worktree cada una, fuera del repositorio.
 
