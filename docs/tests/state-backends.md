@@ -134,7 +134,7 @@ Requisitos: AC-05, RF-38 · Archivo: `tests/test_uid.py`
 | .02 | P | `native_id` acepta `[A-Za-z0-9._=-]`; el punto se acepta en posiciones interiores (`a.b`) pero se rechaza como primer carácter (`.a`) y la secuencia `..`; split en el primer `:` (`a:b:c` ⇒ nativo `b:c`, inválido por `:`). |
 | .03 | N | Driver vacío, con mayúsculas, guion o > 64 ⇒ `E_USAGE` (el formato del uid es inválido); un driver válido pero no instalado ⇒ `E_DRIVER_UNKNOWN` (caso separado). |
 | .04 | N | `native_id` con `/`, espacio, `:` o > 1024; punto inicial; `..`; cadena vacía ⇒ `E_USAGE`. |
-| .05 | P | [por actualizar] Entrada legada: entero sin prefijo en macOS ⇒ driver nativo `apple_mail` con ese nativo; id corto sin prefijo en Windows ⇒ `outlook`. |
+| .05 | P | Entrada legada: entero sin prefijo en macOS ⇒ driver nativo `apple_mail` con ese nativo; id corto sin prefijo en Windows ⇒ `outlook`. |
 | .06 | N | La validación de un uid inválido ocurre antes de crear el home, leer la config y abrir el store; no escribe estado ni caché. |
 | .07 | P | Identificador estable de ruta: 32 hex en minúsculas = primeros 32 caracteres de `SHA-256(uid UTF-8)`; determinista entre plataformas. |
 
@@ -146,7 +146,7 @@ Requisitos: AC-05 · Archivo: `tests/test_uid.py`
 |---|---|---|
 | .01 | P | `search`, `new` y `show` emiten `uid` string con el prefijo del driver nativo; `new` emite `cursor.previous/current.last_uid` igual. |
 | .02 | P | Orden de `search`/`show` por `(date_received DESC, driver ASC, native_order_key DESC)` y de `new` ASC; con Apple Mail el orden numérico no cambia respecto de 2.0.1. `native_order_key` se toma de la fila del backend, nunca del texto del uid. |
-| .03 | P | [por actualizar] Entrada legada: `show 83143` en macOS y `show <id corto>` en Windows se resuelven con el driver nativo y devuelven el uid prefijado. |
+| .03 | P | Entrada legada: `show 83143` en macOS y `show <id corto>` en Windows se resuelven con el driver nativo y devuelven el uid prefijado. |
 | .04 | N | `show` malformado ⇒ `E_USAGE`; driver desconocido ⇒ `E_DRIVER_UNKNOWN`; ambos antes de crear el home, leer config o abrir el store, sin escribir estado ni caché. |
 | .05 | N | `show` con prefijo de un driver instalado pero no declarado ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargar el driver. |
 | .06 | N | Un `state.json` con uid legado válido no se reescribe en comandos de solo lectura (`search`, `show`, `mailboxes`, `doctor`). |

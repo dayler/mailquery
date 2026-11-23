@@ -99,7 +99,7 @@ Requisitos: RF-25, RNF-04 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] el uid es el id corto de 10 caracteres del `EntryID` permanente; `native_order_key` es el `EntryID` permanente en mayúsculas, no el id de la tabla. |
+| .01 | P | el uid es el id corto de 10 caracteres del `EntryID` permanente; `native_order_key` es el `EntryID` permanente en mayúsculas, no el id de la tabla. |
 | .02 | B | Misma fecha ⇒ desempata por `uid` como string. |
 
 #### OL-15 — Fechas
@@ -189,7 +189,7 @@ Requisitos: RF-03, RF-25 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | [por actualizar] un `EntryID` o un id corto en mayúsculas ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y hint no vacío. |
+| .01 | N | un `EntryID` o un id corto en mayúsculas ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y hint no vacío. |
 | .02 | N | uid inválido con `pywin32` ausente ⇒ `E_USAGE` antes de conectar. |
 | .03 | N | un uid cuyo `EntryID` resuelto no coincide con ningún store ⇒ `message uid … was not found` con el hint que remite a `excluded_stores`. |
 | .04 | N | Item que no es correo ⇒ not found. |
@@ -217,7 +217,7 @@ Requisitos: RF-01, RF-32 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] el estado guarda los uids cortos `outlook:<parte del uid>`. |
+| .01 | P | el estado guarda los uids cortos `outlook:<parte del uid>`. |
 | .02 | N | Segunda corrida ⇒ no reemite. |
 | .03 | P | Mensaje movido dentro de la ventana ⇒ `new` termina con exit 0 y lo emite con su nuevo uid. |
 | .04 | N | Cuenta declarada excluida ⇒ `W_STORE_EXCLUDED` antes de `W_FIRST_RUN`. |

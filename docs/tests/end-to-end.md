@@ -27,11 +27,11 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `mailboxes` con la forma agrupada sin contadores ⇒ golden `outlook/mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida `name`, `url` y los contadores (INBOX 3/2). |
-| .02 | P | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `search` con la fila de seis campos ⇒ golden `outlook/search`; `date_sent` y las señales de contenido se comprueban con `--fields all`. |
-| .03 | P | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `show` |
-| .04 | N | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `show_header_only` |
-| .05 | N | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `show_smime` |
-| .06 | P | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
+| .02 | P | `search` con la fila de seis campos ⇒ golden `outlook/search`; `date_sent` y las señales de contenido se comprueban con `--fields all`. |
+| .03 | P | `show` |
+| .04 | N | `show_header_only` |
+| .05 | N | `show_smime` |
+| .06 | P | `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
 | .07 | P | El golden `outlook/doctor` cambia a `pkg 3.0.0a2` (solo la versión). |
 
 #### TC-03 — Gate de solo lectura de Apple Mail
@@ -103,11 +103,11 @@ Requisitos: AC-07, AC-10, AC-12, AC-15 · Archivo: `tests/test_outlook.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `attachment_saved.json` (`cached:false`, ruta/tamaño/hash). |
-| .02 | P | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `attachment_cached.json` (`cached:true`; primera corrida documentada que siembra la caché). |
-| .03 | N | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `attachment_unavailable.json` (`not_downloaded`, exit 3). |
-| .04 | N | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. `attachment_blocked.json` (contenido ejecutable, exit 4). |
-| .05 | P | [por actualizar] Solo cambian el uid, `last_uid` y el directorio de `cached_path`. Los goldens `outlook/show*.json` tienen la forma `attachments[{index, name, cached_path}]`. |
+| .01 | P | `attachment_saved.json` (`cached:false`, ruta/tamaño/hash). |
+| .02 | P | `attachment_cached.json` (`cached:true`; primera corrida documentada que siembra la caché). |
+| .03 | N | `attachment_unavailable.json` (`not_downloaded`, exit 3). |
+| .04 | N | `attachment_blocked.json` (contenido ejecutable, exit 4). |
+| .05 | P | Los goldens `outlook/show*.json` tienen la forma `attachments[{index, name, cached_path}]`. |
 
 #### TC-10 — Goldens multi-driver
 
