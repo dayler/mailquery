@@ -122,6 +122,7 @@ class FakePluginBackend:
         self,
         context: PluginContext | None = None,
         *,
+        driver: str | None = None,
         rows: Sequence[dict[str, Any]] | None = None,
         accounts: Sequence[dict[str, Any]] | None = None,
         mailboxes: Sequence[dict[str, Any]] | None = None,
@@ -132,7 +133,11 @@ class FakePluginBackend:
         events: Mapping[str, threading.Event] | None = None,
         results: Mapping[str, Any] | None = None,
         stream_chunks: Sequence[bytes] | None = None,
+        use_native_ids: bool = False,
+        register_printed: bool = False,
     ) -> None:
+        if driver is not None:
+            self.driver = str(driver)
         self.context = context
         self.rows = [dict(row) for row in (DEFAULT_ROWS if rows is None else rows)]
         self._accounts = [
@@ -158,6 +163,22 @@ class FakePluginBackend:
         self.calls: list[str] = []
         #: Keyword arguments of every ``query`` call (cursor/merge tests).
         self.queries: list[dict[str, Any]] = []
+        #: Native ids received by every ``display_native_id`` call.
+        self.display_calls: list[str] = []
+        #: Native ids received by every ``printed_messages`` call.
+        self.printed_calls: list[list[str]] = []
+        #: Worker thread name of every ``printed_messages`` call.
+        self.printed_threads: list[str] = []
+        #: Uid parts returned by ``assign`` from every ``query`` call.
+        self.assigned: list[dict[str, str]] = []
+        #: ``(uid part, resolved native id)`` of every ``find_message`` call.
+        self.resolved: list[tuple[str, str | None]] = []
+        #: Native id to uid part of every assignment of this execution.
+        self._parts: dict[str, str] = {}
+        #: Whether ``query`` replaces row uids with the assigned uid parts.
+        self.use_native_ids = bool(use_native_ids)
+        #: Whether ``printed_messages`` registers the received ids in the cache.
+        self.register_printed = bool(register_printed)
 
     # -- contract metadata -------------------------------------------------- #
 
@@ -178,6 +199,59 @@ class FakePluginBackend:
 
     def describe(self) -> dict[str, Any]:
         return {"backend": self.driver, "version": VERSION, "strategy": "plugin", "schema_ok": True}
+
+    # -- optional hooks ----------------------------------------------------- #
+
+    def display_native_id(self, native_id: str) -> str:
+        """Optional hook: native form of a uid part, unchanged unless configured."""
+        self.calls.append("display_native_id")
+        self.display_calls.append(str(native_id))
+        return self._fail("display_native_id", str(native_id))
+
+    def printed_messages(self, native_ids: Sequence[str]) -> None:
+        """Optional hook: record the native ids of the rows the core prints."""
+        ids = [str(native_id) for native_id in native_ids]
+        self.calls.append("printed_messages")
+        self.printed_calls.append(ids)
+        self.printed_threads.append(threading.current_thread().name)
+        self._fail("printed_messages", None)
+        if self.register_printed:
+            access = self._native_ids()
+            if access is not None:
+                reverse = {part: native for native, part in self._parts.items()}
+                pending = [reverse.get(native_id, native_id) for native_id in ids]
+                access.register(pending)
+
+    def _native_ids(self) -> Any:
+        """Native id cache access of the plugin context, when the core offers one."""
+        context = self.context
+        return None if context is None else context.native_ids
+
+    def _assign_parts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Replace row uids with the uid parts the context cache assigns."""
+        if not self.use_native_ids:
+            return rows
+        access = self._native_ids()
+        if access is None:
+            return rows
+        native_ids = [str(row["uid"]) for row in rows]
+        parts = access.assign(native_ids) if native_ids else {}
+        self.assigned.append(dict(parts))
+        for row in rows:
+            row["uid"] = parts[str(row["uid"])]
+        self._parts.update(parts)
+        return rows
+
+    def _resolve_part(self, uid_part: str) -> str:
+        """Native id of a uid part through the context cache, when enabled."""
+        if not self.use_native_ids:
+            return uid_part
+        access = self._native_ids()
+        if access is None:
+            return uid_part
+        resolved = access.resolve(uid_part)
+        self.resolved.append((uid_part, resolved))
+        return "" if resolved is None else str(resolved)
 
     # -- the operations of protocol v1 -------------------------------------- #
 
@@ -236,6 +310,7 @@ class FakePluginBackend:
             ),
             reverse=order == "desc",
         )
+        rows = self._assign_parts(rows)
         return self._fail("query", rows)
 
     def membership(self, uids: Sequence[str]) -> dict[str, set[Any]]:
@@ -266,11 +341,15 @@ class FakePluginBackend:
     def find_message(self, uid: str) -> tuple[dict[str, Any], dict[str, Any] | None] | None:
         self.calls.append("find_message")
         self._fail("find_message", None)
+        native_id = self._resolve_part(str(uid))
         for row in self.rows:
-            if str(row.get("uid")) != str(uid):
+            if str(row.get("uid")) != native_id:
                 continue
+            found = dict(row)
+            if self.use_native_ids:
+                found["uid"] = str(uid)
             mailbox = self._mailbox_of(row)
-            return dict(row), mailbox
+            return found, mailbox
         return None
 
     def load_body(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -356,12 +435,15 @@ def plugin_factory(**instance_kwargs: Any) -> Any:
     test configure the double's rows/mailboxes without ``pip install``.
     """
     declared_capabilities = instance_kwargs.pop("capabilities", None)
+    declared_driver = instance_kwargs.pop("driver", None)
     capabilities = dict(CAPABILITIES if declared_capabilities is None else declared_capabilities)
 
     def factory(context: PluginContext | None = None) -> FakePluginBackend:
-        return FakePluginBackend(context, capabilities=capabilities, **instance_kwargs)
+        return FakePluginBackend(
+            context, driver=declared_driver, capabilities=capabilities, **instance_kwargs
+        )
 
-    factory.driver = DRIVER  # type: ignore[attr-defined]
+    factory.driver = str(declared_driver or DRIVER)  # type: ignore[attr-defined]
     factory.plugin_api = PLUGIN_API  # type: ignore[attr-defined]
     factory.capabilities = capabilities  # type: ignore[attr-defined]
     factory.native_order = capabilities["native_order"]  # type: ignore[attr-defined]

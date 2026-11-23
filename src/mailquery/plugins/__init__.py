@@ -7,11 +7,14 @@ An external backend plugin imports only this package from the core::
 The backend protocol (operations and exact signatures) is defined by
 ``mailquery.backends.base.MailBackend``; this package holds only the contract
 values, errors and metadata types plus the core-side error protocol
-(``call_driver``/``wrap_driver``, used by the core — not by plugins).
+(``call_driver``/``wrap_driver``, used by the core — not by plugins). It also
+re-exports :func:`mailquery.native_ids.short_id`, the short-id calculation a
+driver may use for its own native ids.
 """
 
 from __future__ import annotations
 
+from mailquery.native_ids import short_id
 from mailquery.plugins.api import (
     ATTACHMENT_OPERATIONS,
     ATTACHMENTS_MODES,
@@ -71,5 +74,6 @@ __all__ = [
     "call_driver",
     "map_plugin_error",
     "sanitize_error_field",
+    "short_id",
     "wrap_driver",
 ]
