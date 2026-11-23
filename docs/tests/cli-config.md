@@ -210,10 +210,3 @@ Requisitos: RF-83, RF-73, AC-68, AC-70 · Archivo: `tests/test_show_native_id.py
 | .06 | N | Un `display_native_id` que supera el tope de 30 s (acortado en el test) ⇒ `E_CLIENT_TIMEOUT`. |
 | .07 | P | `show --help` describe `--show-native-id` como opción de depuración. |
 | .08 | B | Con `--fields subject`, el `uid` que siempre se entrega muestra la forma nativa. |
-
-Tests que cambian: los tests de ayuda existentes que comparen la ayuda de `show` completa, si fallan por la opción nueva, están en archivos de M05 o M07; no los tocas: los nombras en tu mensaje final y el orquestador los asigna (fuera de alcance).
-
-Comandos:
-
-- `$PY -B -m unittest tests.test_show_native_id > "$LOG/grupo-ut_sni.log" 2>&1`.
-- Suite completa: la de `protocolo.md`.

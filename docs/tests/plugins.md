@@ -274,10 +274,3 @@ Requisitos: RF-82, RF-83, RF-36, AC-65, AC-70 · Archivo: `tests/test_plugins.py
 | .08 | N | La llamada del núcleo a `display_native_id`: sin gancho no llama a nada; con gancho devuelve su valor; un valor que no cumple las reglas de un `<native_id>` (vacío, con `/`, con `..`, con espacio) ⇒ `E_PLUGIN_FAILED` (exit 3). |
 
 Test sin ID en `tests/test_cli.py`: un backend inyectado como driver nativo (interno) cuyo `find_message` lanza `MessageNotFound("<hint>")` hace que `show` y `attachment` respondan con su error de "no encontrado" actual (código, mensaje y exit) y ese hint; sin la excepción, los textos no cambian.
-
-Tests que cambian: los de `tests/test_plugins.py` que comparen la lista exacta de `mailquery.plugins.__all__` o la forma de `PluginContext`, si existen, se amplían con `short_id` y `native_ids`.
-
-Comandos:
-
-- `$PY -B -m unittest discover -s tests -t . -k ut_pl_05 > "$LOG/grupo-ut_pl_05.log" 2>&1` y lo mismo con `-k ut_pl_06`.
-- Suite completa: la de `protocolo.md`.

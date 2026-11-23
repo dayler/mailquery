@@ -66,10 +66,3 @@ Requisitos: RF-80, AC-69, AC-70 · Archivo: `tests/test_native_ids.py`
 | .03 | P | Construir `PluginNativeIds` no crea nada; la primera operación crea la carpeta y el archivo. |
 | .04 | P | Ninguna operación permite elegir otro driver; las filas que escribe son de su driver. |
 | .05 | P | `close()` libera la conexión: después, `cache.db` se puede borrar (también en Windows) y una operación posterior vuelve a abrir la base. |
-
-Comandos:
-
-- Grupo: `$PY -B -m unittest discover -s tests -t . -k ut_nid > "$LOG/grupo-ut_nid.log" 2>&1`.
-- Suite completa: la de `protocolo.md`.
-
-Tests que cambian: ninguno.

@@ -64,20 +64,10 @@ Con la instalación y la config de SMOKE-INSTALL.
 
 #### SMOKE-NEW.11 — uid corto contra el cliente real
 
-Requisitos: AC-63, AC-68, AC-69 · Archivo: `tests/test_smoke.py` (caso nuevo del grupo SMOKE-NEW) · Archivo: `tests/test_smoke.py`
+Requisitos: AC-63, AC-68, AC-69 · Archivo: `tests/test_smoke.py`
 
 **Tabla: Casos de SMOKE-NEW.11**
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .11 | P | [pendiente] En Windows con Outlook abierto: los uids de `search --since 1w` son `outlook:` más 10 caracteres del alfabeto (o con sufijo); `show` del primero responde con exit 0; existe `db/cache.db` en el HOME temporal; `show --show-native-id` da `outlook:` más hexadecimal en mayúsculas; los no leídos no cambian. En macOS: tras `search` y `show`, no existe `db/cache.db`. Donde no aplica, se salta con el motivo de la sección 6 de `infrastructure.md`. |
-
-Tests que cambian:
-
-- OL-30 (gate de solo lectura de Outlook, ya `[por actualizar]`): su barrido de comandos y opciones incluye `show --show-native-id`; la expectativa (cero mutaciones) no cambia.
-- Si OL-21 o OL-23 necesitan otra siembra de la caché, cambian sus datos, no su expectativa.
-
-Comandos:
-
-- `$PY -B -m unittest discover -s tests -t . -k ol_34 > "$LOG/grupo-ol_34.log" 2>&1`; igual con `-k ol_35`, `-k ol_36`, `-k smoke_new_11`.
-- Suite completa: la de `protocolo.md` (incluye los SMOKE, que en este equipo corren contra el Outlook real en solo lectura).
+| .11 | P | En Windows con Outlook abierto: los uids de `search --since 1w` son `outlook:` más 10 caracteres del alfabeto (o con sufijo); `show` del primero responde con exit 0; existe `db/cache.db` en el HOME temporal; `show --show-native-id` da `outlook:` más hexadecimal en mayúsculas; los no leídos no cambian. En macOS: tras `search` y `show`, no existe `db/cache.db`. Donde no aplica, se salta con el motivo de la sección 6 de `infrastructure.md`. |
