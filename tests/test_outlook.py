@@ -2345,6 +2345,8 @@ class OutlookItemLookupTests(_ItemCase):
         self.assertEqual(fake.mutations.total, 0)
 
     def test_find_message_not_found_cases(self) -> None:
+        from mailquery.backends.base import MessageNotFound
+
         fake, backend = self.make_items()
         normal = fake.item("normal").entry_id
         missing_tail = normal[:40] + "0" * (len(normal) - 40)
@@ -2353,11 +2355,16 @@ class OutlookItemLookupTests(_ItemCase):
             ("receipt", fake.item("delivery_receipt").entry_id),
             ("task", fake.item("task").entry_id),
             ("imap_deleted", fake.item("imap_deleted").entry_id),
-            ("missing item", missing_tail),
             ("unknown store", unknown_store),
         ):
             with self.subTest(case=label):
                 self.assertIsNone(backend.find_message(self.seed_part(fake, backend, entry_id)))
+        # An EntryID that no longer exists in its mounted store is a confirmed absence.
+        missing = self.seed_part(fake, backend, missing_tail)
+        with self.assertRaises(MessageNotFound) as caught:
+            backend.find_message(missing)
+        self.assertIn("run `mailquery search`", caught.exception.hint)
+        self.assertIsNone(backend._cache().resolve(missing))
         folders = fk.FakeOutlook.folder_matrix()
         folder_backend = self.make(folders)
         for key in ("in_hidden_folder", "in_hidden_subfolder"):

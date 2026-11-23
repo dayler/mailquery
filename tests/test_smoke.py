@@ -656,6 +656,10 @@ class SmokeTest(unittest.TestCase):
         before = self._counters() if sys.platform == "win32" else None
         found = self._search("--since", "1w")
         self.assertTrue(found["messages"], "no message in the last week to show")
+        print(
+            f"\nSMOKE-NEW.11: {len(found['messages'])} messages in the last week, "
+            f"first uid length {len(str(found['messages'][0]['uid']))}"
+        )
         if sys.platform == "darwin":
             uid = str(found["messages"][0]["uid"])
             self._json(["show", uid], "show")
