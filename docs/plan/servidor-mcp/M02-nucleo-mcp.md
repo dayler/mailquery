@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/servidor-mcp-lote-1`. **Rama del milestone:** `feature/servidor-mcp-m02`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `f866be8`. **Línea base de la suite:** `Ran 1562 tests`, `failures=3`, `skipped=7` (los tres fallos son SMOKE del entorno local: `mtime` de `~/.mailquery/tmp`).
 - **Depende de:** M01 (`logging_setup.log_event` para el evento `event=call`). **Lo usan:** M05 (despacho de `mcp serve`, configuración del log del servidor y pruebas con procesos reales).
 - **ACs:** AC-71 (todo salvo el fin de línea del proceso real en Windows), AC-72 (parte del ejecutor sustituido), AC-73, AC-74 (en proceso: `E_INTERNAL`, serie, cierre de stdin, stderr), AC-76 (importaciones y dependencias).
 
@@ -74,11 +74,11 @@ Margen tuyo: la estructura interna del módulo, los nombres privados y cómo se 
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Esqueleto del módulo con `ToolOutcome`, `ToolRunner` y `serve` sobre flujos de texto; transporte, `initialize`, `ping`, notificaciones, errores JSON-RPC y lotes; UT-MCP-01 y UT-MCP-02 | ⚪ |
-| 2 | `tool_definitions` desde el parser; UT-MCP-03 | ⚪ |
-| 3 | `build_argv`, validación previa, límite del argv y `-32602`; UT-MCP-04 y UT-MCP-06 | ⚪ |
-| 4 | `tools/call`: argv completo, ejecutor real (DP-09), resultado, `E_INTERNAL`, serie, fin de stdin, evento `event=call`; UT-MCP-05 y UT-MCP-07 | ⚪ |
-| 5 | Importaciones y dependencias; UT-MCP-08; cobertura de `mcp_server.py` ≥ 90 %; suite completa, evidencia cruda y propuestas | ⚪ |
+| 1 | Esqueleto del módulo con `ToolOutcome`, `ToolRunner` y `serve` sobre flujos de texto; transporte, `initialize`, `ping`, notificaciones, errores JSON-RPC y lotes; UT-MCP-01 y UT-MCP-02 | 🟢 |
+| 2 | `tool_definitions` desde el parser; UT-MCP-03 | 🟢 |
+| 3 | `build_argv`, validación previa, límite del argv y `-32602`; UT-MCP-04 y UT-MCP-06 | 🟢 |
+| 4 | `tools/call`: argv completo, ejecutor real (DP-09), resultado, `E_INTERNAL`, serie, fin de stdin, evento `event=call`; UT-MCP-05 y UT-MCP-07 | 🟢 |
+| 5 | Importaciones y dependencias; UT-MCP-08; cobertura de `mcp_server.py` ≥ 90 %; suite completa, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -124,3 +124,8 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `ToolOutcome`, `ToolRunner`, `serve`, transporte, `initialize`, `ping`, notificaciones, errores y lotes; UT-MCP-01 y UT-MCP-02 verdes. |
+| 2026-11-23 | 2 | `tool_definitions` desde el parser; UT-MCP-03 verde. |
+| 2026-11-23 | 3 | `build_argv`, validación previa, límite del argv y `-32602`; UT-MCP-04 y UT-MCP-06 verdes. |
+| 2026-11-23 | 4 | `tools/call`, ejecutor real, resultado, `E_INTERNAL`, serie, fin de stdin y `event=call`; UT-MCP-05 y UT-MCP-07 verdes. |
+| 2026-11-23 | 5 | Importaciones y dependencias; UT-MCP-08; cobertura de `mcp_server.py` 92.6 %; suite completa y evidencia. |
