@@ -66,7 +66,7 @@ Margen tuyo: una mención de `3.0.0a2` que sea un registro histórico (por ejemp
 |---|---|---|
 | 1 | `pyproject.toml`, `__version__`, goldens `doctor` y `outlook/doctor`, DOC-16.03 (texto y nombre del método); comentarios de los tests de DP-22 | 🟢 |
 | 2 | Menciones de la versión en los dos README, `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; búsqueda `grep -rn "3\.0\.0a2\|3\.0\.0-alpha\.2" README.md README.es.md skills docs/INTERFACES.md docs/ROADMAP.md docs/recipes docs/security docs/config.example.toml tests` sin resultados salvo registros históricos | 🟢 |
-| 3 | Suite completa, evidencia cruda y propuestas | ⚪ |
+| 3 | Suite completa, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -109,5 +109,8 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `pyproject.toml`, `__version__`, goldens `doctor` y `outlook/doctor`, DOC-16.03 y comentarios de DP-22. |
+| 2026-11-23 | 2 | Menciones en los dos README, `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; búsqueda de la fase 2 revisada (solo quedan las aserciones de ausencia del test DOC-16.03 y registros históricos). |
+| 2026-11-23 | 3 | Grupos verdes y evidencia. |
 | 2026-11-23 | 1 | `pyproject.toml` y `__version__` a `3.0.0a3`; goldens `doctor` y `outlook/doctor` y DOC-16.03 (nombre y texto) actualizados; comentarios DP-22 de `test_packaging.py`, `test_integration.py` y `test_install_scripts.py` al día. |
 | 2026-11-23 | 2 | Versión vigente a `3.0.0a3` en los dos README (mismo commit), `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; la búsqueda de la fase solo conserva la aserción negativa de DOC-16.03 (`self.assertNotIn("3.0.0a2", …)`), que es su oráculo y no una mención vigente. |
