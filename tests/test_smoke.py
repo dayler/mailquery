@@ -1099,17 +1099,22 @@ class _McpClient:
         return self.request("tools/call", {"name": tool, "arguments": arguments or {}})
 
     def close(self) -> tuple[int, str]:
+        if self.proc.stdin is not None and not self.proc.stdin.closed:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
         try:
-            self.proc.stdin.close()
-        except OSError:
-            pass
-        try:
-            _out, err = self.proc.communicate(timeout=120)
+            code = self.proc.wait(timeout=120)
         except subprocess.TimeoutExpired:
             self.proc.kill()
-            _out, err = self.proc.communicate()
+            self.proc.wait()
             raise
-        return self.proc.returncode, err or ""
+        err = self.proc.stderr.read() if self.proc.stderr is not None else ""
+        for stream in (self.proc.stdout, self.proc.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+        return code, err or ""
 
 
 def _tool_payload(reply: dict) -> dict:
@@ -1125,8 +1130,8 @@ class SmokeMcpTest(unittest.TestCase):
         # (and duplicating) its command-level tests.
         SmokeTest.setUpClass.__func__(cls)
 
-    _run = SmokeTest._run
-    _store_counts = SmokeTest._store_counts
+    _run = classmethod(SmokeTest._run.__func__)
+    _store_counts = classmethod(SmokeTest._store_counts.__func__)
 
     def setUp(self) -> None:
         self.client = _McpClient(self.exe, dict(self.env), self.tmp)
@@ -1234,9 +1239,9 @@ class SmokeMcpTest(unittest.TestCase):
         client.initialize()
         self.assertEqual(len(client.request("tools/list")["result"]["tools"]), 6)
         cfg = self.home / ".mailquery" / "config.toml"
-        cfg.write_text(
-            cfg.read_text(encoding="utf-8") + '[scope."graph:smoke"]\n', encoding="utf-8"
-        )
+        original = cfg.read_text(encoding="utf-8")
+        self.addCleanup(cfg.write_text, original, encoding="utf-8")
+        cfg.write_text(original + '[scope."graph:smoke"]\n', encoding="utf-8")
         reply = client.call("search", {"since": "1w"})
         if reply.get("result", {}).get("isError"):
             payload = _tool_payload(reply)
