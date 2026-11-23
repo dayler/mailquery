@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 4 / 2. **Rama del lote:** `feature/servidor-mcp-lote-2`. **Rama del milestone:** `feature/servidor-mcp-m07`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `ce19b37` (lote 2; el milestone solo toca `tests/test_smoke.py`). **Línea base de la suite:** la del lote; los fallos conocidos son los SMOKE del entorno local.
 - **Depende de:** M05 (`mailquery mcp serve` instalable con `pipx`). **Lo usan:** F4 y F5 del plan.
 - **ACs:** ninguno nuevo; verifica AC-72 y AC-74 contra el cliente real y cubre CL-10.
 
@@ -58,9 +58,9 @@ Ninguna. Si el cliente JSON-RPC de prueba necesita compartir la instalación de 
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Cliente JSON-RPC de prueba y clase SMOKE-MCP con sus saltos; SMOKE-MCP.01 y .02 | ⚪ |
-| 2 | SMOKE-MCP.03 a .07 | ⚪ |
-| 3 | Ejecución en el equipo disponible (`-k smoke_mcp`), suite completa, procedimiento para el dueño, evidencia cruda y propuestas | ⚪ |
+| 1 | Cliente JSON-RPC de prueba y clase SMOKE-MCP con sus saltos; SMOKE-MCP.01 y .02 | 🟢 |
+| 2 | SMOKE-MCP.03 a .07 | 🟢 |
+| 3 | Ejecución en el equipo disponible (`-k smoke_mcp`), suite completa, procedimiento para el dueño, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -101,3 +101,6 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Cliente JSON-RPC de prueba y clase `SmokeMcpTest`; SMOKE-MCP.01 y .02. |
+| 2026-11-23 | 2 | SMOKE-MCP.03 a .07, con los saltos por plataforma y por condición externa. |
+| 2026-11-23 | 3 | Ejecución en macOS con Apple Mail real (`Ran 7 tests`, `OK (skipped=1)`), procedimiento para el dueño y evidencia. |
