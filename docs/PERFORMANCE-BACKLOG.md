@@ -173,6 +173,52 @@ No hay fallo funcional: el archivo servido coincide con su SHA-256 del manifiest
 y los contadores de Outlook no cambian. El coste de las cabeceras de A6 en
 `search`/`new` queda dentro del presupuesto (`search` 0,234 s).
 
+## Medición del 2026-11-23 en Windows (3.0.0a2, `show` sin recorrer carpetas)
+
+Windows 11 Enterprise (build 26200) x64, Outlook clásico 16.0.20527 abierto,
+Python 3.14.7. Alcance: 2 cuentas Exchange declaradas (solo INBOX), 38 carpetas y
+175.221 mensajes en el store.
+
+Diagnóstico previo con `cProfile` sobre un `show` (370 ms dentro del proceso):
+unos 200 ms de imports, unos 100 ms recorriendo el árbol de carpetas de **todas**
+las cuentas declaradas (resolución del alcance) y de la cuenta del mensaje
+(`find_message`), unas 600 llamadas COM, y unos 50 ms de trabajo con el mensaje.
+
+Cambios medidos:
+
+- `show` y `attachment` resuelven las cuentas declaradas sin listar sus
+  carpetas: `resolve_scope(..., with_mailboxes=False)` comprueba `mailbox_list`
+  con `resolve_mailbox` y solo lista carpetas para redactar
+  `E_MAILBOX_NOT_FOUND`.
+- `find_message` de Outlook ubica la carpeta del mensaje subiendo por sus
+  ancestros (`Folder.Parent`, de solo lectura) hasta las carpetas de primer nivel
+  del store, sin recorrer el árbol; si la cadena no llega al primer nivel en 64
+  carpetas, recorre el store como antes. La fila resultante es la misma que la
+  del recorrido (lo comprueban los tests para cada carpeta de los fixtures).
+- `hashlib` y `zipfile` se importan solo donde se usan.
+
+Método: 15 corridas intercaladas por comando (más 1 de calentamiento) de
+`develop` @ `3eb2bd4` frente a la rama, cada una en un intérprete nuevo, tiempo de
+pared con `PYTHONPATH` apuntando a cada `src`. La salida JSON de `show` y `search`
+es idéntica en ambos (sin `generated_at` ni `scan`).
+
+**Tabla: Tiempo de pared de develop frente a la rama (mediana y p95, ms)**
+
+| Comando | develop mediana / p95 | rama mediana / p95 | Diferencia (mediana) |
+|---------|-----------------------|--------------------|----------------------|
+| `show UID` | 467 / 482 | 352 / 369 | −115 ms (−25 %) |
+| `show UID --fields attachments` | 458 / 478 | 348 / 366 | −109 ms (−24 %) |
+| `attachment UID --index 1` (acierto de caché) | 429 / 455 | 336 / 343 | −93 ms (−22 %) |
+| `search --since 3d --limit 50` | 549 / 587 | 532 / 549 | −17 ms (−3 %) |
+| `search --since 1d --count` | 467 / 485 | 470 / 495 | +2 ms (ruido) |
+| `mailboxes` | 391 / 406 | 384 / 399 | −7 ms (−2 %) |
+| `--help` | 227 / 238 | 211 / 217 | −16 ms (−7 %) |
+
+El acierto de caché de `attachment` sigue por encima de 50 ms: la deuda abierta
+de arriba no se cierra con este cambio, solo se reduce. El arranque del
+intérprete (unos 180 ms de `python -c pass` en este equipo) sigue siendo el
+mayor componente del tiempo de pared de cada comando.
+
 ## Impacto
 
 `SMOKE-NEW.07` cumple en macOS con Mail real y este store en la medición del
