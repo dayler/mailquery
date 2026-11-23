@@ -755,7 +755,7 @@ guarda contenido de correos.
   archivos en POSIX, y solo da acceso a las filas de ese driver.
 - `assign(native_ids, *, length=10) -> dict[str, str]` no escribe: devuelve la
   parte del uid de cada `native_id`, con una parte por ejecución y el `seq`
-  siguiente al mayor registrado del par. `register(native_ids)` guarda todas
+  siguiente al mayor de las filas del par. `register(native_ids)` guarda todas
   las filas nuevas en una transacción, o ninguna si hay conflicto.
   `resolve(uid_part) -> str | None` devuelve el `native_id` de una parte del
   uid, o `None`; `discard(native_id)` borra su fila; `close()` cierra.
@@ -770,10 +770,10 @@ guarda contenido de correos.
   `E_LOCKED` (5) si SQLite sigue ocupada al vencer el plazo; `E_IO` (3)
   cualquier otro, incluido un archivo que no es una base válida de la librería
   o un conflicto al registrar. Un archivo vacío se inicializa como uno nuevo.
-- Tablas: `cache_native_ids` relaciona `driver`, `short_id` y `seq` con el
+- Tabla: `cache_native_ids` relaciona `driver`, `short_id` y `seq` con el
   `native_id`, con clave `(driver, short_id, seq)` y `(driver, native_id)`
-  única; `cache_native_seq` guarda el mayor `seq` de cada par y solo crece. Un
-  `seq` registrado no se reutiliza mientras exista el archivo.
+  única. El `seq` siguiente al mayor de las filas del par queda libre al
+  borrarse esa fila.
 
 ### `backends/outlook.py`
 `OutlookBackend(*, outlook_app=None, registry=None, security_center=None,

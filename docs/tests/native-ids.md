@@ -23,9 +23,9 @@ Requisitos: RF-80, RNF-05, AC-69 · Archivo: `tests/test_native_ids.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Sin `db/` ni `cache.db`, abrir crea los dos, con `cache_native_ids`, `cache_native_seq`, versión de formato 1 y sin filas. |
+| .01 | P | Sin `db/` ni `cache.db`, abrir crea los dos, con `cache_native_ids`, versión de formato 1 y sin filas. |
 | .02 | B | Un `cache.db` vacío (0 bytes) se inicializa como uno nuevo. |
-| .03 | P | Las tablas tienen solo las columnas de sus estructuras, con sus tipos, `NOT NULL`, la clave primaria (`driver`, `short_id`, `seq`) / (`driver`, `short_id`) y la restricción única (`driver`, `native_id`); no hay otras tablas de usuario. |
+| .03 | P | La tabla tiene solo las columnas de su estructura, con sus tipos, `NOT NULL`, la clave primaria (`driver`, `short_id`, `seq`) y la restricción única (`driver`, `native_id`); no hay otras tablas de usuario. |
 | .04 | P | En POSIX, la carpeta tiene permisos 0700, `cache.db` 0600 y el archivo auxiliar de la base que exista durante una escritura, 0600 (aserción condicional fuera de POSIX). |
 | .05 | N | Archivo con otra versión de formato ⇒ `E_IO` (exit 3) con el mensaje y el hint de D-05; el archivo no cambia. |
 | .06 | N | Archivo que no es una base SQLite ⇒ `E_IO` (exit 3) con el mensaje y el hint de D-05; el archivo no cambia. |
@@ -44,13 +44,13 @@ Requisitos: RF-80, AC-64 · Archivo: `tests/test_native_ids.py`
 | .01 | P | `assign` de un `native_id` sin fila ⇒ su id corto sin sufijo; de uno registrado ⇒ la parte de su fila; `assign` no escribe en el archivo. |
 | .02 | P | Dos `native_id` con el mismo id corto en un mismo `assign` (longitud corta en el test) ⇒ `seq` 1 y 2 en el orden de su `native_id`: `<id>` y `<id>-2`. |
 | .03 | P | En una ejecución, un `native_id` asignado en dos llamadas conserva su primera parte; uno nuevo con el mismo id corto en la segunda llamada recibe el `seq` siguiente al mayor ya asignado; dos `native_id` distintos nunca reciben la misma parte. |
-| .04 | P | `register` guarda a la vez todos los que aún no tienen fila, con su parte asignada, y actualiza `cache_native_seq` en la misma transacción; los ya registrados no cambian. |
+| .04 | P | `register` guarda a la vez todos los que aún no tienen fila, con su parte asignada, en una transacción; los ya registrados no cambian. |
 | .05 | N | Parte ya registrada para otro `native_id`, `native_id` con otra parte o `native_id` no asignado en la ejecución ⇒ `E_IO` con `conflicting uid part` y no se guarda ninguna fila. |
 | .06 | P | `resolve` de una parte registrada ⇒ su `native_id`; de una parte sin fila ⇒ `None`; no escribe. |
-| .07 | P | `discard` borra la fila y el mayor `seq` del par se conserva: con la fila del `seq` 2 borrada, un tercer `native_id` con ese id corto recibe el `seq` 3. |
+| .07 | P | `discard` borra la fila y su `seq` queda libre: con la fila del `seq` 2 borrada, un tercer `native_id` con ese id corto recibe el `seq` 2. |
 | .08 | P | Un driver no ve, no resuelve ni descarta las filas de otro; el mismo `native_id` puede tener una fila en cada driver. |
 | .09 | B | El sufijo va en decimal sin ceros a la izquierda; nunca se produce `-1`; el `seq` 10 da `<id>-10`. |
-| .10 | P | Tras registrar, la base solo contiene `driver`, `short_id`, `seq`, `native_id` y el mayor `seq` de cada par. |
+| .10 | P | Tras registrar, la base solo contiene `driver`, `short_id`, `seq` y `native_id`. |
 | .11 | P | `open_in_memory` asigna, registra y resuelve igual y no crea ningún archivo. |
 
 #### UT-NID-04 — Acceso de un plugin

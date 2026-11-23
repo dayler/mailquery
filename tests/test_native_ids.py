@@ -193,11 +193,10 @@ class CacheOpenTests(_NativeIdsTestCase):
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
-        self.assertEqual(tables, {"cache_native_ids", "cache_native_seq"})
+        self.assertEqual(tables, {"cache_native_ids"})
         self.assertEqual(
             self.query("SELECT COUNT(*) FROM cache_native_ids")[0][0], 0
         )
-        self.assertEqual(self.query("SELECT COUNT(*) FROM cache_native_seq")[0][0], 0)
         invalid_home = self.root / "invalid-driver"
         with self.assertRaises(ValueError):
             NativeIdCache.open("Not A Driver", home=invalid_home)
@@ -240,18 +239,6 @@ class CacheOpenTests(_NativeIdsTestCase):
                 ("native_id", "TEXT", 1, 0),
             ],
         )
-        seq_columns = [
-            (row[1], row[2], row[3], row[5])
-            for row in self.query("PRAGMA table_info(cache_native_seq)")
-        ]
-        self.assertEqual(
-            seq_columns,
-            [
-                ("driver", "TEXT", 1, 1),
-                ("short_id", "TEXT", 1, 2),
-                ("max_seq", "INTEGER", 1, 0),
-            ],
-        )
         unique_indexes = [
             row
             for row in self.query("PRAGMA index_list(cache_native_ids)")
@@ -270,7 +257,7 @@ class CacheOpenTests(_NativeIdsTestCase):
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
-        self.assertEqual(tables, {"cache_native_ids", "cache_native_seq"})
+        self.assertEqual(tables, {"cache_native_ids"})
 
     def test_ut_nid_02_04_directory_and_file_permissions(self) -> None:
         """UT-NID-02.04: on POSIX the folder is 0700 and the file and auxiliaries 0600."""
@@ -295,7 +282,7 @@ class CacheOpenTests(_NativeIdsTestCase):
         self.assert_invalid_cache_is_untouched()
         self.set_user_version(0)
         self.assert_invalid_cache_is_untouched()
-        self.execute("DROP TABLE cache_native_seq")
+        self.execute("DROP TABLE cache_native_ids")
         self.set_user_version(1)
         self.assert_invalid_cache_is_untouched()
 
@@ -466,13 +453,6 @@ class CacheOperationsTests(_NativeIdsTestCase):
             self.assertEqual(driver, "outlook")
             part = short if seq == 1 else f"{short}-{seq}"
             self.assertEqual(cache.resolve(part), native)
-        for driver, short, seq, _ in rows:
-            maximum = self.query(
-                "SELECT max_seq FROM cache_native_seq "
-                "WHERE driver = ? AND short_id = ?",
-                (driver, short),
-            )
-            self.assertEqual(maximum, [(seq,)])
         self.assertEqual(cache.assign(["alpha", "bravo"]), parts)
         cache.register(["alpha", "bravo"])
         self.assertEqual(
@@ -491,32 +471,34 @@ class CacheOperationsTests(_NativeIdsTestCase):
             first.assign(["n1"])
         first.register(["n1"])
 
-        self.execute("DELETE FROM cache_native_seq")
         shared = NativeIdCache.open("outlook", home=self.home)
         self.addCleanup(shared.close)
+        other = NativeIdCache.open("outlook", home=self.home)
+        self.addCleanup(other.close)
         with self.patch_short_id("abc"):
-            self.assertEqual(shared.assign(["n2"]), {"n2": "abc"})
+            self.assertEqual(shared.assign(["n2"]), {"n2": "abc-2"})
+            self.assertEqual(other.assign(["n3"]), {"n3": "abc-2"})
+            other.register(["n3"])
             with self.assertRaises(MailqueryError) as context:
                 shared.register(["n2"])
         self.assert_io_error(context.exception, "conflicting uid part")
-        self.assertEqual(self.query("SELECT native_id FROM cache_native_ids"), [("n1",)])
 
         stale = NativeIdCache.open("outlook", home=self.home)
         self.addCleanup(stale.close)
         with self.patch_short_id("abc"):
-            self.assertEqual(stale.assign(["n3"]), {"n3": "abc"})
+            self.assertEqual(stale.assign(["n4"]), {"n4": "abc-3"})
         with self.patch_short_id("xyz"):
-            other = NativeIdCache.open("outlook", home=self.home)
-            self.addCleanup(other.close)
-            other.assign(["n3"])
-            other.register(["n3"])
+            moved = NativeIdCache.open("outlook", home=self.home)
+            self.addCleanup(moved.close)
+            moved.assign(["n4"])
+            moved.register(["n4"])
         with self.patch_short_id("abc"):
             with self.assertRaises(MailqueryError) as context:
-                stale.register(["n3"])
+                stale.register(["n4"])
         self.assert_io_error(context.exception, "conflicting uid part")
         self.assertEqual(
             {row for row in self.query("SELECT short_id, seq, native_id FROM cache_native_ids")},
-            {("abc", 1, "n1"), ("xyz", 1, "n3")},
+            {("abc", 1, "n1"), ("abc", 2, "n3"), ("xyz", 1, "n4")},
         )
 
         pending = NativeIdCache.open("outlook", home=self.home)
@@ -543,23 +525,22 @@ class CacheOperationsTests(_NativeIdsTestCase):
             with self.subTest(part=part):
                 self.assertIsNone(cache.resolve(part))
 
-    def test_ut_nid_03_07_discard_keeps_the_highest_seq(self) -> None:
-        """UT-NID-03.07: discard deletes the row and the pair keeps its highest seq."""
+    def test_ut_nid_03_07_discard_frees_the_highest_seq(self) -> None:
+        """UT-NID-03.07: discard deletes the row and its seq can be assigned again."""
         cache = self.open_cache()
         with self.patch_short_id("abc"):
             parts = cache.assign(["alpha", "bravo"])
-            cache.register(["alpha", "bravo"])
-            self.assertEqual(parts, {"alpha": "abc", "bravo": "abc-2"})
-            cache.discard("bravo")
-            self.assertIsNone(cache.resolve("abc-2"))
-            self.assertEqual(
-                self.query("SELECT max_seq FROM cache_native_seq WHERE short_id = 'abc'"),
-                [(2,)],
-            )
-            self.assertEqual(cache.assign(["charlie"]), {"charlie": "abc-3"})
-            cache.register(["charlie"])
+        cache.register(["alpha", "bravo"])
+        self.assertEqual(parts, {"alpha": "abc", "bravo": "abc-2"})
+        cache.discard("bravo")
+        self.assertIsNone(cache.resolve("abc-2"))
+        reopened = NativeIdCache.open("outlook", home=self.home)
+        self.addCleanup(reopened.close)
+        with self.patch_short_id("abc"):
+            self.assertEqual(reopened.assign(["charlie"]), {"charlie": "abc-2"})
+        reopened.register(["charlie"])
         self.assertEqual(
-            self.query("SELECT seq FROM cache_native_ids ORDER BY seq"), [(1,), (3,)]
+            self.query("SELECT seq FROM cache_native_ids ORDER BY seq"), [(1,), (2,)]
         )
         cache.discard("not-there")
 
@@ -606,10 +587,6 @@ class CacheOperationsTests(_NativeIdsTestCase):
             [row[1] for row in self.query("PRAGMA table_info(cache_native_ids)")],
             ["driver", "short_id", "seq", "native_id"],
         )
-        self.assertEqual(
-            [row[1] for row in self.query("PRAGMA table_info(cache_native_seq)")],
-            ["driver", "short_id", "max_seq"],
-        )
         rows = self.query(
             "SELECT driver, short_id, seq, native_id FROM cache_native_ids ORDER BY seq"
         )
@@ -618,10 +595,6 @@ class CacheOperationsTests(_NativeIdsTestCase):
             [("outlook", "abc", 1), ("outlook", "abc", 2), ("outlook", "abc", 3)],
         )
         self.assertEqual([row[3] for row in rows], ["alpha", "bravo", "charlie"])
-        self.assertEqual(
-            self.query("SELECT driver, short_id, max_seq FROM cache_native_seq"),
-            [("outlook", "abc", 3)],
-        )
         tables = {
             row[0]
             for row in self.query(
@@ -629,7 +602,7 @@ class CacheOperationsTests(_NativeIdsTestCase):
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
-        self.assertEqual(tables, {"cache_native_ids", "cache_native_seq"})
+        self.assertEqual(tables, {"cache_native_ids"})
 
     def test_ut_nid_03_11_in_memory_cache_creates_no_file(self) -> None:
         """UT-NID-03.11: open_in_memory assigns, registers and resolves without a file."""
@@ -723,13 +696,14 @@ class PluginAccessTests(_NativeIdsTestCase):
         with self.patch_short_id("abc"):
             self.call_plugin(lambda: first.assign(["alpha"]))
             self.call_plugin(lambda: first.register(["alpha"]))
-        self.execute(
-            "DELETE FROM cache_native_seq", path=cache_path(conflict_home)
-        )
         second = PluginNativeIds(conflict_home, "outlook_ext")
         self.addCleanup(second.close)
+        third = PluginNativeIds(conflict_home, "outlook_ext")
+        self.addCleanup(third.close)
         with self.patch_short_id("abc"):
             self.call_plugin(lambda: second.assign(["bravo"]))
+            self.call_plugin(lambda: third.assign(["charlie"]))
+            self.call_plugin(lambda: third.register(["charlie"]))
             with self.assertRaises(MailqueryError) as context:
                 self.call_plugin(lambda: second.register(["bravo"]))
         self.assertEqual(context.exception.code, "E_PLUGIN_FAILED")

@@ -5752,8 +5752,8 @@ class OutlookCollisionTests(_OutlookUidCase):
         self.assertEqual(shown["subject"], "Factura octubre 2026")
         self.assertEqual(shown["uid"], expected)
 
-    def test_ol_34_04_a_discarded_sequence_is_not_reused(self) -> None:
-        """OL-34.04: after the -2 row is discarded, a third message gets -3 and -2 is gone."""
+    def test_ol_34_04_a_discarded_sequence_is_reused(self) -> None:
+        """OL-34.04: after the -2 row is discarded, a third message takes -2 again."""
         fake = self.items()
         first_key, second_key = self.ordered_keys(fake)
         targets = self.collide(
@@ -5769,18 +5769,18 @@ class OutlookCollisionTests(_OutlookUidCase):
         self.assertEqual(code, 2, payload)
         self.assertEqual(payload["error"]["hint"], _REPEAT_SEARCH_HINT)
         self.assertFalse(any(row[2] == moved_from for row in _cache_entries(self.home)))
-        # Another message with the same short id takes the next sequence number.
+        # Another message with the same short id takes the freed sequence number.
         third = fake.store("exchange").inbox.add_message(
             "third_collision", subject="Tercera colisión"
         )
         targets.add(third.entry_id)
         after = self.by_subject(self.search())
         self.assertEqual(
-            after["Tercera colisión"], f"outlook:{_COLLIDING_SHORT_ID}-3"
+            after["Tercera colisión"], f"outlook:{_COLLIDING_SHORT_ID}-2"
         )
         code, payload = self.run_at(self.home, "show", second_uid)
-        self.assertEqual(code, 2, payload)
-        self.assertEqual(payload["error"]["hint"], _REPEAT_SEARCH_HINT)
+        self.assertEqual(code, 0, payload)
+        self.assertEqual(payload["message"]["subject"], "Tercera colisión")
 
 
 class OutlookAbsentMessageTests(_OutlookUidCase):

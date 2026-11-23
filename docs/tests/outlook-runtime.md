@@ -214,7 +214,7 @@ Requisitos: RF-80, RF-81, AC-64 · Archivo: `tests/test_outlook.py`
 | .01 | P | Dos mensajes con el mismo id corto en un mismo `search` reciben `outlook:<id>` y `outlook:<id>-2`, en el orden de su `EntryID`, y `show` de cada uno devuelve su mensaje. |
 | .02 | P | `attachment` de cada uno extrae en `attachments/outlook/<id>/` y `attachments/outlook/<id>-2/` y nunca sirve los archivos del otro. |
 | .03 | P | Un mensaje que el driver lee en dos consultas de una misma ejecución (primera corrida de `new`) conserva su uid. |
-| .04 | P | Con la fila del `-2` borrada por ausencia confirmada, un tercer mensaje con ese id corto recibe `outlook:<id>-3` y `outlook:<id>-2` ya no se resuelve. |
+| .04 | P | Con la fila del `-2` borrada por ausencia confirmada, un tercer mensaje con ese id corto recibe `outlook:<id>-2`, y `show` de ese uid devuelve el tercer mensaje. |
 
 #### OL-35 — Ausente confirmado e indeterminado
 
