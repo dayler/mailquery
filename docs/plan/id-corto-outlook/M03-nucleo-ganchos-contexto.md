@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/id-corto-outlook.md` (contribuye; no la completa sola).
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/id-corto-outlook-lote-1`. **Rama del milestone:** `feature/id-corto-outlook-m03`, creada desde el tip de la rama del lote (con M01 y M02 integrados).
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `b8d35bd` (tip de `feature/id-corto-outlook-lote-1`, con M01 y M02 integrados). **Línea base de la suite:** `Ran 1481 tests`, `OK (skipped=7)`, 0 fallos; los 7 saltos son casos SMOKE/installer que no aplican en macOS.
 - **Depende de:** M01 (`PluginNativeIds`, `short_id`). **Lo usan:** M04 (llamada a `display_native_id`), M05 (aviso de impresos, `bind_home`, `MessageNotFound`).
 - **ACs:** AC-65 (aviso en el núcleo), AC-69 (sin crear la caché en `mailboxes`, `doctor` y `--version` con plugins), AC-70 (contexto de plugin, ganchos, tope de 30 s).
 
@@ -72,11 +72,11 @@ Rangos de `docs/changes/id-corto-outlook.md` en el commit `384e5a8`:
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `MessageNotFound` y sus capturas; test sin ID en `tests/test_cli.py` | ⚪ |
-| 2 | `OPTIONAL_OPERATIONS`, llamada a ganchos opcionales y validación de la forma nativa; UT-PL-06.08 | ⚪ |
-| 3 | `PluginContext.native_ids`, un contexto por plugin, `short_id` en `mailquery.plugins`, `bind_home`; UT-PL-05 | ⚪ |
-| 4 | Aviso de impresos en `search` y `new`; plugin de prueba con ganchos; UT-PL-06.01–.07 | ⚪ |
-| 5 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
+| 1 | `MessageNotFound` y sus capturas; test sin ID en `tests/test_cli.py` | 🟢 |
+| 2 | `OPTIONAL_OPERATIONS`, llamada a ganchos opcionales y validación de la forma nativa; UT-PL-06.08 | 🟢 |
+| 3 | `PluginContext.native_ids`, un contexto por plugin, `short_id` en `mailquery.plugins`, `bind_home`; UT-PL-05 | 🟢 |
+| 4 | Aviso de impresos en `search` y `new`; plugin de prueba con ganchos; UT-PL-06.01–.07 | 🟢 |
+| 5 | Suite completa, cobertura, diff, evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -160,3 +160,8 @@ Los de `protocolo.md`, más la lista de puntos de `search.py` donde se avisa (fu
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `MessageNotFound` con `hint` en `backends/base.py`; capturas en `run_show` y `_run_attachment`; el test sin ID de `tests/test_cli.py` pasa solo. |
+| 2026-11-23 | 2 | `OPTIONAL_OPERATIONS` y `call_optional_operation` con la validación de `display_native_id`; UT-PL-06.08 pasa solo. |
+| 2026-11-23 | 3 | `PluginContext.native_ids` con un contexto por plugin, cierre en el `finally` y `native_ids=None` en `doctor`; `short_id` reexportado; `bind_home` opcional en `_open_drivers`; UT-PL-05.01–.06 pasan uno a uno. |
+| 2026-11-23 | 4 | Aviso de impresos en `search` (sin agrupar y agrupado) y en `new` (también `--peek`), antes del estado; ganchos configurables en el plugin de prueba; UT-PL-06.01–.08 pasan uno a uno. |
+| 2026-11-23 | 5 | Suite completa `Ran 1497 tests`, `OK (skipped=8)`, 0 fallos; cobertura de los módulos tocados 93.6 % total; `git diff --check` limpio; evidencia cruda en `../../.logs/id-corto-outlook/M03/evidencia-cruda.md`. |

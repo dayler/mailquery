@@ -249,12 +249,12 @@ Requisitos: RF-80, RF-36, AC-69, AC-70 · Archivo: `tests/test_plugins.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] El plugin recibe en su `PluginContext` la base abierta para su driver; con ella asigna en `query`, registra en el aviso y resuelve en `find_message`: `show` de un uid impreso por `search` devuelve su mensaje. |
-| .02 | N | [pendiente] El plugin no ve ni cambia las filas de otro driver ya presentes en `cache.db`; dos plugins declarados reciben accesos distintos, cada uno a su driver. |
-| .03 | P | [pendiente] El registro funciona dentro del gancho de aviso, que corre vigilado por el tope de 30 s en un hilo trabajador; al terminar el comando, el acceso está cerrado y `cache.db` se puede borrar. |
-| .04 | P | [pendiente] `from mailquery.plugins import short_id` funciona y es la función de la librería, importando primero `mailquery.plugins` o primero `mailquery.native_ids`; `PLUGIN_API` sigue siendo 1. |
-| .05 | N | [pendiente] Con un plugin declarado, `mailboxes`, `doctor` y `--version` no crean `~/.mailquery/db/` ni `cache.db`. |
-| .06 | N | [pendiente] Durante `search`, el `printed_messages` del plugin registra en una base bloqueada, sin permiso o inválida, sin capturar el error ⇒ `E_CLIENT_BUSY` (exit 5), `E_PERMISSION` (exit 3) o `E_PLUGIN_FAILED` (exit 3), sin mensajes en la salida. |
+| .01 | P | El plugin recibe en su `PluginContext` la base abierta para su driver; con ella asigna en `query`, registra en el aviso y resuelve en `find_message`: `show` de un uid impreso por `search` devuelve su mensaje. |
+| .02 | N | El plugin no ve ni cambia las filas de otro driver ya presentes en `cache.db`; dos plugins declarados reciben accesos distintos, cada uno a su driver. |
+| .03 | P | El registro funciona dentro del gancho de aviso, que corre vigilado por el tope de 30 s en un hilo trabajador; al terminar el comando, el acceso está cerrado y `cache.db` se puede borrar. |
+| .04 | P | `from mailquery.plugins import short_id` funciona y es la función de la librería, importando primero `mailquery.plugins` o primero `mailquery.native_ids`; `PLUGIN_API` sigue siendo 1. |
+| .05 | N | Con un plugin declarado, `mailboxes`, `doctor` y `--version` no crean `~/.mailquery/db/` ni `cache.db`. |
+| .06 | N | Durante `search`, el `printed_messages` del plugin registra en una base bloqueada, sin permiso o inválida, sin capturar el error ⇒ `E_CLIENT_BUSY` (exit 5), `E_PERMISSION` (exit 3) o `E_PLUGIN_FAILED` (exit 3), sin mensajes en la salida. |
 
 #### UT-PL-06 — Ganchos opcionales y aviso de mensajes impresos
 
@@ -264,14 +264,14 @@ Requisitos: RF-82, RF-83, RF-36, AC-65, AC-70 · Archivo: `tests/test_plugins.py
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] `printed_messages` se llama una vez por driver con los `<native_id>` de sus filas impresas, sin repetir y en el orden de la respuesta, en `search`, `search --group-by from`, `new` y `new --peek`. |
-| .02 | N | [pendiente] No se llama en `search --count`, en una respuesta sin mensajes de `search` o de `new`, ni en `show`, `attachment`, `mailboxes` y `doctor`. |
-| .03 | N | [pendiente] Los mensajes leídos que no van en la respuesta (más allá de `--limit` o descartados por un filtro) no van en la lista, ni un uid que solo aparece en el texto de un warning (el plugin de prueba lo pone en el warning del cuerpo de un mensaje impreso). |
-| .04 | P | [pendiente] Un plugin sin ganchos funciona igual y no recibe nada; lo que devuelve `printed_messages` no cambia la respuesta; `plugin_api` sigue en 1. |
-| .05 | N | [pendiente] Un `printed_messages` que lanza `PluginError` con `reason` o una excepción cualquiera ⇒ el error mapeado de RF-50 (`E_CLIENT_BUSY`, `E_PLUGIN_FAILED`…); la salida no tiene mensajes y `new` no escribe `state.json`. |
-| .06 | N | [pendiente] Un `printed_messages` que supera el tope de 30 s (acortado en el test) ⇒ `E_CLIENT_TIMEOUT`, sin mensajes y sin escribir estado. |
-| .07 | P | [pendiente] Con dos plugins declarados, cada uno recibe solo los `<native_id>` de sus filas. |
-| .08 | N | [pendiente] La llamada del núcleo a `display_native_id`: sin gancho no llama a nada; con gancho devuelve su valor; un valor que no cumple las reglas de un `<native_id>` (vacío, con `/`, con `..`, con espacio) ⇒ `E_PLUGIN_FAILED` (exit 3). |
+| .01 | P | `printed_messages` se llama una vez por driver con los `<native_id>` de sus filas impresas, sin repetir y en el orden de la respuesta, en `search`, `search --group-by from`, `new` y `new --peek`. |
+| .02 | N | No se llama en `search --count`, en una respuesta sin mensajes de `search` o de `new`, ni en `show`, `attachment`, `mailboxes` y `doctor`. |
+| .03 | N | Los mensajes leídos que no van en la respuesta (más allá de `--limit` o descartados por un filtro) no van en la lista, ni un uid que solo aparece en el texto de un warning (el plugin de prueba lo pone en el warning del cuerpo de un mensaje impreso). |
+| .04 | P | Un plugin sin ganchos funciona igual y no recibe nada; lo que devuelve `printed_messages` no cambia la respuesta; `plugin_api` sigue en 1. |
+| .05 | N | Un `printed_messages` que lanza `PluginError` con `reason` o una excepción cualquiera ⇒ el error mapeado de RF-50 (`E_CLIENT_BUSY`, `E_PLUGIN_FAILED`…); la salida no tiene mensajes y `new` no escribe `state.json`. |
+| .06 | N | Un `printed_messages` que supera el tope de 30 s (acortado en el test) ⇒ `E_CLIENT_TIMEOUT`, sin mensajes y sin escribir estado. |
+| .07 | P | Con dos plugins declarados, cada uno recibe solo los `<native_id>` de sus filas. |
+| .08 | N | La llamada del núcleo a `display_native_id`: sin gancho no llama a nada; con gancho devuelve su valor; un valor que no cumple las reglas de un `<native_id>` (vacío, con `/`, con `..`, con espacio) ⇒ `E_PLUGIN_FAILED` (exit 3). |
 
 Test sin ID en `tests/test_cli.py`: un backend inyectado como driver nativo (interno) cuyo `find_message` lanza `MessageNotFound("<hint>")` hace que `show` y `attachment` respondan con su error de "no encontrado" actual (código, mensaje y exit) y ese hint; sin la excepción, los textos no cambian.
 

@@ -27,9 +27,10 @@ from mailquery import output
 from mailquery import uid as uid_module
 from mailquery.attachments import classify_name
 from mailquery.attachments.cache import cached_path as attachment_cached_path
-from mailquery.backends.base import ExcludedStoreError
+from mailquery.backends.base import ExcludedStoreError, MessageNotFound
 from mailquery.errors import MailqueryError
 from mailquery.plugins import wrap_driver
+from mailquery.plugins.api import call_optional_operation
 from mailquery.state import Cursor, EmittedUid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -514,6 +515,38 @@ def _direction(is_greater: bool, descending: bool) -> int:
 # --------------------------------------------------------------------------- #
 
 
+def _notify_printed_messages(
+    runs: "Mapping[str, _DriverRun]", rows: Sequence[dict]
+) -> None:
+    """Tell each driver which of its messages the response prints.
+
+    One call per driver with printed rows, carrying the native ids of its rows
+    without repeating and in the order of the response. A driver without the
+    optional ``printed_messages`` hook receives nothing; its return value is
+    ignored. A failure aborts the command before any output or state is written.
+    """
+    printed: dict[str, list[str]] = {}
+    seen: dict[str, set[str]] = {}
+    for row in rows:
+        driver = str(row["_mq_driver"])
+        native_id = str(row["uid"])
+        if native_id in seen.setdefault(driver, set()):
+            continue
+        seen[driver].add(native_id)
+        printed.setdefault(driver, []).append(native_id)
+    for driver, native_ids in printed.items():
+        run = runs.get(driver)
+        if run is None:  # pragma: no cover - merged rows always belong to a run
+            continue
+        call_optional_operation(
+            "printed_messages",
+            run.backend,
+            native_ids,
+            driver=driver,
+            internal=driver in _INTERNAL_DRIVERS,
+        )
+
+
 def run_search(
     backend: "MailBackend | None",
     config: "Config",
@@ -710,6 +743,7 @@ def run_search(
     warnings.extend(body_warnings)
     messages_read = _counted_reads(runs, opened_before, scan_reads, reads)
 
+    _notify_printed_messages(runs, page)
     return {
         "count": len(messages),
         "truncated": truncated,
@@ -867,6 +901,7 @@ def run_new(
         else:
             messages_read += reads.get(driver, 0)
 
+    _notify_printed_messages(runs, page)
     if peek or not page:
         current_payload = previous_payload
     else:
@@ -948,6 +983,8 @@ def run_show(
 
     try:
         found = target_backend.find_message(uid)
+    except MessageNotFound as exc:
+        raise _message_not_found(show_uid, exc.hint) from None
     except ExcludedStoreError as exc:
         raise _excluded_store_error(show_uid, exc.entry) from None
     # A backend may word the not-found hint itself (Outlook points to excluded_stores).
@@ -1968,10 +2005,12 @@ def _grouped_search(
     row_fields = _group_row_fields(fields, keys)
     per_group = _group_limit(limit)
     payload_groups: list[dict] = []
+    printed_rows: list[dict] = []
     body_warnings: list[str] = []
     reads: dict[str, int] = {driver: 0 for driver in runs}
     for group in groups[:GROUP_MAX_GROUPS]:
         page = group["rows"][:per_group] if per_group else []
+        printed_rows.extend(page)
         recipients = (
             _page_recipients(page, runs)
             if "to" in row_fields or "cc" in row_fields
@@ -2000,6 +2039,7 @@ def _grouped_search(
         warnings.append(_group_truncated_warning(remaining))
     warnings.extend(body_warnings)
     no_results_hint = None if rows else _no_results_hint(*scope_size)
+    _notify_printed_messages(runs, printed_rows)
     return {
         "count": len(rows),
         "truncated": truncated,
