@@ -4,7 +4,7 @@
 **Documento:** anexo técnico de seguridad (no forma parte del alcance del PRD).
 **Fecha:** 2026-11-10.
 **Repositorio:** <https://github.com/dayler/mailquery>.
-**Estado:** implementado en `develop` (plugins de backend y adjuntos, PRD v2.3), **no publicado**: el paquete anuncia la pre-release 3.0.0a3 (3.0.0-alpha.3) en `develop`, todavía sin tag de release ni merge a `main`.
+**Estado:** implementado en `develop` (plugins de backend y adjuntos, contenido no confiable, servidor MCP y log JSON, PRD v2.3), **no publicado**: el paquete anuncia la pre-release 3.0.0a3 (3.0.0-alpha.3) en `develop`, todavía sin tag de release ni merge a `main`.
 **Ámbito:** amenazas derivadas del **contenido** del correo (texto, HTML, URLs, imágenes, firmas, adjuntos) y del uso de la salida de `mailquery` por un harness de agentes. No cubre la seguridad del proveedor de correo, del cliente de escritorio ni del endpoint; esas capas se mencionan solo como mitigaciones externas.
 
 **Documentos relacionados:** [PRD](../prd/00-indice.md) §4 (I-1), §21.1 (contenido no confiable), §23 (riesgos); §6.5–§6.7, §10.3, §10.4 y §23.1 (plugins y adjuntos); §6.8 y §12.12 (feature F1: opciones A2–A7); [`ROADMAP.md`](../ROADMAP.md) (ideas, no normativo).
@@ -20,6 +20,8 @@
 Esta separación es deliberada: `mailquery` no puede resolver la inyección de prompt ni evaluar la reputación de una URL, y el harness no puede asumir que el correo es confiable. La decisión queda registrada en el **ADR-28** (§11).
 
 **Lo que `mailquery` garantiza:** estructura JSON, texto extraído sin HTML activo, sin imágenes remotas, sin resolución de URLs, sin ejecución y sin escritura fuera de `~/.mailquery`.
+
+El servidor MCP por stdio (`mailquery mcp serve`) no cambia esa frontera: expone los mismos comandos de datos, no abre red ni puertos y ejecuta cada llamada como una ejecución normal de la CLI (§4.3).
 
 **Lo que `mailquery` no garantiza:** que el texto sea veraz o seguro, que una URL sea benigna, que un adjunto esté libre de malware, ni que el agente ignore instrucciones del correo.
 
@@ -136,6 +138,20 @@ G-01 a G-06 son los que cubre la feature F1 del [PRD](../prd/00-indice.md): A2�
 
 Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*) son `Cf` y los cubre G-01; el JSON escapa los controles C0, así que una secuencia ANSI de un campo no saneado no llega cruda a la terminal; las referencias de carácter HTML (`&#x202E;`) se decodifican antes del saneado; los comentarios HTML, incluidos los condicionales de Outlook, no aportan texto; un MIME anidado a gran profundidad no rompe el proceso (el mensaje queda ilegible). Otros invisibles que no son `Cf` (`U+2800`, marcas combinantes sueltas, variantes de espacio) se aceptan: no se conoce un ataque práctico contra un LLM con ellos y quitarlos alteraría texto legítimo; se revisa si aparece uno.
 
+### 4.3 Superficie del servidor MCP por stdio
+
+`mailquery mcp serve` expone `search`, `new`, `show`, `attachment`, `mailboxes` y `doctor` como herramientas MCP por stdin y stdout. La superficie no añade un servicio: no abre red, no escucha un puerto, no arranca un daemon y no deja estado propio.
+
+- **Proceso hijo por llamada.** Cada `tools/call` se traduce a argumentos y se ejecuta como `sys.executable -P -m mailquery <comando> …` en un proceso hijo, sin shell; el servidor no lee correo, el estado ni un driver. Un driver bloqueado o un plugin colgado terminan solo esa llamada.
+- **`-P`.** El hijo no añade el directorio de trabajo a `sys.path`, así que ejecuta la misma instalación que el servidor y un `mailquery.py` del directorio actual no puede sustituirlo.
+- **Entorno heredado del harness.** El hijo recibe el entorno del servidor (por ejemplo variables de proxy o de sesión) y el mismo directorio de trabajo; no recibe credenciales del núcleo porque no existen. Los parámetros de la llamada llegan como argumentos, nunca como una línea de shell, y se validan contra el esquema, el `enum`, el NUL y el límite de argv.
+- **stdin vacío para los plugins.** El hijo se lanza con stdin vacío y stderr descartado, y su stdout se captura; un plugin no puede leer el protocolo MCP ni bloquearse esperando entrada. El protocolo solo viaja por stdin/stdout del servidor.
+- **stdout reservado al protocolo.** El servidor escribe únicamente mensajes JSON-RPC en su stdout; un fallo de lanzamiento o un hijo que no devuelve un objeto JSON se convierte en `E_INTERNAL` como resultado de la herramienta, nunca en un traceback. Los diagnósticos van al archivo activo del log.
+- **Permisos de la app que lanza el servidor.** El servidor corre con los permisos de la app que lo lanza, no con los de la terminal: en macOS necesita **Acceso total al disco** para leer el store de Apple Mail y en Windows debe compartir la sesión y el nivel de integridad de Outlook clásico. Sin esos permisos, `doctor` y los comandos devuelven `E_PERMISSION` o `E_OUTLOOK_NOT_RUNNING` como en la CLI.
+- **Varias sesiones.** Cada sesión abierta añade ejecuciones concurrentes: más `E_LOCKED` transitorios en `new` y más rotaciones concurrentes del log, toleradas como en la CLI.
+
+**Privacidad de `mailquery.jsonl`.** Con `[logging].json = true`, el núcleo escribe un objeto JSON por línea en `~/.mailquery/logs/mailquery.jsonl` en lugar de `mailquery.log`; el formato no añade campos: registra los mismos datos y omite los mismos que el texto (asunto, cuerpo, direcciones, nombres, términos de búsqueda, rutas y cuentas), con permisos 0600, directorio 0700 y la misma rotación por tamaño. `mcp serve` registra `event=start`, `event=end` y un `event=call` por llamada con la herramienta, el código de salida y la duración, nunca los valores de los parámetros; es el mismo archivo activo que el resto del núcleo y no se mantiene abierto entre eventos.
+
 ---
 
 ## 5. Catálogo de amenazas
@@ -157,10 +173,13 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 | T-11 | Plugin externo malicioso o comprometido | Paquete que lee red, devuelve datos falsos o deja pasar texto oculto en el cuerpo | Compromiso del proceso y de la salida | Consentimiento al instalar; capacidades en `doctor`; revisar paquete; sandbox del OS; el plugin es responsable de entregar el cuerpo sin contenido oculto (§9) | Aceptado |
 | T-12 | Manipulación local de caché, staging o estado | Archivo sustituido en `~/.mailquery/attachments/`, o fila alterada en `~/.mailquery/db/cache.db` | El agente lee datos alterados o un uid resuelve a otro mensaje | Permisos `0700/0600`; manifiesto por mensaje con el SHA-256 de los bytes que pasaron la pantalla: `attachment` nunca sirve un archivo sin verificar y lo re-extrae o elimina; directorios de caché enlazados ⇒ `E_IO`; usuario monousuario. Residual: quien tenga la misma cuenta puede reescribir archivo y manifiesto a la vez (un HMAC no ayuda: la clave viviría en el mismo `~/.mailquery`); `show` no valida (`cached_path` solo comprueba el archivo regular); TOCTOU entre el hash y la lectura del agente | Aceptado |
 | T-13 | Abuso de la excepción COM de materialización (Outlook) | `SaveAsFile` escribiendo fuera del staging o materializando un adjunto no local | Escritura arbitraria o descarga forzada | Solo `Attachment.SaveAsFile` en la lista blanca; path propio en staging `0700`/`0600`; solo adjuntos `OL_FULL_ITEM`/`olByValue`; validación regular/dentro de sesión (D12); borrado siempre | Aceptado (§4.1) |
+| T-14 | Uso del servidor MCP por un harness comprometido o inducido | Un `tools/call` con `--fields body` o `attachment --all` que lleva cuerpos o adjuntos a un contexto no previsto | Exfiltración de contenido del buzón o escritura en la caché del usuario | El servidor no añade superficie ni permisos: sin red, sin shell, esquema y argv validados, `-P`, stdin vacío y stderr descartado; el hijo corre como la CLI, con su lock y su log; el harness aplica mínimo privilegio, confirmación y política (§7) | Aceptado (depende del harness) |
 
 ---
 
 ## 6. Matriz de responsabilidades
+
+**Tabla: Matriz de responsabilidades**
 
 | Capacidad | `mailquery` | Harness | OS / organización |
 |---|---|---|---|
@@ -170,7 +189,8 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 | Ejecutar adjuntos | **Nunca** | No abrir/ejecutar automáticamente | EDR/AV, application control, sin admin |
 | Escanear malware | Bloqueo por nombre/magic; avisos de contenido activo (A7), sin descomprimir | Puede añadir AV/scan antes de abrir | Gateway de correo, AV/EDR |
 | Autenticidad del remitente | No verifica; repite el SPF/DKIM/DMARC fallido que dejó el proveedor (`W_SENDER_AUTH_FAILED`) y avisa de `Reply-To` de otro dominio | No confiar en el nombre visible; verificar dominio; la ausencia del aviso no prueba autenticidad | DMARC/SPF/DKIM del proveedor |
-| Privacidad del contenido | Logs sin PII; no red | No enviar contenido a terceros sin consentimiento | DLP, retención, cifrado |
+| Privacidad del contenido | Logs sin PII; no red; el log JSON Lines no añade campos al de texto | No enviar contenido a terceros sin consentimiento | DLP, retención, cifrado |
+| Servir las herramientas MCP | El servidor no añade red ni permisos propios: valida esquema y argv y ejecuta la CLI con su contrato | Decide qué herramientas expone, si registra el servidor y qué aprobación pide; deduce el código de salida de `error.code` | Aísla el proceso y la cuenta; el registro de servidores es de la app del usuario |
 | Auditoría | Log local | Log de tool calls, URLs, descargas | SIEM, alertas |
 | Sandbox del agente | No aplica | Contenedor/VM, tools efímeras | Aislamiento, cuentas sin privilegios |
 
@@ -194,8 +214,9 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 14. **Usar las señales en la política:** `W_HIDDEN_CONTENT` (caracteres ocultos omitidos), `W_EXTERNAL_LINKS` (URLs en el mensaje), `W_SCRIPT_LINK` (enlaces `javascript:`, `vbscript:` o `data:`, casi siempre maliciosos), `W_LONG_URL` (URLs de más de 2.048 caracteres), `W_NON_ASCII_DOMAIN` (dominios no ASCII, posibles homoglifos), `W_SENDER_AUTH_FAILED` (autenticación fallida según el proveedor), `W_REPLY_TO_MISMATCH` (las respuestas irían a otro dominio) y, en `attachment`, `W_ATTACHMENT_ACTIVE_CONTENT` (JavaScript, macros o ejecutables en un adjunto) permiten marcar el mensaje o el archivo, pedir confirmación o excluirlo según la tarea. Son señales, no veredictos: el texto oculto es común en correo legítimo (preheaders), y su ausencia no prueba que el mensaje sea seguro.
 15. **Tratar la salida como texto plano:** `body_text`, `snippet`, `subject`, los nombres, `headers` y los warnings son texto, aunque contengan `<script>`, etiquetas o URLs; escaparlos siempre antes de insertarlos en HTML, Markdown renderizado o cualquier interfaz que interprete marcado, y no evaluarlos como código.
 16. **Triaje sin contenido:** decidir con la fila por defecto de `search`/`new` (sin cuerpo), `--group-by` y `--count`, y pedir el cuerpo (`--fields snippet` o `show`) solo de los mensajes elegidos (F3 del PRD). Los avisos del cuerpo solo salen cuando se entrega el cuerpo; los del remitente salen siempre.
+17. **Servidor MCP:** si se registra `mailquery mcp serve`, sus herramientas no amplían los permisos de la CLI: `new` avanza el cursor, `attachment` escribe en la caché del usuario y un `tools/call` con `--fields body` entrega cuerpos, así que se aplican las mismas confirmaciones y límites que con la CLI; el código de salida se deduce de `error.code` y un `E_LOCKED` no se reintenta más de una vez.
 
-**Cómo llega este checklist al harness.** Las reglas de comportamiento (puntos 1, 3, 5, 6, 8 y 12 a 16) están en la skill, que el agente lee antes de usar `mailquery`; los controles de configuración (puntos 2, 4, 7, 9, 10 y 11), en los README, porque solo los puede aplicar quien opera el harness. Cada respuesta de éxito de `search`, `new`, `show` y `attachment` lleva además `content_notice`, un texto fijo que recuerda que el contenido no es confiable (RF-66 del PRD). Es un recordatorio, no un control: un correo puede contradecirlo, y lo único que frena una inyección son los controles del harness.
+**Cómo llega este checklist al harness.** Las reglas de comportamiento (puntos 1, 3, 5, 6, 8 y 12 a 17) están en la skill, que el agente lee antes de usar `mailquery`; los controles de configuración (puntos 2, 4, 7, 9, 10 y 11), en los README, porque solo los puede aplicar quien opera el harness. Cada respuesta de éxito de `search`, `new`, `show` y `attachment` lleva además `content_notice`, un texto fijo que recuerda que el contenido no es confiable (RF-66 del PRD). Es un recordatorio, no un control: un correo puede contradecirlo, y lo único que frena una inyección son los controles del harness.
 
 ---
 
@@ -248,6 +269,7 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
   plugin.
 - **Imágenes:** `mailquery` no carga imágenes remotas ni inline y no extrae `src` ni `alt` (ignora los atributos HTML), así que una imagen no aporta texto al agente ni dispara un píxel de seguimiento. Una imagen solo sale con `attachment`, por orden explícita, y `mailquery` nunca la analiza. Si se extrae, sigue siendo contenido no confiable (puede contener QR, texto o exploits del parser de imagen): no analizarla con visión/OCR/QR sin petición explícita.
 - **Firmas:** son texto y enlaces como el resto del cuerpo; mismas reglas. Las firmas con imágenes remotas no se cargan.
+- **Log:** `~/.mailquery/logs/mailquery.log` (texto) o `~/.mailquery/logs/mailquery.jsonl` con `[logging].json = true` registran los mismos datos y omiten los mismos: códigos, comandos, herramientas, contadores y duraciones, nunca cuerpos, asuntos, direcciones, nombres, términos de búsqueda, rutas ni cuentas. Los dos formatos comparten permisos (directorio 0700, archivo 0600) y rotación por tamaño, y cada ejecución escribe solo en el archivo de su formato. `mcp serve` añade `event=start`, `event=call` y `event=end` con la herramienta, el código de salida y la duración, sin los valores de los parámetros. El log es local y no se envía a ninguna parte: copiarlo a un contexto de modelo o a un tercero es una decisión del harness.
 
 ---
 
@@ -293,5 +315,5 @@ Para detectar la ocultación declarada en hojas `<style>`, F1 añade `css-inline
 
 - [PRD](../prd/00-indice.md) §4, §21.1, §23.
 - [PRD](../prd/00-indice.md) v2.3: §6.5–§6.7 y §23.1 (plugins y adjuntos), §6.8 y §12.12 (feature F1: A2–A7).
-- Código: [`output.py`](../../src/mailquery/output.py) (`sanitize_text`, `html_to_text`), [`search.py`](../../src/mailquery/search.py) (`_show_headers`), [`cli.py`](../../src/mailquery/cli.py), [`emlx.py`](../../src/mailquery/emlx.py).
+- Código: [`output.py`](../../src/mailquery/output.py) (`sanitize_text`, `html_to_text`), [`search.py`](../../src/mailquery/search.py) (`_show_headers`), [`cli.py`](../../src/mailquery/cli.py), [`emlx.py`](../../src/mailquery/emlx.py), [`mcp_server.py`](../../src/mailquery/mcp_server.py) (servidor MCP y ejecutor del hijo) y [`logging_setup.py`](../../src/mailquery/logging_setup.py) (`log_event`, formato JSON Lines y archivo activo).
 - [`ROADMAP.md`](../ROADMAP.md) solo como contexto, no como requisito.

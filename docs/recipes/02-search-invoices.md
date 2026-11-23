@@ -240,7 +240,7 @@ Outlook en lugar de reintentar en bucle; corregir con 2/3/4; exit 0 es éxito
 | Exit | Error típico | Acción |
 |------|--------------|--------|
 | `0` | — | Éxito. Si `count == 0`, informar de que no hay facturas en la ventana y proponer ampliar `--since` a `1mo` (una sola variante). |
-| `1` | `E_INTERNAL` | No reintentar en bucle; avisar y revisar `~/.mailquery/logs/mailquery.log`. |
+| `1` | `E_INTERNAL` | No reintentar en bucle; avisar y revisar el log del núcleo: `~/.mailquery/logs/mailquery.log` o `~/.mailquery/logs/mailquery.jsonl` con `[logging].json = true`. |
 | `2` | `E_CONFIG_INVALID`, `E_CONFIG_ACCOUNT_UNKNOWN`, `E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE`, `E_ACCOUNT_NOT_IN_SCOPE`, `E_MAILBOX_NOT_FOUND` | Error de configuración: no reintentar; mostrar el `hint`, revisar `config.toml` con `mailquery doctor` y `mailquery mailboxes`. |
 | `2` | `E_BAD_TIME`, `E_BAD_FILTER` | Filtro/valor inválido (fecha o patrón): corregir el comando; no reintentar igual. |
 | `2` | `E_USAGE` | Argumento inválido; en `show`, un `uid` mal formado o inexistente: volver a tomarlo de `search`, sin modificarlo. |
