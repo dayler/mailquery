@@ -38,6 +38,7 @@ Un cambio necesita una unidad si cambia lo que el producto hace o lo que el PRD 
 - Se crea copiando [PLANTILLA.md](PLANTILLA.md) y sustituyendo su frontmatter por `aliases: ["<título de la unidad>"]` y `tags: [cambio]`.
 - La unidad define lo que se implementa: el código, los tests y los documentos consumidores se comprueban contra su requerimiento y sus criterios de aceptación.
 - La unidad no contiene el texto del PRD: dice qué secciones cambian y qué deben reflejar. El texto se redacta al conciliar.
+- **Diseño sí, código no.** La unidad describe el diseño que el cambio necesita: estructuras de tablas y datos, contratos de interfaces con sus nombres y firmas, diagramas de clases, de secuencia o de componentes y ejemplos de invocación. No contiene código implementado: ni el cuerpo de funciones o métodos, ni sentencias de base de datos, ni pasos o tareas de implementación.
 - Desde que una unidad está `aprobado` y hasta que está `conciliado`, para lo que cambia manda la unidad.
 
 ### Cabecera
