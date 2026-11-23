@@ -39,6 +39,7 @@ from typing import Any, Final, Literal, NotRequired, TypedDict, TypeVar
 
 from mailquery import output
 from mailquery.errors import MailqueryError
+from mailquery.native_ids import PluginNativeIds
 from mailquery.uid import is_valid_native_id
 
 #: Version of the plugin contract; closed for the 3.x line.
@@ -167,10 +168,17 @@ class DriverMetadata(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class PluginContext:
-    """Paths the core hands to a plugin; the plugin owns its files."""
+    """What the core hands to a plugin: its paths and its driver's native id cache.
+
+    ``native_ids`` exposes the rows of the plugin's own driver in
+    ``~/.mailquery/db/cache.db``; the plugin never opens the database itself and
+    cannot reach another driver's rows. ``None`` means the caller does not offer
+    the cache (for example, a diagnostic check).
+    """
 
     home: Path
     tmp_dir: Path
+    native_ids: PluginNativeIds | None = None
 
 
 class PluginError(Exception):
