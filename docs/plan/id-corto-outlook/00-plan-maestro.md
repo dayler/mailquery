@@ -44,8 +44,8 @@ Quién actualiza cada indicador y cuándo:
 | M01 | Librería `native_ids.py` | 🟢 | — | 1 | 1 | AC-64, AC-69, AC-70 (librería) | [M01-libreria-native-ids.md](M01-libreria-native-ids.md) |
 | M02 | Refactor: frontera uid ↔ `EntryID` en el driver `outlook` | 🟢 | — | 1 | 1 | — (refactor sin cambio de comportamiento) | [M02-refactor-frontera-outlook.md](M02-refactor-frontera-outlook.md) |
 | M03 | Núcleo: ganchos opcionales, aviso de impresos y contexto de plugin | 🟢 | M01 | 2 | 1 | AC-65, AC-68 (validación de la forma nativa), AC-69, AC-70 (núcleo) | [M03-nucleo-ganchos-contexto.md](M03-nucleo-ganchos-contexto.md) |
-| M04 | `show --show-native-id` en el núcleo | ⚪ | M03 | 3 | 2 | AC-68, AC-70 (núcleo y plugin) | [M04-show-native-id.md](M04-show-native-id.md) |
-| M05 | Outlook: uid corto, asignación, registro y validación | ⚪ | M01, M02, M03 | 3 | 2 | AC-63, AC-65, AC-67, AC-69 (Outlook) | [M05-outlook-uid-corto.md](M05-outlook-uid-corto.md) |
+| M04 | `show --show-native-id` en el núcleo | 🟡 | M03 | 3 | 2 | AC-68, AC-70 (núcleo y plugin) | [M04-show-native-id.md](M04-show-native-id.md) |
+| M05 | Outlook: uid corto, asignación, registro y validación | 🟡 | M01, M02, M03 | 3 | 2 | AC-63, AC-65, AC-67, AC-69 (Outlook) | [M05-outlook-uid-corto.md](M05-outlook-uid-corto.md) |
 | M06 | Outlook: resolución, ausente confirmado, colisiones y `--show-native-id` | ⚪ | M04, M05 | 4 | 2 | AC-63 (SMOKE), AC-64, AC-66, AC-68, AC-69 (Outlook) | [M06-outlook-resolucion-borrado.md](M06-outlook-resolucion-borrado.md) |
 | M07 | Documentación consumidora y versión `3.0.0a2` | ⚪ | M04, M05 | 4 | 2 | AC-68 (README, RF-73); CL-05, CL-06, CL-11 (documentos y versión) | [M07-docs-version.md](M07-docs-version.md) |
 
@@ -131,7 +131,7 @@ Las oleadas deciden el orden y el paralelismo; los lotes deciden cómo se integr
 | Lote | Milestones | Rama de integración | Corridas de la matriz previstas | Estado |
 |---|---|---|---|---|
 | 1 | M01, M02, M03 | `feature/id-corto-outlook-lote-1` | 1 (+1 de contingencia) | 🟡 |
-| 2 | M04, M05, M06, M07 | `feature/id-corto-outlook-lote-2` | 1 (+1 de contingencia) | ⚪ |
+| 2 | M04, M05, M06, M07 | `feature/id-corto-outlook-lote-2` | 1 (+1 de contingencia) | 🟡 |
 
 ### Presupuesto de integración
 
