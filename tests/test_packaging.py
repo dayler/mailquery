@@ -5,7 +5,9 @@ not yet released: the tests derive every expected version from the package
 instead of pinning a literal (PKG-02).
 """
 
+import contextlib
 import importlib.metadata
+import io
 import re
 import sys
 import tomllib
@@ -13,6 +15,7 @@ import unittest
 from pathlib import Path
 
 import mailquery
+from mailquery import cli
 from mailquery.backends.registry import BackendRegistry, package_version
 
 from tests.fakes.plugin import FakeEntryPoint
@@ -315,6 +318,66 @@ OBSOLETE_UID_TEXTS = (
 UPPERCASE_UID_EXAMPLE = re.compile(r"outlook:[0-9A-F]{6,}")
 #: Placeholder for the native form, admitted only where the option is documented.
 NATIVE_ID_MARKER = "outlook:<EntryID>"
+
+
+class McpDocumentationTests(unittest.TestCase):
+    """DOC-17 — README and skill documentation of the MCP server."""
+
+    def test_doc_17_01_readmes_document_registration_tools_and_permissions(self) -> None:
+        """DOC-17.01: both READMEs document registration, tools, parameter mapping and permissions."""
+        for name in ("README.md", "README.es.md"):
+            with self.subTest(document=name):
+                text = _readme(name)
+                self.assertIn(
+                    "claude mcp add --scope user mailquery -- mailquery mcp serve", text
+                )
+                self.assertIn("mcpServers", text)
+                self.assertIn('"command": "mailquery"', text)
+                self.assertIn('"args": ["mcp", "serve"]', text)
+                for tool in ("search", "new", "show", "attachment", "mailboxes", "doctor"):
+                    self.assertIn(tool, text)
+                self.assertIn("include_mailbox", text)
+                self.assertIn("--include-mailbox", text)
+        english = _readme("README.md")
+        self.assertIn("Full Disk Access", english)
+        self.assertIn("same session", english)
+        self.assertIn("integrity level", english)
+        spanish = _readme("README.es.md")
+        self.assertIn("Acceso total al disco", spanish)
+        self.assertIn("misma sesión", spanish)
+        self.assertIn("nivel de integridad", spanish)
+
+    def test_doc_17_02_skill_uses_mcp_tools_when_available(self) -> None:
+        """DOC-17.02: the skill prefers the MCP tools and deduces the exit code from error.code."""
+        skill = (ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8")
+        flat = " ".join(skill.split())
+        self.assertIn("MCP tools", flat)
+        self.assertIn("use its tools instead of the CLI", flat)
+        self.assertIn("error.code", flat)
+        self.assertIn("mcp serve", flat)
+
+    def test_doc_17_03_no_six_command_wording(self) -> None:
+        """DOC-17.03: READMEs, skill, skills README and helps say no 'six commands'."""
+        documents = [
+            _readme("README.md"),
+            _readme("README.es.md"),
+            (ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8"),
+            (ROOT / "skills" / "README.md").read_text(encoding="utf-8"),
+        ]
+        for text in documents:
+            self.assertNotIn("six commands", text.lower())
+            self.assertNotIn("seis comandos", text.lower())
+        for argv in (["--help"], ["mcp", "--help"], ["mcp", "serve", "--help"]):
+            stdout = io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as raised,
+            ):
+                cli.build_parser().parse_args(argv)
+            self.assertEqual(raised.exception.code, 0)
+            self.assertNotIn("six commands", stdout.getvalue().lower())
+            self.assertNotIn("seis comandos", stdout.getvalue().lower())
 
 
 class ConsumerDocumentsTests(unittest.TestCase):
