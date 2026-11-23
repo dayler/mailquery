@@ -45,7 +45,12 @@ from mailquery.config import (
     resolve_scope,
 )
 from mailquery.errors import MailqueryError, error_detail
-from mailquery.logging_setup import get_logger, log_event, setup_logging
+from mailquery.logging_setup import (
+    active_log_filename,
+    get_logger,
+    log_event,
+    setup_logging,
+)
 from mailquery.native_ids import PluginNativeIds
 from mailquery.output import (
     CONTENT_NOTICE,
@@ -132,7 +137,8 @@ Examples:
 Configuration: ~/.mailquery/config.toml (optional; see README.md)
 Output: one JSON object on stdout for every command, in UTF-8 (this help,
         --version and the default doctor report are the only non-JSON output);
-        logs go to ~/.mailquery/logs/mailquery.log
+        logs go to ~/.mailquery/logs/mailquery.log (text) or
+        ~/.mailquery/logs/mailquery.jsonl with [logging].json = true
 Exit codes: 0 ok | 2 usage or config error | 3 environment error
             | 4 rejected query or blocked attachments | 5 busy or transient error
             | 6 mail client not running
@@ -1117,7 +1123,7 @@ def _run_command(
             "E_INTERNAL",
             f"unexpected internal error: {type(exc).__name__}",
             "run `mailquery doctor` and check "
-            "~/.mailquery/logs/mailquery.log for the traceback",
+            f"~/.mailquery/logs/{active_log_filename()} for the traceback",
         )
         return _report_error(error, command)
     finally:

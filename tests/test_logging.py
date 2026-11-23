@@ -306,6 +306,59 @@ class ContentTests(unittest.TestCase):
         self.assertNotIn("ana.garcia", text)
         self.assertNotIn("nothing declared", text)
 
+    def test_ut_log_05_06_json_log_has_no_private_data_with_labels_unavailable(self) -> None:
+        """UT-LOG-05.06: with the UT-LOG-04.02 scenario, no JSON line has subjects, addresses, uids or paths."""
+        message = (
+            f"cannot search {self.SUBJECT!r} from {self.ADDRESS} ({self.PERSON}) in "
+            f"{self.FOLDER} of {ICLOUD_LABEL} at {self.fx.mail_root}: term {self.TERM} "
+            f"uid {self.UID} snippet {self.BODY}"
+        )
+
+        def failing_search(backend, config, filters, **kwargs):
+            backend.labels.label_for(ACCOUNT_ICLOUD)
+            backend.labels.label_for(ACCOUNT_GMAIL)
+            raise MailqueryError(
+                "E_SCAN_TOO_LARGE",
+                message,
+                f"hint {self.TERM}",
+                log_message="the scan was too large",
+            )
+
+        write_config(self.fx.home, "[logging]\njson = true\n")
+        missing_db = self.fx.root / "no-such-dir" / "Accounts4.sqlite"
+        with mock.patch.object(cli_mod, "run_search", side_effect=failing_search):
+            code, _, _ = self.run_cli(
+                ["--log-level", "debug", "search", "--text", self.TERM],
+                accounts_db=missing_db,
+            )
+        self.assertEqual(code, 4)
+        text = (self.fx.home / "logs" / "mailquery.jsonl").read_text(encoding="utf-8")
+        objects = _jsonl_objects(self.fx.home / "logs" / "mailquery.jsonl")
+        error_line = next(obj for obj in objects if obj["fields"].get("event") == "error")
+        self.assertEqual(error_line["fields"]["code"], "E_SCAN_TOO_LARGE")
+        self.assertEqual(error_line["fields"]["message"], "the scan was too large")
+        forbidden = {
+            "subject": self.SUBJECT,
+            "address": self.ADDRESS,
+            "person": self.PERSON,
+            "folder": self.FOLDER,
+            "account label": ICLOUD_LABEL,
+            "term": self.TERM,
+            "uid": self.UID,
+            "body": self.BODY,
+            "snippet": "snippet",
+            "root path": str(self.fx.root),
+            "home path": str(self.fx.home),
+            "mail path": str(self.fx.mail_root),
+            "accounts db path": str(missing_db),
+            "missing dir": "no-such-dir",
+        }
+        for uuid_value in (ACCOUNT_ICLOUD, ACCOUNT_GMAIL, ACCOUNT_LOCAL):
+            forbidden[f"uuid {uuid_value}"] = uuid_value
+        lowered = text.lower()
+        for name, value in forbidden.items():
+            self.assertNotIn(value.lower(), lowered, f"log leaks the {name}")
+
     def test_ut_log_04_04_non_internal_error_has_no_traceback(self) -> None:
         """UT-LOG-04.04: an error that is not E_INTERNAL logs no traceback."""
         error = MailqueryError("E_BAD_FILTER", "bad filter", "fix it")
