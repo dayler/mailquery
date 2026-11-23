@@ -1357,6 +1357,24 @@ class OutlookGoldenTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def uid_of(self, key: str) -> str:
+        """Register a fixture item in the native id cache and return its uid part."""
+        from mailquery.backends import get_backend
+
+        backend = get_backend(
+            platform="win32",
+            outlook_app=self.fake,
+            registry=self.fake.registry,
+            security_center=self.fake.security_center,
+            tmp_root=self.home / "tmp",
+        )
+        try:
+            part = backend._uid_part(self.fake.item(key).entry_id)
+            backend.printed_messages([part])
+        finally:
+            backend.close()
+        return part
+
     def run_ok(self, *args: str) -> dict:
         from mailquery.backends import get_backend
 
@@ -1379,8 +1397,9 @@ class OutlookGoldenTest(unittest.TestCase):
         return payload
 
     def show(self, key: str) -> dict:
-        payload = self.run_ok("show", prefixed_uid(self.fake.item(key).entry_id, "outlook"))
-        self.assertEqual(payload["message"]["uid"], prefixed_uid(self.fake.item(key).entry_id, "outlook"))
+        uid = self.uid_of(key)
+        payload = self.run_ok("show", uid)
+        self.assertEqual(payload["message"]["uid"], prefixed_uid(uid, "outlook"))
         return payload
 
     def test_tc_02_01_mailboxes(self) -> None:
@@ -1413,7 +1432,7 @@ class OutlookGoldenTest(unittest.TestCase):
         payload = self.run_ok("search")
         self.assertEqual(
             [message["uid"] for message in payload["messages"]],
-            [prefixed_uid(self.fake.item(key).entry_id, "outlook") for key in ("normal", "header_only", "smime_encrypted")],
+            [prefixed_uid(self.uid_of(key), "outlook") for key in ("normal", "header_only", "smime_encrypted")],
         )
         for message in payload["messages"]:
             self.assertEqual(list(message), list(DEFAULT_ROW_FIELDS))
@@ -1455,12 +1474,12 @@ class OutlookGoldenTest(unittest.TestCase):
         _assert_golden(self, "outlook/show_smime.json", payload, self.root)
 
     def test_tc_02_06_new_first_run(self) -> None:
-        """TC-02.06: first run of ``new``: the [D - lookback, D] window, hex uids (golden)."""
+        """TC-02.06: first run of ``new``: the [D - lookback, D] window, short uids (golden)."""
         from mailquery.backends.outlook import OutlookBackend
 
-        normal = self.fake.item("normal").entry_id
+        uid = self.uid_of("normal")
         payload = self.run_ok("new")
-        self.assertEqual([message["uid"] for message in payload["messages"]], [prefixed_uid(normal, "outlook")])
+        self.assertEqual([message["uid"] for message in payload["messages"]], [prefixed_uid(uid, "outlook")])
         self.assertEqual(
             payload["warnings"],
             [
@@ -1470,9 +1489,9 @@ class OutlookGoldenTest(unittest.TestCase):
             ],
         )
         self.assertIsNone(payload["cursor"]["previous"])
-        self.assertEqual(payload["cursor"]["current"]["last_uid"], prefixed_uid(normal, "outlook"))
+        self.assertEqual(payload["cursor"]["current"]["last_uid"], prefixed_uid(uid, "outlook"))
         state = StateStore(self.home, _all_installed).load()
-        self.assertEqual(state.emitted_uids, (prefixed_uid(normal, "outlook"),))
+        self.assertEqual(state.emitted_uids, (prefixed_uid(uid, "outlook"),))
         _assert_golden(self, "outlook/new_first_run.json", payload, self.root)
 
     def test_tc_02_07_doctor(self) -> None:
@@ -1634,9 +1653,27 @@ class _BothBackendsCase(unittest.TestCase):
 class _AttachmentUidMixin:
     """Resolve a message with a known attachment on both backends (TC-04/TC-05/TC-08)."""
 
+    def outlook_uid(self, key: str) -> str:
+        """Register a fixture item in the Outlook cache and return its uid part."""
+        from mailquery.backends import get_backend
+
+        instance = get_backend(
+            platform="win32",
+            outlook_app=self.fake,
+            registry=self.fake.registry,
+            security_center=self.fake.security_center,
+            tmp_root=self.outlook_home / "tmp",
+        )
+        try:
+            part = instance._uid_part(self.fake.item(key).entry_id)
+            instance.printed_messages([part])
+        finally:
+            instance.close()
+        return part
+
     def attachment_uid(self, backend: str) -> str:
         if backend == "outlook":
-            return self.fake.item("complete").entry_id
+            return self.outlook_uid("complete")
         code, payload, stderr = self.run_backend(backend, "show", "2714")
         self.assertEqual(code, 0, f"{backend} show 2714: {payload} {stderr}")
         attachments = payload["message"]["attachments"]
@@ -1741,7 +1778,7 @@ class JsonShapeParityTest(_AttachmentUidMixin, _BothBackendsCase):
         payloads = {}
         for backend, uid in (
             ("apple_mail", "2714"),
-            ("outlook", self.fake.item("complete").entry_id),
+            ("outlook", self.outlook_uid("complete")),
         ):
             code, payload, stderr = self.run_backend(backend, "show", uid)
             self.assertEqual(code, 0, f"{backend}: {payload} {stderr}")
