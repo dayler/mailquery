@@ -6256,5 +6256,47 @@ def _run_apple(case: unittest.TestCase, cli, fx, *argv: str) -> dict:
 
 
 
+class LogPathHintTests(unittest.TestCase):
+    """UT-LOG-06.02: the Outlook hints name the log file of the active format."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(prefix="mailquery-outlook-log-")
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        self.addCleanup(self._close_handlers)
+
+    @staticmethod
+    def _close_handlers() -> None:
+        import logging
+
+        logger = logging.getLogger("mailquery")
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                logger.removeHandler(handler)
+                handler.close()
+
+    def test_ut_log_06_02_outlook_hints_name_the_active_log_file(self) -> None:
+        """UT-LOG-06.02: the hints of an internal COM error and of a blocked member name the active log file."""
+        from mailquery.backends import outlook_com
+        from mailquery.logging_setup import setup_logging
+
+        def errors():
+            return (
+                outlook_com.ComCallError(0x8000FFFF),
+                outlook_com.readonly_violation(
+                    "Item", "Body", "member not whitelisted"
+                ),
+            )
+
+        setup_logging(self.home, "info", 10, False)
+        for error in errors():
+            self.assertIn("mailquery.log", error.hint)
+            self.assertNotIn("mailquery.jsonl", error.hint)
+        setup_logging(self.home, "info", 10, True)
+        for error in errors():
+            self.assertIn("mailquery.jsonl", error.hint)
+            self.assertNotIn("mailquery.log", error.hint)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

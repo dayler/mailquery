@@ -2236,6 +2236,21 @@ class ConfigExampleTest(_DocumentationCase):
         parsed = self._load(explicit)
         self.assertEqual(parsed.content.url_display, "neutralize")
 
+    def test_doc_18_02_example_documents_the_json_log(self) -> None:
+        """DOC-18.02: the example has # json = false in the [logging] block and it loads as false."""
+        template = _read(CONFIG_EXAMPLE)
+        block = template.split("# [logging]", 1)[1].split("# [search]", 1)[0]
+        self.assertRegex(block, r"(?m)^# json = false")
+        lines = [
+            line[2:] if line.startswith("# ") else line
+            for line in block.splitlines()
+        ]
+        uncommented = "[logging]\n" + "\n".join(line for line in lines if line.strip())
+        parsed = self._load(uncommented)
+        self.assertFalse(parsed.logging.json)
+        self.assertEqual(parsed.logging.level, "info")
+        self.assertEqual(parsed.logging.max_size_mb, 10)
+
     def test_doc_06_05_example_documents_the_attachment_timeout(self) -> None:
         """DOC-06.05: the [attachments] block documents timeout_seconds and it loads as 60."""
         template = _read(CONFIG_EXAMPLE)

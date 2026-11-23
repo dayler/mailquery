@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import platform
 import subprocess
@@ -101,6 +102,15 @@ class _FakeBackend:
 
     def close(self) -> None:
         self.closed = True
+
+
+def _close_log_handlers() -> None:
+    """Release the log file so Windows can delete the temp dir."""
+    logger = logging.getLogger("mailquery")
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()
 
 
 class _FakeLock:
@@ -300,6 +310,14 @@ class HelpContractTests(_CliTestCase):
         self.assert_human_readable(stdout)
         self.assertEqual(stderr, "")
         self.assertFalse(unused_home.exists(), "--help must not touch the filesystem")
+
+    def test_ut_log_06_03_root_help_names_both_log_files(self) -> None:
+        """UT-LOG-06.03: the root help names mailquery.log and mailquery.jsonl."""
+        stdout = self.help_text(None)
+        self.assertIn("mailquery.log", stdout)
+        self.assertIn("mailquery.jsonl", stdout)
+        self.assertIn("[logging].json", stdout)
+        self.assert_human_readable(stdout)
 
     def test_ut_atc_09_02_attachment_help_matches_the_prd(self) -> None:
         """UT-ATC-09.02: ``attachment --help`` is the literal text of PRD §12.7."""
@@ -1060,6 +1078,73 @@ class LoggingConfigTests(_CliTestCase):
                 self.assert_error(2, self.run_cli(argv), "E_USAGE")
         self.assertFalse((self.fx.home / "logs" / "mailquery.log").exists())
 
+    def test_ut_log_05_01_without_json_the_text_log_is_used_and_jsonl_is_untouched(self) -> None:
+        """UT-LOG-05.01: no key or false writes mailquery.log in text and leaves mailquery.jsonl and its rotated files alone."""
+        self.addCleanup(_close_log_handlers)
+        logs = self.fx.home / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        jsonl = logs / "mailquery.jsonl"
+        rotated = logs / "mailquery.jsonl.1"
+        for label, config in (("absent", None), ("false", "[logging]\njson = false\n")):
+            with self.subTest(config=label):
+                jsonl.write_text("json sentinel\n", encoding="utf-8")
+                rotated.write_text("rotated sentinel\n", encoding="utf-8")
+                if config is not None:
+                    write_config(self.fx.home, config)
+                code, _, _ = self.run_cli(["search"])
+                self.assertEqual(code, 0)
+                text = (logs / "mailquery.log").read_text(encoding="utf-8")
+                self.assertRegex(
+                    text,
+                    r"(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} INFO  "
+                    r"mailquery\.cli run=[0-9a-f]{12} event=start ",
+                )
+                self.assertEqual(jsonl.read_text(encoding="utf-8"), "json sentinel\n")
+                self.assertEqual(
+                    rotated.read_text(encoding="utf-8"), "rotated sentinel\n"
+                )
+                self.assertFalse((logs / "mailquery.jsonl.2").exists())
+
+    def test_ut_log_05_02_with_json_true_only_the_jsonl_changes(self) -> None:
+        """UT-LOG-05.02: with true, only mailquery.jsonl is written; an existing mailquery.log does not change."""
+        self.addCleanup(_close_log_handlers)
+        logs = self.fx.home / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        text_log = logs / "mailquery.log"
+        text_log.write_text("text sentinel\n", encoding="utf-8")
+        text_rotated = logs / "mailquery.log.1"
+        text_rotated.write_text("text rotated sentinel\n", encoding="utf-8")
+        write_config(self.fx.home, "[logging]\njson = true\n")
+        code, _, _ = self.run_cli(["search"])
+        self.assertEqual(code, 0)
+        jsonl = logs / "mailquery.jsonl"
+        objects = [
+            json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertTrue(objects)
+        for obj in objects:
+            self.assertIn("ts", obj)
+        self.assertEqual(text_log.read_text(encoding="utf-8"), "text sentinel\n")
+        self.assertEqual(
+            text_rotated.read_text(encoding="utf-8"), "text rotated sentinel\n"
+        )
+        self.assertFalse((logs / "mailquery.jsonl.1").exists())
+
+    def test_ut_log_06_01_internal_error_hint_names_the_active_log_file(self) -> None:
+        """UT-LOG-06.01: the E_INTERNAL hint names mailquery.jsonl with [logging].json = true and mailquery.log without it."""
+        self.addCleanup(_close_log_handlers)
+        with mock.patch.object(cli_mod, "_execute", side_effect=RuntimeError("boom")):
+            payload = self.assert_error(1, self.run_cli(["search"]), "E_INTERNAL")
+        hint = payload["error"]["hint"]
+        self.assertIn("mailquery.log", hint)
+        self.assertNotIn("mailquery.jsonl", hint)
+        write_config(self.fx.home, "[logging]\njson = true\n")
+        with mock.patch.object(cli_mod, "_execute", side_effect=RuntimeError("boom")):
+            payload = self.assert_error(1, self.run_cli(["search"]), "E_INTERNAL")
+        hint = payload["error"]["hint"]
+        self.assertIn("mailquery.jsonl", hint)
+        self.assertNotIn("mailquery.log", hint)
+
     def test_defaults_when_no_config_and_no_flag(self) -> None:
         payload = self.success_payload()
         with (
@@ -1068,7 +1153,27 @@ class LoggingConfigTests(_CliTestCase):
         ):
             exit_code, _, _ = self.run_cli(["search"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(setup_mock.call_args.args, (self.fx.home, "info", 10))
+        self.assertEqual(setup_mock.call_args.args, (self.fx.home, "info", 10, False))
+
+    def test_ut_cfg_05_02_non_boolean_json_is_config_invalid_logged_in_text(self) -> None:
+        """UT-CFG-05.02: json = "yes" ⇒ E_CONFIG_INVALID (exit 2), logged in text in mailquery.log."""
+        write_config(self.fx.home, '[logging]\njson = "yes"\n')
+        self.assert_error(2, self.run_cli(["search"]), "E_CONFIG_INVALID")
+        logs = self.fx.home / "logs"
+        text = (logs / "mailquery.log").read_text(encoding="utf-8")
+        self.assertIn("code=E_CONFIG_INVALID", text)
+        self.assertRegex(text, r"(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} ERROR ")
+        self.assertFalse((logs / "mailquery.jsonl").exists())
+
+    def test_ut_cfg_05_03_json_true_with_another_invalid_key_logs_in_text(self) -> None:
+        """UT-CFG-05.03: json = true with another invalid key ⇒ E_CONFIG_INVALID, text log, no jsonl."""
+        write_config(self.fx.home, "[logging]\njson = true\nbogus = 1\n")
+        self.assert_error(2, self.run_cli(["search"]), "E_CONFIG_INVALID")
+        logs = self.fx.home / "logs"
+        text = (logs / "mailquery.log").read_text(encoding="utf-8")
+        self.assertIn("code=E_CONFIG_INVALID", text)
+        self.assertIn("bogus", text)
+        self.assertFalse((logs / "mailquery.jsonl").exists())
 
 
 # --------------------------------------------------------------------------- #

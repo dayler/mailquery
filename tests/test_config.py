@@ -37,6 +37,7 @@ from mailquery.config import (
     driver_in_scope,
     ensure_app_home,
     load_config,
+    load_logging_config,
     parse_duration,
     require_driver_in_scope,
     resolve_scope,
@@ -672,10 +673,63 @@ mailbox_list = ["Facturas", "Archivo"]
         self.assertIn("retention_days", error.message)
         self.assertEqual(error.hint, "retention_days was replaced by max_size_mb")
 
+    def test_ut_cfg_05_01_json_is_false_by_default_and_accepts_booleans(self) -> None:
+        """UT-CFG-05.01: no key ⇒ json is false; true and false load as booleans."""
+        self.assertFalse(self._load("# no logging table\n").logging.json)
+        self.assertTrue(self._load("[logging]\njson = true\n").logging.json)
+        self.assertFalse(self._load("[logging]\njson = false\n").logging.json)
+        self.assertEqual(
+            self._load('[logging]\nlevel = "debug"\nmax_size_mb = 4\njson = true\n').logging,
+            LoggingConfig(level="debug", max_size_mb=4, json=True),
+        )
+
     def test_enum_hint_lists_valid_levels(self) -> None:
         error = self._load_error('[logging]\nlevel = "warn"\n')
         for level in ("error", "warning", "info", "debug"):
             self.assertIn(level, error.hint)
+
+
+class ServerLoggingConfigTests(unittest.TestCase):
+    """UT-CFG-06: ``load_logging_config`` for a caller that only needs the log."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name) / "home"
+
+    def test_ut_cfg_06_01_takes_logging_even_with_an_invalid_rest(self) -> None:
+        """UT-CFG-06.01: level, max_size_mb and json come from [logging] even if the rest is invalid."""
+        content = (
+            '[logging]\nlevel = "debug"\nmax_size_mb = 4\njson = true\n\n'
+            "[search]\ndefault_limit = 0\n\nunknown_key = 1\n"
+        )
+        write_config(self.home, content)
+        self.assertEqual(
+            load_logging_config(self.home),
+            LoggingConfig(level="debug", max_size_mb=4, json=True),
+        )
+
+    def test_ut_cfg_06_02_defaults_without_raising(self) -> None:
+        """UT-CFG-06.02: absent file, invalid TOML or invalid [logging] ⇒ text, info, 10 MB, no raise."""
+        defaults = LoggingConfig()
+        self.assertFalse(defaults.json)
+        self.assertEqual((defaults.level, defaults.max_size_mb), ("info", 10))
+        # Absent file: the home directory may not exist yet.
+        self.assertEqual(load_logging_config(self.home), LoggingConfig())
+        self.home.mkdir(parents=True)
+        self.assertEqual(load_logging_config(self.home), LoggingConfig())
+        invalid_documents = (
+            "this is = = not toml\n",
+            '[logging]\njson = "yes"\n',
+            '[logging]\nlevel = "loud"\n',
+            "[logging]\nmax_size_mb = 0\n",
+            "[logging]\nunknown = true\n",
+            "logging = true\n",
+        )
+        for content in invalid_documents:
+            with self.subTest(content=content):
+                write_config(self.home, content)
+                self.assertEqual(load_logging_config(self.home), LoggingConfig())
 
 
 # --------------------------------------------------------------------------- #

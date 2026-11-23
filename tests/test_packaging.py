@@ -268,6 +268,38 @@ class ReadmeCssInlineTests(unittest.TestCase):
             self.assertNotIn("solo biblioteca estándar", flat, name)
 
 
+class JsonLogDocumentationTests(unittest.TestCase):
+    """DOC-18.01: the two READMEs document the optional JSON Lines log."""
+
+    def test_doc_18_01_readmes_document_the_json_log(self) -> None:
+        """DOC-18.01: both READMEs document [logging].json, mailquery.jsonl and one active format per run."""
+        for name, section, sentence in (
+            (
+                "README.md",
+                "Logs and privacy",
+                "Each run writes only the file of the active format",
+            ),
+            (
+                "README.es.md",
+                "Logs y privacidad",
+                "Cada ejecución escribe solo el archivo de su formato",
+            ),
+        ):
+            text = _readme(name)
+            flat = " ".join(text.split())
+            self.assertIn("[logging].json", text, name)
+            self.assertIn("mailquery.jsonl", text, name)
+            self.assertIn(sentence, flat, name)
+            body = _section(text, section)
+            for needle in ("mailquery.log", "mailquery.jsonl", "ts", "traceback"):
+                self.assertIn(needle, body, f"{name} {section}")
+            row = next(
+                line for line in text.splitlines() if line.startswith("| `E_INTERNAL` (1)")
+            )
+            self.assertIn("mailquery.log", row, name)
+            self.assertIn("mailquery.jsonl", row, name)
+
+
 #: Obsolete Outlook uid texts that the consumer documents must not carry.
 OBSOLETE_UID_TEXTS = (
     "expected an uppercase hexadecimal EntryID",
