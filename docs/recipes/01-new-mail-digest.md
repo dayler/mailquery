@@ -194,7 +194,7 @@ Outlook en lugar de reintentar en bucle; corregir con 2/3/4; exit 0 es éxito
 | Exit | Error típico | Acción |
 |------|--------------|--------|
 | `0` | — | Éxito. Si `count == 0`, terminar sin salida (o avisar de que no hay correo nuevo, según el precepto). |
-| `1` | `E_INTERNAL` | No reintentar en bucle. Avisar del fallo y sugerir revisar `~/.mailquery/logs/mailquery.log`. |
+| `1` | `E_INTERNAL` | No reintentar en bucle. Avisar del fallo y sugerir revisar el log del núcleo: `~/.mailquery/logs/mailquery.log` o `~/.mailquery/logs/mailquery.jsonl` con `[logging].json = true`. |
 | `2` | `E_CONFIG_INVALID`, `E_CONFIG_ACCOUNT_UNKNOWN`, `E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE`, `E_MAILBOX_NOT_FOUND` | Error de configuración: no reintentar; mostrar el `hint`, revisar `~/.mailquery/config.toml` con `mailquery doctor` y `mailquery mailboxes`. |
 | `3` | `E_PERMISSION` | Problema de permisos. macOS: conceder **Acceso total al disco** a la app del harness. Windows: Outlook denegó el acceso (directiva) o el harness no comparte sesión con Outlook. Verificar con `mailquery doctor`; no reintentar en bucle. |
 | `3` | `E_STATE_CORRUPT` | El cursor está corrupto: renombrar/eliminar `~/.mailquery/state.json`; el siguiente `new` será una primera corrida (emitirá `W_FIRST_RUN` y la ventana de `lookback`, que puede repetir mensajes ya vistos una vez; deduplicar por `message_id` si importa). |
