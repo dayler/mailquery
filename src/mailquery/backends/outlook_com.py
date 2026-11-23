@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from mailquery.errors import MailqueryError
-from mailquery.logging_setup import get_logger
+from mailquery.logging_setup import get_logger, log_event
 
 # --------------------------------------------------------------------------- #
 # Constants and seams
@@ -442,7 +442,7 @@ class Watchdog:
             try:
                 handler(self, seconds)
             except Exception:  # noqa: BLE001 - the watchdog thread must survive
-                get_logger("mailquery.outlook").exception("event=watchdog_error")
+                log_event(get_logger("mailquery.outlook"), logging.ERROR, text="event=watchdog_error", exc_info=True)
 
 
 def default_on_expire(watchdog: Watchdog, seconds: float) -> None:
