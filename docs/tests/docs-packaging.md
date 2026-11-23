@@ -215,3 +215,27 @@ Requisitos: AC-36 · Archivo: `tests/test_packaging.py`
 | .01 | P | La entrada de `css-inline` es literalmente `css-inline~=0.23.1`: rango de parches `0.23.x` desde `0.23.1`, sin `==`, sin `>=` abierto y sin marcador de plataforma. |
 | .02 | N | `pywin32` es la única dependencia con marcador `sys_platform == "win32"`. |
 | .03 | P | `[tool.coverage.report].fail_under = 85` y `[tool.coverage.run].branch = true`; `coverage` no está en `[project].dependencies`. |
+
+#### DOC-16 — Documentos del uid corto de Outlook y de la versión
+
+Requisitos: RF-73, RF-81, RF-83, AC-68 · Archivo: `tests/test_packaging.py`
+
+**Tabla: Casos de DOC-16**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | [pendiente] `README.md` y `README.es.md` describen `--show-native-id` como opción de depuración de `show`; `SKILL.md` no la menciona. |
+| .02 | N | [pendiente] `README.md`, `README.es.md`, `SKILL.md`, `docs/INTERFACES.md`, `docs/recipes/` y `docs/security/` no contienen los textos obsoletos de CL-06: `expected an uppercase hexadecimal EntryID`, `mailquery show outlook:00000000A1B2C3D4`, "`show` never writes" / "`show` nunca escribe", "EntryID largo" / "long EntryID" como riesgo vigente de Outlook, "EntryID hexadecimal" como uid legado de Windows, ni un uid de ejemplo `outlook:` seguido de hexadecimal en mayúsculas; se admite el marcador `outlook:<EntryID>` solo en la descripción de `--show-native-id`. |
+| .03 | P | [pendiente] `pyproject.toml` y `mailquery.__version__` dicen `3.0.0a2`, y los README anuncian `3.0.0a2` (`3.0.0-alpha.2`) sin mencionar `3.0.0a1`. |
+| .04 | P | [pendiente] Los dos README describen la carpeta `~/.mailquery/db/` con `cache.db` y dicen que desinstalar no la borra. |
+
+Tests que cambian:
+
+- TC-01.01 y TC-02.07: goldens `doctor` y `outlook/doctor` con `pkg 3.0.0a2` (solo cambia la versión).
+- DOC-10, DOC-11, DOC-12 u otros DOC existentes, solo si un texto que comprueban cambia; su expectativa se mantiene salvo lo que la unidad cambia.
+
+Comandos:
+
+- `$PY -B -m unittest discover -s tests -t . -k doc_16 > "$LOG/grupo-doc_16.log" 2>&1`; `-k tc_01_01`, `-k tc_02_07`, `-k doc_1` a log.
+- Búsquedas de CL-06 y CL-11 (fuera de `docs/prd/` y de `docs/changes/`), con `git grep -n -F` de cada texto en `README.md`, `README.es.md`, `skills/`, `docs/INTERFACES.md`, `docs/recipes/` y `docs/security/`: `uppercase hexadecimal EntryID`, `outlook:00000000A1B2C3D4`, `` `show` never writes ``, `` `show` nunca escribe ``, `show never writes`, `EntryID largo`, `long EntryID`, `EntryID hexadecimal`, `3.0.0a1`. Resultado en la evidencia; `3.0.0a1` solo puede quedar en un registro histórico, y un resultado que no es un texto obsoleto se justifica allí.
+- Suite completa: la de `protocolo.md`.

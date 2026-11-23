@@ -134,7 +134,7 @@ Requisitos: AC-05, RF-38 · Archivo: `tests/test_uid.py`
 | .02 | P | `native_id` acepta `[A-Za-z0-9._=-]`; el punto se acepta en posiciones interiores (`a.b`) pero se rechaza como primer carácter (`.a`) y la secuencia `..`; split en el primer `:` (`a:b:c` ⇒ nativo `b:c`, inválido por `:`). |
 | .03 | N | Driver vacío, con mayúsculas, guion o > 64 ⇒ `E_USAGE` (el formato del uid es inválido); un driver válido pero no instalado ⇒ `E_DRIVER_UNKNOWN` (caso separado). |
 | .04 | N | `native_id` con `/`, espacio, `:` o > 1024; punto inicial; `..`; cadena vacía ⇒ `E_USAGE`. |
-| .05 | P | Entrada legada: entero sin prefijo en macOS ⇒ driver nativo `apple_mail` con ese nativo; hex mayúsculas sin prefijo en Windows ⇒ `outlook`. |
+| .05 | P | [por actualizar] Entrada legada: entero sin prefijo en macOS ⇒ driver nativo `apple_mail` con ese nativo; id corto sin prefijo en Windows ⇒ `outlook`. |
 | .06 | N | La validación de un uid inválido ocurre antes de crear el home, leer la config y abrir el store; no escribe estado ni caché. |
 | .07 | P | Identificador estable de ruta: 32 hex en minúsculas = primeros 32 caracteres de `SHA-256(uid UTF-8)`; determinista entre plataformas. |
 
@@ -146,7 +146,36 @@ Requisitos: AC-05 · Archivo: `tests/test_uid.py`
 |---|---|---|
 | .01 | P | `search`, `new` y `show` emiten `uid` string con el prefijo del driver nativo; `new` emite `cursor.previous/current.last_uid` igual. |
 | .02 | P | Orden de `search`/`show` por `(date_received DESC, driver ASC, native_order_key DESC)` y de `new` ASC; con Apple Mail el orden numérico no cambia respecto de 2.0.1. `native_order_key` se toma de la fila del backend, nunca del texto del uid. |
-| .03 | P | Entrada legada: `show 83143` en macOS y `show <EntryID hex>` en Windows se resuelven con el driver nativo y devuelven el uid prefijado. |
+| .03 | P | [por actualizar] Entrada legada: `show 83143` en macOS y `show <id corto>` en Windows se resuelven con el driver nativo y devuelven el uid prefijado. |
 | .04 | N | `show` malformado ⇒ `E_USAGE`; driver desconocido ⇒ `E_DRIVER_UNKNOWN`; ambos antes de crear el home, leer config o abrir el store, sin escribir estado ni caché. |
 | .05 | N | `show` con prefijo de un driver instalado pero no declarado ⇒ `E_ACCOUNT_NOT_IN_SCOPE` sin cargar el driver. |
 | .06 | N | Un `state.json` con uid legado válido no se reescribe en comandos de solo lectura (`search`, `show`, `mailboxes`, `doctor`). |
+
+#### UT-UID-03 — Apple Mail sin caché de ids nativos
+
+Requisitos: RF-81, AC-63 · Archivo: `tests/test_uid.py`
+
+**Tabla: Casos de UT-UID-03**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | [pendiente] Con solo `apple_mail`, el uid sigue siendo `apple_mail:<n>` y, tras `search`, `new`, `show` y `attachment`, no existen `~/.mailquery/db/` ni `cache.db`. |
+
+Tests que cambian (el orquestador ya marcó `[por actualizar]` los que tienen ID):
+
+- OL-14.01: el uid es el id corto de 10 caracteres del `EntryID` permanente; `native_order_key` es el `EntryID` permanente en mayúsculas, no el id de la tabla.
+- OL-23.01: un `EntryID` o un id corto en mayúsculas ⇒ `E_USAGE` con `invalid uid part '<id>': expected a short id` y hint no vacío.
+- OL-23.03: un uid cuyo `EntryID` resuelto no coincide con ningún store ⇒ `message uid … was not found` con el hint que remite a `excluded_stores`.
+- OL-25.01: el estado guarda los uids cortos `outlook:<parte del uid>`.
+- UT-UID-01.05: entrada legada en Windows: id corto sin prefijo ⇒ `outlook`.
+- UT-UID-02.03: `show <id corto>` sin prefijo en Windows se resuelve con el driver nativo.
+- UT-ATC-01.04: `show` no crea caché de adjuntos, staging ni `state.json`; con Apple Mail no escribe nada más, y solo un driver que usa la librería puede escribir en la caché de ids nativos.
+- TC-02.02–.06 y TC-09 (goldens de Outlook): solo cambian el uid, `last_uid` y el directorio de `cached_path`.
+- Test sin ID de `tests/test_backends.py` sobre `OutlookBackend.parse_uid`: espera la forma corta.
+- Cualquier otro test de los archivos del alcance que use un `EntryID` como uid de entrada pasa a sembrar la caché o a tomar el uid de un `search` previo; su expectativa no cambia.
+
+Comandos:
+
+- `$PY -B -m unittest discover -s tests -t . -k ol_31 > "$LOG/grupo-ol_31.log" 2>&1`; igual con `-k ol_32`, `-k ol_33`, `-k ut_uid_03`.
+- Goldens: `MAILQUERY_UPDATE_GOLDENS=1 $PY -B -m unittest discover -s tests -t . -k tc_02 > "$LOG/goldens-tc02.log" 2>&1` (y `-k tc_09`), después `git diff --stat tests/fixtures/expected/outlook/` y revisión de cada cambio.
+- Suite completa: la de `protocolo.md`.

@@ -12,7 +12,7 @@
 
 | Fecha | Commit | Python | Resumen | Fallos conocidos | Saltos |
 |---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| 2026-11-23 | 4361e96 | 3.14.6 (venv del plan) | `Ran 1452 tests`, `OK (skipped=8)` | ninguno | 8: SMOKE e instaladores que no aplican en macOS |
 
 ## Respuestas del dueño (HITL)
 
@@ -58,6 +58,7 @@ Decisiones de implementación que la unidad deja abiertas, resueltas de la forma
 - **D-17. Aviso de impresos.** En `run_search` (sin agrupar y con `--group-by`), justo antes de devolver la respuesta; en `run_new` (también con `--peek`), antes de escribir el estado. Un aviso por driver con al menos una fila, con los `row["uid"]` de sus filas impresas sin repetir, en el orden de la respuesta. `--count` no avisa.
 - **D-18. Item que existe pero no se puede abrir.** Por la respuesta H-03 del dueño: es *indeterminado*, la fila se conserva y `show` y `attachment` responden como hoy: `show` arma la fila desde las tablas de su carpeta (OL-21) y, si no aparece, "no encontrado" con el hint actual; `attachment` responde `E_ATTACHMENT_UNREADABLE`. Es una desviación aprobada de la condición "Garantía" de RF-81; el orquestador la aplica a la unidad en F0 (H-03).
 - **D-19. `docs/ROADMAP.md`.** No es documento consumidor ni está en CL-11; su mención de `3.0.0a1` no se cambia en este plan.
+- **D-21. Ubicación de worktrees, venv y logs.** El sandbox de esta sesión solo permite escribir dentro del checkout principal, así que los worktrees viven en `.worktrees/` (`unit`, `lote-1`, `lote-2`, `wt-a`, `wt-b`), el venv del plan en `.venv-id-corto/` y los logs en `.logs/id-corto-outlook/M<NN>/`, todos dentro de `mailquery` y excluidos con `.git/info/exclude`. Las rutas relativas de `protocolo.md` se leen desde la raíz del worktree con esa base: el venv es `../../.venv-id-corto/bin/python` y los logs `../../.logs/id-corto-outlook/M<NN>/`. El commit base y las ramas no cambian.
 - **D-20. Commit base y línea base en cada milestone.** El orquestador da al subagente, en el mensaje de lanzamiento, el commit base (tip de la rama del lote) y la línea base de la suite; el subagente los copia en la cabecera de su archivo de milestone en su primer commit.
 
 ## Decisiones abiertas
