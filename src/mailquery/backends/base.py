@@ -41,6 +41,19 @@ class ExcludedStoreError(LookupError):
         self.entry = entry
 
 
+class MessageNotFound(LookupError):
+    """``find_message``: the driver knows the message does not exist.
+
+    ``hint`` is the actionable text the command shows with its not-found error;
+    the core keeps the ``E_USAGE`` code, the message and the uid format. A plugin
+    that raises it is reported as ``E_PLUGIN_FAILED``.
+    """
+
+    def __init__(self, hint: str = "") -> None:
+        super().__init__(hint)
+        self.hint = hint
+
+
 class AccountRow(TypedDict):
     """Candidate account: one row of ``accounts()``."""
 

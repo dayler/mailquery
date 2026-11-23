@@ -27,7 +27,7 @@ from mailquery import output
 from mailquery import uid as uid_module
 from mailquery.attachments import classify_name
 from mailquery.attachments.cache import cached_path as attachment_cached_path
-from mailquery.backends.base import ExcludedStoreError
+from mailquery.backends.base import ExcludedStoreError, MessageNotFound
 from mailquery.errors import MailqueryError
 from mailquery.plugins import wrap_driver
 from mailquery.state import Cursor, EmittedUid
@@ -948,6 +948,8 @@ def run_show(
 
     try:
         found = target_backend.find_message(uid)
+    except MessageNotFound as exc:
+        raise _message_not_found(show_uid, exc.hint) from None
     except ExcludedStoreError as exc:
         raise _excluded_store_error(show_uid, exc.entry) from None
     # A backend may word the not-found hint itself (Outlook points to excluded_stores).

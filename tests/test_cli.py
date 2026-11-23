@@ -23,6 +23,7 @@ from unittest import mock
 from mailquery import cli as cli_mod
 from mailquery import errors
 from mailquery.backends import apple_mail as apple_mail_mod
+from mailquery.backends.base import MessageNotFound
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.attachments import attachment_path, sanitize_name
@@ -2486,6 +2487,51 @@ class AttachmentValidationTests(AttachmentTestBase):
         self.assertEqual(code, 0)
         self.assertTrue(self.json_object(stdout)["ok"])
         self.assertEqual(set(backend.stream_calls), {2})
+
+
+class _MessageNotFoundBackend(FakeAttachmentBackend):
+    """Attachment double whose ``find_message`` reports a driver-known miss."""
+
+    def __init__(self, hint: str = "", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.hint = hint
+
+    def find_message(self, uid):
+        self.calls.append("find_message")
+        raise MessageNotFound(self.hint)
+
+
+class MessageNotFoundHintTests(AttachmentTestBase):
+    """The not-found hint of a driver keeps the command's not-found error."""
+
+    HINT = "run `mailquery search` again: the message may have moved"
+
+    def test_driver_not_found_hint_reaches_show_and_attachment(self) -> None:
+        write_config(self.fx.home, _ATTACHMENT_CONFIG)
+        commands = (
+            (["show", str(ATTACHMENT_NATIVE_UID)], "show"),
+            (
+                ["attachment", f"apple_mail:{ATTACHMENT_NATIVE_UID}", "--index", "1"],
+                "attachment",
+            ),
+        )
+        for argv, command in commands:
+            with self.subTest(command=command):
+                plain = self.assert_error(
+                    2,
+                    self.run_attachment(argv, FakeAttachmentBackend(missing=True)),
+                    "E_USAGE",
+                    command,
+                )
+                hinted = self.assert_error(
+                    2,
+                    self.run_attachment(argv, _MessageNotFoundBackend(self.HINT)),
+                    "E_USAGE",
+                    command,
+                )
+                self.assertEqual(hinted["error"]["message"], plain["error"]["message"])
+                self.assertEqual(hinted["error"]["hint"], self.HINT)
+                self.assertNotEqual(plain["error"]["hint"], self.HINT)
 
 
 class AttachmentJsonCacheTests(AttachmentTestBase):

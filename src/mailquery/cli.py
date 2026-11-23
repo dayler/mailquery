@@ -26,7 +26,7 @@ from mailquery.attachments import W_ATTACHMENT_ACTIVE_CONTENT, active_content_ty
 from mailquery.attachments.engine import AttachmentsEngine
 from mailquery.attachments.paths import message_dir
 from mailquery.backends import backend_class, get_backend
-from mailquery.backends.base import ExcludedStoreError
+from mailquery.backends.base import ExcludedStoreError, MessageNotFound
 from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.config import (
     APP_HOME_SUBDIRS,
@@ -1366,12 +1366,13 @@ def _attachment_stream_guard(driver: str) -> AttachmentStreamGuard | None:
     return AttachmentStreamGuard(driver)
 
 
-def _attachment_not_found(uid: str) -> MailqueryError:
+def _attachment_not_found(uid: str, hint: str | None = None) -> MailqueryError:
     """``E_USAGE`` for an attachment uid that does not resolve to a visible message."""
     return MailqueryError(
         "E_USAGE",
         f"message uid {uid} was not found",
-        "run `mailquery search` to find the uid; deleted messages and orphan "
+        hint
+        or "run `mailquery search` to find the uid; deleted messages and orphan "
         ".emlx files are not shown",
         "message uid was not found",
     )
@@ -1432,6 +1433,8 @@ def _run_attachment(
     declared = {_scope_account_uuid(scope) for scope in resolved}
     try:
         found = wrapped.find_message(native_uid)
+    except MessageNotFound as exc:
+        raise _attachment_not_found(show_uid, exc.hint) from None
     except ExcludedStoreError as exc:
         raise _excluded_store_error(show_uid, exc.entry) from None
     if found is None:
