@@ -1,6 +1,6 @@
 """TC-06, PKG-01, PKG-02, PKG-03, DOC-07 and DOC-16: packaging, dependencies and consumer documents.
 
-``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a2),
+``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a3),
 not yet released: the tests derive every expected version from the package
 instead of pinning a literal (PKG-02).
 """
@@ -331,14 +331,15 @@ class ConsumerDocumentsTests(unittest.TestCase):
                     f"{name}: {NATIVE_ID_MARKER} outside the option description",
                 )
 
-    def test_doc_16_03_version_is_3_0_0a2_in_package_and_readmes(self) -> None:
-        """DOC-16.03: pyproject, ``mailquery.__version__`` and both READMEs announce 3.0.0a2."""
-        self.assertEqual(_load()["project"]["version"], "3.0.0a2")
-        self.assertEqual(mailquery.__version__, "3.0.0a2")
+    def test_doc_16_03_version_is_3_0_0a3_in_package_and_readmes(self) -> None:
+        """DOC-16.03: pyproject, ``mailquery.__version__`` and both READMEs announce 3.0.0a3."""
+        self.assertEqual(_load()["project"]["version"], "3.0.0a3")
+        self.assertEqual(mailquery.__version__, "3.0.0a3")
         for name in ("README.md", "README.es.md"):
             text = _readme(name)
-            self.assertIn("3.0.0a2", text, name)
-            self.assertIn("3.0.0-alpha.2", text, name)
+            self.assertIn("3.0.0a3", text, name)
+            self.assertIn("3.0.0-alpha.3", text, name)
+            self.assertNotIn("3.0.0a2", text, name)
             self.assertNotIn("3.0.0a1", text, name)
 
     def test_doc_16_04_readmes_describe_the_native_id_cache(self) -> None:
