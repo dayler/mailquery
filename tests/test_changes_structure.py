@@ -1,8 +1,10 @@
-"""Structure checks for the change units of the PRD (DOC-15).
+"""Structure checks for the change units (DOC-15).
 
-A change unit is a Markdown file in ``docs/changes/`` that holds the final
-text the PRD must have. The checks take the directory to validate, so they
-run on the repository and on sample units written to a temporary directory.
+A change unit is a Markdown file in ``docs/changes/`` that defines a change of
+the product: its requirement, its acceptance criteria, the PRD sections to
+reconcile and the reconciliation checklist. The checks take the directory to
+validate, so they run on the repository and on sample units written to a
+temporary directory.
 """
 
 from __future__ import annotations
@@ -13,44 +15,58 @@ import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tests.test_prd_structure import DOCS_ROOT, ID_OWNERS, PRD_DIR, classify, index_table, read_lines
+from tests.test_prd_structure import DOCS_ROOT, PRD_DIR, classify, index_table, read_lines
 
 CHANGES_DIR = DOCS_ROOT / "docs" / "changes"
 PROTOCOL_NAME = "PROTOCOLO.md"
 TEMPLATE_NAME = "PLANTILLA.md"
 NOT_UNITS = (PROTOCOL_NAME, TEMPLATE_NAME)
 
+REQUIREMENT = "Requerimiento"
+CRITERIA = "Criterios de aceptación"
+RECONCILIATION = "Conciliación con el PRD"
+CHECKLIST = "Checklist de conciliación"
 SECTIONS = (
     "Estado",
     "Contexto",
+    REQUIREMENT,
+    CRITERIA,
     "IDs",
     "Dependencias",
-    "Cambios en el PRD",
     "Decisiones",
     "Glosario",
-    "Secciones relacionadas y textos obsoletos",
+    RECONCILIATION,
     "Documentos consumidores",
+    CHECKLIST,
     "Desviaciones aprobadas",
 )
 HEADER_FIELDS = ("Tipo", "Base", "Fecha", "Aprobación", "Paquete")
-OPERATIONS = ("añadir", "modificar", "eliminar")
 ID_LINES = ("- Crea:", "- Elimina:")
-NEW_FILE = "archivo nuevo"
 NOT_APPROVED = "—"
 NO_DEPENDENCIES = "Ninguna"
 NO_DECISIONS = "Ninguna"
 NO_GLOSSARY = "Sin cambios"
-NO_CHANGES = "Ninguno"
+NO_RECONCILIATION = "Ninguna"
 NO_CONSUMERS = "Ninguno"
 CONSUMER_STATES = ("pendiente", "actualizado", "sin cambio")
-RELATED_VALUES = ("cambia", "sin cambio")
-RELATED_TABLE = "Secciones que suelen cambiar a la vez"
 CLASSES_TABLE = "Clases de cambio del paquete"
 TREATMENT_TABLE = "Tratamiento de cada tipo de cambio"
 NO_UNIT = "Sin unidad"
-OBSOLETE_KEY = "Textos obsoletos"
-COVER_PAGE = "00-indice.md"
-COVER_LABEL = "Portada"
+PLAN_DIR = "docs/plan"
+DEFECT = "defecto"
+
+RECONCILIATION_COLUMNS = ("ID", "Contrato", "Archivo", "Ancla", "Qué cambia", "Estado")
+NEW_FILE = "(nuevo)"
+NO_ANCHOR = "—"
+ROW_STATES = {
+    "borrador": ("pendiente",),
+    "aprobado": ("pendiente", "implementado"),
+    "implementado": ("implementado",),
+    "conciliado": ("conciliado",),
+}
+COMMON_ITEMS_TABLE = "Ítems comunes del checklist de conciliación"
+CHECKLIST_COLUMNS = ("ID", "Ítem", "Cómo se verifica", "Estado")
+CHECKLIST_STATES = ("pendiente", "cumplido", "no aplica")
 
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*\.md$")
 HEADER_RE = re.compile(r"^\*\*([^:*]+):\*\* (.+)$")
@@ -73,50 +89,29 @@ DEFINITION_RES = (
     re.compile(r"^\| (O|CU-|RF-|RNF-|ADR-)(x?\d+) \|"),
     re.compile(r"^\*\*(AC-)(x?\d+)\.\*\*"),
 )
-OWNER_FILES = {(kind if kind == "O" else f"{kind}-"): owner for kind, _, owner in ID_OWNERS}
-CHANGE_HEADING_RE = re.compile(r"^### (\S+\.md) — (sección \d+(?:\.\d+)?|Anexo [A-Z]|Portada)$")
-TABLE_RULE_RE = re.compile(r"^\|\s*:?-{3,}")
-LINK_TARGET_RE = re.compile(r"\]\(([^)\s]+)\)")
-MD_HEADING_RE = re.compile(r"^(#{1,6}) ")
-LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)]) ")
-FIELD_LINE_RE = re.compile(r"^\*\*[^*]+:\*\* ")
+UNIT_DEFINITION_RE = re.compile(r"^\*\*(O|CU-|RF-|RNF-|ADR-|AC-)(x?\d+)\.")
+CRITERION_KIND = "AC-"
+FILE_CELL_RE = re.compile(r"^`([^`]+\.md)`( \(nuevo\))?$")
+ANCHOR_RE = re.compile(rf"``\s(.+?)\s``|`([^`]+)`|{BEFORE}{KIND}(\d+){AFTER}")
 TABLE_TITLE = "**Tabla: "
+
+OBJECTIVES_FILE = "03-objetivos.md"
+REQUIREMENTS_FILE = "06-requisitos-funcionales.md"
+DEFAULT = "<default>"
+OBJECTIVE_START_RE = re.compile(r"^\| O\d+ \|")
 
 # An ID is (kind, number) when it is real and (kind, "x<n>") when it is a marker.
 Ident = tuple[str, "int | str"]
 
 
 @dataclass
-class Change:
-    """One change of a unit: target file, operation, location block and final text block."""
-
-    file: str
-    line: int
-    operation: str
-    location: list[str] | None = None
-    final: list[str] | None = None
-
-
-@dataclass
-class FileHeading:
-    """A file heading of the changes section; file and label are empty when the heading is malformed."""
-
-    file: str
-    label: str
-    line: int
-    changes: int = 0
-
-
-@dataclass
 class Unit:
-    """A parsed change unit: header fields, sections, file headings and changes."""
+    """A parsed change unit: title, header fields and sections."""
 
     path: Path
     title: str = ""
     header: dict[str, list[str]] = field(default_factory=dict)
     sections: list[tuple[str, list[tuple[int, str, bool]]]] = field(default_factory=list)
-    headings: list[FileHeading] = field(default_factory=list)
-    changes: list[Change] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -133,6 +128,32 @@ class Unit:
     def text_lines(self, title: str) -> list[str]:
         """Non-empty lines of a section outside code blocks, stripped."""
         return [text.strip() for _, text, in_code in self.section(title) if not in_code and text.strip()]
+
+    def table(self, section: str, title: str) -> tuple[list[str], list[list[str]]] | None:
+        """Header cells and data rows of the table of a section that carries this title.
+
+        None when the section has no such title or no table follows it.
+        """
+        lines = [text for _, text, in_code in self.section(section) if not in_code]
+        marker = f"{TABLE_TITLE}{title}**"
+        positions = [index for index, line in enumerate(lines) if line.strip() == marker]
+        if not positions:
+            return None
+        collected: list[list[str]] = []
+        for line in lines[positions[0] + 1:]:
+            if not line.strip() and not collected:
+                continue
+            if not line.startswith("|"):
+                break
+            collected.append([cell.strip() for cell in line.strip().strip("|").split("|")])
+        if len(collected) < 2:
+            return None
+        return collected[0], collected[2:]
+
+    @property
+    def kind(self) -> str:
+        """Unit type of the header, or an empty string."""
+        return (self.header.get("Tipo") or [""])[0]
 
     @property
     def state(self) -> str:
@@ -170,11 +191,6 @@ def table_rows(path: Path, title: str) -> list[list[str]]:
     return rows[2:]
 
 
-def related_rows() -> list[str]:
-    """First cell of each row of the related-sections table of the protocol."""
-    return [row[0] for row in table_rows(CHANGES_DIR / PROTOCOL_NAME, RELATED_TABLE)]
-
-
 def classes_by_type() -> dict[str, tuple[str, ...]]:
     """Package classes that each unit type allows, from the package-classes table of the protocol."""
     result: dict[str, list[str]] = {}
@@ -182,22 +198,6 @@ def classes_by_type() -> dict[str, tuple[str, ...]]:
         for kind in re.findall(r"`([^`]+)`", row[2]):
             result.setdefault(kind, []).append(row[0].strip("`"))
     return {kind: tuple(classes) for kind, classes in result.items()}
-
-
-def section_labels() -> dict[str, str | None]:
-    """Section label of each PRD file, in the order of the cover page.
-
-    The cover page comes first. A file of a numbered section or of an annex has
-    the label of its row in the cover-page table; any other listed file has None.
-    """
-    labels: dict[str, str | None] = {COVER_PAGE: COVER_LABEL}
-    for row in index_table("Archivos del PRD"):
-        number = re.match(r"^(\d+(?:\.\d+)?) ", row[0])
-        annex = re.match(r"^Anexo ([A-Z]) ", row[0])
-        label = f"sección {number.group(1)}" if number else f"Anexo {annex.group(1)}" if annex else None
-        for target in LINK_TARGET_RE.findall(row[1]):
-            labels[target] = label
-    return labels
 
 
 def next_free_ids() -> dict[str, int]:
@@ -210,8 +210,13 @@ def next_free_ids() -> dict[str, int]:
     return result
 
 
+def common_items() -> list[str]:
+    """Item text of each row of the common-items table of the protocol, in order."""
+    return [row[0] for row in table_rows(CHANGES_DIR / PROTOCOL_NAME, COMMON_ITEMS_TABLE)]
+
+
 def parse(path: Path) -> Unit:
-    """Read a unit: title, header fields before the first section, sections and changes."""
+    """Read a unit: title, header fields before the first section, and sections."""
     unit = Unit(path=path)
     current: list[tuple[int, str, bool]] | None = None
     for number, text, in_code in classify(read_lines(path)):
@@ -229,59 +234,7 @@ def parse(path: Path) -> Unit:
         match = HEADER_RE.match(text)
         if match:
             unit.header.setdefault(match.group(1), []).append(match.group(2).strip())
-    _parse_changes(unit)
     return unit
-
-
-def _parse_changes(unit: Unit) -> None:
-    """Fill the file headings and the changes of a unit from its changes section.
-
-    A change starts at its operation line and belongs to the last file heading.
-    The code block after the location label is its location and the one after
-    the final-text label is its final text; fence lines are not part of either.
-    """
-    heading: FileHeading | None = None
-    change: Change | None = None
-    target = ""
-    block: list[str] | None = None
-
-    def close_block() -> None:
-        nonlocal block, target
-        if block is not None and change is not None and target:
-            setattr(change, target, block[:-1])
-        block = None
-        target = ""
-
-    for number, text, in_code in unit.section("Cambios en el PRD"):
-        if in_code:
-            if block is None:
-                block = []
-            else:
-                block.append(text)
-            continue
-        if block is not None:
-            close_block()
-        stripped = text.strip()
-        if text.startswith("### "):
-            match = CHANGE_HEADING_RE.match(text)
-            heading = FileHeading(
-                file=match.group(1) if match else "", label=match.group(2) if match else "", line=number
-            )
-            unit.headings.append(heading)
-        elif stripped.startswith("- **Operación:**"):
-            change = Change(
-                file=heading.file if heading else "",
-                line=number,
-                operation=stripped.split(":**", 1)[1].strip(),
-            )
-            unit.changes.append(change)
-            if heading:
-                heading.changes += 1
-        elif stripped.startswith("- **Ubicación:**"):
-            target = "location"
-        elif stripped.startswith("- **Texto final:**"):
-            target = "final"
-    close_block()
 
 
 def id_line(unit: Unit, label: str) -> tuple[list[Ident], list[str]]:
@@ -347,118 +300,29 @@ def dependency_closure(unit: Unit, by_name: dict[str, Unit]) -> set[str]:
 
 
 def is_resolvable(unit: Unit, by_name: dict[str, Unit]) -> bool:
-    """Whether the locations of the unit must exist in the PRD: it is open and no dependency of it is open."""
+    """Whether what the unit says about the PRD must hold now: it is open and no dependency of it is open."""
     return unit.is_open and not any(
         name in by_name and by_name[name].is_open for name in dependency_names(unit)
     )
 
 
-def location_line(change: Change) -> str | None:
-    """The single non-empty line of the location block, or None when it does not have exactly one."""
-    lines = [line for line in (change.location or []) if line.strip()]
-    return lines[0].rstrip() if len(lines) == 1 else None
-
-
-def matching_lines(prd_dir: Path, file: str, location: str) -> list[int]:
-    """Numbers of the lines of a PRD file that start with the location text; empty when the file is missing."""
-    target = prd_dir / file
-    if not target.is_file():
-        return []
-    return [number for number, line in enumerate(read_lines(target), start=1) if line.startswith(location)]
-
-
-def block_range(lines: list[str], number: int) -> tuple[int, int]:
-    """First and last line numbers of the block that the line with this number identifies.
-
-    A line inside a code block selects the whole code block. A table row
-    selects itself. A table title selects the title and its table. A field
-    line selects itself and its continuation lines, up to the next field line
-    or blank line.
-    A heading selects its section, up to the next heading of the same or a
-    higher level. A list item selects itself with its continuation lines and
-    sub-items. Any other line selects its paragraph.
-    """
-    in_code = {line_number: code for line_number, _, code in classify(lines)}
-    last = len(lines)
-    text = lines[number - 1]
-    if in_code.get(number):
-        start = end = number
-        while in_code.get(start - 1):
-            start -= 1
-        while in_code.get(end + 1):
-            end += 1
-        return start, end
-    if text.startswith("|"):
-        return number, number
-    if text.startswith(TABLE_TITLE):
-        end = number
-        cursor = number + 1
-        while cursor <= last and not lines[cursor - 1].strip():
-            cursor += 1
-        while cursor <= last and lines[cursor - 1].startswith("|"):
-            end = cursor
-            cursor += 1
-        return number, end
-    if FIELD_LINE_RE.match(text):
-        end = number
-        while end < last and lines[end].strip() and not FIELD_LINE_RE.match(lines[end]):
-            end += 1
-        return number, end
-    heading = MD_HEADING_RE.match(text)
-    if heading:
-        end = number
-        for cursor in range(number + 1, last + 1):
-            other = MD_HEADING_RE.match(lines[cursor - 1])
-            if other and not in_code.get(cursor) and len(other.group(1)) <= len(heading.group(1)):
-                break
-            end = cursor
-        return number, end
-    item = LIST_ITEM_RE.match(text)
-    if item:
-        end = number
-        for cursor in range(number + 1, last + 1):
-            line = lines[cursor - 1]
-            other = LIST_ITEM_RE.match(line)
-            if not line.strip() or (other and len(other.group(1)) <= len(item.group(1))):
-                break
-            end = cursor
-        return number, end
-    start = end = number
-    while start > 1 and lines[start - 2].strip():
-        start -= 1
-    while end < last and lines[end].strip():
-        end += 1
-    return start, end
-
-
-def changed_blocks(unit: Unit, prd_dir: Path) -> list[tuple[Change, list[str], int, int, int]]:
-    """(change, file lines, selected line, first line, last line) for each modification or removal.
-
-    Only the changes whose location selects exactly one line of the PRD file are returned.
-    """
-    result = []
-    for change in unit.changes:
-        location = location_line(change)
-        if change.operation not in ("modificar", "eliminar") or location is None:
-            continue
-        numbers = matching_lines(prd_dir, change.file, location)
-        if len(numbers) == 1:
-            lines = read_lines(prd_dir / change.file)
-            result.append((change, lines, numbers[0], *block_range(lines, numbers[0])))
+def section_definitions(unit: Unit, title: str) -> set[Ident]:
+    """IDs that a section of a unit defines: paragraphs that start with a bold ID, outside code blocks."""
+    result: set[Ident] = set()
+    for _, text, in_code in unit.section(title):
+        match = None if in_code else UNIT_DEFINITION_RE.match(text)
+        if match:
+            tail = match.group(2)
+            result.add((match.group(1), tail if tail.startswith("x") else int(tail)))
     return result
 
 
-def removed_ids(unit: Unit, prd_dir: Path) -> set[Ident]:
-    """IDs that the changes of the unit take out of the PRD.
-
-    A removal takes out every ID its block defines; a modification takes out
-    the IDs its block defines that its final text no longer defines.
-    """
-    removed: set[Ident] = set()
-    for change, lines, _, start, end in changed_blocks(unit, prd_dir):
-        kept = definitions(change.final or []) if change.operation == "modificar" else set()
-        removed |= definitions(lines[start - 1:end]) - kept
-    return removed
+def prd_definitions(prd_dir: Path) -> set[Ident]:
+    """IDs that the files of the PRD define."""
+    result: set[Ident] = set()
+    for path in sorted(prd_dir.rglob("*.md")):
+        result |= definitions(read_lines(path))
+    return result
 
 
 def check_files(directory: Path) -> list[str]:
@@ -547,20 +411,20 @@ def check_states(units: list[Unit]) -> list[str]:
 
 
 def check_ids(units: list[Unit], next_free: dict[str, int], prd_dir: Path) -> list[str]:
-    """The IDs section is well formed and agrees with the changes of the unit.
+    """The IDs section is well formed and agrees with the requirement of the unit.
 
     The section has the created line and the removed line, with valid ranges.
     Drafts create only markers and other units hold no markers. In an open
-    unit, the created IDs are exactly the new IDs its final texts define, each
-    in the PRD file that owns its kind; an ID created by an open unit it
-    depends on is not new. When the locations of the unit must exist in the PRD, the
-    removed IDs are exactly the IDs its changes take out, and a modification
-    of a line that defines an ID keeps that ID. The IDs created by
-    approved and implemented units are unique and continue, per kind, from the
-    next free ID of the PRD.
+    unit, the created IDs are exactly the new IDs it defines: acceptance
+    criteria in the criteria section and every other kind in the requirement
+    section; an ID created by an open unit it depends on is not new. When what
+    the unit says about the PRD must hold now, every removed ID is defined in
+    the PRD. The IDs created by approved and implemented units are unique and
+    continue, per kind, from the next free ID of the PRD.
     """
     by_name = {unit.name: unit for unit in units}
     created_by = {unit.name: set(id_line(unit, ID_LINES[0])[0]) for unit in units}
+    in_prd = prd_definitions(prd_dir)
     problems = []
     reserved: dict[str, list[tuple[int, str]]] = {}
     for unit in units:
@@ -586,31 +450,22 @@ def check_ids(units: list[Unit], next_free: dict[str, int], prd_dir: Path) -> li
                 if name in by_name and by_name[name].is_open:
                     inherited |= created_by[name]
             new = set()
-            for change in unit.changes:
-                for ident in definitions(change.final or []) - inherited:
+            for title in (REQUIREMENT, CRITERIA):
+                for ident in section_definitions(unit, title) - inherited:
                     kind, tail = ident
                     if isinstance(tail, str) or tail >= next_free.get(kind, 0):
                         new.add(ident)
-                        if change.file != OWNER_FILES[kind]:
-                            problems.append(f"{label}: {show(ident)} defined outside {OWNER_FILES[kind]}")
+                        if (kind == CRITERION_KIND) != (title == CRITERIA):
+                            problems.append(f"{label}: {show(ident)} defined in the section {title!r}")
             if new != set(created):
                 problems.append(
                     f"{label}: creates {sorted(map(show, created))} "
-                    f"but its final texts define {sorted(map(show, new))}"
+                    f"but it defines {sorted(map(show, new))}"
                 )
         if is_resolvable(unit, by_name):
-            for change, lines, number, _, _ in changed_blocks(unit, prd_dir):
-                dropped = definitions([lines[number - 1]]) - definitions(change.final or [])
-                if change.operation == "modificar" and dropped:
-                    problems.append(
-                        f"{label}:{change.line}: a modification drops {sorted(map(show, dropped))}"
-                    )
-            taken_out = removed_ids(unit, prd_dir)
-            if taken_out != set(removed):
-                problems.append(
-                    f"{label}: removes {sorted(map(show, removed))} "
-                    f"but its changes take out {sorted(map(show, taken_out))}"
-                )
+            for ident in removed:
+                if ident not in in_prd:
+                    problems.append(f"{label}: removes {show(ident)}, which the PRD does not define")
         for kind, number in real:
             if kind not in next_free:
                 problems.append(f"{label}: unknown ID kind {kind}")
@@ -650,163 +505,153 @@ def check_dependencies(units: list[Unit]) -> list[str]:
     return problems
 
 
-def check_changes(units: list[Unit], prd_dir: Path, labels: dict[str, str | None]) -> list[str]:
-    """Each unit has well-formed changes, grouped by file in the order of the PRD.
-
-    A unit without changes says so and changes the glossary or adds decisions.
-    Every file heading is valid, appears once, holds at least one change and
-    carries the section label of its file; the glossary and the history have
-    no heading. Every change has a valid operation, a one-line location and a
-    final text, except a removal, which has none. When the locations of the
-    unit must exist in the PRD, exactly one line of the file starts with the
-    location; the location of a new file belongs to an addition to a file that
-    does not exist yet.
-    """
-    by_name = {unit.name: unit for unit in units}
-    order = list(labels)
+def check_requirement(units: list[Unit]) -> list[str]:
+    """Each unit has a requirement and acceptance criteria, and no line of it cites a plan."""
     problems = []
     for unit in units:
         label = unit.path.name
-        if not unit.changes:
-            declared = not unit.headings and unit.text_lines("Cambios en el PRD") == [NO_CHANGES]
-            elsewhere = (
-                unit.text_lines("Glosario") != [NO_GLOSSARY] or unit.text_lines("Decisiones") != [NO_DECISIONS]
-            )
-            if not (declared and elsewhere):
-                problems.append(f"{label}: no changes")
-        files: list[str] = []
-        for heading in unit.headings:
-            if not heading.file:
-                problems.append(f"{label}:{heading.line}: invalid change heading")
-                continue
-            if not heading.changes:
-                problems.append(f"{label}:{heading.line}: file heading without changes")
-            if heading.file in files:
-                problems.append(f"{label}:{heading.line}: {heading.file} has two headings")
-            files.append(heading.file)
-            if heading.file in labels and labels[heading.file] is None:
-                problems.append(f"{label}:{heading.line}: {heading.file} does not go in the changes section")
-            elif heading.file in labels and heading.label != labels[heading.file]:
-                problems.append(f"{label}:{heading.line}: {heading.file} is {labels[heading.file]!r}")
-        positions = [order.index(file) for file in files if file in order]
-        if positions != sorted(positions):
-            problems.append(f"{label}: files out of the PRD order")
-        resolvable = is_resolvable(unit, by_name)
-        for change in unit.changes:
-            where = f"{label}:{change.line}"
-            if not change.file:
-                problems.append(f"{where}: change outside a valid file heading")
-            if change.operation not in OPERATIONS:
-                problems.append(f"{where}: invalid operation {change.operation!r}")
-            has_final = any(line.strip() for line in change.final or [])
-            if change.operation == "eliminar":
-                if change.final is not None:
-                    problems.append(f"{where}: a removal has a final text")
-            elif not has_final:
-                problems.append(f"{where}: no final text")
-            location = location_line(change)
-            if location is None:
-                count = len([line for line in (change.location or []) if line.strip()])
-                problems.append(f"{where}: the location has {count} lines")
-                continue
-            if not resolvable or not change.file:
-                continue
-            if location.strip() == NEW_FILE:
-                if change.operation != "añadir":
-                    problems.append(f"{where}: a new file is only added")
-                if (prd_dir / change.file).exists():
-                    problems.append(f"{where}: {change.file} already exists")
-            elif not (prd_dir / change.file).is_file():
-                problems.append(f"{where}: missing {change.file}")
-            else:
-                count = len(matching_lines(prd_dir, change.file, location))
-                if count != 1:
-                    problems.append(f"{where}: {count} lines of {change.file} start with the location")
+        for title in (REQUIREMENT, CRITERIA):
+            if not any(text.strip() for _, text, _ in unit.section(title)):
+                problems.append(f"{label}: empty section {title!r}")
+        for _, rows in unit.sections:
+            for number, text, _ in rows:
+                if PLAN_DIR in text:
+                    problems.append(f"{label}:{number}: the unit cites a plan")
     return problems
 
 
-def check_final_text(units: list[Unit]) -> list[str]:
-    """No final text cites a plan, and every whole table in a final text has a title line right above it."""
-    problems = []
-    for unit in units:
-        for change in unit.changes:
-            lines = change.final or []
-            previous = ""
-            for index, line in enumerate(lines):
-                if "docs/plan" in line:
-                    problems.append(f"{unit.path.name}:{change.line}: the final text cites a plan")
-                starts_table = line.startswith("|") and (index == 0 or not lines[index - 1].startswith("|"))
-                whole_table = index + 1 < len(lines) and TABLE_RULE_RE.match(lines[index + 1])
-                if starts_table and whole_table and not previous.startswith(TABLE_TITLE):
-                    problems.append(f"{unit.path.name}:{change.line}: table without title in the final text")
-                if line.strip():
-                    previous = line
-    return problems
+def numbered(rows: list[list[str]], prefix: str) -> bool:
+    """Whether the first cells of the rows are prefix-01, prefix-02 and so on, without gaps."""
+    return [row[0] for row in rows] == [f"{prefix}-{number:02d}" for number in range(1, len(rows) + 1)]
 
 
-def check_overlaps(units: list[Unit], prd_dir: Path) -> list[str]:
-    """No two open units modify or remove blocks that share a line, unless one depends on the other.
+def anchors(cell: str) -> list[str]:
+    """Anchors of a cell: the text of each code span and each ID outside the code spans."""
+    result = []
+    for match in ANCHOR_RE.finditer(cell):
+        double, single, kind, number = match.groups()
+        result.append(double or single or f"{kind}{number}")
+    return result
 
-    The block of a location that selects one line of the PRD file is its range
-    of lines; a location that selects no single line is compared as text.
+
+def anchor_lines(path: Path, anchor: str) -> int:
+    """Number of lines of a PRD file that an anchor selects.
+
+    An ID selects the lines that define it. Any other anchor selects the lines
+    that start with it, or whose first table cell starts with it.
+    """
+    lines = read_lines(path)
+    ident = ID_RE.fullmatch(anchor)
+    if ident:
+        wanted = (ident.group(1), int(ident.group(2)))
+        return sum(1 for line in lines if wanted in definitions([line]))
+    return sum(1 for line in lines if line.startswith(anchor) or line.startswith(f"| {anchor}"))
+
+
+def check_reconciliation(units: list[Unit], prd_dir: Path) -> list[str]:
+    """Each unit has a well-formed reconciliation table, or says there is none.
+
+    Only a defect unit may have none. The table has the required columns and
+    at least one row; the rows are numbered without gaps and the contract and
+    the change are not empty. The state of each row is one that the state of
+    the unit allows. In an open unit, every row names one PRD file and at
+    least one anchor; a row for a new file has no anchor. When what the unit
+    says about the PRD must hold now, the file exists and each anchor selects
+    exactly one line of it, and a new file does not exist yet.
     """
     by_name = {unit.name: unit for unit in units}
-    ranges: list[tuple[str, int, int, str]] = []
-    texts: dict[tuple[str, str], set[str]] = {}
-    for unit in units:
-        if not unit.is_open:
-            continue
-        resolved = {id(change) for change, _, _, _, _ in changed_blocks(unit, prd_dir)}
-        for change, _, _, start, end in changed_blocks(unit, prd_dir):
-            ranges.append((change.file, start, end, unit.name))
-        for change in unit.changes:
-            location = location_line(change)
-            if change.operation in ("modificar", "eliminar") and location and id(change) not in resolved:
-                texts.setdefault((change.file, location.strip()), set()).add(unit.name)
-
-    def related(first: str, second: str) -> bool:
-        return (
-            second in dependency_closure(by_name[first], by_name)
-            or first in dependency_closure(by_name[second], by_name)
-        )
-
-    found: set[tuple[str, str, str]] = set()
-    for index, (file, start, end, name) in enumerate(ranges):
-        for other_file, other_start, other_end, other in ranges[index + 1:]:
-            if file == other_file and name != other and start <= other_end and other_start <= end:
-                found.add((file, *sorted((name, other))))
-    for (file, _), names in texts.items():
-        ordered = sorted(names)
-        for index, first in enumerate(ordered):
-            for second in ordered[index + 1:]:
-                found.add((file, first, second))
-    return [
-        f"{file}: {first}.md and {second}.md change the same block"
-        for file, first, second in sorted(found)
-        if not related(first, second)
-    ]
-
-
-def check_related(units: list[Unit], rows: list[str]) -> list[str]:
-    """Each unit marks every row of the related-sections table once and has the obsolete-texts line."""
     problems = []
     for unit in units:
-        found: dict[str, list[str]] = {}
-        for line in unit.text_lines("Secciones relacionadas y textos obsoletos"):
-            match = ITEM_RE.match(line)
-            if not match:
-                problems.append(f"{unit.path.name}: invalid related-sections line {line!r}")
+        label = unit.path.name
+        if unit.text_lines(RECONCILIATION) == [NO_RECONCILIATION]:
+            if unit.kind != DEFECT:
+                problems.append(f"{label}: only a {DEFECT} unit has no reconciliation table")
+            continue
+        table = unit.table(RECONCILIATION, RECONCILIATION)
+        if table is None:
+            problems.append(f"{label}: no reconciliation table")
+            continue
+        header, rows = table
+        if tuple(header) != RECONCILIATION_COLUMNS:
+            problems.append(f"{label}: reconciliation columns {header}")
+            continue
+        if not rows:
+            problems.append(f"{label}: reconciliation table without rows")
+        if any(len(row) != len(RECONCILIATION_COLUMNS) for row in rows):
+            problems.append(f"{label}: a reconciliation row does not have {len(RECONCILIATION_COLUMNS)} cells")
+            continue
+        if not numbered(rows, "RC"):
+            problems.append(f"{label}: reconciliation IDs {[row[0] for row in rows]}")
+        allowed = ROW_STATES.get(unit.state_word, ())
+        resolvable = is_resolvable(unit, by_name)
+        for identifier, contract, file_cell, anchor_cell, what, state in rows:
+            where = f"{label}: {identifier}"
+            if not contract or not what:
+                problems.append(f"{where}: empty cell")
+            if state not in allowed:
+                problems.append(f"{where}: state {state!r} in a unit {unit.state_word!r}")
+            if not unit.is_open:
                 continue
-            found.setdefault(match.group(1), []).append(match.group(2).strip())
-        for row in rows:
-            values = found.pop(row, [])
-            if len(values) != 1 or values[0] not in RELATED_VALUES:
-                problems.append(f"{unit.path.name}: row {row!r} marked {values}")
-        obsolete = found.pop(OBSOLETE_KEY, [])
-        if len(obsolete) != 1 or not obsolete[0]:
-            problems.append(f"{unit.path.name}: {len(obsolete)} obsolete-texts lines with text")
-        for key in found:
-            problems.append(f"{unit.path.name}: unknown related-sections row {key!r}")
+            file_match = FILE_CELL_RE.match(file_cell)
+            if not file_match:
+                problems.append(f"{where}: invalid file cell {file_cell!r}")
+                continue
+            name, is_new = file_match.groups()
+            target = prd_dir / name
+            if is_new:
+                if anchor_cell != NO_ANCHOR:
+                    problems.append(f"{where}: a new file has no anchor")
+                if resolvable and target.exists():
+                    problems.append(f"{where}: {name} already exists")
+                continue
+            found = anchors(anchor_cell)
+            if not found:
+                problems.append(f"{where}: no anchor")
+            if not resolvable:
+                continue
+            if not target.is_file():
+                problems.append(f"{where}: missing {name}")
+                continue
+            for anchor in found:
+                count = anchor_lines(target, anchor)
+                if count != 1:
+                    problems.append(f"{where}: {count} lines of {name} match the anchor {anchor!r}")
+    return problems
+
+
+def check_checklist(units: list[Unit], common: list[str]) -> list[str]:
+    """Each unit has a well-formed reconciliation checklist that starts with the common items.
+
+    The table has the required columns, its rows are numbered without gaps,
+    no cell is empty and every state is valid. No item is pending once the
+    unit is reconciled.
+    """
+    problems = []
+    for unit in units:
+        label = unit.path.name
+        table = unit.table(CHECKLIST, CHECKLIST)
+        if table is None:
+            problems.append(f"{label}: no checklist table")
+            continue
+        header, rows = table
+        if tuple(header) != CHECKLIST_COLUMNS:
+            problems.append(f"{label}: checklist columns {header}")
+            continue
+        if any(len(row) != len(CHECKLIST_COLUMNS) for row in rows):
+            problems.append(f"{label}: a checklist row does not have {len(CHECKLIST_COLUMNS)} cells")
+            continue
+        if not numbered(rows, "CL"):
+            problems.append(f"{label}: checklist IDs {[row[0] for row in rows]}")
+        items = [row[1] for row in rows]
+        if len(items) < len(common) or any(not item.startswith(text) for item, text in zip(items, common)):
+            problems.append(f"{label}: the checklist does not start with the common items")
+        for identifier, item, how, state in rows:
+            if not item or not how:
+                problems.append(f"{label}: {identifier}: empty cell")
+            if state not in CHECKLIST_STATES:
+                problems.append(f"{label}: {identifier}: invalid state {state!r}")
+            elif state == "pendiente" and not unit.is_open:
+                problems.append(f"{label}: {identifier} is pending in a reconciled unit")
     return problems
 
 
@@ -857,19 +702,12 @@ def check_all(directory: Path) -> dict[str, list[str]]:
         "states": check_states(units),
         "ids": check_ids(units, next_free_ids(), PRD_DIR),
         "dependencies": check_dependencies(units),
-        "changes": check_changes(units, PRD_DIR, section_labels()),
-        "final_text": check_final_text(units),
-        "overlaps": check_overlaps(units, PRD_DIR),
-        "related": check_related(units, related_rows()),
+        "requirement": check_requirement(units),
+        "reconciliation": check_reconciliation(units, PRD_DIR),
+        "checklist": check_checklist(units, common_items()),
         "consumers": check_consumers(units),
         "tables": check_tables(directory),
     }
-
-
-OBJECTIVES_FILE = "03-objetivos.md"
-REQUIREMENTS_FILE = "06-requisitos-funcionales.md"
-DEFAULT = "<default>"
-OBJECTIVE_START_RE = re.compile(r"^\| O\d+ \|")
 
 
 def objective_rows() -> list[tuple[str, str]]:
@@ -882,33 +720,32 @@ def objective_rows() -> list[tuple[str, str]]:
     return result
 
 
-def objectives_heading() -> str:
-    """The heading of the PRD section that holds the objective rows."""
-    heading = ""
-    for line in read_lines(PRD_DIR / OBJECTIVES_FILE):
-        if MD_HEADING_RE.match(line):
-            heading = line
-        if OBJECTIVE_START_RE.match(line):
-            break
-    return heading
+def first_objective() -> str:
+    """ID of the first objective row of the PRD."""
+    return objective_rows()[0][0].strip("| ")
 
 
-def related_text(rows: list[str] | None = None) -> str:
-    """Related-sections lines that mark every row as unchanged and declare no obsolete text."""
-    lines = [f"- {row}: sin cambio" for row in (related_rows() if rows is None else rows)]
-    return "\n".join(lines + [f"- {OBSOLETE_KEY}: Ninguno"])
+def reconciliation_table(
+    rows: list[tuple[str, str, str]], columns: tuple[str, ...] = RECONCILIATION_COLUMNS
+) -> str:
+    """Markdown of a reconciliation table with one row per (file cell, anchor cell, state)."""
+    lines = [f"{TABLE_TITLE}{RECONCILIATION}**", "", "| " + " | ".join(columns) + " |", "|---" * len(columns) + "|"]
+    for number, (file_cell, anchor_cell, state) in enumerate(rows, start=1):
+        lines.append(f"| RC-{number:02d} | Sample contract | {file_cell} | {anchor_cell} | Sample change | {state} |")
+    return "\n".join(lines)
 
 
-def change_block(file: str, section: str, operation: str, location: str, final: str | None) -> str:
-    """Markdown of a file heading with one change; without a final text when it is None."""
-    text = (
-        f"### {file} — {section}\n\n"
-        f"- **Operación:** {operation}\n"
-        f"- **Ubicación:**\n\n```markdown\n{location}\n```\n"
-    )
-    if final is not None:
-        text += f"\n- **Texto final:**\n\n```markdown\n{final}\n```\n"
-    return text
+def objective_row(state: str, anchor: str | None = None) -> tuple[str, str, str]:
+    """A reconciliation row on the objectives file, anchored at the first objective by default."""
+    return (f"`{OBJECTIVES_FILE}`", first_objective() if anchor is None else anchor, state)
+
+
+def checklist_table(state: str, items: list[str] | None = None) -> str:
+    """Markdown of a checklist with these items, the common ones by default, all in one state."""
+    lines = [f"{TABLE_TITLE}{CHECKLIST}**", "", "| " + " | ".join(CHECKLIST_COLUMNS) + " |", "|---|---|---|---|"]
+    for number, item in enumerate(common_items() if items is None else items, start=1):
+        lines.append(f"| CL-{number:02d} | {item} | Sample check | {state} |")
+    return "\n".join(lines)
 
 
 def sample(
@@ -917,35 +754,27 @@ def sample(
     package: str = "3.0.0 (menor)",
     state: str = "aprobado",
     approval: str = "owner, 2026-01-02",
+    requirement: str = "Sample behavior.",
+    criteria: str = "- Sample criterion.",
     created: str = "—",
     removed: str = "—",
     dependencies: str = NO_DEPENDENCIES,
-    file: str = OBJECTIVES_FILE,
-    section: str = "sección 3",
-    operation: str = "modificar",
-    location: str = DEFAULT,
-    final: str | None = DEFAULT,
-    extra: str = "",
-    changes: str = DEFAULT,
     decisions: str = NO_DECISIONS,
     glossary: str = NO_GLOSSARY,
-    related: str = DEFAULT,
+    reconciliation: str = DEFAULT,
     consumers: str = "- `README.md`: sin cambio",
+    checklist: str = DEFAULT,
 ) -> str:
-    """Text of a unit that is valid by default: approved, with no new IDs, it modifies the first objective row.
+    """Text of a unit that is valid by default: approved, with no new IDs and one reconciliation row.
 
-    The default final text keeps the ID of the objective row that the location selects.
+    By default the reconciliation row and the checklist items carry the state
+    that matches the state of the unit.
     """
-    start = objective_rows()[0][0]
-    if location == DEFAULT:
-        location = start
-    if final == DEFAULT:
-        kept = location if OBJECTIVE_START_RE.fullmatch(location) else start
-        final = f"{kept} Sample objective | Sample measure |"
-    if related == DEFAULT:
-        related = related_text()
-    if changes == DEFAULT:
-        changes = f"{change_block(file, section, operation, location, final)}\n{extra}".rstrip("\n")
+    word = state.split(" ")[0]
+    if reconciliation == DEFAULT:
+        reconciliation = reconciliation_table([objective_row(ROW_STATES.get(word, ("pendiente",))[0])])
+    if checklist == DEFAULT:
+        checklist = checklist_table("cumplido" if word == "conciliado" else "pendiente")
     return (
         '---\naliases: ["Sample unit"]\ntags: [cambio]\n---\n\n'
         "# Sample unit\n\n"
@@ -953,27 +782,29 @@ def sample(
         f"**Aprobación:** {approval}\n**Paquete:** {package}\n\n"
         f"## Estado\n\n{state}\n\n"
         "## Contexto\n\nContext text.\n\n"
+        f"## {REQUIREMENT}\n\n{requirement}\n\n"
+        f"## {CRITERIA}\n\n{criteria}\n\n"
         f"## IDs\n\n- Crea: {created}\n- Elimina: {removed}\n\n"
         f"## Dependencias\n\n{dependencies}\n\n"
-        f"## Cambios en el PRD\n\n{changes}\n\n"
         f"## Decisiones\n\n{decisions}\n\n"
         f"## Glosario\n\n{glossary}\n\n"
-        f"## Secciones relacionadas y textos obsoletos\n\n{related}\n\n"
+        f"## {RECONCILIATION}\n\n{reconciliation}\n\n"
         f"## Documentos consumidores\n\n{consumers}\n\n"
+        f"## {CHECKLIST}\n\n{checklist}\n\n"
         "## Desviaciones aprobadas\n\nNinguna\n"
     )
 
 
+def requirement_rows(identifiers: list[str]) -> str:
+    """Markdown of one requirement per ID: a paragraph that starts with the bold ID and title, and a rule."""
+    return "\n\n".join(f"**{identifier}. Sample requirement.**\n\n- Sample rule." for identifier in identifiers)
+
+
 def sample_requirements(first: int, count: int = 1, **values: str) -> str:
-    """Text of a valid approved unit that adds consecutive requirement rows starting at this number."""
-    numbers = range(first, first + count)
+    """Text of a valid approved unit that defines consecutive requirements starting at this number."""
     fields = {
         "created": f"RF-{first}" if count == 1 else f"RF-{first}…RF-{first + count - 1}",
-        "file": REQUIREMENTS_FILE,
-        "section": "sección 6",
-        "operation": "añadir",
-        "location": f"| RF-{first - 1} |",
-        "final": "\n".join(f"| RF-{number} | Sample requirement | M |" for number in numbers),
+        "requirement": requirement_rows([f"RF-{number}" for number in range(first, first + count)]),
     }
     fields.update(values)
     return sample(**fields)
@@ -1025,7 +856,7 @@ class ChangeUnitTests(unittest.TestCase):
         self.assertEqual(self.template.state, "borrador")
 
     def test_doc_15_05_ids(self) -> None:
-        """Created and removed IDs match the changes, drafts hold markers and reserved IDs have no gaps."""
+        """Created IDs are the ones the unit defines, removed IDs exist, and reserved IDs have no gaps."""
         self.assertEqual(check_ids(self.units, next_free_ids(), PRD_DIR), [])
         labels = [line.split(":")[0] + ":" for line in self.template.text_lines("IDs")]
         self.assertEqual(labels, list(ID_LINES))
@@ -1034,103 +865,110 @@ class ChangeUnitTests(unittest.TestCase):
         """Dependencies name other existing units and form no cycle."""
         self.assertEqual(check_dependencies(self.units), [])
 
-    def test_doc_15_07_changes_and_locations(self) -> None:
-        """Changes are grouped by file in the PRD order, well formed, and each location starts one line of its file."""
-        self.assertEqual(check_changes(self.units, PRD_DIR, section_labels()), [])
-        self.assertEqual(len(self.template.changes), 1)
-        self.assertEqual(len(self.template.changes[0].location or []), 1)
-        self.assertEqual(len(self.template.changes[0].final or []), 1)
+    def test_doc_15_07_requirement_and_criteria(self) -> None:
+        """Units and the template have a requirement and acceptance criteria, and cite no plan."""
+        self.assertEqual(check_requirement(self.units + [self.template]), [])
 
-    def test_doc_15_08_final_text(self) -> None:
-        """No final text cites a plan and every whole table in a final text has a title."""
-        self.assertEqual(check_final_text(self.units), [])
+    def test_doc_15_08_reconciliation_table(self) -> None:
+        """Reconciliation tables are well formed and their anchors select one line of their PRD file.
 
-    def test_doc_15_09_no_overlaps(self) -> None:
-        """No two open units change blocks that share a line unless one depends on the other."""
-        self.assertEqual(check_overlaps(self.units, PRD_DIR), [])
+        The template has the table with one pending row.
+        """
+        self.assertEqual(check_reconciliation(self.units, PRD_DIR), [])
+        header, rows = self.template.table(RECONCILIATION, RECONCILIATION)
+        self.assertEqual(tuple(header), RECONCILIATION_COLUMNS)
+        self.assertEqual([row[-1] for row in rows], ["pendiente"])
 
-    def test_doc_15_10_related_sections(self) -> None:
-        """Units mark every row of the related-sections table; the template lists the same rows."""
-        rows = related_rows()
-        self.assertEqual(len(rows), 8)
-        self.assertEqual(check_related(self.units, rows), [])
-        listed = [
-            ITEM_RE.match(line).group(1)
-            for line in self.template.text_lines("Secciones relacionadas y textos obsoletos")
-        ]
-        self.assertEqual(listed, rows + [OBSOLETE_KEY])
+    def test_doc_15_09_checklist(self) -> None:
+        """Checklists are well formed and start with the common items; the template lists exactly those."""
+        common = common_items()
+        self.assertEqual(len(common), 9)
+        self.assertEqual(check_checklist(self.units + [self.template], common), [])
+        _, rows = self.template.table(CHECKLIST, CHECKLIST)
+        self.assertEqual(len(rows), len(common))
 
-    def test_doc_15_11_consumer_documents(self) -> None:
+    def test_doc_15_10_consumer_documents(self) -> None:
         """Consumer documents have a valid state and none is pending in an implemented unit."""
         self.assertEqual(check_consumers(self.units), [])
 
-    def test_doc_15_12_tables_have_title(self) -> None:
+    def test_doc_15_11_tables_have_title(self) -> None:
         """Every table of the protocol, the template and the units has a title line right above it."""
         self.assertEqual(check_tables(CHANGES_DIR), [])
 
-    def test_doc_15_13_valid_sample_units_pass(self) -> None:
+    def test_doc_15_12_valid_sample_units_pass(self) -> None:
         """Valid units of every shape raise no problem."""
-        free = next_free_ids()["RF-"]
-        objectives = objective_rows()
-        second_id = objectives[1][0].strip("| ")
-        decisions = (
-            "**Tabla: Filas para el Anexo D**\n\n"
-            "| Pregunta original | Decisión |\n|---|---|\n| Sample question | Sample decision |"
-        )
+        free = next_free_ids()
+        rf = free["RF-"]
+        criterion = free["AC-"]
+        second_objective = objective_rows()[1][0].strip("| ")
+        heading = next(line for line in read_lines(PRD_DIR / OBJECTIVES_FILE) if line.startswith("## "))
+        decisions = "- **Sample question** (2026-01-01) Sample decision."
+        requirements = f"`{REQUIREMENTS_FILE}`"
         problems = self.problems_of({
-            "old.md": sample_requirements(free, state="conciliado (2026-01-03)"),
-            "first.md": sample_requirements(free, dependencies="- old", decisions=decisions),
-            "second.md": sample_requirements(free + 1, 2, dependencies="- first"),
+            "old.md": sample_requirements(rf, state="conciliado (2026-01-03)"),
+            "first.md": sample_requirements(rf, dependencies="- old", decisions=decisions),
+            "second.md": sample_requirements(rf + 1, 2, dependencies="- first"),
             "row-change.md": sample(
                 dependencies="- first",
-                file=REQUIREMENTS_FILE,
-                section="sección 6",
-                location=f"| RF-{free} |",
-                final=f"| RF-{free} | Sample requirement, changed | M |",
+                requirement=requirement_rows([f"RF-{rf}"]),
+                reconciliation=reconciliation_table([(requirements, f"RF-{rf}", "pendiente")]),
             ),
-            "draft.md": sample_requirements(
-                free,
+            "draft.md": sample(
                 state="borrador",
                 approval=NOT_APPROVED,
-                created="RF-x1",
-                location=f"| RF-{free - 1} |",
-                final="| RF-x1 | Sample requirement | M |",
+                created="RF-x1, AC-x1",
+                requirement=requirement_rows(["RF-x1"]),
+                criteria="**AC-x1.** Sample criterion.",
                 consumers="- `README.md`: pendiente",
             ),
+            "criterion.md": sample(created=f"AC-{criterion}", criteria=f"**AC-{criterion}.** Sample criterion."),
             "base.md": sample(),
             "dependent.md": sample(dependencies="- base"),
-            "removal.md": sample(operation="eliminar", location=objectives[1][0], final=None, removed=second_id),
-            "new-file.md": sample(
-                file="25-sample.md", section="sección 25", operation="añadir", location=NEW_FILE, final="# Sample"
+            "removal.md": sample(removed=second_objective),
+            "existing.md": sample(requirement=requirement_rows([f"RF-{rf - 1}"])),
+            "in-progress.md": sample(
+                reconciliation=reconciliation_table([
+                    objective_row("implementado"),
+                    (requirements, f"después de RF-{rf - 1}", "pendiente"),
+                ])
             ),
-            "no-consumers.md": sample(location=objectives[2][0], consumers=NO_CONSUMERS),
-            "errata.md": sample(kind="errata", package="3.0.0 (sin efecto)", location=objectives[3][0]),
-            "release.md": sample(kind="versión", package="3.0.1 (parche)", location=objectives[4][0]),
-            "glossary-only.md": sample(changes=NO_CHANGES, glossary="- **Sample term:** sample definition."),
+            "text-anchor.md": sample(
+                reconciliation=reconciliation_table([objective_row("pendiente", f"{first_objective()}; después de `{heading}`")])
+            ),
+            "new-file.md": sample(reconciliation=reconciliation_table([(f"`25-sample.md` {NEW_FILE}", NO_ANCHOR, "pendiente")])),
+            "implemented.md": sample(state="implementado"),
+            "no-consumers.md": sample(consumers=NO_CONSUMERS),
+            "errata.md": sample(kind="errata", package="3.0.0 (sin efecto)"),
+            "release.md": sample(kind="versión", package="3.0.1 (parche)"),
+            "defect.md": sample(kind=DEFECT, package="3.0.0 (parche)", reconciliation=NO_RECONCILIATION),
+            "own-items.md": sample(checklist=checklist_table("pendiente", common_items() + ["Sample item"])),
+            "not-applicable.md": sample(checklist=checklist_table("no aplica")),
             "reconciled.md": sample(
-                state="conciliado (2026-01-03)", dependencies="- deleted-unit", location="text that is gone"
+                state="conciliado (2026-01-03)",
+                dependencies="- deleted-unit",
+                reconciliation=reconciliation_table([("`98-gone.md`", "`text that is gone`", "conciliado")]),
             ),
         })
         self.assertEqual({name: found for name, found in problems.items() if found}, {})
 
-    def test_doc_15_14_invalid_sample_units_are_reported(self) -> None:
+    def test_doc_15_13_invalid_sample_units_are_reported(self) -> None:
         """Each kind of structural defect is reported by its check."""
-        free = next_free_ids()["RF-"]
-        (start, line), (second_start, _) = objective_rows()[:2]
-        second_id = second_start.strip("| ")
-        heading = objectives_heading()
+        free = next_free_ids()
+        rf = free["RF-"]
+        criterion = free["AC-"]
+        second_objective = objective_rows()[1][0].strip("| ")
         table = "| Column |\n|---|\n| value |"
-        rows = related_rows()
-        default_block = change_block(
-            OBJECTIVES_FILE, "sección 3", "modificar", start, f"{start} Sample objective | Sample measure |"
-        )
-        second_block = change_block(
-            OBJECTIVES_FILE, "sección 3", "modificar", second_start, f"{second_start} Sample objective | Sample |"
-        )
+        common = common_items()
+        one_row = reconciliation_table([objective_row("pendiente")])
+        old_columns = ("ID", "Contrato", "Sección del PRD", "Qué cambia", "Estado")
+
+        def with_row(file_cell: str, anchor_cell: str, row_state: str = "pendiente", **values: str) -> str:
+            return sample(reconciliation=reconciliation_table([(file_cell, anchor_cell, row_state)]), **values)
+
         cases: list[tuple[str, dict[str, str | None]]] = [
             ("files", {"Bad_Unit.md": sample()}),
             ("files", {"unit.md": sample().replace("tags: [cambio]", "tags: [other]")}),
-            ("files", {"unit.md": "﻿" + sample()}),
+            ("files", {"unit.md": "\ufeff" + sample()}),
             ("files", {"unit.md": sample().split("---\n", 2)[2]}),
             ("files", {"unit.md": sample(), "archive": None}),
             ("header", {"unit.md": sample(kind="improvement")}),
@@ -1142,63 +980,68 @@ class ChangeUnitTests(unittest.TestCase):
             ("header", {"unit.md": sample(kind="versión", package="3.0.0 (sin efecto)")}),
             ("header", {"unit.md": sample(package="3.0.0 (parche)")}),
             ("sections", {"unit.md": sample().replace(f"## Glosario\n\n{NO_GLOSSARY}\n\n", "")}),
+            ("sections", {"unit.md": sample().replace(f"## {CHECKLIST}", "## Cambios en el PRD")}),
             ("states", {"unit.md": sample(state="approved")}),
             ("states", {"unit.md": sample(state="implementado", kind="errata", package="3.0.0 (sin efecto)")}),
             ("states", {"unit.md": sample(state="borrador")}),
             ("states", {"unit.md": sample(approval=NOT_APPROVED)}),
-            ("ids", {"unit.md": sample_requirements(free, state="borrador", approval=NOT_APPROVED)}),
-            ("ids", {"unit.md": sample_requirements(free, created="RF-x1")}),
-            ("ids", {"unit.md": sample_requirements(free).replace("Sample requirement", "Sample of RF-x9")}),
-            ("ids", {"unit.md": sample_requirements(free + 1, location=f"| RF-{free - 1} |")}),
-            ("ids", {"one.md": sample_requirements(free), "two.md": sample_requirements(free)}),
-            ("ids", {"unit.md": sample(created=f"RF-{free}…AC-{free}")}),
-            ("ids", {"unit.md": sample_requirements(free, created="—")}),
-            ("ids", {"unit.md": sample(created=f"RF-{free}")}),
-            ("ids", {"unit.md": sample(created=f"RF-{free}", final=f"| RF-{free} | Sample requirement | M |")}),
+            ("ids", {"unit.md": sample_requirements(rf, state="borrador", approval=NOT_APPROVED)}),
+            ("ids", {"unit.md": sample_requirements(rf, created="RF-x1")}),
+            ("ids", {"unit.md": sample_requirements(rf).replace("Sample requirement", "Sample of RF-x9")}),
+            ("ids", {"unit.md": sample_requirements(rf + 1)}),
+            ("ids", {"one.md": sample_requirements(rf), "two.md": sample_requirements(rf)}),
+            ("ids", {"unit.md": sample(created=f"RF-{rf}…AC-{rf}")}),
+            ("ids", {"unit.md": sample_requirements(rf, created="—")}),
+            ("ids", {"unit.md": sample(created=f"RF-{rf}")}),
             ("ids", {"unit.md": sample().replace("- Elimina: —\n", "")}),
-            ("ids", {"unit.md": sample(removed=second_id)}),
-            ("ids", {"unit.md": sample(operation="eliminar", location=second_start, final=None)}),
-            ("ids", {"unit.md": sample(removed=f"{second_id}…RF-3")}),
-            ("ids", {"unit.md": sample(final=f"{second_start} Sample objective | Sample |", removed=start.strip("| "))}),
+            ("ids", {"unit.md": sample(removed="RF-9999")}),
+            ("ids", {"unit.md": sample(removed=f"{second_objective}…RF-3")}),
+            ("ids", {"unit.md": sample(created=f"AC-{criterion}", requirement=f"**AC-{criterion}.** Sample.")}),
+            ("ids", {"unit.md": sample(created=f"RF-{rf}", criteria=requirement_rows([f"RF-{rf}"]))}),
             ("dependencies", {"unit.md": sample(dependencies="- missing-unit")}),
             ("dependencies", {"unit.md": sample(dependencies="- unit")}),
-            ("dependencies", {
-                "one.md": sample(dependencies="- two"),
-                "two.md": sample(dependencies="- one", location=second_start),
+            ("dependencies", {"one.md": sample(dependencies="- two"), "two.md": sample(dependencies="- one")}),
+            ("dependencies", {"one.md": sample(), "unit.md": sample(dependencies="`one`")}),
+            ("requirement", {"unit.md": sample(requirement="")}),
+            ("requirement", {"unit.md": sample(criteria="")}),
+            ("requirement", {"unit.md": sample(requirement="See docs/plan/sample.md.")}),
+            ("reconciliation", {"unit.md": sample(reconciliation="")}),
+            ("reconciliation", {"unit.md": sample(reconciliation=NO_RECONCILIATION)}),
+            ("reconciliation", {"unit.md": sample(reconciliation=one_row.split("\n", 2)[2])}),
+            ("reconciliation", {"unit.md": sample(reconciliation=one_row.replace("Qué cambia", "Texto final"))}),
+            ("reconciliation", {"unit.md": sample(reconciliation=reconciliation_table([objective_row("pendiente")], old_columns))}),
+            ("reconciliation", {"unit.md": sample(reconciliation="\n".join(one_row.split("\n")[:4]))}),
+            ("reconciliation", {"unit.md": sample(reconciliation=one_row.replace("RC-01", "RC-02"))}),
+            ("reconciliation", {"unit.md": sample(reconciliation=one_row.replace("Sample change", ""))}),
+            ("reconciliation", {"unit.md": sample(reconciliation=one_row.replace("| Sample change ", ""))}),
+            ("reconciliation", {"unit.md": with_row("`99-missing.md`", first_objective())}),
+            ("reconciliation", {"unit.md": with_row(OBJECTIVES_FILE, first_objective())}),
+            ("reconciliation", {"unit.md": with_row("sección 3", first_objective())}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", "")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", "the first objective")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", "`text that is not in the file`")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", "`O`")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", "RF-1")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", f"{first_objective()}; O9999")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}` {NEW_FILE}", NO_ANCHOR)}),
+            ("reconciliation", {"unit.md": with_row(f"`25-sample.md` {NEW_FILE}", first_objective())}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", first_objective(), "done")}),
+            ("reconciliation", {"unit.md": with_row(f"`{OBJECTIVES_FILE}`", first_objective(), "conciliado")}),
+            ("reconciliation", {"unit.md": sample(state="implementado", reconciliation=one_row)}),
+            ("reconciliation", {"unit.md": sample(state="conciliado (2026-01-03)", reconciliation=one_row)}),
+            ("reconciliation", {
+                "unit.md": with_row(
+                    f"`{OBJECTIVES_FILE}`", first_objective(), "implementado", state="borrador", approval=NOT_APPROVED
+                )
             }),
-            ("dependencies", {"one.md": sample(), "unit.md": sample(dependencies="`one`", location=second_start)}),
-            ("changes", {"unit.md": sample(location="text that is not in the file")}),
-            ("changes", {"unit.md": sample(location="|")}),
-            ("changes", {"unit.md": sample(location=line[len(start) + 1:len(start) + 16])}),
-            ("changes", {"unit.md": sample(operation="move")}),
-            ("changes", {"unit.md": sample(location=NEW_FILE)}),
-            ("changes", {"unit.md": sample().replace(f"### {OBJECTIVES_FILE} — sección 3", "### Objectives")}),
-            ("changes", {"unit.md": sample(section="Section 3")}),
-            ("changes", {"unit.md": sample(section="sección 99")}),
-            ("changes", {"unit.md": sample(file="GLOSARIO.md", section="sección 1")}),
-            ("changes", {"unit.md": sample(file="99-missing.md", section="sección 99")}),
-            ("changes", {"unit.md": sample(final=None)}),
-            ("changes", {"unit.md": sample(location="")}),
-            ("changes", {"unit.md": sample(location=f"{start}\n{second_start}")}),
-            ("changes", {"unit.md": sample(operation="eliminar")}),
-            ("changes", {"unit.md": sample(extra="### 05-usuarios.md — sección 5\n")}),
-            ("changes", {"unit.md": sample(extra=second_block)}),
-            ("changes", {"unit.md": sample_requirements(free, extra=default_block)}),
-            ("changes", {"unit.md": sample(changes="")}),
-            ("changes", {"unit.md": sample(changes=NO_CHANGES)}),
-            ("final_text", {"unit.md": sample(final=table)}),
-            ("final_text", {"unit.md": sample(final="See docs/plan/sample.md.")}),
-            ("overlaps", {"one.md": sample(), "two.md": sample()}),
-            ("overlaps", {"one.md": sample(), "two.md": sample(location=line[:len(start) + 6])}),
-            ("overlaps", {"one.md": sample(), "two.md": sample(location=heading, final=f"{heading}\n\nSample.")}),
-            ("overlaps", {
-                "one.md": sample(location="text of a later unit"),
-                "two.md": sample(location="text of a later unit"),
-            }),
-            ("related", {"unit.md": sample(related=related_text(rows[1:]))}),
-            ("related", {"unit.md": sample(related=related_text().replace("sin cambio", "maybe", 1))}),
-            ("related", {"unit.md": sample(related="\n".join(f"- {row}: cambia" for row in rows))}),
-            ("related", {"unit.md": sample(related=related_text() + "\n- Unknown row: cambia")}),
+            ("checklist", {"unit.md": sample(checklist="")}),
+            ("checklist", {"unit.md": sample(checklist=checklist_table("pendiente", common[1:]))}),
+            ("checklist", {"unit.md": sample(checklist=checklist_table("pendiente", common[:-1]))}),
+            ("checklist", {"unit.md": sample(checklist=checklist_table("pendiente").replace("CL-02", "CL-12"))}),
+            ("checklist", {"unit.md": sample(checklist=checklist_table("done"))}),
+            ("checklist", {"unit.md": sample(checklist=checklist_table("pendiente").replace("Ítem", "Item", 1))}),
+            ("checklist", {"unit.md": sample(checklist=checklist_table("pendiente").replace("Sample check", "", 1))}),
+            ("checklist", {"unit.md": sample(state="conciliado (2026-01-03)", checklist=checklist_table("pendiente"))}),
             ("consumers", {"unit.md": sample(consumers="- `README.md`: done")}),
             ("consumers", {"unit.md": sample(state="implementado", consumers="- `README.md`: pendiente")}),
             ("consumers", {"unit.md": sample(state="conciliado (2026-01-03)", consumers="- `README.md`: pendiente")}),
@@ -1208,53 +1051,6 @@ class ChangeUnitTests(unittest.TestCase):
         for index, (check, files) in enumerate(cases):
             with self.subTest(case=index, check=check):
                 self.assertNotEqual(self.problems_of(files)[check], [])
-
-    def test_doc_15_15_block_of_each_kind_of_line(self) -> None:
-        """The block of a line is the one the block table of the protocol gives to its kind."""
-        lines = [
-            "# Title",
-            "",
-            "**Field:** first",
-            "continued",
-            "**Other:** value",
-            "",
-            "## Section",
-            "",
-            "Paragraph one",
-            "still the paragraph",
-            "",
-            "**Tabla: Sample**",
-            "",
-            "| A |",
-            "|---|",
-            "| 1 |",
-            "",
-            "- item",
-            "  continued",
-            "  - sub-item",
-            "- next item",
-            "",
-            "```",
-            "## code",
-            "```",
-            "",
-            "## Next section",
-            "text",
-        ]
-        expected = {
-            1: (1, 28),
-            3: (3, 4),
-            5: (5, 5),
-            7: (7, 26),
-            10: (9, 10),
-            12: (12, 16),
-            16: (16, 16),
-            18: (18, 20),
-            21: (21, 21),
-            24: (23, 25),
-            27: (27, 28),
-        }
-        self.assertEqual({number: block_range(lines, number) for number in expected}, expected)
 
 
 if __name__ == "__main__":
