@@ -91,7 +91,7 @@ Ninguna.
 | 2 | `README.md` y `README.es.md`, en paralelo y con el mismo contenido | 🟢 |
 | 3 | `SKILL.md`, recetas, `INTERFACES.md`, `threat-model.md` | 🟢 |
 | 4 | DOC-16 y tests DOC existentes | 🟢 |
-| 5 | Búsquedas de CL-06 y CL-11 fuera del PRD; suite completa; evidencia cruda | 🟡 |
+| 5 | Búsquedas de CL-06 y CL-11 fuera del PRD; suite completa; evidencia cruda | 🟢 |
 
 ## Tests
 
@@ -162,3 +162,4 @@ Los de `protocolo.md`, más la salida de las búsquedas de CL-06 y CL-11 y la li
 | 2026-11-23 | 2 | README y README.es al día: `3.0.0a2`, uid corto de Outlook, `--show-native-id`, `show` solo escribe en la caché de ids nativos, `~/.mailquery/db/cache.db`, desinstalación que no la borra y «la caché» → «caché de adjuntos»; el mismo contenido en los dos idiomas. |
 | 2026-11-23 | 3 | `SKILL.md` (uid corto, sin `--show-native-id`), recetas, `INTERFACES.md` (`native_ids.py`, ganchos, `PluginContext.native_ids`, home, uid de Outlook, estado, versión) y `threat-model.md` (versión, activo `cache.db`, T-12). |
 | 2026-11-23 | 4 | DOC-16.01–.04 en `tests/test_packaging.py`, verdes en solitario y con los 77 tests DOC; TC-01.01 y TC-02.07 verdes. |
+| 2026-11-23 | 5 | Búsquedas de CL-06 y CL-11 sin resultados en los documentos consumidores; solo quedan registros históricos, la definición de DOC-16 y `docs/ROADMAP.md` (propuesta). Suite completa: `Ran 1529 tests`, `OK (skipped=8)`, 0 fallos. Evidencia en `../../.logs/id-corto-outlook/M07/evidencia-cruda.md`. |
