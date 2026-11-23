@@ -905,6 +905,10 @@ class _InjectedBackend(_FakeBackend):
     def __init__(self) -> None:
         super().__init__()
         self.parsed: list = []
+        self.bound_home: Path | None = None
+
+    def bind_home(self, home: Path) -> None:
+        self.bound_home = home
 
     def parse_native_id(self, native_id: str) -> str:
         self.parsed.append(native_id)
@@ -940,6 +944,7 @@ class BackendInjectionTests(_CliTestCase):
         get_mock.assert_not_called()
         self.assertIs(run_mock.call_args.args[0], backend)
         self.assertTrue(backend.closed)
+        self.assertEqual(backend.bound_home, self.fx.home)
         log_text = (self.fx.home / "logs" / "mailquery.log").read_text(encoding="utf-8")
         self.assertIn("backend=injected", log_text)
 
