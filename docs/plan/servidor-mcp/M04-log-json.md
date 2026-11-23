@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/servidor-mcp-lote-1`. **Rama del milestone:** `feature/servidor-mcp-m04`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `85b781d` (tip de `feature/servidor-mcp-lote-1` al lanzar). **Línea base de la suite:** `Ran 1576 tests`, `failures=3` y `skipped=7`; los tres fallos son SMOKE-INSTALL.04, SMOKE-NEW.07 y SMOKE-NEW.10, fallos locales del entorno SMOKE ajenos a este milestone.
 - **Depende de:** M01 (`log_event` y los campos estructurados de cada evento). **Lo usan:** M05 (`load_logging_config`, archivo activo y formato JSON para el log del servidor), M06 (`docs/INTERFACES.md`).
 - **ACs:** AC-77 completo; la parte de AC-75 "la ayuda raíz nombra `mailquery.log` y `mailquery.jsonl`".
 
@@ -78,7 +78,7 @@ Margen tuyo: el nombre de la función del archivo activo y del formateador, y el
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `config.py`: clave `json`, `load_logging_config`; UT-CFG-05.01 y UT-CFG-06 | ⚪ |
+| 1 | `config.py`: clave `json`, `load_logging_config`; UT-CFG-05.01 y UT-CFG-06 | 🟢 |
 | 2 | `logging_setup.py`: archivo activo, formateador JSON, rotación y permisos de `mailquery.jsonl`; UT-LOG-05.03–.05, .07–.12 | ⚪ |
 | 3 | `cli.py`: `json` en `setup_logging`, errores de configuración en texto, `hint` de `E_INTERNAL`, línea de logs de la ayuda raíz; `outlook_com.py`: `hint` con el archivo activo; UT-LOG-05.01, .02, .06, UT-CFG-05.02–.03, UT-LOG-06 | ⚪ |
 | 4 | `config.example.toml` y los dos README; DOC-18; DOC-06 sigue verde | ⚪ |
@@ -131,3 +131,4 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | Clave `[logging].json`, `load_logging_config`, UT-CFG-05.01–.03 y UT-CFG-06 verdes. |

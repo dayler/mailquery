@@ -107,6 +107,7 @@ _CONSERVATIVE_LABELS_HINT = (
 class LoggingConfig:
     level: str = DEFAULT_LOG_LEVEL
     max_size_mb: int = DEFAULT_MAX_SIZE_MB
+    json: bool = False
 
 
 @dataclass(frozen=True)
@@ -276,6 +277,24 @@ def load_config(
     return _parse_config(home_path, data, registry)
 
 
+def load_logging_config(home: Path) -> LoggingConfig:
+    """Read only the ``[logging]`` table of ``config.toml``; never raises.
+
+    A missing file, invalid TOML, an unreadable file or an invalid ``[logging]``
+    table yields the defaults (text, ``info``, 10 MB), so a caller that only
+    needs the log settings is not blocked by any other part of the file.
+    """
+    path = Path(home) / CONFIG_FILENAME
+    try:
+        with path.open("rb") as handle:
+            data: Any = tomllib.load(handle)
+        if not isinstance(data, dict):  # pragma: no cover - tomllib returns a dict
+            return LoggingConfig()
+        return _parse_logging(data.get("logging"))
+    except (OSError, tomllib.TOMLDecodeError, MailqueryError):
+        return LoggingConfig()
+
+
 def _default_registry() -> "BackendRegistry":
     """A ``BackendRegistry`` with the platform defaults, imported lazily."""
     from mailquery.backends.registry import BackendRegistry
@@ -374,8 +393,8 @@ def _parse_logging(value: Any) -> LoggingConfig:
                 "unknown key [logging].retention_days",
                 "retention_days was replaced by max_size_mb",
             )
-        if key not in ("level", "max_size_mb"):
-            raise _unknown_key("[logging]", ("level", "max_size_mb"), key)
+        if key not in ("level", "max_size_mb", "json"):
+            raise _unknown_key("[logging]", ("level", "max_size_mb", "json"), key)
     level = table.get("level", DEFAULT_LOG_LEVEL)
     if not isinstance(level, str) or level not in LOG_LEVELS:
         raise config_error(
@@ -390,7 +409,13 @@ def _parse_logging(value: Any) -> LoggingConfig:
         minimum=MIN_MAX_SIZE_MB,
         maximum=MAX_MAX_SIZE_MB,
     )
-    return LoggingConfig(level=level, max_size_mb=max_size_mb)
+    json_log = table.get("json", False)
+    if not isinstance(json_log, bool):
+        raise config_error(
+            f"[logging].json must be a boolean: {json_log!r}",
+            "use true or false",
+        )
+    return LoggingConfig(level=level, max_size_mb=max_size_mb, json=json_log)
 
 
 def _parse_search(value: Any) -> SearchConfig:

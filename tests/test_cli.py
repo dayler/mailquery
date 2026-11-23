@@ -1068,7 +1068,27 @@ class LoggingConfigTests(_CliTestCase):
         ):
             exit_code, _, _ = self.run_cli(["search"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(setup_mock.call_args.args, (self.fx.home, "info", 10))
+        self.assertEqual(setup_mock.call_args.args, (self.fx.home, "info", 10, False))
+
+    def test_ut_cfg_05_02_non_boolean_json_is_config_invalid_logged_in_text(self) -> None:
+        """UT-CFG-05.02: json = "yes" ⇒ E_CONFIG_INVALID (exit 2), logged in text in mailquery.log."""
+        write_config(self.fx.home, '[logging]\njson = "yes"\n')
+        self.assert_error(2, self.run_cli(["search"]), "E_CONFIG_INVALID")
+        logs = self.fx.home / "logs"
+        text = (logs / "mailquery.log").read_text(encoding="utf-8")
+        self.assertIn("code=E_CONFIG_INVALID", text)
+        self.assertRegex(text, r"(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} ERROR ")
+        self.assertFalse((logs / "mailquery.jsonl").exists())
+
+    def test_ut_cfg_05_03_json_true_with_another_invalid_key_logs_in_text(self) -> None:
+        """UT-CFG-05.03: json = true with another invalid key ⇒ E_CONFIG_INVALID, text log, no jsonl."""
+        write_config(self.fx.home, "[logging]\njson = true\nbogus = 1\n")
+        self.assert_error(2, self.run_cli(["search"]), "E_CONFIG_INVALID")
+        logs = self.fx.home / "logs"
+        text = (logs / "mailquery.log").read_text(encoding="utf-8")
+        self.assertIn("code=E_CONFIG_INVALID", text)
+        self.assertIn("bogus", text)
+        self.assertFalse((logs / "mailquery.jsonl").exists())
 
 
 # --------------------------------------------------------------------------- #
