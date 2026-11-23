@@ -142,7 +142,7 @@ Revisado sin hueco: los *tag characters* (`U+E0000..U+E007F`, *ASCII smuggling*)
 
 `mailquery mcp serve` expone `search`, `new`, `show`, `attachment`, `mailboxes` y `doctor` como herramientas MCP por stdin y stdout. La superficie no añade un servicio: no abre red, no escucha un puerto, no arranca un daemon y no deja estado propio.
 
-- **Proceso hijo por llamada.** Cada `tools/call` se traduce a argumentos y se ejecuta como `sys.executable -P -m mailquery <comando> …` en un proceso hijo, sin shell; el servidor no lee correo, el estado ni un driver. Un driver bloqueado o un plugin colgado termina solo esa llamada.
+- **Proceso hijo por llamada.** Cada `tools/call` se traduce a argumentos y se ejecuta como `sys.executable -P -m mailquery <comando> …` en un proceso hijo, sin shell; el servidor no lee correo, el estado ni un driver. Un driver bloqueado o un plugin colgado terminan solo esa llamada.
 - **`-P`.** El hijo no añade el directorio de trabajo a `sys.path`, así que ejecuta la misma instalación que el servidor y un `mailquery.py` del directorio actual no puede sustituirlo.
 - **Entorno heredado del harness.** El hijo recibe el entorno del servidor (por ejemplo variables de proxy o de sesión) y el mismo directorio de trabajo; no recibe credenciales del núcleo porque no existen. Los parámetros de la llamada llegan como argumentos, nunca como una línea de shell, y se validan contra el esquema, el `enum`, el NUL y el límite de argv.
 - **stdin vacío para los plugins.** El hijo se lanza con stdin vacío y stderr descartado, y su stdout se captura; un plugin no puede leer el protocolo MCP ni bloquearse esperando entrada. El protocolo solo viaja por stdin/stdout del servidor.
