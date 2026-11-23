@@ -1057,14 +1057,14 @@ class LoggingConfigTests(_CliTestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 setup_mock.call_args.args,
-                (self.fx.home, "debug", 14),
+                (self.fx.home, "debug", 14, False),
             )
             setup_mock.reset_mock()
             exit_code, _, _ = self.run_cli(["--log-level", "error", "search"])
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 setup_mock.call_args.args,
-                (self.fx.home, "error", 14),
+                (self.fx.home, "error", 14, False),
             )
 
     def test_ut_cli_05_02_log_level_after_the_subcommand_is_a_usage_error(self) -> None:
