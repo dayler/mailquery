@@ -81,7 +81,7 @@ Hallazgo para RC-10 (lo añade el orquestador a su "Qué cambia" al cerrar M03, 
 | `docs/config.example.toml` | — | sin cambio |
 | `docs/recipes/` | M07 | actualizado |
 | `docs/security/` | M07 | actualizado |
-| `docs/tests/` | Orquestador (F0, cierres de milestone, F5) | pendiente |
+| `docs/tests/` | Orquestador (F0, cierres de milestone, F5) | actualizado |
 
 ## Cambios en `docs/tests/` (F0)
 

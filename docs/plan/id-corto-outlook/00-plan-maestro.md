@@ -30,10 +30,10 @@ Quién actualiza cada indicador y cuándo:
 |---|---|---|---|
 | F0 Preparación | Pasos de "Preparación (F0)" | Rama de la unidad en el tip de `develop`, desviación H-03 aplicada a la unidad, venv y línea base registrados, definiciones `[pendiente]` en `docs/tests/` | 🟢 |
 | F1 Cimientos y refactor (lote 1) | M01, M02, M03 | Cierre del lote 1 | 🟡 |
-| F2 Implementación (lote 2) | M04, M05, M06 | Cierre de milestone de los tres | ⚪ |
+| F2 Implementación (lote 2) | M04, M05, M06 | Cierre de milestone de los tres | 🟢 |
 | F3 Documentación y versión (lote 2) | M07 | Cierre de milestone de M07 | 🟢 |
-| F4 Integración | Pasos de "Integración (F4)" | Unidad `implementado` en la rama de la unidad y matriz completa verde en el PR | ⚪ |
-| F5 Cierre | Pasos de "Cierre (F5)" | Evidencia completa y revisión del dueño | ⚪ |
+| F4 Integración | Pasos de "Integración (F4)" | Unidad `implementado` en la rama de la unidad y matriz completa verde en el PR | 🟢 |
+| F5 Cierre | Pasos de "Cierre (F5)" | Evidencia completa y revisión del dueño | 🟡 |
 
 ## Milestones
 
@@ -131,7 +131,7 @@ Las oleadas deciden el orden y el paralelismo; los lotes deciden cómo se integr
 | Lote | Milestones | Rama de integración | Corridas de la matriz previstas | Estado |
 |---|---|---|---|---|
 | 1 | M01, M02, M03 | `feature/id-corto-outlook-lote-1` | 1 (+1 de contingencia) | 🟡 |
-| 2 | M04, M05, M06, M07 | `feature/id-corto-outlook-lote-2` | 1 (+1 de contingencia) | 🟡 |
+| 2 | M04, M05, M06, M07 | `feature/id-corto-outlook-lote-2` | 1 (+1 de contingencia) | 🟢 |
 
 ### Presupuesto de integración
 
