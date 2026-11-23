@@ -943,14 +943,16 @@ def run_show(
     native: str | None = None,
     url_mode: str = "neutralize",
     fields: Sequence[str] | None = None,
+    show_native_id: bool = False,
 ) -> dict:
     """Return ``{"message", "warnings"}`` for one uid of a declared account.
 
     The driver of the uid prefix is the one that serves ``show``: the
     core splits the prefix, resolves only that driver's ``[scope]`` blocks and
     calls its ``find_message``/``load_body`` plus the API 1 ``attachments``
-    operation (the core composes ``{index, name, cached_path}``; ``show`` never
-    writes). A uid in an undeclared account (or with no declared accounts)
+    operation (the core composes ``{index, name, cached_path}``). ``show``
+    writes only to the native id cache, through a driver that uses it. A uid in
+    an undeclared account (or with no declared accounts)
     raises ``E_ACCOUNT_NOT_IN_SCOPE``. A uid that does not exist, or is deleted,
     raises ``E_USAGE`` with an actionable hint. A uid whose store is excluded
     (Outlook) raises ``E_ACCOUNT_NOT_IN_SCOPE`` with the reason, declared or not.
@@ -960,7 +962,10 @@ def run_show(
     when a body field or ``attachments`` is selected, and the attachments are
     queried only when ``attachments`` is delivered. ``url_mode`` renders the
     URLs of the subject, the names, the headers and the body before the body is
-    truncated.
+    truncated. With ``show_native_id`` the message is built as without the
+    option and only its ``uid`` changes: the driver's optional
+    ``display_native_id`` hook returns the native form rendered after the driver
+    prefix, and a driver without that hook leaves the uid unchanged.
     """
     delivered = show_message_fields(fields)
     delivered_set = set(delivered)
@@ -1062,6 +1067,16 @@ def run_show(
         )
     if needs_attachments:
         message["attachments"] = attachments
+    if show_native_id:
+        native_form = call_optional_operation(
+            "display_native_id",
+            target_backend,
+            str(row["uid"]),
+            driver=target,
+            internal=target in _INTERNAL_DRIVERS,
+        )
+        if native_form is not None:
+            message["uid"] = f"{target}:{native_form}"
     warnings.extend(_content_warnings(show_uid, fields))
     return {"message": _ordered_fields(message, delivered), "warnings": warnings}
 
