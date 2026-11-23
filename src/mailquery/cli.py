@@ -45,7 +45,7 @@ from mailquery.config import (
     resolve_scope,
 )
 from mailquery.errors import MailqueryError, error_detail
-from mailquery.logging_setup import get_logger, setup_logging
+from mailquery.logging_setup import get_logger, log_event, setup_logging
 from mailquery.native_ids import PluginNativeIds
 from mailquery.output import (
     CONTENT_NOTICE,
@@ -1068,11 +1068,15 @@ def _run_command(
                 _validate_command_native_id(args, opened, native_name)
             if command == "show":
                 _validate_command_native_id(args, opened, native_name)
-            logger.info(
-                "event=start command=%s backend=%s drivers=%s",
-                command,
-                native_name or "-",
-                ",".join(_declared_driver_names(config, native_name)) or "-",
+            log_event(
+                logger,
+                logging.INFO,
+                (
+                    ("command", command),
+                    ("backend", native_name or "-"),
+                    ("drivers", ",".join(_declared_driver_names(config, native_name)) or "-"),
+                ),
+                text="event=start",
             )
             selected = opened.get(native_name)
             drivers = {
@@ -1100,7 +1104,13 @@ def _run_command(
         _log_error(logger, command, exc)
         return _report_error(exc, command)
     except Exception as exc:  # noqa: BLE001 - the CLI must never raise
-        logger.exception("event=internal_error command=%s", command)
+        log_event(
+            logger,
+            logging.ERROR,
+            (("command", command),),
+            text="event=internal_error",
+            exc_info=True,
+        )
         error = MailqueryError(
             "E_INTERNAL",
             f"unexpected internal error: {type(exc).__name__}",
@@ -1118,30 +1128,39 @@ def _run_command(
     duration_ms = int((time.perf_counter() - started) * 1000)
     if command == "attachment":
         attachments = payload.get("attachments") or ()
-        logger.info(
-            "event=end command=attachment exit_code=0 count=%d cached=%d bytes=%d "
-            "duration_ms=%d",
-            len(attachments),
-            sum(1 for entry in attachments if entry.get("cached")),
-            sum(int(entry.get("size_bytes") or 0) for entry in attachments),
-            duration_ms,
+        log_event(
+            logger,
+            logging.INFO,
+            (
+                ("command", "attachment"),
+                ("exit_code", 0),
+                ("count", len(attachments)),
+                ("cached", sum(1 for entry in attachments if entry.get("cached"))),
+                ("bytes", sum(int(entry.get("size_bytes") or 0) for entry in attachments)),
+                ("duration_ms", duration_ms),
+            ),
+            text="event=end",
         )
         return 0
     warnings = payload.get("warnings") or ()
     raw_scan = payload.get("scan")
     scan: dict[str, Any] = raw_scan if isinstance(raw_scan, dict) else {}
-    logger.info(
-        "event=end command=%s exit_code=0 count=%s truncated=%s warnings=%d "
-        "warning_codes=%s mode=%s candidates=%s messages_read=%s duration_ms=%d",
-        command,
-        payload.get("count", 0),
-        bool(payload.get("truncated", False)),
-        len(warnings),
-        ",".join(_warning_code(warning) for warning in warnings) or "-",
-        scan.get("mode", "-"),
-        scan.get("candidates", "-"),
-        scan.get("messages_read", "-"),
-        duration_ms,
+    log_event(
+        logger,
+        logging.INFO,
+        (
+            ("command", command),
+            ("exit_code", 0),
+            ("count", payload.get("count", 0)),
+            ("truncated", bool(payload.get("truncated", False))),
+            ("warnings", len(warnings)),
+            ("warning_codes", ",".join(_warning_code(warning) for warning in warnings) or "-"),
+            ("mode", scan.get("mode", "-")),
+            ("candidates", scan.get("candidates", "-")),
+            ("messages_read", scan.get("messages_read", "-")),
+            ("duration_ms", duration_ms),
+        ),
+        text="event=end",
     )
     return 0
 
@@ -1574,11 +1593,14 @@ def _log_backend_connection(backend: Any) -> None:
     except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
         return
     try:
-        get_logger("mailquery.store").info(
-            "strategy=%s version=%s schema_ok=%s",
-            info.get("strategy", "-"),
-            info.get("version", "-"),
-            str(info.get("schema_ok", True)).lower(),
+        log_event(
+            get_logger("mailquery.store"),
+            logging.INFO,
+            (
+                ("strategy", info.get("strategy", "-")),
+                ("version", info.get("version", "-")),
+                ("schema_ok", str(info.get("schema_ok", True)).lower()),
+            ),
         )
     except Exception:  # noqa: BLE001 - diagnostic logging must never break a command
         pass
@@ -1814,10 +1836,15 @@ def _emit_doctor_report(
         )
         sys.stdout.flush()
     if logger is not None:
-        logger.info(
-            "event=end command=doctor exit_code=0 checks=%d/%d",
-            passed_checks,
-            total_checks,
+        log_event(
+            logger,
+            logging.INFO,
+            (
+                ("command", "doctor"),
+                ("exit_code", 0),
+                ("checks", f"{passed_checks}/{total_checks}"),
+            ),
+            text="event=end",
         )
 
 
@@ -2592,17 +2619,28 @@ def _log_error(logger: Any, command: str, error: MailqueryError) -> None:
 
         frames = "".join(traceback.format_tb(error.__traceback__)).rstrip("\n")
         kind = f"{type(error).__module__}.{type(error).__qualname__}"
-        logger.error(
-            "event=error command=%s code=%s message=%s\n"
-            "Traceback (most recent call last):\n%s\n%s",
-            command,
-            error.code,
-            text,
-            frames,
-            kind,
+        log_event(
+            logger,
+            logging.ERROR,
+            (
+                ("command", command),
+                ("code", error.code),
+                ("message", text),
+            ),
+            text="event=error",
+            traceback=f"Traceback (most recent call last):\n{frames}\n{kind}",
         )
         return
-    logger.error("event=error command=%s code=%s message=%s", command, error.code, text)
+    log_event(
+        logger,
+        logging.ERROR,
+        (
+            ("command", command),
+            ("code", error.code),
+            ("message", text),
+        ),
+        text="event=error",
+    )
 
 
 def _warning_code(warning: Any) -> str:

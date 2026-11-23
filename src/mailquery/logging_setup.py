@@ -11,6 +11,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Sequence
 
 # ``asctime`` without a date format renders ``YYYY-MM-DD HH:MM:SS,mmm``.
 LOG_FORMAT = "%(asctime)s %(levelname)-5s %(name)s run=%(run_id)s %(message)s"
@@ -26,6 +27,9 @@ LEVELS: dict[str, int] = {
 }
 
 _current_run_id: str = "-"
+
+#: Record attribute that carries the structured event to formatters.
+_EVENT_EXTRA_KEY = "mailquery_event"
 
 # A NullHandler keeps library-style usage (and the test suite) from leaking
 # warnings to ``stderr`` through logging's last-resort handler. The CLI replaces
@@ -87,7 +91,12 @@ def setup_logging(home: Path, level: str = "info", max_size_mb: int = DEFAULT_MA
     import uuid  # lazy: only needed once per run
 
     _current_run_id = uuid.uuid4().hex[:12]
-    logger.debug("logging initialized level=%s max_size_mb=%s", level, max_size_mb)
+    log_event(
+        get_logger("mailquery"),
+        logging.DEBUG,
+        (("level", level), ("max_size_mb", max_size_mb)),
+        text="logging initialized",
+    )
     return _current_run_id
 
 
@@ -98,6 +107,39 @@ def current_run_id() -> str:
 def get_logger(name: str = "mailquery") -> logging.LoggerAdapter:
     """Return a logger adapter carrying the current run correlation id."""
     return logging.LoggerAdapter(logging.getLogger(name), {"run_id": _current_run_id})
+
+
+def log_event(
+    logger: logging.Logger | logging.LoggerAdapter,
+    level: int,
+    fields: Sequence[tuple[str, object]] = (),
+    *,
+    text: str | None = None,
+    traceback: str | None = None,
+    exc_info: bool = False,
+) -> None:
+    """Log one structured event without changing its rendered text line.
+
+    ``fields`` keeps every ``key=value`` pair in order; ``text`` is the free
+    text that precedes them. Both travel to the formatter as record data, so
+    the JSON formatter can read the event without parsing the text line. A
+    logger adapter keeps its own extra values (the run id) and gains the event
+    data; calling the adapter directly would replace one map with the other on
+    the supported Python versions.
+    """
+    items = tuple((str(key), value) for key, value in fields)
+    parts = [text] if text else []
+    parts.extend(f"{key}={value}" for key, value in items)
+    message = " ".join(parts)
+    if traceback:
+        message = f"{message}\n{traceback}" if message else traceback
+    event = {"fields": items, "text": text, "traceback": traceback}
+    if isinstance(logger, logging.LoggerAdapter):
+        merged = dict(logger.extra or {})
+        merged[_EVENT_EXTRA_KEY] = event
+        logger.logger.log(level, message, extra=merged, exc_info=exc_info)
+        return
+    logger.log(level, message, extra={_EVENT_EXTRA_KEY: event}, exc_info=exc_info)
 
 
 def _chmod_dir(path: Path) -> None:

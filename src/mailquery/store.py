@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import plistlib
 import shutil
+import logging
 import sqlite3
 import tempfile
 import time
@@ -22,7 +23,7 @@ from typing import Any, Sequence
 from urllib.parse import unquote, urlsplit
 
 from mailquery.errors import MailqueryError
-from mailquery.logging_setup import get_logger
+from mailquery.logging_setup import get_logger, log_event
 
 SUPPORTED_VERSIONS = ("V9", "V10", "V11")
 
@@ -243,7 +244,7 @@ def detect_version(mail_root: Path | None = None) -> StoreVersion:
     if not version_uuid:
         version_uuid = _find_version_uuid(version_dir)
         if version_uuid:
-            _log().debug("recovered version uuid from disk")
+            log_event(_log(), logging.DEBUG, text="recovered version uuid from disk")
 
     return StoreVersion(
         mail_root=root,
@@ -846,7 +847,7 @@ def open_store(mail_root: Path | None = None, tmp_root: Path | None = None) -> E
                 "the Apple Mail index drifted from the supported layout "
                 "(V9/V10/V11); update mailquery or check `mailquery doctor`",
             )
-        _log().debug("opened Envelope Index strategy=%s", strategy)
+        log_event(_log(), logging.DEBUG, (("strategy", strategy),), text="opened Envelope Index")
         return store
     except Exception:
         if work_dir is not None:
