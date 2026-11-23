@@ -74,13 +74,13 @@ Hallazgo para RC-10 (lo añade el orquestador a su "Qué cambia" al cerrar M03, 
 
 | Documento | Milestone | Estado en la unidad |
 |---|---|---|
-| `README.md` | M07 | pendiente |
-| `README.es.md` | M07 | pendiente |
-| `skills/mailquery/SKILL.md` | M07 | pendiente |
-| `docs/INTERFACES.md` | M07 | pendiente |
+| `README.md` | M07 | actualizado |
+| `README.es.md` | M07 | actualizado |
+| `skills/mailquery/SKILL.md` | M07 | actualizado |
+| `docs/INTERFACES.md` | M07 | actualizado |
 | `docs/config.example.toml` | — | sin cambio |
-| `docs/recipes/` | M07 | pendiente |
-| `docs/security/` | M07 | pendiente |
+| `docs/recipes/` | M07 | actualizado |
+| `docs/security/` | M07 | actualizado |
 | `docs/tests/` | Orquestador (F0, cierres de milestone, F5) | pendiente |
 
 ## Cambios en `docs/tests/` (F0)
