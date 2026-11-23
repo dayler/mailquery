@@ -167,6 +167,7 @@ READONLY_MEMBERS: dict[str, dict[str, str | None]] = {
         "EntryID": None,
         "DefaultItemType": None,
         "Folders": "Folders",
+        "Parent": "Folder",  # read only below the store root: the root's parent is the namespace
         "PropertyAccessor": "PropertyAccessor",
         "GetTable": "Table",
     },
