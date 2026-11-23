@@ -309,6 +309,14 @@ cuentas) están en
 Precedencia: flags de la CLI, `config.toml`, defaults. La rotación diaria del log
 de la 1.x se reemplazó por `[logging].max_size_mb`; la clave retirada da
 `E_CONFIG_INVALID` con el hint `retention_days was replaced by max_size_mb`.
+El formato del log se elige en cada ejecución con `[logging].json`: con `true`,
+la ejecución escribe JSON Lines en `~/.mailquery/logs/mailquery.jsonl` en lugar
+del texto plano `~/.mailquery/logs/mailquery.log`:
+
+```toml
+[logging]
+json = true                    # false (default): texto en mailquery.log
+```
 
 ### Recuperación de adjuntos (`[attachments]`)
 
@@ -964,12 +972,24 @@ confianza.
 ## Logs y privacidad
 
 `~/.mailquery/logs/mailquery.log`, texto plano; rota por tamaño
-(`[logging].max_size_mb`, default 10 MB, 5 archivos rotados). La línea
-`event=start` registra `backend=` (el driver nativo) y `drivers=` (la lista
-declarada); el éxito de `attachment` registra `event=end` con conteos y bytes.
-Asuntos, cuerpos, direcciones, carpetas, cuentas, rutas, términos de búsqueda,
-uids y nombres de adjuntos nunca se registran. Cero red y cero telemetría desde
-el núcleo; las credenciales y tokens nunca se leen.
+(`[logging].max_size_mb`, default 10 MB, 5 archivos rotados). Con
+`[logging].json = true` la ejecución escribe
+`~/.mailquery/logs/mailquery.jsonl` en su lugar, un objeto JSON por línea, con
+la misma rotación. Cada ejecución escribe solo el archivo de su formato: el del
+otro formato, con sus rotados, no se modifica, no se rota ni se borra. Cada
+objeto tiene `ts` (ISO 8601 local con milisegundos y desfase), `level`,
+`logger`, `run`, `fields` con los campos del evento, `text` para el texto libre
+y `traceback` para un error interno, por ejemplo:
+
+```json
+{"ts": "2026-11-02T02:15:00.214-04:00", "level": "INFO", "logger": "mailquery.cli", "run": "abc123", "fields": {"event": "start", "command": "search", "backend": "apple_mail", "drivers": "apple_mail"}}
+```
+
+La línea `event=start` registra `backend=` (el driver nativo) y `drivers=` (la
+lista declarada); el éxito de `attachment` registra `event=end` con conteos y
+bytes. Asuntos, cuerpos, direcciones, carpetas, cuentas, rutas, términos de
+búsqueda, uids y nombres de adjuntos nunca se registran. Cero red y cero
+telemetría desde el núcleo; las credenciales y tokens nunca se leen.
 
 ## Permisos
 
@@ -1026,7 +1046,7 @@ abren ni ejecutan los archivos recuperados.
 | `E_ATTACHMENT_UNREADABLE` (3) | El adjunto está corrupto o protegido con S/MIME | Revísalo en el cliente de correo; los adjuntos S/MIME no se pueden extraer |
 | `E_IO` (3) | Fallo de E/S de la caché de adjuntos, la caché de ids nativos o el staging (espacio, cuota, sistema de archivos) | Revisa el espacio libre y los permisos de `~/.mailquery`, y reintenta |
 | `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` sin acotar / demasiados candidatos | Añade `--since` u otro filtro, o sube `search.max_scan` (máx. 50000) |
-| `E_INTERNAL` (1) | Fallo inesperado | Revisa `~/.mailquery/logs/mailquery.log` con `--log-level debug` |
+| `E_INTERNAL` (1) | Fallo inesperado | Revisa `~/.mailquery/logs/mailquery.log` (o `mailquery.jsonl` con `[logging].json = true`) con `--log-level debug` |
 
 ## Licencia
 
