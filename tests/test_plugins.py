@@ -36,6 +36,7 @@ from mailquery.plugins import (
     Reason,
     call_driver,
 )
+from mailquery.plugins.api import call_optional_operation
 
 from tests.fakes.plugin import (
     ACCOUNT_LABEL as PLUGIN_ACCOUNT_LABEL,
@@ -698,6 +699,47 @@ class PluginApiTests(_PluginTestCase):
                 }:
                     offenders.append(f"{path.relative_to(SRC_ROOT)} imports {module}")
         self.assertEqual(offenders, [])
+
+
+# --------------------------------------------------------------------------- #
+# UT-PL-06 — optional hooks (AC-70)
+# --------------------------------------------------------------------------- #
+
+
+class OptionalHookTests(_PluginTestCase):
+    """UT-PL-06.08: the core calls an optional hook only when the driver has it."""
+
+    def test_ut_pl_06_08_display_native_id_is_optional_and_validated(self) -> None:
+        """UT-PL-06.08: no hook ⇒ nothing; hook ⇒ its value; invalid plugin value ⇒ E_PLUGIN_FAILED."""
+        context = PluginContext(home=Path("/home/u"), tmp_dir=Path("/home/u/tmp"))
+        self.assertIsNone(
+            call_optional_operation("display_native_id", object(), "ABC", driver=DRIVER)
+        )
+        plugin = FakePluginBackend(context)
+        self.assertEqual(
+            call_optional_operation("display_native_id", plugin, "ABC", driver=DRIVER),
+            "ABC",
+        )
+        self.assertEqual(plugin.display_calls, ["ABC"])
+        for invalid in ("", "/", "..", " "):
+            with self.subTest(value=invalid):
+                broken = FakePluginBackend(
+                    context, results={"display_native_id": invalid}
+                )
+                with self.assertRaises(MailqueryError) as caught:
+                    call_optional_operation(
+                        "display_native_id", broken, "ABC", driver=DRIVER
+                    )
+                self.assertEqual(caught.exception.code, "E_PLUGIN_FAILED")
+                self.assertEqual(caught.exception.exit_code, 3)
+        # A built-in driver's value is not validated.
+        internal = FakePluginBackend(context, results={"display_native_id": ".."})
+        self.assertEqual(
+            call_optional_operation(
+                "display_native_id", internal, "ABC", driver="outlook", internal=True
+            ),
+            "..",
+        )
 
 
 # --------------------------------------------------------------------------- #

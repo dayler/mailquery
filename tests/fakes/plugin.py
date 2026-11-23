@@ -158,6 +158,8 @@ class FakePluginBackend:
         self.calls: list[str] = []
         #: Keyword arguments of every ``query`` call (cursor/merge tests).
         self.queries: list[dict[str, Any]] = []
+        #: Native ids received by every ``display_native_id`` call.
+        self.display_calls: list[str] = []
 
     # -- contract metadata -------------------------------------------------- #
 
@@ -178,6 +180,14 @@ class FakePluginBackend:
 
     def describe(self) -> dict[str, Any]:
         return {"backend": self.driver, "version": VERSION, "strategy": "plugin", "schema_ok": True}
+
+    # -- optional hooks ----------------------------------------------------- #
+
+    def display_native_id(self, native_id: str) -> str:
+        """Optional hook: native form of a uid part, unchanged unless configured."""
+        self.calls.append("display_native_id")
+        self.display_calls.append(str(native_id))
+        return self._fail("display_native_id", str(native_id))
 
     # -- the operations of protocol v1 -------------------------------------- #
 

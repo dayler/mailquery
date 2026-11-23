@@ -39,6 +39,7 @@ from typing import Any, Final, Literal, NotRequired, TypedDict, TypeVar
 
 from mailquery import output
 from mailquery.errors import MailqueryError
+from mailquery.uid import is_valid_native_id
 
 #: Version of the plugin contract; closed for the 3.x line.
 PLUGIN_API: Final[int] = 1
@@ -107,6 +108,13 @@ METADATA_OPERATIONS: Final[frozenset[str]] = frozenset(
 #: Operations whose ``reason`` uses the attachment mapping context.
 ATTACHMENT_OPERATIONS: Final[frozenset[str]] = frozenset(
     {"attachment_names", "attachments", "attachment_stream", "unreadable_attachments"}
+)
+
+#: Optional driver hooks: the core calls each one only when the driver defines
+#: it. They are not part of :data:`METADATA_OPERATIONS` and do not change
+#: ``PLUGIN_API``: a driver without them behaves exactly as before.
+OPTIONAL_OPERATIONS: Final[frozenset[str]] = frozenset(
+    {"display_native_id", "printed_messages"}
 )
 
 ReadOnlyMode = Literal["structural", "promise"]
@@ -715,6 +723,42 @@ def call_driver(
     return value
 
 
+def call_optional_operation(
+    operation: str,
+    backend: Any,
+    *args: Any,
+    driver: str,
+    internal: bool | None = None,
+    timeout: float | None = None,
+) -> Any:
+    """Call one optional driver hook through the driver protocol.
+
+    A driver that does not define ``operation`` receives nothing and the call
+    returns ``None``. A driver that defines it runs through :func:`call_driver`,
+    so the call keeps the metadata deadline and maps a plugin failure to the
+    plugin error protocol. ``display_native_id`` of an external driver must
+    return a valid native id: an invalid value is ``E_PLUGIN_FAILED``. The value
+    of ``printed_messages`` is returned to the caller, which ignores it.
+    """
+    hook = getattr(backend, operation, None)
+    if not callable(hook):
+        return None
+    is_internal = (
+        driver in RESERVED_DRIVER_NAMES if internal is None else bool(internal)
+    )
+    value = call_driver(
+        operation,
+        lambda: hook(*args),
+        driver=driver,
+        internal=is_internal,
+        timeout=timeout,
+    )
+    if operation == "display_native_id" and not is_internal:
+        if not is_valid_native_id(value):
+            raise _invalid_result(driver, operation)
+    return value
+
+
 class _DriverCallProxy:
     """Transparent proxy routing every protocol operation through :func:`call_driver`."""
 
@@ -807,6 +851,7 @@ __all__ = [
     "METADATA_TIMEOUT_SECONDS",
     "NATIVE_ORDERS",
     "NativeOrder",
+    "OPTIONAL_OPERATIONS",
     "PLUGIN_API",
     "PluginContext",
     "PluginError",
@@ -816,6 +861,7 @@ __all__ = [
     "AttachmentsMode",
     "ReadOnlyMode",
     "call_driver",
+    "call_optional_operation",
     "map_plugin_error",
     "sanitize_error_field",
     "wrap_driver",

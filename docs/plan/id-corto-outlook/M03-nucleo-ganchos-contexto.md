@@ -72,8 +72,8 @@ Rangos de `docs/changes/id-corto-outlook.md` en el commit `384e5a8`:
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `MessageNotFound` y sus capturas; test sin ID en `tests/test_cli.py` | 🟡 |
-| 2 | `OPTIONAL_OPERATIONS`, llamada a ganchos opcionales y validación de la forma nativa; UT-PL-06.08 | ⚪ |
+| 1 | `MessageNotFound` y sus capturas; test sin ID en `tests/test_cli.py` | 🟢 |
+| 2 | `OPTIONAL_OPERATIONS`, llamada a ganchos opcionales y validación de la forma nativa; UT-PL-06.08 | 🟢 |
 | 3 | `PluginContext.native_ids`, un contexto por plugin, `short_id` en `mailquery.plugins`, `bind_home`; UT-PL-05 | ⚪ |
 | 4 | Aviso de impresos en `search` y `new`; plugin de prueba con ganchos; UT-PL-06.01–.07 | ⚪ |
 | 5 | Suite completa, cobertura, diff, evidencia cruda | ⚪ |
@@ -160,3 +160,5 @@ Los de `protocolo.md`, más la lista de puntos de `search.py` donde se avisa (fu
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `MessageNotFound` con `hint` en `backends/base.py`; capturas en `run_show` y `_run_attachment`; el test sin ID de `tests/test_cli.py` pasa solo. |
+| 2026-11-23 | 2 | `OPTIONAL_OPERATIONS` y `call_optional_operation` con la validación de `display_native_id`; UT-PL-06.08 pasa solo. |
