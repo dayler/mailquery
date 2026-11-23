@@ -128,9 +128,8 @@ Condiciones:
 - **Resolver.** Dada la parte del `uid`, devuelve el `native_id` de su fila, o nada si no hay fila. No escribe.
 - **Descartar.** Borra la fila de un `native_id`.
 - **Filas.** Cada fila relaciona `driver`, `short_id` y `seq` con un `native_id`. Un `native_id` tiene como mucho una fila por driver. Una fila de mensaje no se actualiza: se inserta y se borra.
-- **Mayor `seq` registrado.** La caché recuerda, por cada `driver` y `short_id`, el mayor `seq` registrado. Ese dato solo crece y no se borra al borrar filas.
-- **`seq`.** Los `native_id` sin fila que comparten `driver` y `short_id` reciben el `seq` siguiente al mayor registrado del par y al mayor ya asignado en la ejecución; sin ninguno, el primero recibe 1. Si varios lo reciben en la misma consulta, van en el orden de su `native_id`.
-- **Sin reutilizar.** Un `seq` registrado para un `native_id` no pasa nunca a otro mientras exista el archivo.
+- **`seq`.** Los `native_id` sin fila que comparten `driver` y `short_id` reciben el `seq` siguiente al mayor de las filas del par y al mayor ya asignado en la ejecución; sin ninguno, el primero recibe 1. Si varios lo reciben en la misma consulta, van en el orden de su `native_id`.
+- **Reutilización.** El `seq` de una fila borrada puede volver a asignarse: mientras esa fila no exista, el uid antiguo no resuelve y un mensaje nuevo con el mismo id corto puede recibir ese sufijo.
 - **Forma del sufijo.** `seq` va en decimal sin ceros a la izquierda. Así cada parte del `uid` representa a un solo `native_id`.
 - **Qué no guarda.** Ni `Message-ID`, asuntos, direcciones, cuerpos, cuentas, carpetas, fechas ni rutas.
 - **Salida.** Ninguna salida JSON tiene una propiedad `short_id`, `seq` ni otra propia de la caché: el id corto solo aparece dentro del `uid`.
@@ -220,7 +219,7 @@ El driver `outlook` emite como `<native_id>` un id corto de 10 caracteres deriva
 - **Motivo.** El uid de Outlook pasa de 148 a 18 caracteres sin cambiar el formato `"<driver>:<native_id>"`, el contrato JSON, `state.json` ni la regla de la ruta de adjuntos. La caché solo traduce ids, registrar solo lo impreso la mantiene pequeña y cada uid apunta a un solo mensaje.
 - **Alternativas descartadas.** `uid` propio del núcleo derivado de `Message-ID`, con el estado de `new` en la misma base; id corto también en Apple Mail; registrar todos los mensajes leídos; devolver todas las coincidencias de un id corto con un warning; cambiar el `native_id` de una fila o buscar el mensaje en otras carpetas; un contador único de la base para `seq`.
 
-ADR-02 cambia: el único estado de `new` sigue siendo el cursor de `state.json`. La caché de ids nativos es una base SQLite con identificadores y el mayor `seq` registrado de cada par, sin mensajes ni estado de `new`; en ese punto ADR-50 supera el descarte de "SQLite de estado".
+ADR-02 cambia: el único estado de `new` sigue siendo el cursor de `state.json`. La caché de ids nativos es una base SQLite con identificadores, sin mensajes ni estado de `new`; en ese punto ADR-50 supera el descarte de "SQLite de estado".
 
 ### Arquitectura
 
@@ -282,17 +281,6 @@ Base SQLite de la librería, en `~/.mailquery/db/cache.db`. La escriben solo los
 
 - **Clave primaria.** `driver`, `short_id` y `seq`: no hay dos filas con los mismos tres valores.
 - **Única.** `driver` y `native_id`: un `native_id` tiene como mucho una fila por driver.
-
-**Tabla: Estructura de la tabla `cache_native_seq`**
-
-| Columna | Tipo | Nulo | Contenido |
-|---|---|---|---|
-| `driver` | texto | no | Driver del par |
-| `short_id` | texto | no | Id corto del par, sin sufijo |
-| `max_seq` | entero ≥ 1 | no | Mayor `seq` registrado del par; solo crece y no se borra al borrar filas de `cache_native_ids` |
-
-- **Clave primaria.** `driver` y `short_id`.
-- **Cuándo cambia.** Se crea o se actualiza en la misma transacción que registra filas en `cache_native_ids`.
 - **Versión de formato.** La base guarda una versión de formato; la de esta estructura es la 1.
 
 Reglas del archivo:
@@ -303,7 +291,7 @@ Reglas del archivo:
 - **Creación.** Al abrir la base, la librería comprueba la carpeta y la crea si no existe; si no encuentra el archivo, lo crea siempre, con su tabla y una versión de formato, aunque el comando no llegue a registrar nada; también `search --count`, que no registra filas. Con solo el driver `apple_mail`, nadie usa la librería y el archivo no se crea.
 - Un archivo recién creado no tiene filas: ningún uid se resuelve hasta que `search` o `new` vuelven a imprimir el mensaje.
 - Un archivo vacío se inicializa como uno nuevo. Uno con otra versión de formato no es una base válida de la librería.
-- Las filas de mensajes solo se insertan y se borran; el mayor `seq` registrado de cada par solo crece.
+- Las filas de mensajes solo se insertan y se borran; el `seq` de un par es el siguiente al mayor de sus filas.
 - Si el archivo se borra, los uids ya impresos dejan de resolverse hasta que `search` o `new` vuelven a imprimir el mensaje, con el mismo id corto. `new` y su estado no dependen de este archivo, salvo en el caso de "Riesgos" en que se borra con dos mensajes que comparten id corto.
 - Si el archivo no se puede abrir, leer o escribir, o no es una base válida, el comando que lo necesita falla con el error de RF-80.
 - En macOS la carpeta tiene permisos 0700, y el archivo y los archivos auxiliares de la base, 0600.
@@ -348,10 +336,10 @@ Los ejemplos del PRD con un uid de Outlook usan el id corto.
 ### Riesgos
 
 - **Borrado o pérdida de `cache.db`.** Probabilidad baja, impacto bajo. Los uids de Outlook ya impresos dejan de resolverse hasta que una búsqueda vuelve a imprimir el mensaje, con el mismo id corto.
-- **`cache.db` crece con filas de mensajes borrados que nadie vuelve a pedir y con el mayor `seq` registrado de cada id corto, que nunca se borra.** Probabilidad media, impacto bajo. Solo se registran los mensajes impresos y cada fila guarda dos identificadores; las filas tienen borrado a demanda (RF-81), el mayor `seq` no. Riesgo aceptado.
-- **Un mensaje cuya fila se borró vuelve a imprimirse.** Probabilidad muy baja, impacto bajo. Si Outlook da por ausente un mensaje que luego reaparece, el mensaje recibe un `seq` nuevo: su uid cambia y `new` puede emitirlo otra vez. Riesgo aceptado.
-- **Dos mensajes con el mismo id corto.** Probabilidad baja, impacto bajo. Cada uno tiene su `seq` y su uid (RF-80), y un `seq` no se reutiliza mientras exista `cache.db`. Riesgo aceptado.
-- **Borrar `cache.db` con dos mensajes que comparten id corto.** Probabilidad muy baja, impacto medio. El sufijo vuelve a asignarse por orden de registro y un uid puede pasar a otro mensaje. Un uid guardado por el harness abre entonces el otro mensaje; `attachment` puede servir un adjunto ya extraído del mensaje anterior con el mismo nombre e índice; y `new` puede no emitir un mensaje nuevo cuyo uid ya estaba en su anillo. Exige una colisión de 10 caracteres y el borrado manual del archivo. Riesgo aceptado.
+- **`cache.db` crece con filas de mensajes borrados que nadie vuelve a pedir.** Probabilidad media, impacto bajo. Solo se registran los mensajes impresos y cada fila guarda dos identificadores; las filas tienen borrado a demanda (RF-81). Riesgo aceptado.
+- **Un mensaje cuya fila se borró vuelve a imprimirse.** Probabilidad muy baja, impacto bajo. Si Outlook da por ausente un mensaje que luego reaparece, el mensaje recibe el `seq` siguiente al mayor de las filas que quedan del par: su uid puede cambiar y `new` puede emitirlo otra vez. Riesgo aceptado.
+- **Dos mensajes con el mismo id corto.** Probabilidad baja, impacto bajo. Cada uno tiene su `seq` y su uid (RF-80); el `seq` de una fila borrada puede pasar a otro mensaje con el mismo id corto. Riesgo aceptado.
+- **Borrar la fila de un mensaje y que otro con el mismo id corto tome su sufijo.** Probabilidad muy baja, impacto medio. El sufijo vuelve a asignarse por orden de registro y un uid puede pasar a otro mensaje. Un uid guardado por el harness abre entonces el otro mensaje; `attachment` puede servir un adjunto ya extraído del mensaje anterior con el mismo nombre e índice; y `new` puede no emitir un mensaje nuevo cuyo uid ya estaba en su anillo. Exige una colisión de 10 caracteres y que la fila borrada fuera la del mayor `seq` del par, o el borrado manual del archivo. Riesgo aceptado.
 - **`cache.db` guarda el `EntryID` de los mensajes impresos.** Probabilidad media, impacto bajo. Es un archivo privado del usuario (RNF-05), sin `Message-ID`, asuntos, direcciones ni cuerpos.
 - **Un uid que solo salió en un warning abre otro mensaje.** Probabilidad muy baja, impacto bajo. Ese uid no se registra (RF-82): si en una ejecución posterior otro mensaje con el mismo id corto se imprime antes, recibe esa misma parte del `uid`. Riesgo aceptado.
 - **Un uid de Outlook guardado por el harness deja de resolverse** (mensaje movido, `cache.db` borrada). Probabilidad media, impacto bajo. Se vuelve a buscar el mensaje.
@@ -361,7 +349,7 @@ Los ejemplos del PRD con un uid de Outlook usan el id corto.
 
 **AC-63.** En Windows, todo `uid` que emite el driver `outlook` es `outlook:` más un id corto de 10 caracteres, con o sin sufijo; el mismo mensaje da el mismo `uid` en corridas sucesivas y, si ningún otro mensaje con su id corto se lee ni se registra después del borrado, también después de borrar `cache.db`; `show` y `attachment` lo resuelven; un `EntryID` como uid, con prefijo o sin él, un id corto en mayúsculas o los sufijos `-1` y `-02` ⇒ `E_USAGE` sin abrir ni crear la caché. En macOS el `uid` no cambia y, con solo el driver `apple_mail`, `cache.db` no se crea.
 
-**AC-64.** Dos `native_id` del mismo driver con el mismo id corto reciben `seq` 1 y 2 y los uids `<driver>:<short_id>` y `<driver>:<short_id>-2`, también cuando llegan en la misma consulta; un `native_id` leído en dos consultas de una misma ejecución conserva su uid; cada uid resuelve a su mensaje, y `attachment` extrae los adjuntos de cada uno en su propio directorio, sin servir los del otro. Si se borra la fila del `seq` 2, un tercer `native_id` con ese id corto recibe el `seq` 3.
+**AC-64.** Dos `native_id` del mismo driver con el mismo id corto reciben `seq` 1 y 2 y los uids `<driver>:<short_id>` y `<driver>:<short_id>-2`, también cuando llegan en la misma consulta; un `native_id` leído en dos consultas de una misma ejecución conserva su uid; cada uid resuelve a su mensaje, y `attachment` extrae los adjuntos de cada uno en su propio directorio, sin servir los del otro. Si se borra la fila del `seq` 2, un tercer `native_id` con ese id corto recibe el `seq` 2 otra vez.
 
 **AC-65.** `search` (también con `--group-by`) y `new` (también con `--peek`) registran en la caché de ids nativos solo los mensajes que imprimen; `search --count` no registra filas; una respuesta sin mensajes no avisa al driver; si el registro falla, el comando falla sin imprimir mensajes ni escribir estado.
 
@@ -371,7 +359,7 @@ Los ejemplos del PRD con un uid de Outlook usan el id corto.
 
 **AC-68.** `show --show-native-id` muestra en Windows `outlook:<EntryID>` en `message.uid`; las claves del JSON, los demás valores, la caché de ids nativos y `cached_path` son los mismos que sin la opción; ese id nativo como entrada de `show` o de `attachment` ⇒ `E_USAGE`; `search`, `new`, `attachment`, `mailboxes` y `doctor` rechazan la opción con `E_USAGE`. Un plugin que devuelve una forma nativa que no cumple RF-38 ⇒ `E_PLUGIN_FAILED`. En macOS la salida de `show` es la misma con la opción y sin ella.
 
-**AC-69.** El texto `mailquery` con 10 caracteres da el id corto `pmw3w06f5e`. Con el driver `outlook`: base bloqueada por otro proceso más de 5 s ⇒ `E_LOCKED` (exit 5); sin permiso sobre `cache.db` ⇒ `E_PERMISSION`; archivo que no es una base válida de la librería o conflicto al registrar ⇒ `E_IO`, con el hint de RF-80; archivo vacío ⇒ se inicializa. Desde el aviso de un plugin que no captura el error, los mismos fallos dan `E_CLIENT_BUSY`, `E_PERMISSION` y `E_PLUGIN_FAILED`. Un uid que no está en la caché o cuyo mensaje está ausente confirmado lleva el hint de repetir la búsqueda. `show` sin la carpeta `~/.mailquery/db/` ni `cache.db` ⇒ crea las dos, con la base vacía, y responde `message uid … was not found`. En macOS, la carpeta tiene permisos 0700, y `cache.db` y sus archivos auxiliares, 0600. Las tablas de `cache.db` solo tienen las columnas de sus estructuras. `mailboxes`, `doctor` y `--version` no crean `cache.db`.
+**AC-69.** El texto `mailquery` con 10 caracteres da el id corto `pmw3w06f5e`. Con el driver `outlook`: base bloqueada por otro proceso más de 5 s ⇒ `E_LOCKED` (exit 5); sin permiso sobre `cache.db` ⇒ `E_PERMISSION`; archivo que no es una base válida de la librería o conflicto al registrar ⇒ `E_IO`, con el hint de RF-80; archivo vacío ⇒ se inicializa. Desde el aviso de un plugin que no captura el error, los mismos fallos dan `E_CLIENT_BUSY`, `E_PERMISSION` y `E_PLUGIN_FAILED`. Un uid que no está en la caché o cuyo mensaje está ausente confirmado lleva el hint de repetir la búsqueda. `show` sin la carpeta `~/.mailquery/db/` ni `cache.db` ⇒ crea las dos, con la base vacía, y responde `message uid … was not found`. En macOS, la carpeta tiene permisos 0700, y `cache.db` y sus archivos auxiliares, 0600. La tabla de `cache.db` solo tiene las columnas de su estructura. `mailboxes`, `doctor` y `--version` no crean `cache.db`.
 
 **AC-70.** Un plugin recibe en su contexto la base abierta para su driver: con ella registra y resuelve sus filas, también dentro de un gancho vigilado por el tope de 30 s, y no ve ni cambia las filas de otro driver. Un plugin sin los ganchos opcionales funciona igual: no recibe el aviso y `show --show-native-id` muestra su uid sin cambios. Un gancho de un plugin que supera el tope de 30 s ⇒ `E_CLIENT_TIMEOUT`, sin imprimir mensajes.
 
@@ -388,7 +376,7 @@ Ninguna
 
 - **¿Cómo se acorta el `uid` de Outlook?** (2026-11-22) Con un id corto de 10 caracteres derivado del `EntryID`, a cargo del driver, sin cambiar el formato del `uid` ni el contrato JSON; Apple Mail no cambia (ADR-50, RF-81).
 - **¿Quién ofrece las herramientas del id corto?** (2026-11-22) Una librería del núcleo, con el cálculo (recibe la cantidad de caracteres), la conexión y las operaciones de la tabla; cada driver decide si la usa (RF-80).
-- **¿Qué guarda la caché de ids nativos?** (2026-11-22) `driver`, `short_id`, `seq` y `native_id` en la tabla `cache_native_ids`, y el mayor `seq` registrado de cada `driver` y `short_id` en `cache_native_seq`, y nada más; ninguna salida JSON tiene una propiedad `short_id` (RF-80).
+- **¿Qué guarda la caché de ids nativos?** (2026-11-22) `driver`, `short_id`, `seq` y `native_id` en la tabla `cache_native_ids`, y nada más; ninguna salida JSON tiene una propiedad `short_id` (RF-80).
 - **¿Qué pasa si dos mensajes tienen el mismo id corto?** (2026-11-22) `seq` los distingue y va en el `uid` a partir de 2; cada `uid` apunta a un solo mensaje y no hay warning nuevo (RF-80).
 - **¿Qué mensajes se registran en la caché de ids nativos?** (2026-11-22) Solo los que el comando imprime: el núcleo avisa de ellos a cada driver antes de imprimir (RF-82).
 - **¿Qué pasa si el `native_id` de una fila ya no existe?** (2026-11-22) La fila se borra solo con la ausencia confirmada; con Outlook cerrado, sin conexión o con un PST desmontado no se borra nada; no se actualiza la fila ni se busca el mensaje en otras carpetas (RF-81).
@@ -396,7 +384,8 @@ Ninguna
 - **¿Cómo se llaman el archivo y el módulo, y cambia `plugin_api`?** (2026-11-22) `~/.mailquery/db/cache.db` y `native_ids.py`. Los dos ganchos nuevos, `printed_messages` y `display_native_id`, son opcionales y `plugin_api` sigue en 1 (RF-80, RF-82, RF-83).
 - **¿Qué errores da la caché de ids nativos?** (2026-11-22) Los del PRD, sin código nuevo y sin cambiar RF-50. Con un driver interno: base ocupada por otro proceso más de 5 s ⇒ `E_LOCKED`; sin permiso ⇒ `E_PERMISSION`; otro fallo, base no válida o registro que falla ⇒ `E_IO`. Dentro de un plugin, por el protocolo de RF-50: `busy`, `permission` o `E_PLUGIN_FAILED` (RF-80).
 - **¿Qué pasa si dos mensajes nuevos con el mismo id corto aparecen en la misma ejecución?** (2026-11-22) La asignación vale para toda la ejecución: un `native_id` conserva la primera parte del `uid` que recibió, aunque se lea en varias consultas, y los nuevos de un mismo id corto reciben `seq` siguientes en el orden de su `native_id` (RF-80).
-- **¿Se reutiliza el `seq` de una fila borrada?** (2026-11-22) No: la caché recuerda el mayor `seq` registrado de cada par mientras exista el archivo. Así no se hereda un directorio de adjuntos ni `new` deja de emitir un mensaje nuevo; solo el borrado manual del archivo lo permite (RF-80, "Riesgos").
+- **¿Hay una tabla aparte para el mayor `seq`?** (2026-11-23) No: el `seq` siguiente sale del mayor `seq` de las filas del par, así que al borrar la última fila con ese sufijo el número queda libre. Una tabla que recordara el mayor `seq` solo evitaba ese caso, improbable, y obligaba a escribirla en cada registro (RF-80, "Riesgos").
+- **¿Se reutiliza el `seq` de una fila borrada?** (2026-11-22) Sí: el `seq` siguiente es el mayor de las filas que quedan del par, así que al borrar la última fila con ese sufijo el número queda libre para otro mensaje con el mismo id corto (RF-80, "Riesgos").
 - **¿Cuándo está un mensaje ausente confirmado?** (2026-11-22) Solo cuando su store está montado y Outlook, al abrir su `EntryID` en ese store, responde que no existe o que no es válido; cualquier otro resultado conserva la fila (RF-81).
 - **¿Dónde está la base y quién la crea?** (2026-11-22) En la carpeta `~/.mailquery/db/`. Al abrir la base, la librería crea la carpeta si no existe y crea siempre el archivo si no lo encuentra; un archivo vacío se inicializa (RF-80, "Caché de ids nativos").
 - **¿Qué versión anuncia `develop`?** (2026-11-22) La pre-release `3.0.0a2`, en lugar de `3.0.0a1` ("Versión"). Sustituye a la decisión del 2026-11-11 que fijaba `3.0.0a1` hasta el release.
@@ -426,11 +415,11 @@ Ninguna
 | RC-06 | Requisitos nuevos | `06-requisitos-funcionales.md` | después de RF-79 | Subsección nueva 6.10 con RF-80…RF-83. | implementado |
 | RC-07 | Ayuda de `show` | `06-requisitos-funcionales.md` | RF-73 | `show --help` y los README describen `--show-native-id` como opción de depuración. | implementado |
 | RC-08 | Privacidad y permisos | `07-requisitos-no-funcionales.md` | RNF-05 | La carpeta `~/.mailquery/db/` entre los subdirectorios con permisos 0700, y la caché de ids nativos entre los archivos con permisos 0600. | implementado |
-| RC-09 | Decisiones de arquitectura | `08-adr.md` | ADR-02; después de ADR-49 | ADR-02: el único estado de `new` sigue siendo el cursor; la caché de ids nativos es una base SQLite con identificadores y el mayor `seq` de cada par, y ADR-50 supera en ese punto el descarte de "SQLite de estado". ADR-50 nueva. | implementado |
+| RC-09 | Decisiones de arquitectura | `08-adr.md` | ADR-02; después de ADR-49 | ADR-02: el único estado de `new` sigue siendo el cursor; la caché de ids nativos es una base SQLite con identificadores, y ADR-50 supera en ese punto el descarte de "SQLite de estado". ADR-50 nueva. | implementado |
 | RC-10 | Módulos | `09-arquitectura.md` | `### 9.1 Vista de componentes`; `` `cli.py` ``; `` `search.py` ``; `` `backends/outlook.py` ``; después de `` `uid.py` ``; `` `plugins/api.py` ``; `` `plugins/__init__.py` `` | Diagrama: `native_ids.py` y `~/.mailquery/db/cache.db`, usados por `backends/outlook.py`. `cli.py`: opción de depuración de `show`. `search.py`: aviso de mensajes impresos. `backends/outlook.py`: id corto y su resolución. Fila nueva de `native_ids.py`. `plugins/api.py`: las llamadas a los dos ganchos opcionales siguen las reglas de las demás llamadas a un plugin. `plugins/__init__.py`: reexporta el cálculo del id corto; el contexto de plugin da la base abierta para su driver. | implementado |
 | RC-11 | Árbol de fuentes y home | `10-carpetas-y-cache.md` | `│   ├── cli.py, config.py`; `├── state.json` | `native_ids.py` en el árbol de fuentes. Carpeta nueva `db/` con `cache.db` en el del home. | implementado |
 | RC-12 | Orden total | `11-modelo-de-datos.md` | `- **Orden total:**` | Aclara que `native_order_key` de Outlook es el `EntryID`, no el id corto. | implementado |
-| RC-13 | Caché de ids nativos | `11-modelo-de-datos.md` | después de `- **Composición JSON multi-driver:**` | Subsección nueva 11.4 con las estructuras de las tablas `cache_native_ids` y `cache_native_seq` y las reglas del archivo. | implementado |
+| RC-13 | Caché de ids nativos | `11-modelo-de-datos.md` | después de `- **Composición JSON multi-driver:**` | Subsección nueva 11.4 con la estructura de la tabla `cache_native_ids` y las reglas del archivo. | implementado |
 | RC-14 | Opciones de `show` | `12.04-show.md` | `` Opciones: `--fields LISTA` `` | Añade `--show-native-id`, opción de depuración (RF-83). | implementado |
 | RC-15 | Validación del uid | `12.04-show.md` | `**Tabla: Resolución del uid (igual en ambas plataformas)**`; `` `uid` con formato inválido ``; `` `uid` que no existe, está borrado ``; `` `uid` cuyo `EntryID` identifica `` | Título: la resolución en la caché de ids nativos depende del driver. Formato inválido en Windows: no es un id corto, con el mensaje `expected a short id`. No encontrado: también un uid que no está en la caché de ids nativos, incluida una base recién creada, o cuyo mensaje está ausente confirmado, con el hint de repetir la búsqueda. La forma se valida antes de abrir la caché. Store excluido: el `EntryID` es el resuelto en la caché de ids nativos. | implementado |
 | RC-16 | Errores `E_PERMISSION` y `E_IO` | `12.06-errores.md` | `**Tabla: Errores propios de cada plataforma**`; `**Tabla: Errores de drivers, plugins y adjuntos, con su dueño y su hint**` | Filas `E_PERMISSION` de las dos tablas y fila `E_IO`: cubren también la caché de ids nativos; el hint de `E_IO` para ella dice qué pasa si se borra el archivo (RF-80). | implementado |

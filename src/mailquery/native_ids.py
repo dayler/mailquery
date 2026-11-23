@@ -2,9 +2,9 @@
 
 :func:`short_id` derives a deterministic short id from any text. :class:`NativeIdCache`
 stores one row per native id and driver: the short id without suffix, the ``seq``
-that keeps a uid part unique, and the native id itself. Registered ``seq`` values
-are never reused, even after their row is deleted, because a second table keeps
-the highest ``seq`` of each driver and short id.
+that keeps a uid part unique, and the native id itself. A new ``seq`` is the one
+after the highest ``seq`` stored for its driver and short id, so deleting a row
+lets that ``seq`` be used again.
 
 :class:`PluginNativeIds` wraps a cache for the driver of a plugin: it opens the
 database on its first operation and translates the cache failures to the plugin
@@ -39,7 +39,6 @@ CACHE_DIRECTORY_NAME: Final[str] = "db"
 CACHE_FILE_NAME: Final[str] = "cache.db"
 
 _IDS_TABLE: Final[str] = "cache_native_ids"
-_SEQ_TABLE: Final[str] = "cache_native_seq"
 
 _LOCKED_MESSAGE: Final[str] = "the native id cache is locked by another process"
 _LOCKED_HINT: Final[str] = (
@@ -66,15 +65,6 @@ CREATE TABLE {_IDS_TABLE} (
     native_id TEXT NOT NULL,
     PRIMARY KEY (driver, short_id, seq),
     UNIQUE (driver, native_id)
-)
-"""
-
-_CREATE_SEQ: Final[str] = f"""
-CREATE TABLE {_SEQ_TABLE} (
-    driver TEXT NOT NULL,
-    short_id TEXT NOT NULL,
-    max_seq INTEGER NOT NULL,
-    PRIMARY KEY (driver, short_id)
 )
 """
 
@@ -236,7 +226,6 @@ def _create_schema(connection: sqlite3.Connection) -> None:
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(_CREATE_IDS)
-        connection.execute(_CREATE_SEQ)
         connection.execute(f"PRAGMA user_version = {FORMAT_VERSION}")
         connection.execute("COMMIT")
     except BaseException:
@@ -251,7 +240,7 @@ def _prepare_file_cache(connection: sqlite3.Connection) -> None:
             raise _invalid_cache()
         _create_schema(connection)
     elif version == FORMAT_VERSION:
-        if not {_IDS_TABLE, _SEQ_TABLE} <= tables:
+        if _IDS_TABLE not in tables:
             raise _invalid_cache()
     else:
         raise _invalid_cache()
@@ -319,7 +308,7 @@ class NativeIdCache:
     def open(cls, driver: str, *, home: Path) -> "NativeIdCache":
         """Open ``<home>/db/cache.db`` for ``driver``, creating the folder and file.
 
-        A missing or empty database is initialized with both tables and
+        A missing or empty database is initialized with its table and
         :data:`FORMAT_VERSION`; a database with another format is rejected.
         """
         if not is_valid_driver(driver):
@@ -445,7 +434,7 @@ class NativeIdCache:
             return None if row is None else str(row[0])
 
     def discard(self, native_id: str) -> None:
-        """Delete the row of ``native_id``; the highest registered ``seq`` is kept."""
+        """Delete the row of ``native_id``; its ``seq`` can be assigned again."""
         with self._lock:
             self._ensure_open()
             try:
@@ -491,10 +480,10 @@ class NativeIdCache:
 
     def _max_registered_seq(self, short: str) -> int:
         row = self._fetch_one(
-            f"SELECT max_seq FROM {_SEQ_TABLE} WHERE driver = ? AND short_id = ?",
+            f"SELECT MAX(seq) FROM {_IDS_TABLE} WHERE driver = ? AND short_id = ?",
             (self._driver, short),
         )
-        return 0 if row is None else int(row[0])
+        return 0 if row is None or row[0] is None else int(row[0])
 
     def _assign_one(self, native_id: str, length: int) -> tuple[str, int]:
         known = self._assigned.get(native_id)
@@ -540,12 +529,6 @@ class NativeIdCache:
             f"INSERT INTO {_IDS_TABLE} (driver, short_id, seq, native_id) "
             "VALUES (?, ?, ?, ?)",
             (self._driver, short, seq, native_id),
-        )
-        self._connection.execute(
-            f"INSERT INTO {_SEQ_TABLE} (driver, short_id, max_seq) VALUES (?, ?, ?) "
-            "ON CONFLICT (driver, short_id) DO UPDATE SET "
-            "max_seq = max(max_seq, excluded.max_seq)",
-            (self._driver, short, seq),
         )
 
 
