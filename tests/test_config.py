@@ -16,6 +16,7 @@ import os
 import stat
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from mailquery import cli
@@ -838,10 +839,38 @@ class ResolveScopeTests(_ErrorAssertions):
         self.assertEqual(scopes[0].mailboxes, ())
         self.assertIsNone(scopes[0].account_email)
 
-    def _resolve_error(self, config: Config) -> MailqueryError:
+    def _resolve_error(self, config: Config, **options: object) -> MailqueryError:
         with self.assertRaises(MailqueryError) as context:
-            resolve_scope(config, self.backend)
+            resolve_scope(config, self.backend, **options)
         return context.exception
+
+    def test_accounts_only_resolution_lists_no_folder(self) -> None:
+        config = _config((ICLOUD_LABEL, ()), (GMAIL_LABEL, ()))
+        full = resolve_scope(config, self.backend)
+        listed = mock.Mock(wraps=self.backend.mailboxes)
+        with mock.patch.object(self.backend, "mailboxes", listed):
+            only = resolve_scope(config, self.backend, with_mailboxes=False)
+        self.assertEqual(listed.call_count, 0)
+        self.assertEqual(
+            [(scope.account_uuid, scope.account_label, scope.account_email, scope.driver)
+             for scope in only],
+            [(scope.account_uuid, scope.account_label, scope.account_email, scope.driver)
+             for scope in full],
+        )
+        self.assertTrue(all(scope.mailboxes == () for scope in only))
+        self.assertTrue(all(scope.mailboxes for scope in full))
+
+    def test_accounts_only_resolution_still_checks_the_mailbox_list(self) -> None:
+        valid = resolve_scope(
+            _config((ICLOUD_LABEL, ("Facturas",)),), self.backend, with_mailboxes=False
+        )
+        self.assertEqual(valid[0].mailboxes, ())
+        config = _config((ICLOUD_LABEL, ("Missing",)),)
+        full = self._resolve_error(config)
+        only = self._resolve_error(config, with_mailboxes=False)
+        self.assertEqual(
+            (only.code, only.message, only.hint), (full.code, full.message, full.hint)
+        )
 
 
 # --------------------------------------------------------------------------- #

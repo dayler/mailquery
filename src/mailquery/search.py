@@ -981,7 +981,9 @@ def run_show(
 
     target_config = _config_for_driver(config, target, native_name)
     excluded: list[dict] = []
-    resolved = _resolved_scope(target_config, target_backend, excluded, native=target)
+    resolved = _resolved_scope(
+        target_config, target_backend, excluded, native=target, with_mailboxes=False
+    )
     accounts = _accounts_by_uuid(target_backend)
     declared = {_scope_account_uuid(scope) for scope in resolved}
     show_uid = uid_module.format_uid(target, str(uid))
@@ -1254,12 +1256,15 @@ def _resolved_scope(
     *,
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
+    with_mailboxes: bool = True,
 ) -> list[Any]:
     """Resolve ``[scope.*]`` accounts through :mod:`mailquery.config`.
 
     ``excluded`` receives the entry of each declared account that is an
     excluded store (Outlook). ``drivers`` maps the other declared
-    backends and ``native`` names the platform driver.
+    backends and ``native`` names the platform driver. With
+    ``with_mailboxes=False`` the declared accounts' folders are not listed and
+    every resolved scope has ``mailboxes=()``.
 
     The catalog handed to :mod:`mailquery.config` uses the wrapped drivers,
     so the ``accounts``/``mailboxes``/``resolve_mailbox`` calls of the scope
@@ -1276,6 +1281,7 @@ def _resolved_scope(
         excluded=excluded,
         drivers=other_backends,
         native=native_name,
+        with_mailboxes=with_mailboxes,
     )
     return list(resolved or ())
 

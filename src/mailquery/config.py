@@ -647,6 +647,7 @@ def resolve_scope(
     *,
     drivers: "Mapping[str, MailBackend] | None" = None,
     native: str | None = None,
+    with_mailboxes: bool = True,
 ) -> list[ResolvedScope]:
     """Resolve declared accounts and their mailbox list, driver by driver.
 
@@ -663,6 +664,13 @@ def resolve_scope(
     entry) is not read and is left out of the result; its
     ``{label, path, reason}`` entry is appended once to ``excluded`` when the
     caller passes a list (for ``W_STORE_EXCLUDED``).
+
+    With ``with_mailboxes=False`` the accounts resolve and every ``mailbox_list``
+    entry is still checked with ``resolve_mailbox``, but the declared accounts'
+    folders are not listed: each result has ``mailboxes=()`` and an account
+    without ``mailbox_list`` entries reads no folder. The folders of an account
+    are listed only to word ``E_MAILBOX_NOT_FOUND``. Callers that need only the
+    declared account UUIDs (one message by uid) use it.
     Raises E_DRIVER_UNKNOWN (driver backend not available to this call),
     E_CONFIG_ACCOUNT_UNKNOWN, E_ACCOUNT_AMBIGUOUS,
     E_ACCOUNT_LABELS_UNAVAILABLE or E_MAILBOX_NOT_FOUND.
@@ -710,7 +718,9 @@ def resolve_scope(
             if ref not in merged_refs:
                 merged_refs.append(ref)
 
-    mailboxes_by_driver = _listed_mailboxes_by_driver(catalog, declared_order)
+    mailboxes_by_driver = (
+        _listed_mailboxes_by_driver(catalog, declared_order) if with_mailboxes else {}
+    )
     by_driver_accounts = _accounts_by_driver(catalog, declared_order, accounts_cache)
     resolved: list[ResolvedScope] = []
     for driver_name, account_uuid in declared_order:
@@ -728,12 +738,20 @@ def resolve_scope(
         for ref in declared_refs[(driver_name, account_uuid)]:
             mailbox = _find_mailbox(driver_backend, account_uuid, ref)
             if mailbox is None:
+                if not with_mailboxes:
+                    account_mailboxes = [
+                        row
+                        for row in listed_mailboxes(driver_backend, [account_uuid])
+                        if row["account_uuid"] == account_uuid
+                    ]
                 raise _mailbox_not_found(
                     ref,
                     account_uuid,
                     account_mailboxes,
                     by_driver_accounts[driver_name],
                 )
+            if not with_mailboxes:
+                continue
             if mailbox["id"] not in seen_ids:
                 chosen.append(mailbox)
                 seen_ids.add(mailbox["id"])
