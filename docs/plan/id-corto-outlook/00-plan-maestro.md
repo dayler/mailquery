@@ -42,7 +42,7 @@ Quién actualiza cada indicador y cuándo:
 | ID | Milestone | Estado | Depende de | Oleada | Lote | ACs | Archivo |
 |---|---|---|---|---|---|---|---|
 | M01 | Librería `native_ids.py` | 🟡 | — | 1 | 1 | AC-64, AC-69, AC-70 (librería) | [M01-libreria-native-ids.md](M01-libreria-native-ids.md) |
-| M02 | Refactor: frontera uid ↔ `EntryID` en el driver `outlook` | 🟡 | — | 1 | 1 | — (refactor sin cambio de comportamiento) | [M02-refactor-frontera-outlook.md](M02-refactor-frontera-outlook.md) |
+| M02 | Refactor: frontera uid ↔ `EntryID` en el driver `outlook` | 🟢 | — | 1 | 1 | — (refactor sin cambio de comportamiento) | [M02-refactor-frontera-outlook.md](M02-refactor-frontera-outlook.md) |
 | M03 | Núcleo: ganchos opcionales, aviso de impresos y contexto de plugin | ⚪ | M01 | 2 | 1 | AC-65, AC-68 (validación de la forma nativa), AC-69, AC-70 (núcleo) | [M03-nucleo-ganchos-contexto.md](M03-nucleo-ganchos-contexto.md) |
 | M04 | `show --show-native-id` en el núcleo | ⚪ | M03 | 3 | 2 | AC-68, AC-70 (núcleo y plugin) | [M04-show-native-id.md](M04-show-native-id.md) |
 | M05 | Outlook: uid corto, asignación, registro y validación | ⚪ | M01, M02, M03 | 3 | 2 | AC-63, AC-65, AC-67, AC-69 (Outlook) | [M05-outlook-uid-corto.md](M05-outlook-uid-corto.md) |
