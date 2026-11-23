@@ -13,7 +13,6 @@ opened.
 
 from __future__ import annotations
 
-import hashlib
 import re
 import sys
 from dataclasses import dataclass
@@ -127,6 +126,8 @@ def stable_identifier(uid: str) -> str:
     """
     if not isinstance(uid, str) or not uid:
         raise _invalid_uid(uid, "expected a non-empty uid string")
+    import hashlib
+
     digest = hashlib.sha256(uid.encode("utf-8")).hexdigest()
     return digest[:_STABLE_IDENTIFIER_CHARS]
 

@@ -320,9 +320,7 @@ class ArchiveExecutableTests(ActiveContentTestCase):
         path = samples.write_zip(self.root, "valid.zip", [("run.bat", b"")])
         for error in (ValueError("bad directory"), OSError("unreadable")):
             with self.subTest(error=type(error).__name__):
-                with mock.patch.object(
-                    active_content.zipfile, "ZipFile", side_effect=error
-                ):
+                with mock.patch("zipfile.ZipFile", side_effect=error):
                     self.assertEqual(active_content_types(path), ())
 
 

@@ -16,7 +16,6 @@ runs, writes only under ``<home>/db/cache.db`` and never touches the mail store.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import sqlite3
@@ -86,6 +85,8 @@ def short_id(text: str, length: int) -> str:
         raise ValueError(
             f"length must be between 1 and {SHORT_ID_MAX_LENGTH}, got {length}"
         )
+    import hashlib
+
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     # 52 groups of 5 bits cover the 256-bit digest with four trailing zero bits.
     value = int.from_bytes(digest, "big") << (_GROUPS * 5 - 256)

@@ -14,7 +14,6 @@ from __future__ import annotations
 import mmap
 import os
 import re
-import zipfile
 from pathlib import Path
 from typing import Final
 
@@ -117,6 +116,8 @@ def _zip_entry_names(path: Path, data: mmap.mmap) -> tuple[str, ...] | None:
     """
     if data[: len(_ZIP_SIGNATURE)] != _ZIP_SIGNATURE:
         return None
+    import zipfile
+
     try:
         with zipfile.ZipFile(path) as archive:
             return tuple(archive.namelist())
