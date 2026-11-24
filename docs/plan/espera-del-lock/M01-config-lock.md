@@ -57,7 +57,7 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | 1 | Tests del grupo UT-CFG-07, en rojo | 🟢 |
-| 2 | `LockConfig`, `Config.lock`, lectura y validación de `[lock]`, `hint` con `[lock]` | ⚪ |
+| 2 | `LockConfig`, `Config.lock`, lectura y validación de `[lock]`, `hint` con `[lock]` | 🟢 |
 | 3 | Gates, datos crudos de evidencia y propuestas | ⚪ |
 
 ## Tests
@@ -108,3 +108,4 @@ Los de la sección "Evidencia cruda" de `REGLAS.md`, más: el texto exacto de lo
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-24 | 1 | Ocho casos de UT-CFG-07 en `LockConfigTests`; en rojo por la falta de `LockConfig` (ImportError). |
+| 2026-11-24 | 2 | `LockConfig`, `Config.lock`, `_parse_lock` y `_parse_number`; `hint` de primer nivel con `[lock]` tras `[content]`. Los 8 casos pasan solos al primer intento. |

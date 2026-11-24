@@ -79,12 +79,31 @@ MAX_LOOKBACK_SECONDS = 86400  # 1 day
 MIN_UUID_PREFIX = 8
 
 # Fixed order used for top-level validation and error hints.
-_TOP_LEVEL_KEYS = ("logging", "search", "new", "attachments", "content", "scope")
+_TOP_LEVEL_KEYS = (
+    "logging",
+    "search",
+    "new",
+    "attachments",
+    "content",
+    "lock",
+    "scope",
+)
 
 #: ``[content]`` values and the accepted URL display modes.
 DEFAULT_URL_DISPLAY = "neutralize"
 URL_DISPLAY_MODES = ("neutralize", "keep", "strip")
 CONTENT_KEYS = ("url_display",)
+
+DEFAULT_LOCK_RETRIES = 5
+MIN_LOCK_RETRIES = 0
+MAX_LOCK_RETRIES = 10
+DEFAULT_LOCK_INITIAL_DELAY_MS = 150
+MIN_LOCK_INITIAL_DELAY_MS = 10
+MAX_LOCK_INITIAL_DELAY_MS = 5000
+DEFAULT_LOCK_BACKOFF_FACTOR = 2.0
+MIN_LOCK_BACKOFF_FACTOR = 1
+MAX_LOCK_BACKOFF_FACTOR = 10
+LOCK_KEYS = ("retries", "initial_delay_ms", "backoff_factor")
 
 #: Built-in drivers: ``[scope]`` accounts of these resolve by label, email or UUID/prefix.
 _INTERNAL_DRIVERS = frozenset({"apple_mail", "outlook"})
@@ -142,6 +161,15 @@ class ContentConfig:
 
 
 @dataclass(frozen=True)
+class LockConfig:
+    """``[lock]`` table: retries, first pause and growth factor of the run lock."""
+
+    retries: int = DEFAULT_LOCK_RETRIES
+    initial_delay_ms: int = DEFAULT_LOCK_INITIAL_DELAY_MS
+    backoff_factor: float = DEFAULT_LOCK_BACKOFF_FACTOR
+
+
+@dataclass(frozen=True)
 class ScopeEntry:
     """One ``[scope."<driver>:<cuenta>"]`` block exactly as written by the user.
 
@@ -170,6 +198,7 @@ class Config:
     new: NewConfig = field(default_factory=NewConfig)
     attachments: AttachmentsConfig = field(default_factory=AttachmentsConfig)
     content: ContentConfig = field(default_factory=ContentConfig)
+    lock: LockConfig = field(default_factory=LockConfig)
     scopes: tuple[ScopeEntry, ...] = ()
 
     @property
@@ -314,6 +343,7 @@ def _parse_config(
     new_cfg = _parse_new(data.get("new"))
     attachments_cfg = _parse_attachments(data.get("attachments"))
     content_cfg = _parse_content(data.get("content"))
+    lock_cfg = _parse_lock(data.get("lock"))
     scopes = _parse_scopes(data.get("scope"), registry)
     return Config(
         home=home,
@@ -322,6 +352,7 @@ def _parse_config(
         new=new_cfg,
         attachments=attachments_cfg,
         content=content_cfg,
+        lock=lock_cfg,
         scopes=scopes,
     )
 
@@ -332,13 +363,13 @@ def _unknown_top_level(key: str, value: Any) -> MailqueryError:
             f"unknown top-level section [{key}]",
             'account blocks must be declared as [scope."<account-id>"], not as '
             "top-level tables; only [logging], [search], [new], [attachments], "
-            "[content] and [scope.*] are allowed",
+            "[content], [lock] and [scope.*] are allowed",
             "unknown top-level section in config.toml",
         )
     return config_error(
         f"unknown top-level key {key!r}",
-        "only the [logging], [search], [new], [attachments], [content] and "
-        "[scope.*] sections are allowed; see docs/config.example.toml",
+        "only the [logging], [search], [new], [attachments], [content], [lock] "
+        "and [scope.*] sections are allowed; see docs/config.example.toml",
         "unknown top-level key in config.toml",
     )
 
@@ -381,6 +412,30 @@ def _parse_int(
             f"valid range: {minimum}..{maximum}",
         )
     return value
+
+
+def _parse_number(
+    table: dict[str, Any],
+    *,
+    display: str,
+    key: str,
+    default: float,
+    minimum: int,
+    maximum: int,
+) -> float:
+    """Read an integer or decimal value within ``minimum..maximum`` as a float."""
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise config_error(
+            f"{display}.{key} must be a number",
+            f"set {key} to a number between {minimum} and {maximum}",
+        )
+    if not minimum <= value <= maximum:
+        raise config_error(
+            f"{display}.{key} out of range: {value}",
+            f"valid range: {minimum}..{maximum}",
+        )
+    return float(value)
 
 
 def _parse_logging(value: Any) -> LoggingConfig:
@@ -553,6 +608,45 @@ def _parse_content(value: Any) -> ContentConfig:
             "invalid [content].url_display in config.toml",
         )
     return ContentConfig(url_display=url_display)
+
+
+def _parse_lock(value: Any) -> LockConfig:
+    """``[lock]``: closed schema; each missing key takes its default."""
+    if value is None:
+        return LockConfig()
+    table = _as_table(value, "lock")
+    for key in table:
+        if key not in LOCK_KEYS:
+            raise _unknown_key("[lock]", LOCK_KEYS, key)
+    retries = _parse_int(
+        table,
+        display="[lock]",
+        key="retries",
+        default=DEFAULT_LOCK_RETRIES,
+        minimum=MIN_LOCK_RETRIES,
+        maximum=MAX_LOCK_RETRIES,
+    )
+    initial_delay_ms = _parse_int(
+        table,
+        display="[lock]",
+        key="initial_delay_ms",
+        default=DEFAULT_LOCK_INITIAL_DELAY_MS,
+        minimum=MIN_LOCK_INITIAL_DELAY_MS,
+        maximum=MAX_LOCK_INITIAL_DELAY_MS,
+    )
+    backoff_factor = _parse_number(
+        table,
+        display="[lock]",
+        key="backoff_factor",
+        default=DEFAULT_LOCK_BACKOFF_FACTOR,
+        minimum=MIN_LOCK_BACKOFF_FACTOR,
+        maximum=MAX_LOCK_BACKOFF_FACTOR,
+    )
+    return LockConfig(
+        retries=retries,
+        initial_delay_ms=initial_delay_ms,
+        backoff_factor=backoff_factor,
+    )
 
 
 def _parse_scopes(
