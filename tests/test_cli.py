@@ -277,7 +277,7 @@ class HelpContractTests(_CliTestCase):
         return stdout
 
     def test_ut_atc_09_01_root_help_lists_six_commands_and_exit_line(self) -> None:
-        """UT-ATC-09.01: root --help lists the six commands and the PRD §12.7 exit line."""
+        """UT-ATC-09.01: root --help lists the seven commands and the PRD §12.7 exit line."""
         unused_home = self.fx.root / "unused-home"
         code, stdout, stderr = self.run_cli(["--help"], home=unused_home)
         self.assertEqual(code, 0)

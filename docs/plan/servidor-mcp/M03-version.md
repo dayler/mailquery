@@ -109,9 +109,6 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
-| 2026-11-23 | 1 | `pyproject.toml`, `__version__`, goldens `doctor` y `outlook/doctor`, DOC-16.03 y comentarios de DP-22. |
-| 2026-11-23 | 2 | Menciones en los dos README, `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; búsqueda de la fase 2 revisada (solo quedan las aserciones de ausencia del test DOC-16.03 y registros históricos). |
-| 2026-11-23 | 3 | Grupos verdes y evidencia. |
 | 2026-11-23 | 1 | `pyproject.toml` y `__version__` a `3.0.0a3`; goldens `doctor` y `outlook/doctor` y DOC-16.03 (nombre y texto) actualizados; comentarios DP-22 de `test_packaging.py`, `test_integration.py` y `test_install_scripts.py` al día. |
 | 2026-11-23 | 2 | Versión vigente a `3.0.0a3` en los dos README (mismo commit), `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; la búsqueda de la fase solo conserva la aserción negativa de DOC-16.03 (`self.assertNotIn("3.0.0a2", …)`), que es su oráculo y no una mención vigente. |
 | 2026-11-23 | 3 | Suite completa `Ran 1562 tests`, `OK (skipped=7)`, sin fallos nuevos frente a la línea base; `git diff --check` limpio y diff solo del alcance. Evidencia cruda y propuestas entregadas. |

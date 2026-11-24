@@ -175,8 +175,11 @@ def build_argv(tool: str, arguments: Mapping[str, Any]) -> list[str]:
         if "uid" not in arguments:
             raise _usage(tool, "uid", "the uid parameter is required")
         _validate_parameter(tool, "uid", arguments["uid"], properties["uid"])
+        uid = str(arguments["uid"])
+        if len(uid) > longest_size:
+            longest_key, longest_size = "uid", len(uid)
         argv.append("--")
-        argv.append(str(arguments["uid"]))
+        argv.append(uid)
     if tool == "doctor":
         argv = _with_doctor_json(tool, arguments, argv)
     _check_argv_length(tool, argv, longest_key)
@@ -309,14 +312,11 @@ def _validate_parameter(tool: str, name: str, value: Any, schema: dict) -> None:
 
 def _check_argv_length(tool: str, argv: Sequence[str], longest_key: str) -> None:
     """Reject an argv above the platform limit before any child is launched."""
+    message = _argv_too_long_message(longest_key)
     if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
         line = subprocess.list2cmdline([sys.executable, "-P", "-m", "mailquery", *argv])
         if len(line) > _MAX_WINDOWS_COMMAND_LINE:
-            raise _usage(
-                tool,
-                longest_key,
-                f"the command line is too long; shorten the parameter {longest_key!r}",
-            )
+            raise _usage(tool, longest_key, message)
         return
     limit = _arg_max()
     total = sum(len(argument.encode("utf-8")) + 1 for argument in argv)
@@ -326,11 +326,14 @@ def _check_argv_length(tool: str, argv: Sequence[str], longest_key: str) -> None
     for key, value in os.environ.items():
         total += len(key.encode("utf-8")) + len(value.encode("utf-8")) + 2
     if total > limit:
-        raise _usage(
-            tool,
-            longest_key,
-            f"the command line is too long; shorten the parameter {longest_key!r}",
-        )
+        raise _usage(tool, longest_key, message)
+
+
+def _argv_too_long_message(longest_key: str) -> str:
+    """Return the usage hint for an oversized command line."""
+    if longest_key:
+        return f"the command line is too long; shorten the parameter {longest_key!r}"
+    return "the command line is too long; shorten the arguments"
 
 
 def _arg_max() -> int:
@@ -443,17 +446,9 @@ def _tools_call(
             exit_code=1,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+        _log_call(name, outcome)
         return _result(request_id, _internal_result(name, outcome))
-    log_event(
-        get_logger("mailquery.mcp"),
-        logging.INFO,
-        (
-            ("event", "call"),
-            ("tool", name),
-            ("exit_code", outcome.exit_code),
-            ("duration_ms", outcome.duration_ms),
-        ),
-    )
+    _log_call(name, outcome)
     text = outcome.stdout[:-1] if outcome.stdout.endswith("\n") else outcome.stdout
     try:
         payload = json.loads(text)
@@ -467,6 +462,20 @@ def _tools_call(
             "content": [{"type": "text", "text": text}],
             "isError": outcome.exit_code != 0,
         },
+    )
+
+
+def _log_call(tool: str, outcome: ToolOutcome) -> None:
+    """Log one completed tool call with its tool, exit code and duration."""
+    log_event(
+        get_logger("mailquery.mcp"),
+        logging.INFO,
+        (
+            ("event", "call"),
+            ("tool", tool),
+            ("exit_code", outcome.exit_code),
+            ("duration_ms", outcome.duration_ms),
+        ),
     )
 
 
@@ -493,7 +502,21 @@ def _rpc_error(request_id: Any, code: int, message: str) -> dict:
 
 
 def _read_line(stdin: TextIO) -> str | None:
-    """Read one line and strip its line ending; ``None`` at EOF."""
+    """Read one UTF-8 line and strip its line ending; ``None`` at EOF.
+
+    The raw buffer is read when the stream exposes one, so an invalid line
+    cannot discard the bytes of the lines that follow it.
+    """
+    buffer = getattr(stdin, "buffer", None)
+    if buffer is not None:
+        data = buffer.readline()
+        if data == b"":
+            return None
+        if data.endswith(b"\r\n"):
+            data = data[:-2]
+        elif data.endswith(b"\n"):
+            data = data[:-1]
+        return data.decode("utf-8")
     line = stdin.readline()
     if line == "":
         return None
