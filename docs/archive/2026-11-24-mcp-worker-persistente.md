@@ -11,6 +11,8 @@ tags: [cambio]
 **Aprobación:** —
 **Paquete:** 3.0.0 (menor)
 
+> **Archivada el 2026-11-24 por orden del dueño.** La unidad no se aprobó ni se implementó: quedó en `borrador`, sus IDs son marcadores y no reservó ninguno. Se guarda como registro; no se mantiene al día y no es una unidad abierta. La espera del lock (RF-x2) siguió como unidad propia, `docs/changes/espera-del-lock.md`. Las notas de la revisión están al final, en "Notas de revisión".
+
 ## Estado
 
 borrador
@@ -281,3 +283,44 @@ sequenceDiagram
 ## Desviaciones aprobadas
 
 Ninguna
+
+## Notas de revisión
+
+Revisión del 2026-11-24, antes de archivar. Las rutas y los números de línea son los del código de ese día.
+
+### Veredicto
+
+- **La dirección es correcta.** Un worker por sesión es la mejor de las alternativas que la unidad compara, y el razonamiento de las descartadas se sostiene.
+- **El beneficio no compensa el coste hoy.** El worker ahorra unos 250 ms por llamada: en el resumen semanal medido, alrededor de 1,5 s sobre 4,4 s. En una sesión de agente, cada turno del modelo tarda varios segundos y ese ahorro apenas se nota. A cambio se pierde la propiedad más simple del diseño de ADR-51: un proceso nuevo por llamada, con el estado limpio garantizado por el sistema operativo.
+- **No choca con la skill.** El worker vive solo dentro de `mcp serve`; la CLI que usa la skill sin MCP sigue siendo un proceso por invocación. El único roce entre los dos caminos es el lock, y eso lo resuelve la espera del lock sin worker.
+
+### Huecos de diseño que impedían aprobarla
+
+- **El tope de la llamada no está definido.** RF-x1 mata el worker cuando "no responde dentro del tope", pero la unidad no le da valor, origen ni criterio de aceptación; RF-86 dice que el servidor no impone tope propio. El tope tendría que superar la espera del lock más los topes de la CLI, o mataría llamadas legítimas. AC-x2 solo prueba una muerte por señal, nunca un cuelgue.
+- **`ping` no responde durante un cuelgue.** ADR-x1 dice que la sesión "sigue respondiendo a `ping`", pero las llamadas van en serie: con el worker colgado, `ping` espera hasta el tope.
+- **Las salidas con `os._exit` cambian los códigos de salida.** El watchdog COM termina el proceso con `os._exit(3)` (`backends/outlook_com.py`, línea 476) y `doctor` con `os._exit(0)` (`cli.py`, línea 1892). En el worker eso es una caída: el harness recibiría `E_INTERNAL` en lugar de `E_CLIENT_TIMEOUT`, y el informe de `doctor` se perdería. Contradice "Lo que no cambia".
+- **El protocolo comparte descriptores con el comando.** Si las peticiones y las respuestas viajan por stdin y stdout del worker, un plugin que escribe en stdout corrompe el protocolo y uno que lee stdin consume peticiones. RF-86 garantiza stdin vacío y un `E_INTERNAL` limitado a esa llamada; la unidad no dice que el protocolo use descriptores propios.
+- **"Solo sobreviven los módulos importados" no es comprobable.** También sobreviven los globales de módulo, los handlers de logging, el estado de los plugins y los hilos abandonados (`plugins/api.py`, línea 464), que son uno de los motivos de ADR-51. Falta una regla que se pueda probar, por ejemplo relevo si queda un hilo vivo al terminar la petición, o cada cierto número de llamadas.
+- **La muerte del servidor no llega a un worker ocupado.** Un worker bloqueado en un driver no lee su tubería, así que no ve el fin de la entrada. AC-x2 y CL-12 exigen que no quede vivo, sin mecanismo. AC-x2 nombra además `SIGKILL`, que no existe en Windows.
+
+### Medición
+
+- **Solo hay datos de macOS.** En Windows la conexión COM se abre en cada petición y puede dominar el tiempo de la llamada; la bajada del 40 % de AC-x1 puede no cumplirse allí.
+- **El texto y la tabla no coinciden.** El problema habla de siete llamadas y la tabla tiene cinco filas, ninguna de `show`, aunque AC-x1 mide `show`.
+- **Falta una alternativa.** Reducir los imports del arranque no se midió ni se descartó; puede recuperar parte de los 191–294 ms sin tocar ADR-51.
+
+### Otros defectos
+
+- **Dos cambios en una unidad.** RF-x2 no depende del worker y afecta a toda la CLI.
+- **La mitigación de la fuga de memoria no se sigue.** La degradación se activa por relevos, y una fuga no provoca relevos.
+- **"Versión importada" está sin definir.** No dice qué archivo se mira ni si ese reemplazo cuenta para los tres relevos; el glosario lo incluye en "relevo".
+- **`ToolRunner` no "se mantiene".** `argv` lleva hoy el intérprete (`mcp_server.py`, línea 439) y el protocolo lo quita; el ciclo de vida exige además un cierre que `run` no cubre.
+- **`docs/security/: sin cambio` es dudoso.** Un proceso que conserva el código de los plugins entre llamadas cambia el modelo de amenazas.
+- **La base quedó atrás.** La unidad se escribió contra el PRD 2.5; el PRD pasó a 2.6 el mismo día, al conciliarse `servidor-mcp`.
+
+### Qué habría que tener antes de reabrirla
+
+1. La espera del lock implementada, para medir sin el ruido de `E_LOCKED`.
+2. El coste de los imports del arranque medido con `python -X importtime`, y lo que recuperan los imports diferidos.
+3. El arranque medido en Windows con Outlook, con la misma batería de llamadas.
+4. Una decisión con esos datos: el worker solo si el arranque sigue siendo un coste que se nota en uso real, y entonces con los huecos de diseño de arriba resueltos.
