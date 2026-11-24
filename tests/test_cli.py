@@ -16,6 +16,8 @@ import platform
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -114,8 +116,10 @@ def _close_log_handlers() -> None:
 
 
 class _FakeLock:
-    def __init__(self, home: Path) -> None:
+    def __init__(self, home: Path, retry=None, *, sleep=None) -> None:
         self.home = home
+        self.retry = retry
+        self.sleep = sleep
         self.acquired = False
         self.released = False
 
@@ -819,6 +823,7 @@ class ErrorContractTests(_CliTestCase):
     def test_lock_busy_against_a_real_flock_exits_5(self) -> None:
         from mailquery.state import RunLock as RealRunLock
 
+        write_config(self.fx.home, "[lock]\nretries = 0\n")
         holder = RealRunLock(self.fx.home)
         holder.acquire()
         self.addCleanup(holder.release)
@@ -2041,6 +2046,308 @@ class PipeEncodingTests(unittest.TestCase):
                 self.assertTrue(result.stdout, result.stderr)
                 self.assertNotIn(b"\r", result.stdout)
                 self.assertNotIn(b"\r", result.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# UT-CLI-15 — run lock retry in the commands (RF-89, AC-79, AC-80)
+# --------------------------------------------------------------------------- #
+
+# Takes the run lock of ``argv[1]``, prints ``locked`` and keeps it ``argv[2]`` seconds.
+_LOCK_HOLDER = r"""
+import sys
+import time
+from pathlib import Path
+from mailquery.state import RunLock
+
+lock = RunLock(Path(sys.argv[1]))
+lock.acquire()
+print("locked", flush=True)
+time.sleep(float(sys.argv[2]))
+lock.release()
+"""
+
+_LOCK_HELP_TEXT = (
+    "Lock: a busy run lock is retried 5 times, pausing 150 ms and doubling each "
+    "time ([lock] in config.toml)"
+)
+_LOCKED_MESSAGE = "another mailquery run is already in progress"
+_NO_RETRY_HINT = (
+    "wait for the running invocation to finish and retry "
+    "(the harness should only retry exit code 5)"
+)
+_DATA_COMMANDS = (
+    ("search",),
+    ("new",),
+    ("show", "83143"),
+    ("attachment", "83143", "--all"),
+    ("mailboxes",),
+)
+
+
+def _subprocess_env(home: Path) -> dict:
+    """Environment of a child process that imports this checkout, with an isolated HOME."""
+    env = dict(os.environ)
+    env["HOME"] = env["USERPROFILE"] = str(home)
+    env["PYTHONPATH"] = os.pathsep.join([str(_REPO_ROOT / "src"), str(_REPO_ROOT)])
+    env.pop("PYTHONWARNINGS", None)
+    return env
+
+
+def _normalized(payload: dict) -> dict:
+    """``payload`` without the fields that change between two runs."""
+    payload = dict(payload)
+    payload.pop("generated_at", None)
+    if isinstance(payload.get("scan"), dict):
+        payload["scan"] = {
+            key: value for key, value in payload["scan"].items() if key != "duration_ms"
+        }
+    return payload
+
+
+class LockRetryCommandTests(_CliTestCase):
+    """UT-CLI-15 — the data commands retry a busy run lock; ``doctor`` does not."""
+
+    def lock_path(self) -> Path:
+        return self.fx.home / "locks" / "mailquery.lock"
+
+    def hold_lock(self, seconds: float) -> float:
+        """Hold the run lock from another process; return the monotonic time it confirmed."""
+        proc = subprocess.Popen(
+            [sys.executable, "-B", "-c", _LOCK_HOLDER, str(self.fx.home), str(seconds)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=_subprocess_env(self.fx.home),
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._stop_holder, proc)
+        line = proc.stdout.readline()
+        confirmed = time.monotonic()
+        if line.strip() != "locked":
+            proc.wait(timeout=60)
+            self.fail(f"the lock holder did not take the lock: {proc.stderr.read()}")
+        return confirmed
+
+    @staticmethod
+    def _stop_holder(proc: subprocess.Popen) -> None:
+        if proc.poll() is None:
+            proc.kill()
+        proc.communicate(timeout=60)
+
+    def launch(self, *argv: str) -> subprocess.CompletedProcess:
+        """Run ``cli.main`` in a child process over the fixture store."""
+        return subprocess.run(
+            [sys.executable, "-B", "-c", _LAUNCHER, "plain", str(self.fx.root), *argv],
+            capture_output=True,
+            env=_subprocess_env(self.fx.home),
+            cwd=str(_REPO_ROOT),
+            timeout=120,
+        )
+
+    def recording_lock(self):
+        """A real ``RunLock`` factory that records each ``retry`` and every pause."""
+        from mailquery.state import RunLock as RealRunLock
+
+        record: dict[str, list] = {"retries": [], "sleeps": []}
+
+        def sleep(seconds: float) -> None:
+            record["sleeps"].append(seconds)
+            time.sleep(seconds)
+
+        def factory(home, retry=None, **_kwargs):
+            record["retries"].append(retry)
+            return RealRunLock(home, retry, sleep=sleep)
+
+        return factory, record
+
+    def test_ut_cli_15_01_search_waits_for_a_lock_held_two_seconds(self) -> None:
+        """UT-CLI-15.01: lock held 2 s, no [lock]: search exits 0 with the unwaited output."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        baseline = self.launch("search")
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        expected = json.loads(baseline.stdout.decode("utf-8"))
+        self.assertGreater(expected["count"], 0)
+
+        confirmed = self.hold_lock(2)
+        result = self.launch("search")
+        elapsed = time.monotonic() - confirmed
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observed = json.loads(result.stdout.decode("utf-8"))
+        self.assertIn("generated_at", observed)
+        self.assertEqual(_normalized(observed), _normalized(expected))
+        self.assertGreaterEqual(elapsed, 1.9, "search finished before the lock was released")
+        self.assertLess(elapsed, 2 + 4.65 + 5, f"search took {elapsed:.3f} s")
+
+    def test_ut_cli_15_02_exhausted_retries_give_e_locked(self) -> None:
+        """UT-CLI-15.02: retries=2, 100 ms, lock held 3 s: E_LOCKED in 0.3..2 s with the hint."""
+        write_config(self.fx.home, "[lock]\nretries = 2\ninitial_delay_ms = 100\n")
+        self.hold_lock(3)
+        started = time.monotonic()
+        result = self.run_cli(["search"])
+        elapsed = time.monotonic() - started
+
+        payload = self.assert_error(5, result, "E_LOCKED", "search")
+        self.assertEqual(payload["error"]["message"], _LOCKED_MESSAGE)
+        self.assertEqual(
+            payload["error"]["hint"],
+            f"still held after 2 retries: {self.lock_path()}; retry later "
+            "([lock] in ~/.mailquery/config.toml sets the retries)",
+        )
+        self.assertGreaterEqual(elapsed, 0.3, f"E_LOCKED after {elapsed:.3f} s")
+        self.assertLessEqual(elapsed, 2.0, f"E_LOCKED after {elapsed:.3f} s")
+
+    def test_ut_cli_15_03_zero_retries_fail_at_once(self) -> None:
+        """UT-CLI-15.03: retries=0 and the lock held: E_LOCKED without pausing, no-retry hint."""
+        write_config(self.fx.home, "[lock]\nretries = 0\n")
+        self.hold_lock(60)
+        factory, record = self.recording_lock()
+        started = time.monotonic()
+        with mock.patch.object(cli_mod, "RunLock", factory):
+            result = self.run_cli(["search"])
+        elapsed = time.monotonic() - started
+
+        payload = self.assert_error(5, result, "E_LOCKED", "search")
+        self.assertEqual(payload["error"]["message"], _LOCKED_MESSAGE)
+        self.assertEqual(payload["error"]["hint"], _NO_RETRY_HINT)
+        self.assertEqual(record["sleeps"], [])
+        self.assertLess(elapsed, 1.0, f"E_LOCKED after {elapsed:.3f} s")
+
+    def test_ut_cli_15_04_data_commands_build_the_lock_with_config_lock(self) -> None:
+        """UT-CLI-15.04: search, new, show, attachment and mailboxes pass config.lock."""
+        from mailquery.config import LockConfig
+
+        write_config(
+            self.fx.home,
+            DEFAULT_CONFIG
+            + "\n[lock]\nretries = 3\ninitial_delay_ms = 20\nbackoff_factor = 1.5\n",
+        )
+        expected = LockConfig(retries=3, initial_delay_ms=20, backoff_factor=1.5)
+        for argv in _DATA_COMMANDS:
+            with self.subTest(command=argv[0]):
+                built: list[_FakeLock] = []
+
+                class _RecordingBusyLock(_BusyLock):
+                    def __init__(self, *args, **kwargs) -> None:
+                        super().__init__(*args, **kwargs)
+                        built.append(self)
+
+                with mock.patch.object(cli_mod, "RunLock", _RecordingBusyLock):
+                    result = self.run_cli(list(argv))
+                self.assert_error(5, result, "E_LOCKED", argv[0])
+                self.assertEqual(len(built), 1)
+                self.assertEqual(built[0].home, self.fx.home)
+                self.assertEqual(built[0].retry, expected)
+
+    def test_ut_cli_15_05_invalid_lock_config_fails_before_the_lock(self) -> None:
+        """UT-CLI-15.05: retries=11 gives E_CONFIG_INVALID with the range, lock untouched."""
+        write_config(self.fx.home, DEFAULT_CONFIG + "\n[lock]\nretries = 11\n")
+        for argv in _DATA_COMMANDS:
+            with self.subTest(command=argv[0]):
+                lock_mock = mock.MagicMock()
+                with mock.patch.object(cli_mod, "RunLock", lock_mock):
+                    result = self.run_cli(list(argv))
+                payload = self.assert_error(2, result, "E_CONFIG_INVALID", argv[0])
+                self.assertIn("0..10", payload["error"]["hint"])
+                lock_mock.assert_not_called()
+
+    def test_ut_cli_15_06_doctor_lock_check_never_pauses(self) -> None:
+        """UT-CLI-15.06: doctor reports the held lock at once with any [lock], even invalid."""
+        self.hold_lock(120)
+        configs = (
+            ("no [lock]", None),
+            ("maximum pauses", "[lock]\nretries = 10\ninitial_delay_ms = 5000\nbackoff_factor = 10\n"),
+            ("retries = 11", "[lock]\nretries = 11\n"),
+        )
+        for label, text in configs:
+            with self.subTest(config=label):
+                if text is None:
+                    (self.fx.home / "config.toml").unlink(missing_ok=True)
+                else:
+                    write_config(self.fx.home, text)
+                factory, record = self.recording_lock()
+                started = time.monotonic()
+                with mock.patch.object(cli_mod, "RunLock", factory):
+                    exit_code, stdout, stderr = self.run_cli(["doctor", "--json"])
+                elapsed = time.monotonic() - started
+                self.assertEqual((exit_code, stderr), (0, ""))
+                checks = {check["name"]: check for check in self.json_object(stdout)["checks"]}
+                self.assertFalse(checks["lock"]["ok"])
+                self.assertEqual(
+                    checks["lock"]["detail"],
+                    f"held by another mailquery process: {self.lock_path()}",
+                )
+                self.assertEqual(record["retries"], [None])
+                self.assertEqual(record["sleeps"], [])
+                self.assertLess(elapsed, 5.0, f"doctor took {elapsed:.3f} s")
+                if label == "retries = 11":
+                    self.assertFalse(checks["config"]["ok"])
+                    self.assertIn("E_CONFIG_INVALID", checks["config"]["detail"])
+                    self.assertIn("[lock].retries", checks["config"]["detail"])
+
+    def test_ut_cli_15_07_root_help_has_the_lock_line(self) -> None:
+        """UT-CLI-15.07: the root help shows the Lock: line right after Configuration:."""
+        code, stdout, stderr = self.run_cli(["--help"])
+        self.assertEqual((code, stderr), (0, ""))
+        lines = stdout.splitlines()
+        starts = [i for i, line in enumerate(lines) if line.startswith("Configuration:")]
+        self.assertEqual(len(starts), 1, stdout)
+        block = [lines[starts[0] + 1]]
+        self.assertTrue(block[0].startswith("Lock: "), stdout)
+        for line in lines[starts[0] + 2 :]:
+            if not line.startswith(" "):
+                break
+            block.append(line)
+        self.assertEqual(" ".join(" ".join(block).split()), _LOCK_HELP_TEXT)
+        for line in block:
+            self.assertLessEqual(len(line), HelpContractTests.HELP_MAX_WIDTH, line)
+
+    def test_ut_cli_15_08_two_concurrent_new_runs_split_the_messages(self) -> None:
+        """UT-CLI-15.08: two new runs at once both exit 0; each new message appears once."""
+        write_config(self.fx.home, DEFAULT_CONFIG)
+        code, stdout, _ = self.run_cli(["new", "--peek"])
+        _close_log_handlers()
+        self.assertEqual(code, 0)
+        expected = [message["uid"] for message in json.loads(stdout)["messages"]]
+        self.assertTrue(expected, "the fixture must have new messages")
+
+        results: list = [None, None]
+        durations = [0.0, 0.0]
+
+        def run(index: int) -> None:
+            started = time.monotonic()
+            results[index] = self.launch("new")
+            durations[index] = time.monotonic() - started
+
+        threads = [threading.Thread(target=run, args=(index,)) for index in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=180)
+
+        emitted: list[list[str]] = []
+        for result in results:
+            self.assertIsNotNone(result)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout.decode("utf-8"))
+            emitted.append([message["uid"] for message in payload["messages"]])
+        self.assertEqual(sorted(emitted[0] + emitted[1]), sorted(expected))
+        self.assertFalse(set(emitted[0]) & set(emitted[1]), emitted)
+        for duration in durations:
+            self.assertLess(duration, 2 + 4.65 + 5, f"new took {duration:.3f} s")
+
+    def test_ut_cli_15_09_unopenable_lock_file_is_e_permission_at_once(self) -> None:
+        """UT-CLI-15.09: a lock file that cannot be opened gives E_PERMISSION without pausing."""
+        self.lock_path().mkdir(parents=True)
+        factory, record = self.recording_lock()
+        started = time.monotonic()
+        with mock.patch.object(cli_mod, "RunLock", factory):
+            result = self.run_cli(["search"])
+        elapsed = time.monotonic() - started
+        self.assert_error(3, result, "E_PERMISSION", "search")
+        self.assertEqual(record["sleeps"], [])
+        self.assertLess(elapsed, 1.0, f"E_PERMISSION after {elapsed:.3f} s")
 
 
 # --------------------------------------------------------------------------- #
