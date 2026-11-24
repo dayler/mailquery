@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/espera-del-lock.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m04`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `a283610` (tip de `feature/espera-del-lock-lote-1`, con M01 integrado). **Línea base de la suite:** en `7a7a10d` (mismo código que la base), con el intérprete `~\dev\mailquery\.venv\Scripts\python.exe`: 1662 tests, OK, 8 saltos, sin fallos conocidos (con el `python` de pyenv hay 10 fallos de entorno conocidos; no se usa).
 - **Depende de:** M01 (`LockConfig` y la lectura de `[lock]`, ya integrados en la rama del lote). **Lo usan:** nadie. Corre en paralelo con M02.
 - **ACs:** ninguno directo; cubre los documentos consumidores de la unidad.
 
@@ -61,10 +61,10 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Tests del grupo DOC-19, en rojo | ⚪ |
-| 2 | `README.md` y `README.es.md` | ⚪ |
-| 3 | `docs/config.example.toml`, `docs/INTERFACES.md` y `docs/security/threat-model.md` | ⚪ |
-| 4 | Búsqueda de textos obsoletos, gates, datos crudos de evidencia y propuestas | ⚪ |
+| 1 | Tests del grupo DOC-19, en rojo | 🟢 |
+| 2 | `README.md` y `README.es.md` | 🟢 |
+| 3 | `docs/config.example.toml`, `docs/INTERFACES.md` y `docs/security/threat-model.md` | 🟢 |
+| 4 | Búsqueda de textos obsoletos, gates, datos crudos de evidencia y propuestas | 🟢 |
 
 ## Tests
 
@@ -113,3 +113,7 @@ Los de la sección "Evidencia cruda" de `REGLAS.md` (cobertura: "no aplica", no 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-24 | 1 | DOC-19.01 a .03 añadidos y DOC-06.02 admite `lock`; los tres de DOC-19 fallan como se espera y DOC-06.02 pasa. |
+| 2026-11-24 | 2 | Sección `[lock]` en los dos README, `[lock]` en la lista de secciones, `E_LOCKED` como reintentos agotados en la tabla de códigos de salida y en la de problemas típicos, línea `Lock:` nombrada en `--help`. DOC-19.01 pasa solo; DOC-19.01 compara la lista de secciones con los espacios normalizados. |
+| 2026-11-24 | 3 | Bloque `# [lock]` y claves admitidas en el ejemplo; `LockConfig`, `Config.lock`, `RunLock` nuevo y su uso en `cli.py` en `INTERFACES.md`; "Varias sesiones" del modelo de amenazas describe el reintento. DOC-19.01, .02, .03 y DOC-06.02 pasan solos. |
+| 2026-11-24 | 4 | Sin textos obsoletos en los cinco documentos; `-k doc_19`, `-k test_doc_`, `-k doc_14`, `-k doc_15` y `git diff --check` limpios; suite completa en `21d4de3`: 1665 tests, OK, 8 saltos. Evidencia y propuestas en `work/`. |
