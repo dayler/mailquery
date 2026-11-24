@@ -180,16 +180,16 @@ Ninguna
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- docs/INTERFACES.md: pendiente
-- docs/config.example.toml: pendiente
-- docs/security/threat-model.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- docs/INTERFACES.md: actualizado
+- docs/config.example.toml: actualizado
+- docs/security/threat-model.md: actualizado
 - docs/tests/TEST-CATALOG.md: pendiente
 - docs/tests/acceptance-matrix.md: pendiente
-- docs/tests/state-backends.md: pendiente
+- docs/tests/state-backends.md: actualizado
 - docs/tests/cli-config.md: pendiente
-- docs/tests/docs-packaging.md: pendiente
+- docs/tests/docs-packaging.md: actualizado
 - docs/tests/mcp-server.md: pendiente
 - skills/mailquery/SKILL.md: sin cambio
 - docs/recipes/: sin cambio

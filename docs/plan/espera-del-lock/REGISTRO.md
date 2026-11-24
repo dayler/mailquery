@@ -14,3 +14,5 @@ Se completa al cerrar cada milestone y cada lote, y con cada relanzamiento.
 | 2026-11-24 | M01 | 🟡 → 🟢 | `7a7a10d`: 1662 tests, sin fallos nuevos (10 conocidos del entorno con pyenv; OK con el `.venv`) | [evidence/M01.md](evidence/M01.md) | Integrado en el lote 1 (`4ce0dad`); `[pendiente]` quitado de UT-CFG-07; sin relanzamientos |
 | 2026-11-24 | M02, M04 | ⚪ → 🟡 | — | — | Lanzados en paralelo en `../mailquery-wt/espera-del-lock-m02` y `-m04` desde el tip del lote |
 | 2026-11-24 | M02 | 🟡 → 🟢 | `b1c558c`: 1671 tests, OK, 8 saltos (`.venv`) | [evidence/M02.md](evidence/M02.md) | Integrado en el lote 1 (`8948d6f`); `[pendiente]` quitado de UT-ST-08; sin relanzamientos |
+| 2026-11-24 | M04 | 🟡 → 🟢 | `21d4de3`: 1665 tests, OK, 8 saltos (`.venv`) | [evidence/M04.md](evidence/M04.md) | Integrado en el lote 1 (`2765d59`); marcas de DOC-19 y DOC-06.02 quitadas; siete documentos consumidores a `actualizado`; sin relanzamientos |
+| 2026-11-24 | M03 | ⚪ → 🟡 | — | — | Lanzado en `../mailquery-wt/espera-del-lock-m03` desde el tip del lote |
