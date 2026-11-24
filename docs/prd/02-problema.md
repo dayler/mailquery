@@ -36,8 +36,9 @@ Con el endurecimiento del contenido (F1), la corrección de defectos (F2) y la s
 5. **Diagnóstico tras un fallo (F3):** `doctor` debe mostrar solo lo que falla e incluir los plugins mal configurados; el harness no debe ejecutar `doctor` y `mailboxes` en cada conversación, y un `search` con `count: 0` porque el correo está en otra carpeta debe explicar el alcance buscado.
 6. **`mailboxes` para elegir carpetas (F3):** ver qué carpetas existen para `--include-mailbox` y `mailbox_list` sin repetir la cuenta en cada carpeta ni recontar todos los mensajes (`PERFORMANCE-BACKLOG.md`).
 7. **`uid` corto en Outlook:** con un `EntryID` de Exchange u OST, el `uid` de Outlook mide 148 caracteres (`outlook:` más 140 hexadecimales) y se repite en cada fila, en cada warning de mensaje y en el cursor de `new`; en una fila mínima de `search` es cerca de un tercio de la fila. El `uid` de Apple Mail mide unos 16.
+8. **Herramientas tipadas para el harness:** con la CLI, el agente compone la línea de comandos, cita los valores y lee el código de salida, y un harness sin herramienta de shell, o con la shell restringida, no puede usarla. Cada comando aparece además como una llamada de shell genérica, así que el usuario no puede autorizar `mailquery` por separado del resto de la shell ni ver sus parámetros como campos. `mailquery` debe registrarse y comportarse como cualquier servidor MCP por stdio.
 
-Las razones de cada decisión, con sus mediciones, están en ADR-29–ADR-50.
+Las razones de cada decisión, con sus mediciones, están en ADR-29–ADR-51.
 
 ---
 

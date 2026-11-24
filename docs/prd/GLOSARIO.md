@@ -25,6 +25,10 @@ Base SQLite de `~/.mailquery` que relaciona cada id corto impreso con su `native
 
 Marca de agua `(fecha de recepción, uid)` que da a `new` su semántica de procesamiento único.
 
+### Herramienta MCP
+
+Cada comando que el servidor MCP expone (`search`, `new`, `show`, `attachment`, `mailboxes`, `doctor`), con un parámetro por opción del comando (RF-85).
+
 ### Id corto
 
 Alias de un `native_id` largo: el principio de la codificación en base32 de su `SHA-256`, sin sufijo. En Outlook tiene 10 caracteres. Con el sufijo `-<seq>`, que llevan desde el segundo `native_id` del mismo driver con el mismo id corto, forma la parte del `uid` posterior al prefijo (RF-80, RF-81).
@@ -44,6 +48,10 @@ Regla que el usuario define para una tarea del harness; vive en `docs/recipes/`,
 ### `sanitized_name`
 
 Nombre seguro, determinista e idempotente de un adjunto en la caché, con el prefijo `<index:02d>_` (§10.3.3).
+
+### Servidor MCP
+
+Proceso `mailquery mcp serve` que lanza el harness para usar los comandos de `mailquery` como herramientas MCP por stdin y stdout; ejecuta cada llamada como una invocación de la CLI (RF-84, RF-86).
 
 ### Snippet
 

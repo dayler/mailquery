@@ -72,6 +72,7 @@ mailquery/
 │   └── plugin-<driver>/             # OPCIONAL: temporal de un plugin (propiedad del plugin)
 └── logs/
     ├── mailquery.log                # log del núcleo (rotación §14)
+    ├── mailquery.jsonl              # log del núcleo en JSON con [logging].json = true (rotación §14)
     └── <driver>.log                 # OPCIONAL: log de un plugin externo (propiedad del plugin; el núcleo no lo lee)
 ```
 

@@ -38,5 +38,14 @@ mailquery show outlook:k3f9q2m7xa   # Windows (uid legado: mailquery show k3f9q2
 mailquery attachment apple_mail:83143 --index 2
 mailquery attachment apple_mail:83143 --all
 mailquery attachment apple_mail:83143 --index 2 --force
+
+# Servidor MCP: registro en Claude Code (una sola vez)
+claude mcp add --scope user mailquery -- mailquery mcp serve
+
+# Servidor MCP: prueba manual en una terminal; escribir después una línea por mensaje
+mailquery mcp serve
+# {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}
+# {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+# Cerrar stdin (Ctrl+D en macOS, Ctrl+Z y Enter en Windows) termina el servidor con exit 0.
 ```
 

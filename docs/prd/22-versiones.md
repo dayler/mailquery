@@ -46,7 +46,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 
 `3.0.0` (mayor). El cambio de tipo y forma de `uid` (incluido `cursor.*.last_uid`), la forma de `show.attachments`, el esquema de `[scope]` y la semántica de errores son incompatibles para un harness que consume la 2.0.x. El formato de `--version` es aditivo. Se aplica la misma regla que justificó `2.0.0`, cuyos cambios (§22.2) eran incompatibles para un harness que ya consumía la 1.x en macOS.
 
-**Estado:** `develop` anuncia la pre-release `3.0.0a2` (forma PEP 440 normalizada de `3.0.0-alpha.2`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`; se usa la forma normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance del `3.0.0`.
+**Estado:** `develop` anuncia la pre-release `3.0.0a3` (forma PEP 440 normalizada de `3.0.0-alpha.3`) en `pyproject.toml`, `mailquery.__version__`, `--version` y `doctor`; se usa la forma normalizada porque los metadatos instalados (`pip`/`pipx`, `doctor`) siempre la normalizan y `--version` debe coincidir con ellos. Sigue sin publicarse: sin tag de release, sin merge a `main` y sin publicación; ningún documento debe presentar el `3.0.0` como publicado. El release llegará cuando se complete el resto del alcance del `3.0.0`.
 
 ### 22.4 Cambios visibles en 3.0.0 (amplían §22.2)
 
@@ -73,6 +73,8 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 | Warnings del estado del cuerpo en `search` y `new` (`W_BODY_UNREADABLE`, `W_EMLX_MISSING`, `W_EMLX_CORRUPT`, `W_BODY_NOT_LOCAL`, `W_HTML_NO_TEXT`) | Siempre que el cuerpo falla | Solo con `--fields snippet`, `body` o `all` |
 | Salida de `mailboxes` | `accounts[]` y un `mailboxes[]` de primer nivel con `account`, `name`, `path`, `url`, `total`, `unread` e `included` en cada carpeta | Cada cuenta de `accounts[]` con su `mailboxes[]`, cada carpeta con `path` e `included`; `name`, `url`, `total` y `unread` con `--fields` |
 | Opciones de `mailboxes` | — | `--fields` (sin `all`) |
+| Comandos | — | `mcp serve`: servidor MCP por stdio con una herramienta por comando de lectura (RF-84–RF-87) |
+| `config.toml` y logs | — | `[logging].json` (por defecto `false`, sin cambio en el log); con `true`, el log va a `mailquery.jsonl` en JSON Lines (RF-88) |
 
 **macOS.** Además de lo que el §22.2 y la tabla común ya listan, `3.0.0` cambia en macOS exactamente esto:
 
@@ -87,7 +89,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 | `[scope]` | `[scope."<cuenta>"]` | `[scope."<driver>:<cuenta>"]` (el prefijo puede omitirse) |
 | `doctor` | `python`, `home`, chequeos, `config`, `state`, `lock` | `python`, `home`, `driver`, chequeos, `config`, `state`, `lock` |
 | `--version` | `... (backend apple_mail; Python x; macOS y)` | `... (backend apple_mail; Python x; macOS y; drivers: ...)` |
-| Ayuda raíz | Cinco comandos | Seis comandos |
+| Ayuda raíz | Cinco comandos | Siete comandos (`attachment` y `mcp`) |
 | `uid` en `new` (`cursor.previous/current.last_uid`) | Entero | String `"apple_mail:<n>"` |
 | Logs | `backend=` | `backend=` (nativo) y `drivers=` (lista declarada) |
 | Errores nuevos | — | §12.6 (incluye `E_ATTACHMENT_UNAVAILABLE` y `E_IO`) |
@@ -107,7 +109,7 @@ Todo lo demás de macOS debe quedar idéntico.
 | `show.message.attachments[]` | `[{"name": "..."}]` | `[{"index", "name", "cached_path"}]` |
 | `doctor` | `python`, `home`, chequeos, `config`, `state`, `lock` | `python`, `home`, `driver`, chequeos, `config`, `state`, `lock` |
 | `--version` | `... (backend outlook; Python x; Windows y)` | `... (backend outlook; Python x; Windows y; drivers: ...)` |
-| Ayuda raíz | Cinco comandos | Seis comandos (`attachment`) |
+| Ayuda raíz | Cinco comandos | Siete comandos (`attachment` y `mcp`) |
 | Logs | `backend=` | `backend=` (nativo) y `drivers=` (lista declarada) |
 | Errores nuevos | — | §12.6 (incluye `E_ATTACHMENT_UNAVAILABLE` y `E_IO`) |
 
