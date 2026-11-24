@@ -28,4 +28,5 @@ F0 prepara en cada worktree un entorno virtual `.venv` con `css-inline~=0.23.1`,
 | 2026-11-23 | M04 | ⚪ → 🟢 | `Ran 1598`, 2 fallos SMOKE de entorno | `evidence/M04.md` | `[logging].json`, `JsonFormatter`, archivo activo, hints y README. |
 | 2026-11-23 | M05 | ⚪ → 🟢 | `-k ut_mcp` 67 tests, `-k smoke_mcp` 7 OK (1 skip) | `evidence/M05.md` | `mcp serve`, log del servidor, ayudas, README, skill y pruebas con procesos reales. |
 | 2026-11-23 | Lote 2 (M06+M07) | ⚪ → 🟢 | grupos verdes | `evidence/M06.md`, `evidence/M07.md` | M06 documentos técnicos; M07 SMOKE-MCP en macOS con Apple Mail real. |
-| 2026-11-23 | PR #17 | abierto | CI | https://github.com/dayler/mailquery/pull/17 | Único PR de `feature/servidor-mcp` a `develop`; la conciliación PRD/unidad se difiere por orden del dueño. |
+| 2026-11-23 | PR #17 | abierto → mergeado | Matriz del PR: 15/15 jobs verdes (12 de suite, 3 de instaladores) | https://github.com/dayler/mailquery/pull/17 | Único PR de `feature/servidor-mcp` a `develop`, mergeado en `dd79daf`; la conciliación PRD/unidad se difiere por orden del dueño. |
+| 2026-11-23 | `develop` | — → 🟢 | Matriz de `develop`: 15/15 jobs verdes sobre `dd79daf` | https://github.com/dayler/mailquery/actions/runs/45294624259 | CI de `develop` tras el merge, sin fallos; `main` sin tocar. |
