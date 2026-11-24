@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/espera-del-lock.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 1 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m01`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `044e8ae` (tip de `feature/espera-del-lock-lote-1`). **Línea base de la suite:** en `41fc5b2` (mismo código), 1654 tests, 10 fallos, 9 saltos. Fallos conocidos del entorno local, no del código: `test_ut_cnt_02_10`, `test_ut_cnt_03_01`, `test_ut_cnt_03_02`, `test_ut_cnt_03_10`, `test_ut_cw_07_01` (falta el backend de hojas de estilo), `test_tc_01_01`, `test_tc_02_07`, `test_tc_06_02`, `test_pkg_01_03`, `test_pkg_02_01` (metadatos del paquete instalado en 2.0.1).
 - **Depende de:** nada. **Lo usan:** M02 (`LockConfig`), M03 (`config.lock`), M04 (valores por defecto).
 - **ACs:** AC-80, la parte del esquema de `[lock]`.
 
@@ -56,7 +56,7 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Tests del grupo UT-CFG-07, en rojo | ⚪ |
+| 1 | Tests del grupo UT-CFG-07, en rojo | 🟢 |
 | 2 | `LockConfig`, `Config.lock`, lectura y validación de `[lock]`, `hint` con `[lock]` | ⚪ |
 | 3 | Gates, datos crudos de evidencia y propuestas | ⚪ |
 
@@ -107,3 +107,4 @@ Los de la sección "Evidencia cruda" de `REGLAS.md`, más: el texto exacto de lo
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-24 | 1 | Ocho casos de UT-CFG-07 en `LockConfigTests`; en rojo por la falta de `LockConfig` (ImportError). |
