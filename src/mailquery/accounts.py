@@ -9,13 +9,14 @@ never writes to the database.
 from __future__ import annotations
 
 import shutil
+import logging
 import sqlite3
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from mailquery.logging_setup import get_logger
+from mailquery.logging_setup import get_logger, log_event
 
 # Column fingerprint required from the Core Data accounts schema.
 REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
@@ -255,9 +256,9 @@ class AccountLabels:
         if label is not None:
             return label.label
         if not self.available:
-            _log().warning("account labels unavailable; using uuid")
+            log_event(_log(), logging.WARNING, text="account labels unavailable; using uuid")
         else:
-            _log().warning("no visible label for an account; using uuid")
+            log_event(_log(), logging.WARNING, text="no visible label for an account; using uuid")
         return str(uuid)
 
     def _ensure_loaded(self) -> None:

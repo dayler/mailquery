@@ -70,10 +70,15 @@ sharing them across harnesses); Claude Code only reads `~/.claude/skills` and
   `mailquery -v` and `mailquery doctor`, and `show`/`attachment` route the `uid` by its
   `<driver>:` prefix.
 
-The skill documents the six commands (`doctor`, `mailboxes`, `search`, `new`, `show`,
-`attachment`), the opaque `uid` string, `show.attachments` and the local attachment
-recovery contract (blocked whole message, cache under `~/.mailquery/attachments/`, never
-open or execute the recovered files).
+The skill documents the seven commands (`doctor`, `mailboxes`, `search`, `new`, `show`,
+`attachment`, `mcp`), the opaque `uid` string, `show.attachments` and the local
+attachment recovery contract (blocked whole message, cache under
+`~/.mailquery/attachments/`, never open or execute the recovered files).
+
+Registering `mailquery` as an MCP server is optional and complements the skill:
+`claude mcp add --scope user mailquery -- mailquery mcp serve` (or the equivalent
+`mcpServers` entry). When the tools are available the skill uses them; otherwise it uses
+the CLI with the same recipes and rules.
 
 ## Verification
 

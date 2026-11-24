@@ -19,4 +19,13 @@ F0 prepara en cada worktree un entorno virtual `.venv` con `css-inline~=0.23.1`,
 |---|---|---|---|---|---|
 | 2026-11-23 | Plan | — → ⚪ | 1561 tests, 10 fallos de entorno, 7 saltos (sección 1) | — | Plan creado. F0 en 🔴 por DA-01 (unidad en `borrador`). |
 | 2026-11-23 | F0 | 🔴 → ⚪ | — | — | DA-01 respondida: unidad aprobada; IDs reservados (CU-10, RF-84…RF-88, ADR-51, AC-71…AC-78) y sustituidos en la unidad y en el plan. Falta commitear la unidad aprobada en `develop` (orden del dueño). |
-| 2026-11-23 | Plan | ⚪ → ⚪ | — | — | Dos revisiones independientes del plan: 27 hallazgos en la primera y 10 en la segunda (DP-10 roto, llamadas de los procesos hijo en las pruebas reales, entre otros); todos corregidos en el plan. |
+| 2026-11-23 | Plan | ⚪ → ⚪ | — | — | Dos revisiones independientes del plan: 27 hallazgos en la primera y 10 en la segunda; todos corregidos. |
+| 2026-11-23 | F0 | ⚪ → 🟢 | Línea base en `f866be8`: `Ran 1562`, `failures=3` (SMOKE del entorno), `skipped=7` | — | Definiciones de test en `docs/tests/`; consumidores añadidos a la unidad (DP-14); rama `feature/servidor-mcp`; worktrees `.worktrees/servidor-mcp-*` con `.venv`. |
+| 2026-11-23 | M01 | ⚪ → 🟢 | `Ran 1576`, 3 fallos de entorno | `evidence/M01.md` | `log_event` en las 14 llamadas; test de regresión; sin llamadas directas. |
+| 2026-11-23 | M03 | ⚪ → 🟢 | `Ran 1562`, `OK (skipped=7)` | `evidence/M03.md` | `3.0.0a3` en paquete, `--version`, `doctor` y documentos; búsqueda de CL-11 limpia. |
+| 2026-11-23 | Lote 1 (M01+M03) | ⚪ → 🟢 | — | — | Integración `--no-ff` en `feature/servidor-mcp-lote-1`. |
+| 2026-11-23 | M02 | ⚪ → 🟢 | `-k ut_mcp` 52 tests, OK; cobertura 92.6 % | `evidence/M02.md` | Núcleo del servidor, esquemas y ejecutor real. |
+| 2026-11-23 | M04 | ⚪ → 🟢 | `Ran 1598`, 2 fallos SMOKE de entorno | `evidence/M04.md` | `[logging].json`, `JsonFormatter`, archivo activo, hints y README. |
+| 2026-11-23 | M05 | ⚪ → 🟢 | `-k ut_mcp` 67 tests, `-k smoke_mcp` 7 OK (1 skip) | `evidence/M05.md` | `mcp serve`, log del servidor, ayudas, README, skill y pruebas con procesos reales. |
+| 2026-11-23 | Lote 2 (M06+M07) | ⚪ → 🟢 | grupos verdes | `evidence/M06.md`, `evidence/M07.md` | M06 documentos técnicos; M07 SMOKE-MCP en macOS con Apple Mail real. |
+| 2026-11-23 | PR #17 | abierto | CI | https://github.com/dayler/mailquery/pull/17 | Único PR de `feature/servidor-mcp` a `develop`; la conciliación PRD/unidad se difiere por orden del dueño. |

@@ -1,11 +1,13 @@
 """TC-06, PKG-01, PKG-02, PKG-03, DOC-07 and DOC-16: packaging, dependencies and consumer documents.
 
-``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a2),
+``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a3),
 not yet released: the tests derive every expected version from the package
 instead of pinning a literal (PKG-02).
 """
 
+import contextlib
 import importlib.metadata
+import io
 import re
 import sys
 import tomllib
@@ -13,6 +15,7 @@ import unittest
 from pathlib import Path
 
 import mailquery
+from mailquery import cli
 from mailquery.backends.registry import BackendRegistry, package_version
 
 from tests.fakes.plugin import FakeEntryPoint
@@ -268,6 +271,38 @@ class ReadmeCssInlineTests(unittest.TestCase):
             self.assertNotIn("solo biblioteca estándar", flat, name)
 
 
+class JsonLogDocumentationTests(unittest.TestCase):
+    """DOC-18.01: the two READMEs document the optional JSON Lines log."""
+
+    def test_doc_18_01_readmes_document_the_json_log(self) -> None:
+        """DOC-18.01: both READMEs document [logging].json, mailquery.jsonl and one active format per run."""
+        for name, section, sentence in (
+            (
+                "README.md",
+                "Logs and privacy",
+                "Each run writes only the file of the active format",
+            ),
+            (
+                "README.es.md",
+                "Logs y privacidad",
+                "Cada ejecución escribe solo el archivo de su formato",
+            ),
+        ):
+            text = _readme(name)
+            flat = " ".join(text.split())
+            self.assertIn("[logging].json", text, name)
+            self.assertIn("mailquery.jsonl", text, name)
+            self.assertIn(sentence, flat, name)
+            body = _section(text, section)
+            for needle in ("mailquery.log", "mailquery.jsonl", "ts", "traceback"):
+                self.assertIn(needle, body, f"{name} {section}")
+            row = next(
+                line for line in text.splitlines() if line.startswith("| `E_INTERNAL` (1)")
+            )
+            self.assertIn("mailquery.log", row, name)
+            self.assertIn("mailquery.jsonl", row, name)
+
+
 #: Obsolete Outlook uid texts that the consumer documents must not carry.
 OBSOLETE_UID_TEXTS = (
     "expected an uppercase hexadecimal EntryID",
@@ -283,6 +318,66 @@ OBSOLETE_UID_TEXTS = (
 UPPERCASE_UID_EXAMPLE = re.compile(r"outlook:[0-9A-F]{6,}")
 #: Placeholder for the native form, admitted only where the option is documented.
 NATIVE_ID_MARKER = "outlook:<EntryID>"
+
+
+class McpDocumentationTests(unittest.TestCase):
+    """DOC-17 — README and skill documentation of the MCP server."""
+
+    def test_doc_17_01_readmes_document_registration_tools_and_permissions(self) -> None:
+        """DOC-17.01: both READMEs document registration, tools, parameter mapping and permissions."""
+        for name in ("README.md", "README.es.md"):
+            with self.subTest(document=name):
+                text = _readme(name)
+                self.assertIn(
+                    "claude mcp add --scope user mailquery -- mailquery mcp serve", text
+                )
+                self.assertIn("mcpServers", text)
+                self.assertIn('"command": "mailquery"', text)
+                self.assertIn('"args": ["mcp", "serve"]', text)
+                for tool in ("search", "new", "show", "attachment", "mailboxes", "doctor"):
+                    self.assertIn(tool, text)
+                self.assertIn("include_mailbox", text)
+                self.assertIn("--include-mailbox", text)
+        english = _readme("README.md")
+        self.assertIn("Full Disk Access", english)
+        self.assertIn("same session", english)
+        self.assertIn("integrity level", english)
+        spanish = _readme("README.es.md")
+        self.assertIn("Acceso total al disco", spanish)
+        self.assertIn("misma sesión", spanish)
+        self.assertIn("nivel de integridad", spanish)
+
+    def test_doc_17_02_skill_uses_mcp_tools_when_available(self) -> None:
+        """DOC-17.02: the skill prefers the MCP tools and deduces the exit code from error.code."""
+        skill = (ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8")
+        flat = " ".join(skill.split())
+        self.assertIn("MCP tools", flat)
+        self.assertIn("use its tools instead of the CLI", flat)
+        self.assertIn("error.code", flat)
+        self.assertIn("mcp serve", flat)
+
+    def test_doc_17_03_no_six_command_wording(self) -> None:
+        """DOC-17.03: READMEs, skill, skills README and helps say no 'six commands'."""
+        documents = [
+            _readme("README.md"),
+            _readme("README.es.md"),
+            (ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8"),
+            (ROOT / "skills" / "README.md").read_text(encoding="utf-8"),
+        ]
+        for text in documents:
+            self.assertNotIn("six commands", text.lower())
+            self.assertNotIn("seis comandos", text.lower())
+        for argv in (["--help"], ["mcp", "--help"], ["mcp", "serve", "--help"]):
+            stdout = io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as raised,
+            ):
+                cli.build_parser().parse_args(argv)
+            self.assertEqual(raised.exception.code, 0)
+            self.assertNotIn("six commands", stdout.getvalue().lower())
+            self.assertNotIn("seis comandos", stdout.getvalue().lower())
 
 
 class ConsumerDocumentsTests(unittest.TestCase):
@@ -331,14 +426,15 @@ class ConsumerDocumentsTests(unittest.TestCase):
                     f"{name}: {NATIVE_ID_MARKER} outside the option description",
                 )
 
-    def test_doc_16_03_version_is_3_0_0a2_in_package_and_readmes(self) -> None:
-        """DOC-16.03: pyproject, ``mailquery.__version__`` and both READMEs announce 3.0.0a2."""
-        self.assertEqual(_load()["project"]["version"], "3.0.0a2")
-        self.assertEqual(mailquery.__version__, "3.0.0a2")
+    def test_doc_16_03_version_is_3_0_0a3_in_package_and_readmes(self) -> None:
+        """DOC-16.03: pyproject, ``mailquery.__version__`` and both READMEs announce 3.0.0a3."""
+        self.assertEqual(_load()["project"]["version"], "3.0.0a3")
+        self.assertEqual(mailquery.__version__, "3.0.0a3")
         for name in ("README.md", "README.es.md"):
             text = _readme(name)
-            self.assertIn("3.0.0a2", text, name)
-            self.assertIn("3.0.0-alpha.2", text, name)
+            self.assertIn("3.0.0a3", text, name)
+            self.assertIn("3.0.0-alpha.3", text, name)
+            self.assertNotIn("3.0.0a2", text, name)
             self.assertNotIn("3.0.0a1", text, name)
 
     def test_doc_16_04_readmes_describe_the_native_id_cache(self) -> None:

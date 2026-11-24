@@ -71,3 +71,21 @@ Requisitos: AC-63, AC-68, AC-69 · Archivo: `tests/test_smoke.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .11 | P | En Windows con Outlook abierto: los uids de `search --since 1w` son `outlook:` más 10 caracteres del alfabeto (o con sufijo); `show` del primero responde con exit 0; existe `db/cache.db` en el HOME temporal; `show --show-native-id` da `outlook:` más hexadecimal en mayúsculas; los no leídos no cambian. En macOS: tras `search` y `show`, no existe `db/cache.db`. Donde no aplica, se salta con el motivo de la sección 6 de `infrastructure.md`. |
+
+#### SMOKE-MCP — Servidor MCP contra el cliente real
+
+Requisitos: RF-84, RF-86, AC-72, AC-74 · Archivo: `tests/test_smoke.py`
+
+Con la instalación y la configuración de SMOKE-INSTALL; un cliente JSON-RPC de prueba habla con `mailquery mcp serve` instalado.
+
+**Tabla: Casos de SMOKE-MCP**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `initialize` y `tools/list` ⇒ las seis herramientas. |
+| .02 | P | `search` con `since: "1w"` ⇒ exit 0 en el JSON y filas por defecto; `show` del primer `uid` ⇒ `isError: false`. |
+| .03 | P | `new` dos veces seguidas ⇒ el cursor avanza y la segunda no repite mensajes de la primera. |
+| .04 | P | `attachment` con `index: 1` y `force: true` de un mensaje con adjunto local ⇒ `isError: false` y el archivo bajo `~/.mailquery/attachments` del HOME temporal; se salta con motivo si no hay adjunto local. |
+| .05 | N | macOS: con la app que lanza el servidor sin Acceso total al disco ⇒ `E_PERMISSION`; Windows: con Outlook cerrado ⇒ `E_OUTLOOK_NOT_RUNNING`. Se salta con motivo si no se puede preparar la condición. |
+| .06 | P | Con un plugin declarado junto al driver nativo ⇒ resultados de los dos drivers en `search`; con un plugin que falla ⇒ `E_PLUGIN_FAILED`. El plugin de prueba va en el `PYTHONPATH` del servidor, con su `dist-info`. |
+| .07 | N | Los contadores de no leídos de las carpetas incluidas no cambian. |

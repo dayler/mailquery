@@ -1856,10 +1856,10 @@ def _normalized(text: str) -> str:
     return " ".join(text.split())
 
 
-#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a2``).
+#: A ``major.minor.patch`` version with an optional PEP 440 pre-release (``3.0.0a3``).
 _VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
 #: ``mailquery 3.0.0`` presented as the final release (a pre-release such as
-#: ``3.0.0a2`` is not the published 3.0.0).
+#: ``3.0.0a3`` is not the published 3.0.0).
 _FINAL_3_0_0 = r"mailquery 3\.0\.0(?!(?:a|b|rc)\d)"
 
 #: Stale patterns the 2.1 documentation retires.
@@ -1883,6 +1883,8 @@ _STALE_TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
         r"solo biblioteca\s+estándar", re.IGNORECASE
     ),
     "preflight": re.compile(r"\bpreflight\b", re.IGNORECASE),
+    "six commands": re.compile(r"\bsix commands\b", re.IGNORECASE),
+    "seis comandos": re.compile(r"\bseis comandos\b", re.IGNORECASE),
 }
 
 #: Text the README must document (DOC-01.03/05, AC-21).
@@ -2166,13 +2168,17 @@ class HelpDocumentationTest(_DocumentationCase):
             with self.subTest(note=note):
                 self.assertIn(note, normalized)
 
-    def test_doc_05_03_seven_help_invocations_parse(self) -> None:
-        """DOC-05.03: the root help and the six subcommand helps (7 invocations) parse."""
-        for argv in (["--help"], *([command, "--help"] for command in COMMANDS)):
+    def test_doc_05_03_nine_help_invocations_parse(self) -> None:
+        """DOC-05.03: the root help, seven subcommand helps and mcp serve (9) parse."""
+        for argv in (
+            ["--help"],
+            *([command, "--help"] for command in COMMANDS),
+            ["mcp", "serve", "--help"],
+        ):
             with self.subTest(argv=argv):
                 text = _help_text(argv)
                 self.assertTrue(text.strip())
-        self.assertEqual(len(COMMANDS), 6)
+        self.assertEqual(len(COMMANDS), 7)
 
     def test_doc_05_04_help_has_no_stale_terms(self) -> None:
         """DOC-05.04: no help mentions five commands or an integer uid (module docstring included)."""
@@ -2236,6 +2242,21 @@ class ConfigExampleTest(_DocumentationCase):
         parsed = self._load(explicit)
         self.assertEqual(parsed.content.url_display, "neutralize")
 
+    def test_doc_18_02_example_documents_the_json_log(self) -> None:
+        """DOC-18.02: the example has # json = false in the [logging] block and it loads as false."""
+        template = _read(CONFIG_EXAMPLE)
+        block = template.split("# [logging]", 1)[1].split("# [search]", 1)[0]
+        self.assertRegex(block, r"(?m)^# json = false")
+        lines = [
+            line[2:] if line.startswith("# ") else line
+            for line in block.splitlines()
+        ]
+        uncommented = "[logging]\n" + "\n".join(line for line in lines if line.strip())
+        parsed = self._load(uncommented)
+        self.assertFalse(parsed.logging.json)
+        self.assertEqual(parsed.logging.level, "info")
+        self.assertEqual(parsed.logging.max_size_mb, 10)
+
     def test_doc_06_05_example_documents_the_attachment_timeout(self) -> None:
         """DOC-06.05: the [attachments] block documents timeout_seconds and it loads as 60."""
         template = _read(CONFIG_EXAMPLE)
@@ -2266,10 +2287,14 @@ class ConfigExampleTest(_DocumentationCase):
 class UserDocumentationTest(_DocumentationCase):
     """TC-07: documentation and helps are coherent with the 2.1 contract."""
 
-    def test_tc_07_01_root_and_six_helps_parse(self) -> None:
-        """TC-07.01: the root help and the six subcommand helps (7 invocations) parse."""
-        self.assertEqual(len(COMMANDS), 6)
-        for argv in (["--help"], *([command, "--help"] for command in COMMANDS)):
+    def test_tc_07_01_root_and_all_helps_parse(self) -> None:
+        """TC-07.01: the root help, seven subcommand helps and mcp serve (9) parse."""
+        self.assertEqual(len(COMMANDS), 7)
+        for argv in (
+            ["--help"],
+            *([command, "--help"] for command in COMMANDS),
+            ["mcp", "serve", "--help"],
+        ):
             with self.subTest(argv=argv):
                 self.assertTrue(_help_text(argv).strip())
 

@@ -29,8 +29,8 @@ para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
   la entrada para el driver nativo de la plataforma.
 
 La recuperación de adjuntos y el motor multi-driver forman parte del futuro
-3.0.0, todavía no publicado. `develop` anuncia la pre-release `3.0.0a2`
-(3.0.0-alpha.2) en `--version`, pero no publica nada: sin tag, sin release y sin
+3.0.0, todavía no publicado. `develop` anuncia la pre-release `3.0.0a3`
+(3.0.0-alpha.3) en `--version`, pero no publica nada: sin tag, sin release y sin
 merge a `main`.
 
 Referencias: [`docs/prd/`](docs/prd/00-indice.md) (contrato del producto, v2.3),
@@ -309,6 +309,14 @@ cuentas) están en
 Precedencia: flags de la CLI, `config.toml`, defaults. La rotación diaria del log
 de la 1.x se reemplazó por `[logging].max_size_mb`; la clave retirada da
 `E_CONFIG_INVALID` con el hint `retention_days was replaced by max_size_mb`.
+El formato del log se elige en cada ejecución con `[logging].json`: con `true`,
+la ejecución escribe JSON Lines en `~/.mailquery/logs/mailquery.jsonl` en lugar
+del texto plano `~/.mailquery/logs/mailquery.log`:
+
+```toml
+[logging]
+json = true                    # false (default): texto en mailquery.log
+```
 
 ### Recuperación de adjuntos (`[attachments]`)
 
@@ -382,7 +390,7 @@ control.
 
 ```text
 $ mailquery -v          # sin efectos: no crea ~/.mailquery ni abre el cliente
-mailquery 3.0.0a2 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a2)
+mailquery 3.0.0a3 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a3)
 ```
 
 La línea conserva `backend <driver nativo>` y añade `; drivers: <driver>
@@ -412,7 +420,7 @@ Generated at: 2026-11-13T09:15:00-04:00
 Checks:
   [ok]   python              3.14.7
   [ok]   home                …\.mailquery (writable)
-  [ok]   driver              outlook (api=1; pkg 3.0.0a2; network=false; readonly=structural;
+  [ok]   driver              outlook (api=1; pkg 3.0.0a3; network=false; readonly=structural;
                              body_local=true; attachments=local; native_order=text)
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)
@@ -811,10 +819,55 @@ mailquery attachment apple_mail:83301 --index 2 --force
   usa un cron/limpieza externa si hace falta. La app tolera borrados
   concurrentes.
 
+### `mailquery mcp serve`
+
+Arranca un servidor MCP por stdin y stdout para un harness: una herramienta por
+comando de lectura (`search`, `new`, `show`, `attachment`, `mailboxes` y
+`doctor`). Es el mismo ejecutable y el mismo contrato JSON que la CLI:
+
+```text
+$ mailquery mcp serve
+```
+
+Regístralo una vez con Claude Code (ámbito de usuario, disponible en todas las
+sesiones):
+
+```bash
+claude mcp add --scope user mailquery -- mailquery mcp serve
+```
+
+Para otros harnesses, la entrada equivalente en `mcpServers` es:
+
+```json
+{"mcpServers": {"mailquery": {"command": "mailquery", "args": ["mcp", "serve"]}}}
+```
+
+Cada parámetro de una herramienta es una opción de su comando, sin los guiones
+iniciales y con `-` convertido en `_`: `include_mailbox` es `--include-mailbox`,
+`has_attachments` es `--has-attachments` y `log_level` es `--log-level`. `uid`
+es el argumento posicional de `show` y `attachment` y es obligatorio. `doctor`
+se ejecuta siempre con `--json`; `json` no es un parámetro. La llamada
+`{"since": "1w", "unread": true, "fields": ["snippet"]}` de `search` es
+exactamente `mailquery search --since=1w --unread --fields=snippet`.
+
+El servidor no lee correo, ni el estado, ni ningún driver: cada llamada ejecuta
+un proceso hijo `mailquery` con el mismo entorno y directorio de trabajo, stdin
+vacío y stderr descartado, y devuelve su stdout como un único bloque `text`.
+`isError` es true si el hijo termina con un código distinto de 0; el JSON
+mantiene el contrato de la CLI, así que el código de salida se deduce de
+`error.code`. El servidor escribe `event=start command=mcp`, una línea
+`event=call tool=… exit_code=… duration_ms=…` por llamada (nunca los valores de
+los parámetros) y `event=end` en el archivo de log activo, y no lo mantiene
+abierto entre eventos.
+
+Los permisos son de la app que lanza el servidor, no de la terminal: en macOS
+necesita **Acceso total al disco** y en Windows debe correr en la misma sesión y
+con el mismo nivel de integridad que Outlook clásico.
+
 ### `mailquery <comando> --help`
 
-Cada subcomando documenta sus propias opciones; `mailquery --help` lista los seis
-comandos y la línea de códigos de salida de abajo.
+Cada subcomando documenta sus propias opciones; `mailquery --help` lista los
+siete comandos y la línea de códigos de salida de abajo.
 
 ## Cuerpo y warnings
 
@@ -964,12 +1017,24 @@ confianza.
 ## Logs y privacidad
 
 `~/.mailquery/logs/mailquery.log`, texto plano; rota por tamaño
-(`[logging].max_size_mb`, default 10 MB, 5 archivos rotados). La línea
-`event=start` registra `backend=` (el driver nativo) y `drivers=` (la lista
-declarada); el éxito de `attachment` registra `event=end` con conteos y bytes.
-Asuntos, cuerpos, direcciones, carpetas, cuentas, rutas, términos de búsqueda,
-uids y nombres de adjuntos nunca se registran. Cero red y cero telemetría desde
-el núcleo; las credenciales y tokens nunca se leen.
+(`[logging].max_size_mb`, default 10 MB, 5 archivos rotados). Con
+`[logging].json = true` la ejecución escribe
+`~/.mailquery/logs/mailquery.jsonl` en su lugar, un objeto JSON por línea, con
+la misma rotación. Cada ejecución escribe solo el archivo de su formato: el del
+otro formato, con sus rotados, no se modifica, no se rota ni se borra. Cada
+objeto tiene `ts` (ISO 8601 local con milisegundos y desfase), `level`,
+`logger`, `run`, `fields` con los campos del evento, `text` para el texto libre
+y `traceback` para un error interno, por ejemplo:
+
+```json
+{"ts": "2026-11-02T02:15:00.214-04:00", "level": "INFO", "logger": "mailquery.cli", "run": "abc123", "fields": {"event": "start", "command": "search", "backend": "apple_mail", "drivers": "apple_mail"}}
+```
+
+La línea `event=start` registra `backend=` (el driver nativo) y `drivers=` (la
+lista declarada); el éxito de `attachment` registra `event=end` con conteos y
+bytes. Asuntos, cuerpos, direcciones, carpetas, cuentas, rutas, términos de
+búsqueda, uids y nombres de adjuntos nunca se registran. Cero red y cero
+telemetría desde el núcleo; las credenciales y tokens nunca se leen.
 
 ## Permisos
 
@@ -1026,7 +1091,7 @@ abren ni ejecutan los archivos recuperados.
 | `E_ATTACHMENT_UNREADABLE` (3) | El adjunto está corrupto o protegido con S/MIME | Revísalo en el cliente de correo; los adjuntos S/MIME no se pueden extraer |
 | `E_IO` (3) | Fallo de E/S de la caché de adjuntos, la caché de ids nativos o el staging (espacio, cuota, sistema de archivos) | Revisa el espacio libre y los permisos de `~/.mailquery`, y reintenta |
 | `E_UNBOUNDED_SCAN` / `E_SCAN_TOO_LARGE` (4) | `--text` sin acotar / demasiados candidatos | Añade `--since` u otro filtro, o sube `search.max_scan` (máx. 50000) |
-| `E_INTERNAL` (1) | Fallo inesperado | Revisa `~/.mailquery/logs/mailquery.log` con `--log-level debug` |
+| `E_INTERNAL` (1) | Fallo inesperado | Revisa `~/.mailquery/logs/mailquery.log` (o `mailquery.jsonl` con `[logging].json = true`) con `--log-level debug` |
 
 ## Licencia
 

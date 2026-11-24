@@ -8,14 +8,14 @@ Leyenda de estados: la de [PLAN.md](PLAN.md). La columna "Tests" lista los grupo
 
 | AC | Qué exige (resumen) | Milestone | Tests | Evidencia | CI | Estado |
 |---|---|---|---|---|---|---|
-| AC-71 | `initialize`, versiones, `ping`, `tools/list` con esquemas de RF-85, solo JSON-RPC en stdout, errores `-32601`/`-32700`/`-32600`, lotes, `\r\n` y `\n` en Windows | M02 (en proceso), M05 (`\n` del proceso real en Windows) | UT-MCP-01, UT-MCP-02, UT-MCP-03, UT-MCP-09.05 | — | — | ⚪ |
-| AC-72 | argv equivalente con ejecutor sustituido; texto e `isError`; ejecutor real con `search --since bogus` igual que la CLI, también con `json.py` en el cwd | M02 (sustituido), M05 (real), M07 (cliente real) | UT-MCP-04, UT-MCP-05.01–.02, UT-MCP-05.07, UT-MCP-09.03, SMOKE-MCP | — | — | ⚪ |
-| AC-73 | `E_USAGE` sin proceso hijo (parámetro desconocido, tipo, `uid`, `show_native_id`, NUL), formato de la CLI, `--subject=-…`, `-32602` | M02 | UT-MCP-06, UT-MCP-04.07 | — | — | ⚪ |
-| AC-74 | Arranque sin config o con config inválida; `E_INTERNAL` y servidor vivo; `E_CONFIG_INVALID` que se corrige sin reiniciar; serie; cierre de stdin con llamada en curso; stderr vacío | M02 (en proceso), M05 (proceso real), M07 (cliente real) | UT-MCP-05.03–.05, UT-MCP-07, UT-MCP-09.01, .02, .04, SMOKE-MCP | — | — | ⚪ |
-| AC-75 | Ayuda raíz con `mcp`; `E_USAGE` de `mcp` y `mcp serve extra`; ayudas con el registro; ayuda raíz con los dos logs; README y skill; log del servidor `start`/`call`/`end` sin valores | M04 (línea de logs de la ayuda), M05 | UT-LOG-06.03, UT-CLI-14, DOC-17, UT-MCP-11 | — | — | ⚪ |
-| AC-76 | Dependencias sin cambios; `mcp_server.py` solo importa biblioteca estándar y `mailquery`; servidor responde con un plugin que no carga | M02, M05 | UT-MCP-08, UT-MCP-10 | — | — | ⚪ |
-| AC-77 | Log JSON: archivo, campos, tipos, `message`, `traceback`, `hint` con `mailquery.jsonl`, nivel, permisos, rotación, `json = "yes"` y config inválida registrados en texto | M04 | UT-LOG-05, UT-LOG-06.01–.02, UT-CFG-05, DOC-18 | — | — | ⚪ |
-| AC-78 | Rotación con el servidor en marcha, en macOS y Windows, en los dos formatos; `event=call` en el archivo activo nuevo | M05 | UT-MCP-12 (matriz de CI en macOS y Windows) | — | — | ⚪ |
+| AC-71 | `initialize`, versiones, `ping`, `tools/list` con esquemas de RF-85, solo JSON-RPC en stdout, errores `-32601`/`-32700`/`-32600`, lotes, `\r\n` y `\n` en Windows | M02 (en proceso), M05 (`\n` del proceso real en Windows) | UT-MCP-01, UT-MCP-02, UT-MCP-03, UT-MCP-09.05 | 🟢 | — | 🟢 |
+| AC-72 | argv equivalente con ejecutor sustituido; texto e `isError`; ejecutor real con `search --since bogus` igual que la CLI, también con `json.py` en el cwd | M02 (sustituido), M05 (real), M07 (cliente real) | UT-MCP-04, UT-MCP-05.01–.02, UT-MCP-05.07, UT-MCP-09.03, SMOKE-MCP | 🟢 | — | 🟢 |
+| AC-73 | `E_USAGE` sin proceso hijo (parámetro desconocido, tipo, `uid`, `show_native_id`, NUL), formato de la CLI, `--subject=-…`, `-32602` | M02 | UT-MCP-06, UT-MCP-04.07 | 🟢 | — | 🟢 |
+| AC-74 | Arranque sin config o con config inválida; `E_INTERNAL` y servidor vivo; `E_CONFIG_INVALID` que se corrige sin reiniciar; serie; cierre de stdin con llamada en curso; stderr vacío | M02 (en proceso), M05 (proceso real), M07 (cliente real) | UT-MCP-05.03–.05, UT-MCP-07, UT-MCP-09.01, .02, .04, SMOKE-MCP | 🟢 | — | 🟢 |
+| AC-75 | Ayuda raíz con `mcp`; `E_USAGE` de `mcp` y `mcp serve extra`; ayudas con el registro; ayuda raíz con los dos logs; README y skill; log del servidor `start`/`call`/`end` sin valores | M04 (línea de logs de la ayuda), M05 | UT-LOG-06.03, UT-CLI-14, DOC-17, UT-MCP-11 | 🟢 | — | 🟢 |
+| AC-76 | Dependencias sin cambios; `mcp_server.py` solo importa biblioteca estándar y `mailquery`; servidor responde con un plugin que no carga | M02, M05 | UT-MCP-08, UT-MCP-10 | 🟢 | — | 🟢 |
+| AC-77 | Log JSON: archivo, campos, tipos, `message`, `traceback`, `hint` con `mailquery.jsonl`, nivel, permisos, rotación, `json = "yes"` y config inválida registrados en texto | M04 | UT-LOG-05, UT-LOG-06.01–.02, UT-CFG-05, DOC-18 | 🟢 | — | 🟢 |
+| AC-78 | Rotación con el servidor en marcha, en macOS y Windows, en los dos formatos; `event=call` en el archivo activo nuevo | M05 | UT-MCP-12 (matriz de CI en macOS y Windows) | 🟢 | — | 🟢 |
 
 ## 2. Requisitos
 

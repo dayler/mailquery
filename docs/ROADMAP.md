@@ -80,16 +80,22 @@ soportan Outlook nuevo (`olk.exe`).
   `new` con cursor idempotente.
 - Protección contra escaneos ilimitados (`E_UNBOUNDED_SCAN`, `max_scan`) y
   diagnóstico con `doctor`.
+- Servidor MCP por stdio incluido (`mailquery mcp serve`): una herramienta por
+  comando de datos sobre el mismo contrato JSON, para harnesses que registran
+  servidores MCP; la CLI sigue siendo la otra vía y el servidor no añade
+  herramientas de escritura.
 - Dependencias: `css-inline` en macOS y Windows y `pywin32` en Windows; tests
   con `unittest`.
-- Privacidad: logs sin asuntos ni direcciones; cero telemetría.
-- **Cero tokens de sobrecarga por turno: el agente solo paga lo que consulta.**
-  Un MCP server inyecta la definición de todas sus herramientas en cada turno
-  (con 29 herramientas, entre 4.000 y 12.000 tokens fijos por conversación).
-  Con mailquery el coste es el skill, que se carga una vez y solo si se usa, el
-  comando y el JSON devuelto, acotado por `--limit` y el truncado de cuerpos.
-  Claude Code mitiga el problema con carga diferida de herramientas MCP; la
-  mayoría de hosts (Claude Desktop, Cursor) no.
+- Privacidad: logs sin asuntos ni direcciones, en texto (`mailquery.log`) o en
+  JSON Lines (`mailquery.jsonl` con `[logging].json = true`); cero telemetría.
+- **Cero tokens de sobrecarga por turno con la CLI: el agente solo paga lo que
+  consulta.** Un MCP server inyecta la definición de todas sus herramientas en
+  cada turno (con 29 herramientas, entre 4.000 y 12.000 tokens fijos por
+  conversación); el servidor MCP de mailquery declara seis herramientas, así
+  que su coste fijo es pequeño, y con la CLI el coste es el skill, que se carga
+  una vez y solo si se usa, el comando y el JSON devuelto, acotado por `--limit`
+  y el truncado de cuerpos. Claude Code mitiga el problema con carga diferida
+  de herramientas MCP; la mayoría de hosts (Claude Desktop, Cursor) no.
 
 ### Desventajas
 
@@ -99,7 +105,6 @@ soportan Outlook nuevo (`olk.exe`).
 - En Windows exige Outlook clásico abierto en la misma sesión.
 - Sin cuerpos no descargados (`W_BODY_NOT_LOCAL`); las herramientas IMAP los
   traen del servidor.
-- Es CLI, no MCP: para hosts que solo hablan MCP requiere un envoltorio.
 - Depende de internos no documentados (esquema del Envelope Index, Object
   Model Guard de Outlook).
 - ~~No descarga adjuntos, solo lista nombres.~~
@@ -107,8 +112,8 @@ soportan Outlook nuevo (`olk.exe`).
 
 ## 4. Diseño objetivo
 
-Tres capas. El núcleo ya existe; lo que cambia es que queda expuesto por más de
-un adaptador y por backends instalables.
+Tres capas, ya implementadas en 3.0.0: el núcleo queda expuesto por la CLI y
+por un adaptador MCP por stdio, y por backends instalables.
 
 ```
   ┌──────────────┐   ┌──────────────┐
@@ -126,10 +131,12 @@ un adaptador y por backends instalables.
 └──────────┘ └──────────┘ └─────────────┘
 ```
 
+**Tabla: Acciones del diseño objetivo**
+
 | Acción | Qué | Por qué |
 |--------|-----|---------|
 | Mantener | Solo lectura estructural, un JSON por ejecución, códigos de salida, `doctor`, cursor de `new`, sin red ni daemon | Es lo que diferencia el producto |
-| Agregar | Adaptador MCP por stdio sobre el mismo núcleo, ~5 herramientas | Entrar en Claude Desktop y Cursor sin perder la CLI |
+| ~~Agregar~~ | ~~Adaptador MCP por stdio sobre el mismo núcleo, ~5 herramientas~~: hecho en 3.0.0 como `mailquery mcp serve`, con seis herramientas | Entrar en Claude Desktop y Cursor sin perder la CLI |
 | Agregar | Backend Thunderbird (mbox/maildir) | Linux pasa de "solo CI" a soportado sin tocar la invariante |
 | ~~Agregar~~ | ~~`--fields` para elegir campos del JSON~~ | ~~Reduce tokens de salida, que es donde realmente se gasta~~ |
 | ~~Agregar~~ | ~~Descarga de adjuntos (ver §6)~~ | ~~Carencia más citada frente a los MCP servers~~ |
@@ -137,6 +144,12 @@ un adaptador y por backends instalables.
 | ~~Cambiar~~ | ~~`search --text` sobre un índice local opcional (SQLite FTS)~~ | ~~Evita `E_UNBOUNDED_SCAN` en la mayoría de casos~~ |
 | Quitar | `scripts/install.sh` e `install.ps1` | Con PyPI sobran; la siembra del config pasa a `doctor --init` |
 | ~~Quitar~~ | ~~`README.es.md` como copia paralela~~ | ~~Dos READMEs se desincronizan; inglés canónico y enlace a docs en español~~ |
+
+Ya en 3.0.0, además del adaptador MCP: el log del núcleo puede ser JSON Lines
+(`[logging].json = true`), un objeto por línea en
+`~/.mailquery/logs/mailquery.jsonl`, con la misma rotación, los mismos permisos
+y los mismos datos que el formato de texto; una ejecución escribe solo en el
+archivo de su formato.
 
 ## 5. Plugins de backend
 
@@ -276,17 +289,17 @@ requiere la app en Entra ID.
    (§5, puntos 1 a 3).~~
 2. Publicar en PyPI; retirar los instaladores.
 3. ~~`--fields`~~ y ~~descarga de adjuntos~~.
-4. Adaptador MCP por stdio.
+4. ~~Adaptador MCP por stdio.~~
 5. Backend Thunderbird.
 6. `mailquery-graph` con cuenta personal; solicitud de consentimiento a IT
    cuando esté terminado.
 
 ## 10. Para publicar 3.0.0
 
-Las features de `3.0.0` están en `develop` con la versión `3.0.0a2`, sin tag ni
-merge a `main`. Falta:
+Las features de `3.0.0` —incluidos el servidor MCP por stdio y el log JSON—
+están en `develop` con la versión `3.0.0a3`, sin tag ni merge a `main`. Falta:
 
-1. Subir la versión de `3.0.0a2` a `3.0.0` en `pyproject.toml`,
+1. Subir la versión de `3.0.0a3` a `3.0.0` en `pyproject.toml`,
    `mailquery.__version__`, los goldens `doctor` y la documentación; reinstalar el
    paquete y comprobar TC-06, PKG-01, PKG-02 y DOC-03
    ([`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md)).

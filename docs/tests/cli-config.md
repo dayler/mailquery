@@ -37,6 +37,29 @@ Requisitos: AC-43 · Archivo: `tests/test_config.py`
 | .02 | N | 9, 601, `"60"`, `60.0` y `true` ⇒ `E_CONFIG_INVALID`, exit 2, también en `search` y `show`, antes del store. |
 | .03 | B | Con un valor válido, `show` y `search` dan la misma salida que sin la clave. |
 
+#### UT-CFG-05 — `[logging].json`
+
+Requisitos: RF-88, AC-77 · Archivo: `tests/test_config.py`, `tests/test_cli.py`
+
+**Tabla: Casos de UT-CFG-05**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin la clave ⇒ `json` es `false`; `true` y `false` se cargan como booleanos. |
+| .02 | N | `json = "yes"` ⇒ `E_CONFIG_INVALID` (exit 2), y la ejecución lo registra en `mailquery.log` en texto. |
+| .03 | N | `json = true` con otra clave inválida ⇒ `E_CONFIG_INVALID`, registrado en `mailquery.log` en texto, sin crear `mailquery.jsonl`. |
+
+#### UT-CFG-06 — Configuración del log del servidor
+
+Requisitos: RF-84 · Archivo: `tests/test_config.py`
+
+**Tabla: Casos de UT-CFG-06**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `load_logging_config` toma `level`, `max_size_mb` y `json` de `[logging]` aunque el resto del archivo no sea válido. |
+| .02 | B | Archivo ausente, TOML inválido o `[logging]` inválida ⇒ texto, `info` y 10 MB, sin lanzar. |
+
 #### UT-CLI-04 — Opciones que no existen
 
 Requisitos: RF-16, RF-19, RF-24 · Archivo: `tests/test_cli.py`
@@ -113,6 +136,21 @@ Requisitos: RNF-05 · Archivo: `tests/test_cli.py`
 | .01 | N | POSIX: home 0755 ⇒ `home` `ok=false`. |
 | .02 | N | `win32` parcheado: crear el archivo de prueba lanza `PermissionError` ⇒ `ok=false`. |
 
+#### UT-CLI-14 — Comando `mcp`
+
+Requisitos: RF-84, RF-87, AC-75 · Archivo: `tests/test_cli.py`
+
+**Tabla: Casos de UT-CLI-14**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `mailquery --help` lista `mcp` con el texto `serve the read commands as MCP tools over stdio`, y su línea `Output:` dice que `mcp serve` habla el protocolo MCP por stdout. |
+| .02 | N | `mailquery mcp` ⇒ `E_USAGE`, exit 2, JSON de error con `"command": "mcp"`. |
+| .03 | N | `mailquery mcp serve extra` ⇒ lo mismo. |
+| .04 | P | `mailquery mcp --help` y `mailquery mcp serve --help` muestran `claude mcp add --scope user mailquery -- mailquery mcp serve` y la entrada genérica `mcpServers`. |
+| .05 | P | `mailquery --log-level debug mcp serve` se acepta. |
+| .06 | P | `cli.main` con `mcp serve` en el mismo proceso, con stdin y stdout sustituidos, responde a `initialize` y devuelve 0 al terminar stdin. |
+
 #### UT-INS-01 — Comprobación final de `install.ps1`
 
 Requisitos: RNF-05 · Archivo: `tests/test_install_scripts.py`
@@ -165,6 +203,39 @@ Requisitos: RF-18, RNF-05 · Archivo: `tests/test_logging.py`
 | .02 | N | Con `--log-level debug` y etiquetas no disponibles, un error cuyo mensaje contiene asunto, dirección, nombre de persona, carpeta, etiqueta de cuenta, ruta, término de búsqueda y uid, tras un `search --text` ⇒ ninguno de esos datos, ni uuids de cuenta, cuerpo ni `snippet`, aparece en el log. |
 | .03 | P | Warnings ⇒ número y códigos `W_*`, sin el detalle. |
 | .04 | N | Error que no es `E_INTERNAL` ⇒ sin traceback. |
+
+#### UT-LOG-05 — Log en JSON
+
+Requisitos: RF-88, RNF-05, AC-77 · Archivo: `tests/test_logging.py`, `tests/test_cli.py`
+
+**Tabla: Casos de UT-LOG-05**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Sin la clave o con `false`, `search` escribe en `mailquery.log` con el formato de texto y no crea `mailquery.jsonl`; un `mailquery.jsonl` existente y sus rotados no cambian. |
+| .02 | P | Con `true`, escribe solo en `mailquery.jsonl`; un `mailquery.log` existente no cambia. |
+| .03 | P | Cada línea es un objeto con `ts` (ISO 8601 con milisegundos y desfase), `level`, `logger`, `run` y `fields`; `text` solo cuando el evento tiene texto sin forma `clave=valor`. |
+| .04 | P | En `fields`, `exit_code` y `duration_ms` son números, `truncated` es booleano (también un valor `TRUE` o `False` en cualquier combinación de mayúsculas), un valor `-` es `null` y `checks` de `doctor` es texto (`3/5`). |
+| .05 | P | `event=error` lleva su mensaje completo en `fields.message`, como texto también si es numérico, si parece un booleano (`true`) o si tiene espacios. |
+| .06 | N | Con el escenario de UT-LOG-04.02, ninguna línea contiene asuntos, direcciones, uids ni rutas. |
+| .07 | P | Un `E_INTERNAL` lleva su traceback en `traceback`. |
+| .08 | B | Con `level = "warning"`, o con `--log-level warning`, no hay líneas `INFO` en `mailquery.jsonl`. |
+| .09 | P | POSIX: `mailquery.jsonl` y sus rotados tienen permisos 0600. |
+| .10 | B | Con `max_size_mb = 1`, `mailquery.jsonl` rota a `mailquery.jsonl.1` y se conservan 5 rotados; `mailquery.log` y sus rotados no cambian. |
+| .11 | P | La misma ejecución en los dos formatos produce los mismos eventos, en el mismo orden y con los mismos campos. |
+| .12 | N | El formato JSON solo se aplica al logger `mailquery` y sus hijos: un logger de otro nombre, como el de un plugin, no recibe el formateador JSON ni escribe en `mailquery.jsonl`. |
+
+#### UT-LOG-06 — Ruta del log en los mensajes
+
+Requisitos: RF-88, AC-75, AC-77 · Archivo: `tests/test_cli.py`, `tests/test_outlook.py`
+
+**Tabla: Casos de UT-LOG-06**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | El `hint` de `E_INTERNAL` nombra `mailquery.jsonl` con `[logging].json = true` y `mailquery.log` sin ella. |
+| .02 | P | Los `hint` de Outlook de un error COM interno y de un miembro bloqueado por el proxy de solo lectura nombran el archivo del formato activo. |
+| .03 | P | La ayuda raíz nombra `mailquery.log` y `mailquery.jsonl`. |
 
 #### UT-OUT-01 — JSON formateado
 

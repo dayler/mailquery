@@ -8,7 +8,7 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | El golden `doctor` cambia a `pkg 3.0.0a2` (solo la versión). |
+| .01 | P | El golden `doctor` cambia a `pkg 3.0.0a3` (solo la versión). |
 | .02 | P | `mailboxes` con la forma agrupada por cuenta (cada cuenta con `uuid`, `label`, `email`, `declared` y `mailboxes[]`, cada carpeta solo con `path` e `included`) ⇒ golden `mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida nombre, URL y contadores de cada carpeta. |
 | .03 | P | `search` por defecto devuelve todos los mensajes distintos con la fila de seis campos ⇒ golden `search_default`; una segunda corrida con `--fields all` valida los campos fuera de la fila y los warnings de cuerpo. |
 | .04 | P | `search` con All Mail deduplica al canónico de INBOX con la fila de seis campos ⇒ golden `search_all_mail`; `duplicate_count`, `snippet` y `mailbox` se comprueban con `--fields all`. |
@@ -36,7 +36,7 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 | .04 | N | `show_header_only` |
 | .05 | N | `show_smime` |
 | .06 | P | `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
-| .07 | P | El golden `outlook/doctor` cambia a `pkg 3.0.0a2` (solo la versión). |
+| .07 | P | El golden `outlook/doctor` cambia a `pkg 3.0.0a3` (solo la versión). |
 
 #### TC-03 — Gate de solo lectura de Apple Mail
 
@@ -81,9 +81,11 @@ Requisitos: AC-01, AC-18 · Archivo: `tests/test_packaging.py`
 
 Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 
+**Tabla: Casos de TC-07**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | Recorre la ayuda raíz + 6 subcomandos (7 invocaciones) y todas parsean. |
+| .01 | P | Recorre la ayuda raíz + 7 subcomandos y `mcp serve --help` (9 invocaciones) y todas parsean. |
 | .02 | P | `attachment --help` coincide con §12.7. |
 | .03 | N | Ninguna ayuda o documento contiene las marcas retiradas de la guardia (cinco comandos, uid entero, `preflight`, `list accounts, folders, counters`, `standard library only`/`solo biblioteca estándar`, `--out`, entre otras) ni promete escritura fuera de `~/.mailquery`; las recetas cubren los exits 3, 5 y 6. |
 | .04 | N | Ninguna ayuda ni documento muestra un uid entero ni promete escrituras fuera de `~/.mailquery`. |

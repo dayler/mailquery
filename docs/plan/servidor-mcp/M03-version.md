@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/servidor-mcp.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 1 / 1. **Rama del lote:** `feature/servidor-mcp-lote-1`. **Rama del milestone:** `feature/servidor-mcp-m03`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `f866be8` (tip de `feature/servidor-mcp-lote-1`). **Línea base de la suite:** medida en `f866be8` con el `.venv` del worktree: `Ran 1562 tests` en 131.6 s, `FAILED (failures=1, skipped=7)`. Fallo de entorno conocido: `tests.test_smoke.SmokeTest.test_smoke_new_10_doctor_failures` (la instantánea de `~/.mailquery` real cambia por actividad concurrente del entorno); los 7 saltos son los de CI sin el paquete instalado. Una medición anterior dio 8 fallos porque el entorno virtual compartido se estaba reconstruyendo a la vez; no se toma como línea base.
 - **Depende de:** nada. **Lo usan:** M05 (`serverInfo.version` y README con la versión ya al día).
 - **ACs:** ninguno; cubre la sección "Versión" de la unidad y prepara CL-11.
 
@@ -64,9 +64,9 @@ Margen tuyo: una mención de `3.0.0a2` que sea un registro histórico (por ejemp
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | `pyproject.toml`, `__version__`, goldens `doctor` y `outlook/doctor`, DOC-16.03 (texto y nombre del método); comentarios de los tests de DP-22 | ⚪ |
-| 2 | Menciones de la versión en los dos README, `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; búsqueda `grep -rn "3\.0\.0a2\|3\.0\.0-alpha\.2" README.md README.es.md skills docs/INTERFACES.md docs/ROADMAP.md docs/recipes docs/security docs/config.example.toml tests` sin resultados salvo registros históricos | ⚪ |
-| 3 | Suite completa, evidencia cruda y propuestas | ⚪ |
+| 1 | `pyproject.toml`, `__version__`, goldens `doctor` y `outlook/doctor`, DOC-16.03 (texto y nombre del método); comentarios de los tests de DP-22 | 🟢 |
+| 2 | Menciones de la versión en los dos README, `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; búsqueda `grep -rn "3\.0\.0a2\|3\.0\.0-alpha\.2" README.md README.es.md skills docs/INTERFACES.md docs/ROADMAP.md docs/recipes docs/security docs/config.example.toml tests` sin resultados salvo registros históricos | 🟢 |
+| 3 | Suite completa, evidencia cruda y propuestas | 🟢 |
 
 ## Tests
 
@@ -109,3 +109,9 @@ Los de la sección "Evidencia cruda" de [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md), 
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-23 | 1 | `pyproject.toml`, `__version__`, goldens `doctor` y `outlook/doctor`, DOC-16.03 y comentarios de DP-22. |
+| 2026-11-23 | 2 | Menciones en los dos README, `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; búsqueda de la fase 2 revisada (solo quedan las aserciones de ausencia del test DOC-16.03 y registros históricos). |
+| 2026-11-23 | 3 | Grupos verdes y evidencia. |
+| 2026-11-23 | 1 | `pyproject.toml` y `__version__` a `3.0.0a3`; goldens `doctor` y `outlook/doctor` y DOC-16.03 (nombre y texto) actualizados; comentarios DP-22 de `test_packaging.py`, `test_integration.py` y `test_install_scripts.py` al día. |
+| 2026-11-23 | 2 | Versión vigente a `3.0.0a3` en los dos README (mismo commit), `docs/INTERFACES.md`, `docs/ROADMAP.md` y `docs/security/threat-model.md`; la búsqueda de la fase solo conserva la aserción negativa de DOC-16.03 (`self.assertNotIn("3.0.0a2", …)`), que es su oráculo y no una mención vigente. |
+| 2026-11-23 | 3 | Suite completa `Ran 1562 tests`, `OK (skipped=7)`, sin fallos nuevos frente a la línea base; `git diff --check` limpio y diff solo del alcance. Evidencia cruda y propuestas entregadas. |
