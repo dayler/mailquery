@@ -23,6 +23,7 @@ La herramienta no programa nada: no hay frecuencias ni cron internos; el harness
 | CU-07 | Verificar la instalación o diagnosticar un fallo | `mailquery doctor` | Al instalar o actualizar, o tras un fallo |
 | CU-08 | Recuperar adjuntos locales de un correo a disco | `mailquery attachment <uid> --index 2` o `--all` | Bajo demanda, tras inspeccionar el correo con `show <uid>`. |
 | CU-09 | Consultar una cuenta servida por un plugin instalado | `mailquery search --since 7d` con `[scope."graph:..."]` | Bajo demanda; el plugin debe estar instalado y declarado. |
+| CU-10 | Usar `mailquery` como herramientas MCP | `mailquery mcp serve`, lanzado por el harness | El inicio de una sesión del harness con el servidor registrado (§21.4). |
 
 ---
 

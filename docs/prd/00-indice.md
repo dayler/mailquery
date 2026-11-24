@@ -6,9 +6,9 @@ tags: [prd]
 # PRD — mailquery
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes (DeepSeek u otro similar): **Apple Mail en macOS** y **Outlook clásico en Windows**, ampliable con plugins de backend.
-**Versión del documento:** 2.5 (un solo PRD para todas las plataformas, en un archivo por sección; incorpora plugins de backend, la recuperación local de adjuntos, el endurecimiento del contenido no confiable, la corrección de defectos de adjuntos, la salida a medida y el id corto de mensaje en Outlook).
-**Versión del paquete:** `3.0.0` (en `develop` se anuncia la pre-release `3.0.0a2`; sin publicar, §22.3).
-**Fecha:** 2026-11-23.
+**Versión del documento:** 2.6 (un solo PRD para todas las plataformas, en un archivo por sección; incorpora plugins de backend, la recuperación local de adjuntos, el endurecimiento del contenido no confiable, la corrección de defectos de adjuntos, la salida a medida, el id corto de mensaje en Outlook, el servidor MCP por stdio y el log en JSON).
+**Versión del paquete:** `3.0.0` (en `develop` se anuncia la pre-release `3.0.0a3`; sin publicar, §22.3).
+**Fecha:** 2026-11-24.
 **Repositorio:** <https://github.com/dayler/mailquery>.
 **Estado:** describe el producto implementado en `develop`; el paquete sigue sin publicar (§22.3). Las aprobaciones y las conciliaciones de cada versión están en [HISTORIAL.md](HISTORIAL.md).
 
@@ -33,10 +33,10 @@ tags: [prd]
 | 2 Problema y contexto | [02-problema.md](02-problema.md) | — |
 | 3 Objetivos | [03-objetivos.md](03-objetivos.md) | O1…O28 |
 | 4 Garantía de solo lectura | [04-solo-lectura.md](04-solo-lectura.md) | — |
-| 5 Usuarios y casos de uso | [05-usuarios.md](05-usuarios.md) | CU-01…CU-09 |
-| 6 Requisitos funcionales | [06-requisitos-funcionales.md](06-requisitos-funcionales.md) | RF-01…RF-83 |
+| 5 Usuarios y casos de uso | [05-usuarios.md](05-usuarios.md) | CU-01…CU-10 |
+| 6 Requisitos funcionales | [06-requisitos-funcionales.md](06-requisitos-funcionales.md) | RF-01…RF-88 |
 | 7 Requisitos no funcionales | [07-requisitos-no-funcionales.md](07-requisitos-no-funcionales.md) | RNF-01…RNF-22 |
-| 8 Decisiones de arquitectura | [08-adr.md](08-adr.md) | ADR-01…ADR-50 |
+| 8 Decisiones de arquitectura | [08-adr.md](08-adr.md) | ADR-01…ADR-51 |
 | 9 Arquitectura | [09-arquitectura.md](09-arquitectura.md) | — |
 | 10 Estructura de carpetas | [10-carpetas-y-cache.md](10-carpetas-y-cache.md) | — |
 | 11 Modelo de datos | [11-modelo-de-datos.md](11-modelo-de-datos.md) | — |
@@ -60,7 +60,7 @@ tags: [prd]
 | 17 Comportamiento ante errores | [17-comportamiento-errores.md](17-comportamiento-errores.md) | — |
 | 18 Procesamiento único e idempotencia | [18-procesamiento-unico.md](18-procesamiento-unico.md) | — |
 | 19 Rendimiento | [19-rendimiento.md](19-rendimiento.md) | — |
-| 20 Criterios de aceptación | [20-criterios-aceptacion.md](20-criterios-aceptacion.md) | AC-01…AC-70 |
+| 20 Criterios de aceptación | [20-criterios-aceptacion.md](20-criterios-aceptacion.md) | AC-01…AC-78 |
 | 21 Operación con el harness | [21-harness.md](21-harness.md) | — |
 | 22 Versiones | [22-versiones.md](22-versiones.md) | — |
 | 23 Riesgos y mitigaciones | [23-riesgos.md](23-riesgos.md) | — |
@@ -83,6 +83,6 @@ El PRD solo cambia al conciliar una unidad de cambio de `docs/changes/`. Cuándo
 
 | O | CU | RF | RNF | ADR | AC |
 |---|---|---|---|---|---|
-| O29 | CU-10 | RF-84 | RNF-23 | ADR-51 | AC-71 |
+| O29 | CU-11 | RF-89 | RNF-23 | ADR-52 | AC-79 |
 
 Esta tabla se actualiza al conciliar una unidad de cambio.

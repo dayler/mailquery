@@ -18,7 +18,7 @@ Entregar una herramienta local, simple y auditable, que permita a un harness de 
 | O1 | Leer correos nuevos de forma incremental | `mailquery new` devuelve cada mensaje una sola vez, sin duplicados ni omisiones dentro del alcance configurado |
 | O2 | Buscar por asunto, contenido, remitente, destinatarios, fechas, carpeta y estado | `mailquery search` con filtros combinables y JSON estable |
 | O3 | Garantizar solo lectura | Invariante I-1 (§4) cumplido según los criterios de aceptación de §20 |
-| O4 | Integrarse con el harness | JSON en `stdout`, logs aparte, códigos de salida estables, ejecución no interactiva, `-h/--help` |
+| O4 | Integrarse con el harness | Por la CLI o por el servidor MCP por stdio (RF-84): JSON en `stdout`, logs aparte, códigos de salida estables, ejecución no interactiva, `-h/--help` |
 | O5 | Mantener simplicidad | Sin demonio, sin scheduler, sin base de datos de mensajes; biblioteca estándar más `css-inline` (ADR-33) en ambas plataformas y, en Windows, `pywin32` (ADR-14) |
 | O6 | Ser predecible y observable | `doctor` diagnostica el entorno; cada ejecución deja un log con duración, conteos y errores |
 | O7 | Paridad entre plataformas | Todo lo que `mailquery` hace con macOS + Apple Mail funciona de forma equivalente con Windows + Outlook clásico: mismos comandos, flags, configuración, catálogo de warnings (§12.10), códigos de error y forma del JSON; las únicas diferencias son las declaradas en §11.3 y §12.5; cambios en macOS: RNF-11 |
@@ -54,7 +54,8 @@ Entregar una herramienta local, simple y auditable, que permita a un harness de 
 - No construir una copia local de los correos (sin índice FTS, §22.1).
 - No programar tareas: el harness decide cuándo invocar la herramienta (operación bajo demanda).
 - En el núcleo, no soportar otros clientes: ni el **nuevo Outlook** (`olk`, que no expone COM ni un store local y solo sería alcanzable por Microsoft Graph, con red y OAuth, contra I-1), ni Outlook en la web, ni Outlook para Mac, ni Thunderbird u otros. Linux no tiene backend de datos (solo desarrollo/CI). Se admite leer cuentas servidas por plugins externos instalados por el usuario (§6.5); la implementación de plugins concretos queda fuera de esta versión.
-- No incluir interfaz gráfica, servidor HTTP ni demonio.
+- No incluir interfaz gráfica, servidor HTTP ni demonio. `mcp serve` no es ninguno de ellos: habla MCP por stdin y stdout, lo lanza el harness como proceso hijo de su sesión y termina con ella (ADR-51).
+- No ofrecer transportes MCP distintos de stdio (HTTP, SSE) ni recursos, *prompts* o notificaciones de cambio de MCP: el servidor MCP solo expone herramientas.
 
 - **No implementar** plugins externos concretos en esta versión: `mailquery-graph`, `mailquery-thunderbird`, `bird` u otros. El contrato queda listo para ellos (§4, §6.5).
 - No escribir adjuntos fuera de `~/.mailquery/attachments/` (ni siquiera temporales: el staging vive bajo `~/.mailquery/tmp/` y se limpia).

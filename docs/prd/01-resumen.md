@@ -80,5 +80,13 @@ F3 hace que lo barato sea lo que sale por defecto y añade formas de pedir solo 
 2. **Caché de ids nativos:** `~/.mailquery/db/cache.db` relaciona cada id corto impreso con su id nativo. El núcleo ofrece la librería y cada driver decide si la usa (RF-80, RF-82).
 3. **`--show-native-id`:** opción de depuración de `show`, que muestra el id nativo en lugar del id corto (RF-83).
 
+**Servidor MCP por stdio.**
+
+1. **`mailquery mcp serve`:** el mismo ejecutable arranca un servidor MCP que habla JSON-RPC por stdin y stdout. El harness lo registra una vez y lo lanza como proceso hijo de su sesión, como a cualquier servidor MCP por stdio (RF-84, RF-87).
+2. **Una herramienta por comando:** `search`, `new`, `show`, `attachment`, `mailboxes` y `doctor`, con un parámetro por opción, generados desde el parser de la CLI (RF-85).
+3. **Cada llamada es una ejecución de la CLI:** el servidor la ejecuta como proceso hijo `mailquery <comando>` y devuelve su JSON tal cual, con cualquier driver declarado, nativo o plugin. El servidor no lee correo ni carga drivers y no añade dependencias (RF-86, ADR-51).
+4. **La skill sigue siendo la puerta de entrada:** usa las herramientas MCP si el servidor está registrado y la CLI si no, con las mismas recetas y reglas (RF-87).
+5. **Log en JSON:** la clave `[logging].json` escribe el log en `mailquery.jsonl`, un objeto JSON por línea; apagada por defecto (RF-88).
+
 ---
 

@@ -17,4 +17,5 @@ Invocación: `mailquery <comando> [opciones]`. Comandos, opciones y semántica s
 | `new` | Mensajes recibidos desde la última ejecución (cursor). | JSON con `messages[]`, `cursor` |
 | `show <uid>` | Detalle de un mensaje. | JSON con `message` |
 | `attachment <uid>` | Recupera adjuntos locales del mensaje (§12.11). | JSON con `uid`, `output_dir`, `count`, `attachments[]`, `warnings[]` |
+| `mcp serve` | Servidor MCP por stdio que expone los comandos de lectura como herramientas (RF-84, §21.4). | El protocolo MCP (JSON-RPC por stdout), no un único objeto JSON |
 

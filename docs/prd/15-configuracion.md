@@ -27,6 +27,7 @@ tags: [prd]
 | `[logging]` | tabla TOML | No | — | — | `[logging]` | Sección de logging. |
 | `logging.level` | string | No | `"info"` | `error`, `warning`, `info`, `debug` | `"debug"` | Nivel mínimo del log; `--log-level` lo sobrescribe. |
 | `logging.max_size_mb` | entero | No | `10` | 1–1024 | `50` | Tamaño en MB a partir del cual se rota el log; se conservan 5 archivos rotados (§14). |
+| `logging.json` | booleano | No | `false` | `true`, `false` | `true` | `true` escribe el log en JSON Lines en `mailquery.jsonl` en lugar de `mailquery.log` (§14, RF-88). |
 | `[search]` | tabla TOML | No | — | — | `[search]` | Defaults de búsqueda. |
 | `search.default_limit` | entero | No | `20` | 1–200 | `50` | Límite por defecto de `search`; `--limit` lo sobrescribe; no aplica con `--group-by` (RF-70). |
 | `search.max_scan` | entero | No | `5000` | 100–50000 | `10000` | Candidatos máximos al leer contenido: `--text` y, en Windows, `--to`/`--cc` (RF-15). |
@@ -142,6 +143,7 @@ El ejemplo de macOS muestra **todo** lo que se puede configurar hoy, con las tre
 [logging]
 level = "info"                 # error | warning | info | debug
 max_size_mb = 10               # 1..1024; rota al superar este tamaño (5 rotados)
+json = false                   # true: JSON Lines en mailquery.jsonl
 
 [search]
 default_limit = 20             # 1..200
@@ -248,7 +250,7 @@ Los valores configurables están en §15.1. Estos son los que se mantienen fijos
 | Snippet | 200 caracteres | Solo con `--fields snippet` (o `all`) en `search`/`new` (RF-67, RF-68). |
 | Cuerpo en `show` | 20.000 caracteres | Truncado con aviso en el JSON. |
 | HTML → texto | Activado | Según RF-53; para el cuerpo, la búsqueda por contenido y los snippets. |
-| Logs | Ruta, formato y 5 archivos rotados (§14) | Nivel y tamaño de rotación se configuran en `[logging]`. |
+| Logs | Rutas (`mailquery.log`, `mailquery.jsonl`) y 5 archivos rotados por formato (§14) | Nivel, tamaño de rotación y formato se configuran en `[logging]`. |
 | Lock | `~/.mailquery/locks/mailquery.lock` | Automático; evita corridas solapadas. |
 | Directorio de adjuntos | `~/.mailquery/attachments/<driver>/<native_id>/` | `native_id` se sustituye por un identificador estable de 32 hex derivado de `uid` solo si `<native_id>` o la ruta exceden los límites de la plataforma (límites y fórmula en §10.3.3). |
 | Staging | subdirectorio transitorio bajo `~/.mailquery/tmp/` | Se limpia al terminar, con éxito o no; el núcleo no toca archivos de plugins ni cachés del backend. |

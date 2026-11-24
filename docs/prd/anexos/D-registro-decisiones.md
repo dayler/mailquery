@@ -68,4 +68,13 @@ tags: [prd]
 | **¿`new --peek` registra los mensajes que imprime?** (2026-11-22) | Sí: escribe en la caché de ids nativos y no en el estado; sin registro, sus uids no se podrían abrir (RF-82). |
 | **¿Cambian `doctor` o los presupuestos de rendimiento?** (2026-11-22) | No: `doctor` no tiene chequeo nuevo y los presupuestos no cambian. |
 | **¿Se puede ver el id nativo en la salida?** (2026-11-22) | Sí, solo para depurar: con `--show-native-id` en `show` y en ningún otro comando; es solo de presentación y el id nativo no se acepta como entrada (RF-83). |
+| **¿Se expone `doctor` como herramienta MCP?** (2026-11-23) | Sí, siempre con `--json`; `failures` y `log_level` son sus parámetros (RF-85). |
+| **¿Qué opciones de los comandos son parámetros de las herramientas MCP?** (2026-11-23) | Todas salvo `--help` y `--show-native-id`; `--log-level` sí se expone. `--show-native-id` no se expone porque es una opción de depuración sin utilidad para el harness (RF-85). |
+| **¿Las herramientas MCP llevan prefijo en su nombre?** (2026-11-23) | No: se llaman como el comando (`search`); el harness ya las agrupa por servidor (RF-85). |
+| **¿El servidor MCP atiende las llamadas en serie o en paralelo?** (2026-11-23) | En serie, en orden de llegada (RF-86). |
+| **¿Se expone `--version` como herramienta MCP?** (2026-11-23) | No: su salida es texto y no JSON; la versión de la app llega en `serverInfo.version` y la de los drivers, en `doctor` (RF-85). |
+| **¿Qué versión anuncia `develop`?** (2026-11-23) | La pre-release `3.0.0a3`, en lugar de `3.0.0a2` (§22.3). Sustituye a la decisión del 2026-11-22 que fijaba `3.0.0a2`. |
+| **¿El log puede escribirse en JSON?** (2026-11-23) | Sí, con una clave de `[logging]` en `config.toml`, apagada por defecto; apagada, el log es el de texto de siempre (RF-88). |
+| **¿El formato del log se puede elegir en la línea de comandos?** (2026-11-23) | No: solo en `config.toml`. |
+| **¿El log JSON va al mismo archivo que el de texto?** (2026-11-23) | No: va a `mailquery.jsonl`, con su propia rotación; cada ejecución escribe solo en el archivo del formato activo (RF-88). |
 
