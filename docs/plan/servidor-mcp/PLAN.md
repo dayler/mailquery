@@ -33,12 +33,12 @@ Esta leyenda vale para todos los archivos del plan.
 
 | Fase | Contenido | Milestones | Estado |
 |---|---|---|---|
-| F0 Preparación | Unidad aprobada y con IDs reales, y plan con esos IDs (hecho el 2026-11-23); commit de la unidad aprobada en `develop`; rama de la unidad; definiciones `[pendiente]` y marcas `[por actualizar]` en `docs/tests/` (de [DEFINICIONES-TESTS.md](DEFINICIONES-TESTS.md)); consumidores `docs/tests/attachments-command.md` y `docs/tests/infrastructure.md` añadidos a la unidad (DP-14); worktrees `servidor-mcp-a` y `servidor-mcp-b`, cada uno con su `.venv` (PROTOCOLO-PLAN.md, sección 1); línea base de la suite, medida con ese `.venv`, en el commit de partida | — (orquestador) | ⚪ |
-| F1 Refactor | Eventos de log estructurados sin cambiar el log de texto | M01 | ⚪ |
-| F2 Implementación | Núcleo del servidor, pre-release `3.0.0a3`, log JSON y comando `mcp serve` | M02, M03, M04, M05 | ⚪ |
-| F3 Documentación | Documentos técnicos y barrido de textos obsoletos (CL-06, CL-11) | M06 | ⚪ |
-| F4 Integración y verificación real | Cierre del lote 1 y del lote 2 con la matriz de CI verde en el PR; ejecución de SMOKE-MCP por el dueño en macOS y Windows y verificación manual con Claude Code (CL-10, DA-03) | M07, lotes 1 y 2 | ⚪ |
-| F5 Cierre | Todos los AC con evidencia; documentos consumidores `actualizado` o `sin cambio`; filas de conciliación `implementado`; unidad `implementado`; PR listo para la conciliación que ordene el dueño (DA-02) | — (orquestador) | ⚪ |
+| F0 Preparación | Unidad aprobada y con IDs reales, y plan con esos IDs (hecho el 2026-11-23); commit de la unidad aprobada en `develop`; rama de la unidad; definiciones `[pendiente]` y marcas `[por actualizar]` en `docs/tests/` (de [DEFINICIONES-TESTS.md](DEFINICIONES-TESTS.md)); consumidores `docs/tests/attachments-command.md` y `docs/tests/infrastructure.md` añadidos a la unidad (DP-14); worktrees en `.worktrees/servidor-mcp-*`, cada uno con su `.venv` (PROTOCOLO-PLAN.md, sección 1); línea base de la suite, medida con ese `.venv`, en el commit de partida | — (orquestador) | 🟢 |
+| F1 Refactor | Eventos de log estructurados sin cambiar el log de texto | M01 | 🟢 |
+| F2 Implementación | Núcleo del servidor, pre-release `3.0.0a3`, log JSON y comando `mcp serve` | M02, M03, M04, M05 | 🟢 |
+| F3 Documentación | Documentos técnicos y barrido de textos obsoletos (CL-06, CL-11) | M06 | 🟢 |
+| F4 Integración y verificación real | Cierre del lote 1 y del lote 2 con la matriz de CI verde en el PR; ejecución de SMOKE-MCP por el dueño en macOS y Windows y verificación manual con Claude Code (CL-10, DA-03) | M07, lotes 1 y 2 | 🟡 (tests y lotes hechos; la ejecución del dueño queda pendiente) |
+| F5 Cierre | Todos los AC con evidencia; documentos consumidores `actualizado` o `sin cambio`; filas de conciliación `implementado`; unidad `implementado`; PR listo para la conciliación que ordene el dueño (DA-02). La conciliación con el PRD y la unidad se difiere por orden del dueño a una tarea posterior | — (orquestador) | 🟡 (verificación hecha; conciliación diferida) |
 
 ## 3. Milestones
 
@@ -46,13 +46,13 @@ Esta leyenda vale para todos los archivos del plan.
 
 | ID | Milestone | Oleada | Lote | Depende de | ACs | Archivo | Estado |
 |---|---|---|---|---|---|---|---|
-| M01 | Eventos de log estructurados (refactor) | 1 | 1 | — | — (prepara AC-77) | [M01-eventos-log.md](M01-eventos-log.md) | ⚪ |
-| M02 | Núcleo del servidor MCP | 2 | 1 | M01 | AC-71, AC-72 (ejecutor sustituido), AC-73, AC-74 (en proceso), AC-76 (imports y dependencias) | [M02-nucleo-mcp.md](M02-nucleo-mcp.md) | ⚪ |
-| M03 | Pre-release `3.0.0a3` | 1 | 1 | — | — (CL-11) | [M03-version.md](M03-version.md) | ⚪ |
-| M04 | Log en JSON | 2 | 1 | M01 | AC-77, AC-75 (línea de logs de la ayuda raíz) | [M04-log-json.md](M04-log-json.md) | ⚪ |
-| M05 | Comando `mcp serve`, ayuda, README y skill | 3 | 2 | M02, M03, M04 | AC-72 (ejecutor real), AC-74 (proceso real), AC-75, AC-76 (plugin), AC-78, AC-71 (fin de línea del proceso real en Windows) | [M05-mcp-serve.md](M05-mcp-serve.md) | ⚪ |
-| M06 | Documentos técnicos | 4 | 2 | M04, M05 | — (CL-05, CL-06) | [M06-documentos-tecnicos.md](M06-documentos-tecnicos.md) | ⚪ |
-| M07 | SMOKE del servidor MCP con el cliente real | 4 | 2 | M05 | — (CL-10) | [M07-smoke.md](M07-smoke.md) | ⚪ |
+| M01 | Eventos de log estructurados (refactor) | 1 | 1 | — | — (prepara AC-77) | [M01-eventos-log.md](M01-eventos-log.md) | 🟢 |
+| M02 | Núcleo del servidor MCP | 2 | 1 | M01 | AC-71, AC-72 (ejecutor sustituido), AC-73, AC-74 (en proceso), AC-76 (imports y dependencias) | [M02-nucleo-mcp.md](M02-nucleo-mcp.md) | 🟢 |
+| M03 | Pre-release `3.0.0a3` | 1 | 1 | — | — (CL-11) | [M03-version.md](M03-version.md) | 🟢 |
+| M04 | Log en JSON | 2 | 1 | M01 | AC-77, AC-75 (línea de logs de la ayuda raíz) | [M04-log-json.md](M04-log-json.md) | 🟢 |
+| M05 | Comando `mcp serve`, ayuda, README y skill | 3 | 2 | M02, M03, M04 | AC-72 (ejecutor real), AC-74 (proceso real), AC-75, AC-76 (plugin), AC-78, AC-71 (fin de línea del proceso real en Windows) | [M05-mcp-serve.md](M05-mcp-serve.md) | 🟢 |
+| M06 | Documentos técnicos | 4 | 2 | M04, M05 | — (CL-05, CL-06) | [M06-documentos-tecnicos.md](M06-documentos-tecnicos.md) | 🟢 |
+| M07 | SMOKE del servidor MCP con el cliente real | 4 | 2 | M05 | — (CL-10) | [M07-smoke.md](M07-smoke.md) | 🟢 |
 
 ## 4. Dependencias y oleadas
 
@@ -105,8 +105,8 @@ Las oleadas deciden el orden y el paralelismo de la ejecución; los lotes decide
 
 | Lote | Milestones | Rama de integración | Corridas de CI previstas |
 |---|---|---|---|
-| 1 | M01, M03, M02, M04 | `feature/servidor-mcp-lote-1` | 1 (al cerrar: se abre el PR) + 1 de reserva |
-| 2 | M05, M06, M07 | `feature/servidor-mcp-lote-2` | 1 (al cerrar: se actualiza el PR) + 1 de reserva |
+| 1 | M01, M03, M02, M04 (+ M05, integrado al adelantar la ola 3) | `feature/servidor-mcp-lote-1` | 1 (al cerrar: se abre el PR) + 1 de reserva |
+| 2 | M06, M07 | `feature/servidor-mcp-lote-2` | 1 (al cerrar: se actualiza el PR) + 1 de reserva |
 
 1. **Lotes.** `feature/servidor-mcp` se crea desde `develop` en F0. Cada lote tiene una rama de integración creada desde el tip de `feature/servidor-mcp` y se integra en ella con `git merge --no-ff` al cerrarse. El lote 2 no se abre hasta que el lote 1 está integrado.
 2. **Ramas y worktrees.** Cada milestone crea `feature/servidor-mcp-m<NN>` desde el tip de la rama de su lote, nunca desde `develop`. Hay dos worktrees reutilizables fuera del repositorio, `<padre del repositorio principal>/mailquery-wt/servidor-mcp-a` y `…/servidor-mcp-b`, uno por milestone activo, cada uno con su `.venv`; en el primer lanzamiento de un milestone, su worktree se resetea al tip del lote (comandos en [PROTOCOLO-PLAN.md](PROTOCOLO-PLAN.md)). No se crea un worktree por intento: un relanzamiento usa el mismo worktree y la misma rama, sin resetearlos. Los milestones de una misma oleada tienen alcances de escritura disjuntos (sección 5); si un solape aparece, se ejecutan en secuencia.
