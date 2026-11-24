@@ -42,5 +42,5 @@ Leyenda de estados: la de [PLAN.md](PLAN.md). La columna "Tests" lista los grupo
 | CL-10 SMOKE y verificación manual | M07 (tests y procedimiento) y el dueño (ejecución, DA-03) | F4 | 🟢 (Windows, 2026-11-24: SMOKE-MCP verde, .05 a mano, las seis herramientas en Claude Code, la skill usa MCP registrado y la CLI sin registrar; macOS dado por hecho por el dueño) |
 | CL-11 `3.0.0a3` fuera del PRD | M03; búsqueda del orquestador | F3 | 🟢 |
 | CL-12 Casos en el catálogo | Orquestador (F0 y cierre de cada milestone) | F0; F5 | 🟢 |
-| CL-01–CL-04, CL-08, parte PRD de CL-06 y CL-11 | Quien concilie (DA-02) | Fuera del plan | ⚪ |
+| CL-01–CL-04, CL-08, parte PRD de CL-06 y CL-11 | Quien concilie (DA-02) | Fuera del plan | 🟢 (conciliación del 2026-11-24, PRD 2.6) |
 | CL-07 | No aplica | — | — |

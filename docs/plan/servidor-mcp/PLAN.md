@@ -38,7 +38,7 @@ Esta leyenda vale para todos los archivos del plan.
 | F2 Implementación | Núcleo del servidor, pre-release `3.0.0a3`, log JSON y comando `mcp serve` | M02, M03, M04, M05 | 🟢 |
 | F3 Documentación | Documentos técnicos y barrido de textos obsoletos (CL-06, CL-11) | M06 | 🟢 |
 | F4 Integración y verificación real | Cierre del lote 1 y del lote 2 con la matriz de CI verde en el PR; ejecución de SMOKE-MCP por el dueño en macOS y Windows y verificación manual con Claude Code (CL-10, DA-03) | M07, lotes 1 y 2 | 🟢 (tests y lotes hechos; Windows hecho el 2026-11-24, incluida la skill con y sin MCP; macOS dado por hecho por el dueño) |
-| F5 Cierre | Todos los AC con evidencia; documentos consumidores `actualizado` o `sin cambio`; filas de conciliación `implementado`; unidad `implementado`; PR listo para la conciliación que ordene el dueño (DA-02). La conciliación con el PRD y la unidad se difiere por orden del dueño a una tarea posterior | — (orquestador) | 🟡 (unidad `implementado` el 2026-11-24; la conciliación la hace el orquestador en una rama desde `develop` cuando CL-10 esté cumplido y el dueño lo ordene, DA-02) |
+| F5 Cierre | Todos los AC con evidencia; documentos consumidores `actualizado` o `sin cambio`; filas de conciliación `implementado`; unidad `implementado`; PR listo para la conciliación que ordene el dueño (DA-02). La conciliación con el PRD y la unidad se difiere por orden del dueño a una tarea posterior | — (orquestador) | 🟢 (unidad `conciliado (2026-11-24)` en `feature/reconcile-servidor-mcp`, PRD 2.6; el plan se elimina solo por orden del dueño) |
 
 ## 3. Milestones
 
