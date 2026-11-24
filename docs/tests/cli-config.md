@@ -68,14 +68,14 @@ Requisitos: RF-89, AC-80 · Archivo: `tests/test_config.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] Sin `[lock]`: `retries = 5`, `initial_delay_ms = 150` y `backoff_factor = 2`. Con una sección que solo declara `retries`, las otras dos claves valen su valor por defecto. |
-| .02 | B | [pendiente] Se aceptan `retries` 0 y 10; `initial_delay_ms` 10 y 5000; `backoff_factor` 1, 1.5 y 10. |
-| .03 | N | [pendiente] `retries` igual a `-1`, `11`, `"5"`, `5.0` o `true` ⇒ `E_CONFIG_INVALID` (exit 2) con el rango 0 a 10 en el `hint`: `valid range: 0..10` fuera de rango y `set retries to an integer between 0 and 10` con otro tipo. |
-| .04 | N | [pendiente] `initial_delay_ms` igual a `9` o `5001` ⇒ `E_CONFIG_INVALID` con `valid range: 10..5000` en el `hint`. |
-| .05 | N | [pendiente] `backoff_factor` igual a `0.5`, `11`, `"2"` o `true` ⇒ `E_CONFIG_INVALID` con el rango 1 a 10 en el `hint`: `valid range: 1..10` fuera de rango y `set backoff_factor to a number between 1 and 10` con otro tipo. |
-| .06 | N | [pendiente] La clave `max_delay_ms` en `[lock]` ⇒ `E_CONFIG_INVALID` con `retries`, `initial_delay_ms` y `backoff_factor` en el `hint`. |
-| .07 | N | [pendiente] Los `hint` de sección desconocida y de clave de primer nivel desconocida nombran `[lock]`, después de `[content]`. |
-| .08 | P | [pendiente] `load_logging_config` con `[lock] retries = 11` devuelve la configuración del log sin fallar. |
+| .01 | P | Sin `[lock]`: `retries = 5`, `initial_delay_ms = 150` y `backoff_factor = 2`. Con una sección que solo declara `retries`, las otras dos claves valen su valor por defecto. |
+| .02 | B | Se aceptan `retries` 0 y 10; `initial_delay_ms` 10 y 5000; `backoff_factor` 1, 1.5 y 10. |
+| .03 | N | `retries` igual a `-1`, `11`, `"5"`, `5.0` o `true` ⇒ `E_CONFIG_INVALID` (exit 2) con el rango 0 a 10 en el `hint`: `valid range: 0..10` fuera de rango y `set retries to an integer between 0 and 10` con otro tipo. |
+| .04 | N | `initial_delay_ms` igual a `9` o `5001` ⇒ `E_CONFIG_INVALID` con `valid range: 10..5000` en el `hint`. |
+| .05 | N | `backoff_factor` igual a `0.5`, `11`, `"2"` o `true` ⇒ `E_CONFIG_INVALID` con el rango 1 a 10 en el `hint`: `valid range: 1..10` fuera de rango y `set backoff_factor to a number between 1 and 10` con otro tipo. |
+| .06 | N | La clave `max_delay_ms` en `[lock]` ⇒ `E_CONFIG_INVALID` con `retries`, `initial_delay_ms` y `backoff_factor` en el `hint`. |
+| .07 | N | Los `hint` de sección desconocida y de clave de primer nivel desconocida nombran `[lock]`, después de `[content]`. |
+| .08 | P | `load_logging_config` con `[lock] retries = 11` devuelve la configuración del log sin fallar. |
 
 #### UT-CLI-04 — Opciones que no existen
 
