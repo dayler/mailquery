@@ -113,6 +113,26 @@ Requisitos: AC-06 · Archivo: `tests/test_state.py`
 | .04 | N | Un uid migrado de 1025 caracteres ⇒ `E_STATE_CORRUPT` (después de migrar en memoria). |
 | .05 | P | `schema` ausente, booleano o distinto de 1/2 ⇒ `E_STATE_CORRUPT`. |
 
+#### UT-ST-08 — Reintento del lock
+
+Requisitos: RF-89, AC-79 · Archivo: `tests/test_state.py`
+
+El lock ocupado se consigue con otro `RunLock` sobre el mismo directorio; las pausas, con un `sleep` sustituido que las registra en milisegundos enteros.
+
+**Tabla: Casos de UT-ST-08**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | [pendiente] Lock libre: se toma en el primer intento y `sleep` no se llama. |
+| .02 | N | [pendiente] Lock siempre ocupado y `LockConfig` por defecto: seis intentos, pausas de 150, 300, 600, 1200 y 2400 ms, y `E_LOCKED` con el `message` `another mailquery run is already in progress` y el `hint` `still held after 5 retries: <ruta>; retry later ([lock] in ~/.mailquery/config.toml sets the retries)`, comparados literalmente con la ruta del lock. |
+| .03 | B | [pendiente] `retries = 3`, `initial_delay_ms = 1000`, `backoff_factor = 3`: pausas de 1000, 3000 y 5000 ms. |
+| .04 | B | [pendiente] `retries = 3`, `initial_delay_ms = 100`, `backoff_factor = 1.5`: pausas de 100, 150 y 225 ms. |
+| .05 | N | [pendiente] `retries = 0`, y también sin `retry`: un solo intento, sin pausa, y `E_LOCKED` con el `hint` `wait for the running invocation to finish and retry (the harness should only retry exit code 5)`. |
+| .06 | P | [pendiente] Lock ocupado que se libera durante la segunda pausa: `acquire` lo toma en el siguiente intento y no hay más pausas. |
+| .07 | N | [pendiente] El archivo del lock no se puede abrir: `E_PERMISSION` y `sleep` no se llama. |
+| .08 | N | [pendiente] `sleep` lanza `KeyboardInterrupt`: se propaga, el lock no queda tomado y, al liberarlo su dueño, otro `RunLock` lo toma. |
+| .09 | B | [pendiente] Pausas truncadas: `initial_delay_ms = 10` y `backoff_factor = 1.25` dan 10, 12 y 15 ms. |
+
 #### UT-STO-01 — Copias temporales
 
 Requisitos: RNF-05 · Archivo: `tests/test_store.py`
