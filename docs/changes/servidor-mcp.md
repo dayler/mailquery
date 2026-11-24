@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-aprobado
+implementado
 
 ## Contexto
 
@@ -354,63 +354,63 @@ Ninguna
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | En `develop` se anuncia la pre-release `3.0.0a3`. | pendiente |
-| RC-02 | Resumen del servidor MCP | `01-resumen.md` | después de `**Id corto de mensaje en Outlook.**` | Nuevo bloque "Servidor MCP por stdio": `mcp serve`, una herramienta por comando, cada llamada como invocación de la CLI con cualquier driver declarado, registro como servidor MCP por stdio y uso desde la skill (RF-84…RF-87). | pendiente |
-| RC-03 | Necesidad del servidor MCP | `02-problema.md` | después de `` 7. **`uid` corto en Outlook:** ``; `Las razones de cada decisión` | Nueva necesidad 8: que la skill use `mailquery` con herramientas tipadas, sin componer comandos de shell, y que el usuario lo autorice por separado; el rango de ADR pasa a ADR-29–ADR-51. | pendiente |
-| RC-04 | No objetivos de MCP | `03-objetivos.md` | `- No incluir interfaz gráfica, servidor HTTP ni demonio.` | Precisa que `mcp serve` por stdio no es servidor HTTP ni demonio; nuevos no objetivos: transportes MCP distintos de stdio y recursos, *prompts* y notificaciones de cambio. | pendiente |
-| RC-05 | Objetivo de integración | `03-objetivos.md` | O4 | La integración con el harness es por la CLI o por el servidor MCP por stdio (RF-84). | pendiente |
-| RC-06 | Caso de uso MCP | `05-usuarios.md` | después de CU-09 | Nueva fila CU-10. | pendiente |
-| RC-07 | Logs de texto o JSON | `06-requisitos-funcionales.md` | RF-18 | Logs en texto plano en `mailquery.log` o, con `[logging].json = true`, JSON Lines en `mailquery.jsonl`, cada uno con rotación por tamaño (RF-88). | pendiente |
-| RC-08 | Excepción de salida de `mcp serve` | `06-requisitos-funcionales.md` | RF-16 | Añade `mcp serve` a las excepciones: su stdout es el protocolo MCP. | pendiente |
-| RC-09 | Requisitos del servidor MCP | `06-requisitos-funcionales.md` | después de RF-83 | Nueva subsección 6.11 "Servidor MCP por stdio" con RF-84…RF-87 y nueva subsección 6.12 "Formato del log" con RF-88. | pendiente |
-| RC-10 | Skill con herramientas MCP | `06-requisitos-funcionales.md` | RF-73 | La skill usa las herramientas MCP si están disponibles y la CLI si no, con las mismas reglas (RF-87). | pendiente |
-| RC-11 | Simplicidad sin demonio | `07-requisitos-no-funcionales.md` | RNF-02 | Precisa que `mcp serve` lo lanza el harness como proceso hijo de su sesión y no es un servicio ni un demonio (ADR-51). | pendiente |
-| RC-12 | Observabilidad | `07-requisitos-no-funcionales.md` | RNF-07 | Log por ejecución en texto o en JSON (RF-88). | pendiente |
-| RC-13 | Privacidad en logs | `07-requisitos-no-funcionales.md` | RNF-15 | La regla se aplica a `mailquery.log` y a `mailquery.jsonl` (RF-88). | pendiente |
-| RC-14 | Formato JSON-only | `08-adr.md` | ADR-04 | Las excepciones de RF-16 incluyen el protocolo MCP de `mcp serve` (ADR-51). | pendiente |
-| RC-15 | Proceso de un solo disparo | `08-adr.md` | ADR-05 | Excepción de `mcp serve`: un proceso por sesión del harness que ejecuta cada llamada como proceso de un solo disparo (ADR-51). | pendiente |
-| RC-16 | Versión mayor | `08-adr.md` | ADR-27 | En `develop` se anuncia la pre-release `3.0.0a3`. | pendiente |
-| RC-17 | Decisión del servidor MCP | `08-adr.md` | después de ADR-50 | Nueva fila ADR-51 con su decisión, alternativas descartadas y motivo. | pendiente |
-| RC-18 | Vista de componentes | `09-arquitectura.md` | `### 9.1 Vista de componentes` | El diagrama añade la entrada JSON-RPC por stdio, `mcp_server.py` y el proceso hijo de la CLI (RF-86); el logger escribe en `mailquery.log` o en `mailquery.jsonl` (RF-88). | pendiente |
-| RC-19 | Responsabilidades de módulos | `09-arquitectura.md` | `` `cli.py` ``; después de `` `attachments/` `` | `cli.py` despacha `mcp serve`; nueva fila `mcp_server.py` con su responsabilidad y lo que no debe hacer (RF-84…RF-86). | pendiente |
-| RC-20 | Responsabilidad del logger | `09-arquitectura.md` | `` `logging_setup.py` `` | Logger en texto o JSON con rotación por tamaño; formato log4j o JSON Lines; redacción (RF-88). | pendiente |
-| RC-21 | Flujo de una llamada MCP | `09-arquitectura.md` | después de `` En `search`, `new` y `show`, el núcleo decide `` | Nueva subsección 9.6 "Flujo de una llamada de `mcp serve`" con el diagrama de secuencia: `initialize`, `tools/list`, `tools/call` con proceso hijo por llamada, resultado e `isError`, y fin al cerrar stdin (RF-84, RF-86). | pendiente |
-| RC-22 | Carpeta de logs | `10-carpetas-y-cache.md` | `    ├── mailquery.log` | Nueva línea después: `mailquery.jsonl`, log del núcleo en JSON con `[logging].json = true` (rotación §14) (RF-88). | pendiente |
-| RC-23 | Tabla de comandos | `12-cli.md` | `` `attachment <uid>` `` | Nueva fila después: `mcp serve`, servidor MCP por stdio, salida el protocolo MCP (RF-84). | pendiente |
-| RC-24 | Ayuda | `12.07-ayuda.md` | `` `mailquery <comando> --help` de los seis `` ; `  attachment         recover local attachments of one message`; `Output: one JSON object on stdout`; `        logs go to` | Siete comandos; la ayuda raíz lista `mcp` con su texto; la línea `Output:` añade `mcp serve` a lo que no es un objeto JSON; `mcp serve --help` muestra el registro (RF-87). La línea `logs go to` nombra `mailquery.log` y, con `[logging].json = true`, `mailquery.jsonl` (RF-88). | pendiente |
-| RC-25 | Formato de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es la pre-release `3.0.0a3`. | pendiente |
-| RC-26 | Logs del servidor MCP | `14-logs.md` | `**Regla:**`; `` - Un `E_INTERNAL` registra traceback `` | Excepción de stdout de `mcp serve`; eventos `start`, `call` y `end` del servidor sin parámetros (RF-84, RF-86). | pendiente |
-| RC-27 | Formato JSON del log | `14-logs.md` | `**Archivo:**`; `Formato (estilo log4j):` | `mailquery.log` en texto plano o, con `[logging].json = true`, `mailquery.jsonl` en JSON Lines, con la misma rotación y solo el archivo del formato activo; "Formato de texto (estilo log4j)" y nuevo bloque "Formato JSON" con sus campos, tipos, `message`, `traceback`, archivo activo y el ejemplo de RF-88. | pendiente |
-| RC-28 | Clave `logging.json` | `15-configuracion.md` | `` `logging.max_size_mb` ``; `max_size_mb = 10`; `Logs` | Nueva fila después: `logging.json`, booleano, opcional, por defecto `false`, `true` escribe el log en JSON (§14); el ejemplo añade `json = false` en `[logging]`; la fila "Logs" dice que nivel, tamaño de rotación y formato se configuran en `[logging]` (RF-88). | pendiente |
-| RC-29 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El rango de criterios pasa a AC-01…AC-78 e incluye el servidor MCP y el log JSON. | pendiente |
-| RC-30 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-70 | AC-71…AC-78. | pendiente |
-| RC-31 | Contrato con el harness | `21-harness.md` | `1. El harness invoca la CLI`; `` 2. `stdout` es un único objeto JSON ``; `3. Códigos de salida:` | Invocación bajo demanda o mediante el servidor MCP; con MCP, stdout es el protocolo y los códigos de salida se deducen de `error.code` (RF-86). | pendiente |
-| RC-32 | Idempotencia y servidor MCP | `21-harness.md` | `### 21.3 Idempotencia y concurrencia`; después de `` - `new`: exactamente-una-vez por corrida `` | Una llamada MCP tiene los efectos de su comando; nueva subsección 21.4 con ciclo de vida, registro en Claude Code y genérico, relación con la skill, proceso hijo por llamada, permisos de la app que lanza el servidor, entorno y stdin de los plugins, y depuración (RF-84, RF-86, RF-87). | pendiente |
-| RC-33 | Versión en `develop` | `22-versiones.md` | `**Estado:**` | `develop` anuncia la pre-release `3.0.0a3` (`3.0.0-alpha.3`). | pendiente |
-| RC-34 | Cambios visibles en 3.0.0 | `22-versiones.md` | `**Tabla: Cambios visibles de 3.0.0 en ambas plataformas**`; `**Tabla: Cambios visibles en macOS en 3.0.0**`; `**Tabla: Cambios visibles de 3.0.0 solo en Windows**` | Tabla común: nuevas filas del comando `mcp serve` y de la clave `[logging].json`. Tablas de macOS y Windows: la fila "Ayuda raíz" pasa a siete comandos. | pendiente |
-| RC-35 | Riesgos del servidor MCP | `23-riesgos.md` | `Documentación desincronizada` | Nuevas filas después: cambios de la especificación MCP, latencia por llamada, app que lanza el servidor sin los permisos de la terminal, llamada colgada que bloquea la sesión, servidor terminado con una llamada en curso, resultados truncados por el harness, varias sesiones a la vez y harness con otro PATH, con sus mitigaciones. | pendiente |
-| RC-36 | Ejemplos de `mcp serve` | `anexos/E-ejemplos-invocacion.md` | después de `# Recuperar adjuntos locales a la caché` | Nuevo bloque después del de adjuntos: registro con `claude mcp add` y prueba manual con `initialize` y `tools/list` (RF-84, RF-87). | pendiente |
+| RC-01 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | En `develop` se anuncia la pre-release `3.0.0a3`. | implementado |
+| RC-02 | Resumen del servidor MCP | `01-resumen.md` | después de `**Id corto de mensaje en Outlook.**` | Nuevo bloque "Servidor MCP por stdio": `mcp serve`, una herramienta por comando, cada llamada como invocación de la CLI con cualquier driver declarado, registro como servidor MCP por stdio y uso desde la skill (RF-84…RF-87). | implementado |
+| RC-03 | Necesidad del servidor MCP | `02-problema.md` | después de `` 7. **`uid` corto en Outlook:** ``; `Las razones de cada decisión` | Nueva necesidad 8: que la skill use `mailquery` con herramientas tipadas, sin componer comandos de shell, y que el usuario lo autorice por separado; el rango de ADR pasa a ADR-29–ADR-51. | implementado |
+| RC-04 | No objetivos de MCP | `03-objetivos.md` | `- No incluir interfaz gráfica, servidor HTTP ni demonio.` | Precisa que `mcp serve` por stdio no es servidor HTTP ni demonio; nuevos no objetivos: transportes MCP distintos de stdio y recursos, *prompts* y notificaciones de cambio. | implementado |
+| RC-05 | Objetivo de integración | `03-objetivos.md` | O4 | La integración con el harness es por la CLI o por el servidor MCP por stdio (RF-84). | implementado |
+| RC-06 | Caso de uso MCP | `05-usuarios.md` | después de CU-09 | Nueva fila CU-10. | implementado |
+| RC-07 | Logs de texto o JSON | `06-requisitos-funcionales.md` | RF-18 | Logs en texto plano en `mailquery.log` o, con `[logging].json = true`, JSON Lines en `mailquery.jsonl`, cada uno con rotación por tamaño (RF-88). | implementado |
+| RC-08 | Excepción de salida de `mcp serve` | `06-requisitos-funcionales.md` | RF-16 | Añade `mcp serve` a las excepciones: su stdout es el protocolo MCP. | implementado |
+| RC-09 | Requisitos del servidor MCP | `06-requisitos-funcionales.md` | después de RF-83 | Nueva subsección 6.11 "Servidor MCP por stdio" con RF-84…RF-87 y nueva subsección 6.12 "Formato del log" con RF-88. | implementado |
+| RC-10 | Skill con herramientas MCP | `06-requisitos-funcionales.md` | RF-73 | La skill usa las herramientas MCP si están disponibles y la CLI si no, con las mismas reglas (RF-87). | implementado |
+| RC-11 | Simplicidad sin demonio | `07-requisitos-no-funcionales.md` | RNF-02 | Precisa que `mcp serve` lo lanza el harness como proceso hijo de su sesión y no es un servicio ni un demonio (ADR-51). | implementado |
+| RC-12 | Observabilidad | `07-requisitos-no-funcionales.md` | RNF-07 | Log por ejecución en texto o en JSON (RF-88). | implementado |
+| RC-13 | Privacidad en logs | `07-requisitos-no-funcionales.md` | RNF-15 | La regla se aplica a `mailquery.log` y a `mailquery.jsonl` (RF-88). | implementado |
+| RC-14 | Formato JSON-only | `08-adr.md` | ADR-04 | Las excepciones de RF-16 incluyen el protocolo MCP de `mcp serve` (ADR-51). | implementado |
+| RC-15 | Proceso de un solo disparo | `08-adr.md` | ADR-05 | Excepción de `mcp serve`: un proceso por sesión del harness que ejecuta cada llamada como proceso de un solo disparo (ADR-51). | implementado |
+| RC-16 | Versión mayor | `08-adr.md` | ADR-27 | En `develop` se anuncia la pre-release `3.0.0a3`. | implementado |
+| RC-17 | Decisión del servidor MCP | `08-adr.md` | después de ADR-50 | Nueva fila ADR-51 con su decisión, alternativas descartadas y motivo. | implementado |
+| RC-18 | Vista de componentes | `09-arquitectura.md` | `### 9.1 Vista de componentes` | El diagrama añade la entrada JSON-RPC por stdio, `mcp_server.py` y el proceso hijo de la CLI (RF-86); el logger escribe en `mailquery.log` o en `mailquery.jsonl` (RF-88). | implementado |
+| RC-19 | Responsabilidades de módulos | `09-arquitectura.md` | `` `cli.py` ``; después de `` `attachments/` `` | `cli.py` despacha `mcp serve`; nueva fila `mcp_server.py` con su responsabilidad y lo que no debe hacer (RF-84…RF-86). | implementado |
+| RC-20 | Responsabilidad del logger | `09-arquitectura.md` | `` `logging_setup.py` `` | Logger en texto o JSON con rotación por tamaño; formato log4j o JSON Lines; redacción (RF-88). | implementado |
+| RC-21 | Flujo de una llamada MCP | `09-arquitectura.md` | después de `` En `search`, `new` y `show`, el núcleo decide `` | Nueva subsección 9.6 "Flujo de una llamada de `mcp serve`" con el diagrama de secuencia: `initialize`, `tools/list`, `tools/call` con proceso hijo por llamada, resultado e `isError`, y fin al cerrar stdin (RF-84, RF-86). | implementado |
+| RC-22 | Carpeta de logs | `10-carpetas-y-cache.md` | `    ├── mailquery.log` | Nueva línea después: `mailquery.jsonl`, log del núcleo en JSON con `[logging].json = true` (rotación §14) (RF-88). | implementado |
+| RC-23 | Tabla de comandos | `12-cli.md` | `` `attachment <uid>` `` | Nueva fila después: `mcp serve`, servidor MCP por stdio, salida el protocolo MCP (RF-84). | implementado |
+| RC-24 | Ayuda | `12.07-ayuda.md` | `` `mailquery <comando> --help` de los seis `` ; `  attachment         recover local attachments of one message`; `Output: one JSON object on stdout`; `        logs go to` | Siete comandos; la ayuda raíz lista `mcp` con su texto; la línea `Output:` añade `mcp serve` a lo que no es un objeto JSON; `mcp serve --help` muestra el registro (RF-87). La línea `logs go to` nombra `mailquery.log` y, con `[logging].json = true`, `mailquery.jsonl` (RF-88). | implementado |
+| RC-25 | Formato de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es la pre-release `3.0.0a3`. | implementado |
+| RC-26 | Logs del servidor MCP | `14-logs.md` | `**Regla:**`; `` - Un `E_INTERNAL` registra traceback `` | Excepción de stdout de `mcp serve`; eventos `start`, `call` y `end` del servidor sin parámetros (RF-84, RF-86). | implementado |
+| RC-27 | Formato JSON del log | `14-logs.md` | `**Archivo:**`; `Formato (estilo log4j):` | `mailquery.log` en texto plano o, con `[logging].json = true`, `mailquery.jsonl` en JSON Lines, con la misma rotación y solo el archivo del formato activo; "Formato de texto (estilo log4j)" y nuevo bloque "Formato JSON" con sus campos, tipos, `message`, `traceback`, archivo activo y el ejemplo de RF-88. | implementado |
+| RC-28 | Clave `logging.json` | `15-configuracion.md` | `` `logging.max_size_mb` ``; `max_size_mb = 10`; `Logs` | Nueva fila después: `logging.json`, booleano, opcional, por defecto `false`, `true` escribe el log en JSON (§14); el ejemplo añade `json = false` en `[logging]`; la fila "Logs" dice que nivel, tamaño de rotación y formato se configuran en `[logging]` (RF-88). | implementado |
+| RC-29 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El rango de criterios pasa a AC-01…AC-78 e incluye el servidor MCP y el log JSON. | implementado |
+| RC-30 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-70 | AC-71…AC-78. | implementado |
+| RC-31 | Contrato con el harness | `21-harness.md` | `1. El harness invoca la CLI`; `` 2. `stdout` es un único objeto JSON ``; `3. Códigos de salida:` | Invocación bajo demanda o mediante el servidor MCP; con MCP, stdout es el protocolo y los códigos de salida se deducen de `error.code` (RF-86). | implementado |
+| RC-32 | Idempotencia y servidor MCP | `21-harness.md` | `### 21.3 Idempotencia y concurrencia`; después de `` - `new`: exactamente-una-vez por corrida `` | Una llamada MCP tiene los efectos de su comando; nueva subsección 21.4 con ciclo de vida, registro en Claude Code y genérico, relación con la skill, proceso hijo por llamada, permisos de la app que lanza el servidor, entorno y stdin de los plugins, y depuración (RF-84, RF-86, RF-87). | implementado |
+| RC-33 | Versión en `develop` | `22-versiones.md` | `**Estado:**` | `develop` anuncia la pre-release `3.0.0a3` (`3.0.0-alpha.3`). | implementado |
+| RC-34 | Cambios visibles en 3.0.0 | `22-versiones.md` | `**Tabla: Cambios visibles de 3.0.0 en ambas plataformas**`; `**Tabla: Cambios visibles en macOS en 3.0.0**`; `**Tabla: Cambios visibles de 3.0.0 solo en Windows**` | Tabla común: nuevas filas del comando `mcp serve` y de la clave `[logging].json`. Tablas de macOS y Windows: la fila "Ayuda raíz" pasa a siete comandos. | implementado |
+| RC-35 | Riesgos del servidor MCP | `23-riesgos.md` | `Documentación desincronizada` | Nuevas filas después: cambios de la especificación MCP, latencia por llamada, app que lanza el servidor sin los permisos de la terminal, llamada colgada que bloquea la sesión, servidor terminado con una llamada en curso, resultados truncados por el harness, varias sesiones a la vez y harness con otro PATH, con sus mitigaciones. | implementado |
+| RC-36 | Ejemplos de `mcp serve` | `anexos/E-ejemplos-invocacion.md` | después de `# Recuperar adjuntos locales a la caché` | Nuevo bloque después del de adjuntos: registro con `claude mcp add` y prueba manual con `initialize` y `tools/list` (RF-84, RF-87). | implementado |
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- skills/mailquery/SKILL.md: pendiente
-- skills/README.md: pendiente
-- docs/INTERFACES.md: pendiente
-- docs/config.example.toml: pendiente
-- docs/ROADMAP.md: pendiente
-- docs/recipes/: pendiente
-- docs/security/: pendiente
-- docs/tests/TEST-CATALOG.md: pendiente
-- docs/tests/mcp-server.md: pendiente
-- docs/tests/cli-config.md: pendiente
-- docs/tests/docs-packaging.md: pendiente
-- docs/tests/end-to-end.md: pendiente
-- docs/tests/acceptance-matrix.md: pendiente
-- docs/tests/smoke.md: pendiente
-- docs/tests/attachments-command.md: pendiente
-- docs/tests/infrastructure.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- skills/mailquery/SKILL.md: actualizado
+- skills/README.md: actualizado
+- docs/INTERFACES.md: actualizado
+- docs/config.example.toml: actualizado
+- docs/ROADMAP.md: actualizado
+- docs/recipes/: actualizado
+- docs/security/: actualizado
+- docs/tests/TEST-CATALOG.md: actualizado
+- docs/tests/mcp-server.md: actualizado
+- docs/tests/cli-config.md: actualizado
+- docs/tests/docs-packaging.md: actualizado
+- docs/tests/end-to-end.md: actualizado
+- docs/tests/acceptance-matrix.md: actualizado
+- docs/tests/smoke.md: actualizado
+- docs/tests/attachments-command.md: actualizado
+- docs/tests/infrastructure.md: actualizado
 
 ## Checklist de conciliación
 

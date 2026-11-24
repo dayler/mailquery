@@ -38,8 +38,8 @@ Tomadas al planificar, sin pregunta al dueño, porque la unidad o el código ya 
 | ID | Pregunta | Qué bloquea | Estado |
 |---|---|---|---|
 | DA-01 | ¿Se aprueba la unidad `servidor-mcp` y se reservan sus IDs? El protocolo de cambios solo permite implementar una unidad `aprobado`, y los tests citan IDs del PRD, no marcadores. | F0 y, con ella, todos los milestones | 🟢 respondida (sección 3) |
-| DA-02 | ¿Quién concilia la unidad con el PRD y cuándo? El protocolo exige que el commit de conciliación sea el último de `feature/servidor-mcp` antes del merge a `develop`; este plan no toca el PRD. | El merge del PR (no los milestones) | ⚪ pendiente del dueño; se pregunta al cerrar F5 |
-| DA-03 | CL-10 exige ejecutar los SMOKE de M07 y una verificación manual con Claude Code en un Mac y en un Windows con Outlook clásico, con un plugin declarado. ¿En qué equipos y cuándo? | La fase F4 (no el cierre de M07 ni el del lote 2) | ⚪ pendiente del dueño; se pregunta al cerrar M07 |
+| DA-02 | ¿Quién concilia la unidad con el PRD y cuándo? El protocolo exige que el commit de conciliación sea el último de `feature/servidor-mcp` antes del merge a `develop`; este plan no toca el PRD. | El merge del PR (no los milestones) | 🟢 respondida (sección 3) |
+| DA-03 | CL-10 exige ejecutar los SMOKE de M07 y una verificación manual con Claude Code en un Mac y en un Windows con Outlook clásico, con un plugin declarado. ¿En qué equipos y cuándo? | La fase F4 (no el cierre de M07 ni el del lote 2) | 🟢 respondida (sección 3) |
 
 ## 3. Respuestas del dueño
 
@@ -48,3 +48,6 @@ Tomadas al planificar, sin pregunta al dueño, porque la unidad o el código ya 
 | Fecha | Pregunta | Respuesta | Aplicada en |
 |---|---|---|---|
 | 2026-11-23 | DA-01: ¿se aprueba la unidad y se reservan sus IDs? | Sí, aprobada. | Unidad `aprobado` con `**Aprobación:** dueño del producto, 2026-11-23`; IDs CU-10, RF-84…RF-88, ADR-51, AC-71…AC-78 en la unidad y en el plan |
+| 2026-11-24 | DA-03: ¿en qué equipos y cuándo se ejecuta CL-10? | Windows: en el equipo del dueño, el 2026-11-24, cerrando y reabriendo Outlook para SMOKE-MCP.05; registrar el servidor en Claude Code y retirar la skill de usuario para probar solo con MCP en los próximos días. | `evidence/M07.md`, `REGISTRO.md`, `TRAZABILIDAD.md` |
+| 2026-11-24 | DA-02: ¿quién concilia la unidad con el PRD y cuándo? | El orquestador, en una rama creada desde `develop` (el código ya está en `develop` por los PR #17 y #18 y `feature/servidor-mcp` no existe), cuando estén resueltos todos los pendientes; no empieza sin la orden del dueño. | `REGISTRO.md`; unidad `implementado` el 2026-11-24 |
+| 2026-11-24 | DA-03 en macOS | Se da por hecho; no se registra ejecución. | `evidence/M07.md`, `TRAZABILIDAD.md` |
