@@ -82,10 +82,10 @@ Con la instalación y la configuración de SMOKE-INSTALL; un cliente JSON-RPC de
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] `initialize` y `tools/list` ⇒ las seis herramientas. |
-| .02 | P | [pendiente] `search` con `since: "1w"` ⇒ exit 0 en el JSON y filas por defecto; `show` del primer `uid` ⇒ `isError: false`. |
-| .03 | P | [pendiente] `new` dos veces seguidas ⇒ el cursor avanza y la segunda no repite mensajes de la primera. |
-| .04 | P | [pendiente] `attachment` con `index: 1` y `force: true` de un mensaje con adjunto local ⇒ `isError: false` y el archivo bajo `~/.mailquery/attachments` del HOME temporal; se salta con motivo si no hay adjunto local. |
-| .05 | N | [pendiente] macOS: con la app que lanza el servidor sin Acceso total al disco ⇒ `E_PERMISSION`; Windows: con Outlook cerrado ⇒ `E_OUTLOOK_NOT_RUNNING`. Se salta con motivo si no se puede preparar la condición. |
-| .06 | P | [pendiente] Con un plugin declarado junto al driver nativo ⇒ resultados de los dos drivers en `search`; con un plugin que falla ⇒ `E_PLUGIN_FAILED`. El plugin de prueba va en el `PYTHONPATH` del servidor, con su `dist-info`. |
-| .07 | N | [pendiente] Los contadores de no leídos de las carpetas incluidas no cambian. |
+| .01 | P | `initialize` y `tools/list` ⇒ las seis herramientas. |
+| .02 | P | `search` con `since: "1w"` ⇒ exit 0 en el JSON y filas por defecto; `show` del primer `uid` ⇒ `isError: false`. |
+| .03 | P | `new` dos veces seguidas ⇒ el cursor avanza y la segunda no repite mensajes de la primera. |
+| .04 | P | `attachment` con `index: 1` y `force: true` de un mensaje con adjunto local ⇒ `isError: false` y el archivo bajo `~/.mailquery/attachments` del HOME temporal; se salta con motivo si no hay adjunto local. |
+| .05 | N | macOS: con la app que lanza el servidor sin Acceso total al disco ⇒ `E_PERMISSION`; Windows: con Outlook cerrado ⇒ `E_OUTLOOK_NOT_RUNNING`. Se salta con motivo si no se puede preparar la condición. |
+| .06 | P | Con un plugin declarado junto al driver nativo ⇒ resultados de los dos drivers en `search`; con un plugin que falla ⇒ `E_PLUGIN_FAILED`. El plugin de prueba va en el `PYTHONPATH` del servidor, con su `dist-info`. |
+| .07 | N | Los contadores de no leídos de las carpetas incluidas no cambian. |

@@ -167,10 +167,10 @@ Requisitos: AC-21 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] La ayuda raíz lista `doctor`, `mailboxes`, `search`, `new`, `show`, `attachment`, `mcp` y la línea de exits de §12.7. |
+| .01 | P | La ayuda raíz lista `doctor`, `mailboxes`, `search`, `new`, `show`, `attachment`, `mcp` y la línea de exits de §12.7. |
 | .02 | P | `attachment --help` coincide con §12.7 (usage, positional, options, examples, notes), ≤ 100 columnas y sin ANSI. |
-| .03 | P | [por actualizar] La ayuda raíz, las siete ayudas de subcomando y `mcp serve --help` (9 invocaciones) pasan `parse_args`. |
-| .04 | N | [por actualizar] Ningún texto de ayuda dice “cinco comandos”/“five commands” ni “seis comandos”/“six commands”, muestra un uid entero como formato de salida o promete escritura fuera de `~/.mailquery`. |
+| .03 | P | La ayuda raíz, las siete ayudas de subcomando y `mcp serve --help` (9 invocaciones) pasan `parse_args`. |
+| .04 | N | Ningún texto de ayuda dice “cinco comandos”/“five commands” ni “seis comandos”/“six commands”, muestra un uid entero como formato de salida o promete escritura fuera de `~/.mailquery`. |
 | .05 | P | `attachment` sin `<uid>` ⇒ `E_USAGE`, exit 2. |
 
 #### UT-ATC-10 — `attachment` con driver externo declarado

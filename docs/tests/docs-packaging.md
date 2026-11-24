@@ -54,7 +54,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] Contiene los siete comandos y ningún texto con “cinco comandos”/“five commands” ni “seis comandos”/“six commands”. |
+| .01 | P | Contiene los siete comandos y ningún texto con “cinco comandos”/“five commands” ni “seis comandos”/“six commands”. |
 | .02 | P | Describe el `uid` como string prefijado y la aceptación del uid legado; no hay ejemplos con uid entero. |
 | .03 | P | Documenta `[scope."<driver>:<cuenta>"]`, `[attachments]`, `attachment`, `show.attachments`, `doctor driver`, `--version drivers` y los exit codes/errores nuevos. |
 | .04 | N | No contiene marcas obsoletas: `five commands`, `baseline` como concepto vigente, `retention_days`, uid entero en JSON, `attachments` solo con `name`, `preflight`, `list accounts, folders, counters`, `standard library only`, ni presenta `3.0.0` como versión publicada. |
@@ -88,7 +88,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] Tabla de comandos con `attachment` y el uso de las herramientas MCP; uid string; `show.attachments` con `cached_path`; errores nuevos. |
+| .01 | P | Tabla de comandos con `attachment` y el uso de las herramientas MCP; uid string; `show.attachments` con `cached_path`; errores nuevos. |
 | .02 | P | Indica que el harness no debe ejecutar ni abrir los archivos recuperados y que el bloqueo es del mensaje completo. |
 | .03 | N | No presenta el uid como entero ni omite `attachment`. |
 
@@ -100,9 +100,9 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [por actualizar] La ayuda raíz lista los siete comandos, la línea de exits de §12.7 y la línea `environment and read-only diagnosis` de `doctor`. |
+| .01 | P | La ayuda raíz lista los siete comandos, la línea de exits de §12.7 y la línea `environment and read-only diagnosis` de `doctor`. |
 | .02 | P | `attachment --help` coincide con §12.7 (usage, positional, options, examples, notes). |
-| .03 | P | [por actualizar] La ayuda raíz, las siete ayudas de subcomando y `mcp serve --help` (9 invocaciones) pasan `parse_args` (sin invocar el store). |
+| .03 | P | La ayuda raíz, las siete ayudas de subcomando y `mcp serve --help` (9 invocaciones) pasan `parse_args` (sin invocar el store). |
 | .04 | N | Ninguna ayuda menciona cinco comandos, un formato de uid entero, `preflight`, `list accounts, folders, counters` ni `standard library only`. |
 
 #### DOC-06 — `config.example.toml`
@@ -232,7 +232,7 @@ Requisitos: RF-73, RF-81, RF-83, AC-68 · Archivo: `tests/test_packaging.py`
 |---|---|---|
 | .01 | P | `README.md` y `README.es.md` describen `--show-native-id` como opción de depuración de `show`; `SKILL.md` no la menciona. |
 | .02 | N | `README.md`, `README.es.md`, `SKILL.md`, `docs/INTERFACES.md`, `docs/recipes/` y `docs/security/` no contienen los textos obsoletos del uid de Outlook: `expected an uppercase hexadecimal EntryID`, `mailquery show outlook:00000000A1B2C3D4`, "`show` never writes" / "`show` nunca escribe", "EntryID largo" / "long EntryID" como riesgo vigente de Outlook, "EntryID hexadecimal" como uid legado de Windows, ni un uid de ejemplo `outlook:` seguido de hexadecimal en mayúsculas; se admite el marcador `outlook:<EntryID>` solo en la descripción de `--show-native-id`. |
-| .03 | P | [por actualizar] `pyproject.toml` y `mailquery.__version__` dicen `3.0.0a3`, y los README anuncian `3.0.0a3` (`3.0.0-alpha.3`) sin mencionar `3.0.0a2` ni `3.0.0a1`. |
+| .03 | P | `pyproject.toml` y `mailquery.__version__` dicen `3.0.0a3`, y los README anuncian `3.0.0a3` (`3.0.0-alpha.3`) sin mencionar `3.0.0a2` ni `3.0.0a1`. |
 | .04 | P | Los dos README describen la carpeta `~/.mailquery/db/` con `cache.db` y dicen que desinstalar no la borra. |
 
 #### DOC-17 — Documentación del servidor MCP
@@ -243,9 +243,9 @@ Requisitos: RF-87, AC-75 · Archivo: `tests/test_packaging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] `README.md` y `README.es.md` contienen `claude mcp add --scope user mailquery -- mailquery mcp serve`, la entrada `mcpServers` con `"command": "mailquery"` y `"args": ["mcp", "serve"]`, las seis herramientas, la equivalencia de un parámetro con su opción (`include_mailbox` y `--include-mailbox`) y los permisos de la app que lanza el servidor (Acceso total al disco en macOS; misma sesión y nivel de integridad que Outlook en Windows). |
-| .02 | P | [pendiente] `skills/mailquery/SKILL.md` dice que usa las herramientas MCP de `mailquery` si están disponibles y la CLI si no, con las mismas recetas y reglas, y que con MCP el código de salida se deduce de `error.code`. |
-| .03 | N | [pendiente] `README.md`, `README.es.md`, `SKILL.md`, `skills/README.md` y las ayudas no contienen "six commands" ni "seis comandos". |
+| .01 | P | `README.md` y `README.es.md` contienen `claude mcp add --scope user mailquery -- mailquery mcp serve`, la entrada `mcpServers` con `"command": "mailquery"` y `"args": ["mcp", "serve"]`, las seis herramientas, la equivalencia de un parámetro con su opción (`include_mailbox` y `--include-mailbox`) y los permisos de la app que lanza el servidor (Acceso total al disco en macOS; misma sesión y nivel de integridad que Outlook en Windows). |
+| .02 | P | `skills/mailquery/SKILL.md` dice que usa las herramientas MCP de `mailquery` si están disponibles y la CLI si no, con las mismas recetas y reglas, y que con MCP el código de salida se deduce de `error.code`. |
+| .03 | N | `README.md`, `README.es.md`, `SKILL.md`, `skills/README.md` y las ayudas no contienen "six commands" ni "seis comandos". |
 
 #### DOC-18 — Documentación del log en JSON
 
@@ -255,5 +255,5 @@ Requisitos: RF-88, AC-77 · Archivo: `tests/test_packaging.py`, `tests/test_inte
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] `README.md` y `README.es.md` documentan `[logging].json`, el archivo `mailquery.jsonl` y que cada ejecución escribe solo en el archivo del formato activo. |
-| .02 | P | [pendiente] `docs/config.example.toml` tiene `# json = false` dentro del bloque comentado `[logging]`; una copia con el bloque descomentado se carga con el cargador real y da `json` `false`. |
+| .01 | P | `README.md` y `README.es.md` documentan `[logging].json`, el archivo `mailquery.jsonl` y que cada ejecución escribe solo en el archivo del formato activo. |
+| .02 | P | `docs/config.example.toml` tiene `# json = false` dentro del bloque comentado `[logging]`; una copia con el bloque descomentado se carga con el cargador real y da `json` `false`. |
