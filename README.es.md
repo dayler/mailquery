@@ -8,7 +8,8 @@ modificar nada**: Apple Mail en macOS y Outlook clásico en Windows. Está pensa
 para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
 
 - **Un único objeto JSON por ejecución** en `stdout` (no existe `--format`).
-  Excepciones: `--help`, `--version` y el informe de texto de `doctor`.
+  Excepciones: `--help`, `--version`, el informe de texto de `doctor` y el
+  protocolo MCP de `mcp serve`.
 - **Solo lectura** (invariante I-1): no marca leído, no mueve, no borra, no
   envía, no descarga cuerpos desde el servidor y **no lanza** Mail.app ni
   Outlook. Solo escribe dentro de `~/.mailquery` (estado, logs, locks, staging,
@@ -28,10 +29,10 @@ para que un harness de agentes la invoque **bajo demanda** y consuma su salida.
   el `EntryID` nunca se acepta como uid. El uid legado sin prefijo se acepta en
   la entrada para el driver nativo de la plataforma.
 
-La recuperación de adjuntos y el motor multi-driver forman parte del futuro
-3.0.0, todavía no publicado. `develop` anuncia la pre-release `3.0.0a3`
-(3.0.0-alpha.3) en `--version`, pero no publica nada: sin tag, sin release y sin
-merge a `main`.
+La recuperación de adjuntos, el motor multi-driver, el servidor MCP de
+`mcp serve` y el log JSON forman parte del futuro 3.0.0, todavía no publicado.
+`develop` anuncia la pre-release `3.0.0a3` (3.0.0-alpha.3) en `--version`, pero
+no publica nada: sin tag, sin release y sin merge a `main`.
 
 Referencias: [`docs/prd/`](docs/prd/00-indice.md) (contrato del producto, v2.3),
 [`docs/recipes/`](docs/recipes/) (recetas para el harness),
