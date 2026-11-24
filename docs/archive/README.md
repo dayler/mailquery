@@ -16,6 +16,14 @@ documento), para poder identificarlo.
 | [`2026-11-04-Walkthrough-w4-outlook-complete.md`](2026-11-04-Walkthrough-w4-outlook-complete.md) | W4 | 2026-11-04 | `new`, `--text`/`--to`/`--cc`, `doctor`, exit 6 y pruebas cross-backend | `6e8b439` |
 | [`2026-11-04-Walkthrough-w5-polish.md`](2026-11-04-Walkthrough-w5-polish.md) | W5 | 2026-11-04 | Instaladores, empaquetado 2.0.0, SMOKE, rendimiento de Outlook y documentación de usuario | `bf1d50d` |
 
+## Unidades de cambio archivadas
+
+Unidades de `docs/changes/` que el dueño ordenó archivar sin aprobar ni implementar. No son unidades abiertas y no reservan IDs.
+
+- [`2026-11-24-mcp-worker-persistente.md`](2026-11-24-mcp-worker-persistente.md) — Proceso hijo persistente del servidor MCP. Archivada el 2026-11-24 en `borrador`, con las notas de su revisión.
+
+## Plan de 2.0.0
+
 El plan de ejecución `2026-11-03-v2.0.0-windows-outlook.md` (rev. 18) se eliminó al
 cerrar la fase: era un artefacto de proceso y sigue disponible en el historial de git
 (commit `0784651`).
