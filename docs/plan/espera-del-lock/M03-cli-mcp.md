@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/espera-del-lock.md` (la completa).
 - **Oleada / lote:** 3 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m03`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `93fa726` (tip de `feature/espera-del-lock-lote-1`, con M01, M02 y M04 integrados). **Línea base de la suite:** en `93fa726`, con el intérprete del venv del checkout principal: 1674 tests, OK, 8 saltos; sin fallos conocidos (con el `python` de pyenv hay 10 fallos de entorno, no se usa).
 - **Depende de:** M01 (`config.lock`) y M02 (`RunLock(home, retry)`), ya integrados en la rama del lote. **Lo usan:** nadie.
 - **ACs:** AC-79 y AC-80, las partes de comando, `doctor`, ayuda y MCP.
 
