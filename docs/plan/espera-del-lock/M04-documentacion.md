@@ -28,9 +28,9 @@ Los README, el archivo de configuración de ejemplo, el documento de interfaces 
 
 ## Especificación
 
-Rangos de `docs/changes/espera-del-lock.md` en el commit `<commit de referencia>` (encabezado y líneas):
+Rangos de `docs/changes/espera-del-lock.md` en el commit `e3670c7` (encabezado y líneas):
 
-- "Requerimientos", RF-x1 entero: 70-98.
+- "Requerimientos", RF-89 entero: 70-98.
 - "Configuración": 100-111.
 - "Interfaz de los módulos": 113-117.
 - "Cambios visibles": 126-128.
@@ -68,7 +68,7 @@ Ninguna.
 
 ## Tests
 
-Grupo nuevo `DOC-19 — Documentación del reintento del lock` en `tests/test_integration.py` (Requisitos: RF-x1); definición en `docs/tests/docs-packaging.md`, detrás de DOC-18:
+Grupo nuevo `DOC-19 — Documentación del reintento del lock` en `tests/test_integration.py` (Requisitos: RF-89); definición en `docs/tests/docs-packaging.md`, detrás de DOC-18:
 
 - **.01 P.** `README.md` y `README.es.md` documentan `[lock]` con `retries`, `initial_delay_ms` y `backoff_factor`, sus valores por defecto 5, 150 y 2, sus rangos y `retries = 0`.
 - **.02 P.** `docs/config.example.toml` se lee con el cargador real, y su sección `[lock]` declara los valores por defecto de `LockConfig`.

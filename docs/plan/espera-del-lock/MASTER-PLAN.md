@@ -24,10 +24,10 @@ Ninguna.
 
 | Milestone | Estado | Depende de | ACs | Oleada | Lote | Unidad |
 |---|---|---|---|---|---|---|
-| [M01 — Sección `[lock]` de la configuración](M01-config-lock.md) | ⚪ | — | AC-x2 (esquema) | 1 | 1 | contribuye |
-| [M02 — Reintento en `RunLock`](M02-reintento-runlock.md) | ⚪ | M01 | AC-x1 (pausas, `retries = 0`, `E_PERMISSION`) | 2 | 1 | contribuye |
+| [M01 — Sección `[lock]` de la configuración](M01-config-lock.md) | ⚪ | — | AC-80 (esquema) | 1 | 1 | contribuye |
+| [M02 — Reintento en `RunLock`](M02-reintento-runlock.md) | ⚪ | M01 | AC-79 (pausas, `retries = 0`, `E_PERMISSION`) | 2 | 1 | contribuye |
 | [M04 — Documentación](M04-documentacion.md) | ⚪ | M01 | — (documentos consumidores) | 2 | 1 | contribuye |
-| [M03 — Comandos, `doctor`, ayuda y MCP](M03-cli-mcp.md) | ⚪ | M01, M02 | AC-x1, AC-x2 | 3 | 1 | la completa |
+| [M03 — Comandos, `doctor`, ayuda y MCP](M03-cli-mcp.md) | ⚪ | M01, M02 | AC-79, AC-80 | 3 | 1 | la completa |
 
 ## Dependencias y oleadas
 

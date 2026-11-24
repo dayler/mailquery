@@ -4,7 +4,7 @@
 - **Oleada / lote:** 1 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m01`, creada desde el tip de la rama del lote.
 - **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
 - **Depende de:** nada. **Lo usan:** M02 (`LockConfig`), M03 (`config.lock`), M04 (valores por defecto).
-- **ACs:** AC-x2, la parte del esquema de `[lock]`.
+- **ACs:** AC-80, la parte del esquema de `[lock]`.
 
 ## Objetivo
 
@@ -27,12 +27,12 @@
 
 ## Especificación
 
-Rangos de `docs/changes/espera-del-lock.md` en el commit `<commit de referencia>` (encabezado y líneas):
+Rangos de `docs/changes/espera-del-lock.md` en el commit `e3670c7` (encabezado y líneas):
 
 - "Requerimientos", condiciones "Sección" a "Sección admitida": 77-84.
 - "Configuración": 100-111.
 - "Interfaz de los módulos": 113-117.
-- "Criterios de aceptación", AC-x2: 134.
+- "Criterios de aceptación", AC-80: 134.
 
 ## Puntos de entrada en el código
 
@@ -62,7 +62,7 @@ Ninguna.
 
 ## Tests
 
-Grupo nuevo `UT-CFG-07 — [lock]` en `tests/test_config.py` (Requisitos: RF-x1, AC-x2); definición en `docs/tests/cli-config.md`, detrás de UT-CFG-06:
+Grupo nuevo `UT-CFG-07 — [lock]` en `tests/test_config.py` (Requisitos: RF-89, AC-80); definición en `docs/tests/cli-config.md`, detrás de UT-CFG-06:
 
 - **.01 P.** Sin `[lock]`: `retries = 5`, `initial_delay_ms = 150`, `backoff_factor = 2`. Con una sección que solo declara `retries`, las otras dos claves valen su valor por defecto.
 - **.02 B.** Se aceptan `retries` 0 y 10; `initial_delay_ms` 10 y 5000; `backoff_factor` 1, 1.5 y 10.

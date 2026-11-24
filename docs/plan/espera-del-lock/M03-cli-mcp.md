@@ -4,7 +4,7 @@
 - **Oleada / lote:** 3 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m03`, creada desde el tip de la rama del lote.
 - **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
 - **Depende de:** M01 (`config.lock`) y M02 (`RunLock(home, retry)`), ya integrados en la rama del lote. **Lo usan:** nadie.
-- **ACs:** AC-x1 y AC-x2, las partes de comando, `doctor`, ayuda y MCP.
+- **ACs:** AC-79 y AC-80, las partes de comando, `doctor`, ayuda y MCP.
 
 ## Objetivo
 
@@ -29,7 +29,7 @@ Los comandos de datos toman el lock con los reintentos de `config.lock`; `doctor
 
 ## Especificación
 
-Rangos de `docs/changes/espera-del-lock.md` en el commit `<commit de referencia>` (encabezado y líneas):
+Rangos de `docs/changes/espera-del-lock.md` en el commit `e3670c7` (encabezado y líneas):
 
 - "Lo que no cambia": 51-58.
 - "Requerimientos", condiciones "Quién reintenta" (76), "Valor inválido" (82), "Errores previos" (85) y "Lock conseguido" a "MCP" (89-96).
@@ -67,7 +67,7 @@ Ninguna.
 
 ## Tests
 
-Grupo nuevo `UT-CLI-15 — Reintento del lock en los comandos` en `tests/test_cli.py` (Requisitos: RF-x1, AC-x1, AC-x2); definición en `docs/tests/cli-config.md`, detrás de UT-CLI-14:
+Grupo nuevo `UT-CLI-15 — Reintento del lock en los comandos` en `tests/test_cli.py` (Requisitos: RF-89, AC-79, AC-80); definición en `docs/tests/cli-config.md`, detrás de UT-CLI-14:
 
 - **.01 P.** Lock retenido 2 s por otro proceso, sin `[lock]`: `search` termina con exit 0 tras liberarse y su salida es la de una ejecución sin espera salvo `generated_at`.
 - **.02 N.** `retries = 2`, `initial_delay_ms = 100` y lock retenido 3 s: `E_LOCKED` (exit 5), no antes de 300 ms ni después de 2 s, con el `message` y el `hint` de reintentos agotados que fija la unidad, comparados literalmente con `2` y la ruta del lock.
@@ -79,7 +79,7 @@ Grupo nuevo `UT-CLI-15 — Reintento del lock en los comandos` en `tests/test_cl
 - **.08 P.** Dos `new` lanzados a la vez, cada uno de menos de 2 s: los dos terminan con exit 0 y cada mensaje nuevo sale en uno solo.
 - **.09 N.** El archivo del lock no se puede abrir: el comando da `E_PERMISSION` sin esperar.
 
-Grupo nuevo `UT-MCP-13 — Lock ocupado en una llamada MCP` en `tests/test_mcp_server.py` (Requisitos: RF-x1, AC-x1, AC-x2); definición en `docs/tests/mcp-server.md`, detrás de UT-MCP-12:
+Grupo nuevo `UT-MCP-13 — Lock ocupado en una llamada MCP` en `tests/test_mcp_server.py` (Requisitos: RF-89, AC-79, AC-80); definición en `docs/tests/mcp-server.md`, detrás de UT-MCP-12:
 
 - **.01 P.** Lock retenido 2 s por otro proceso, sin `[lock]`: `tools/call` de `search` devuelve el resultado de la CLI con `isError: false` y una sola ejecución del comando.
 - **.02 N.** `[lock] retries = 11`: `mailquery mcp serve` arranca, y una llamada a `search` devuelve `E_CONFIG_INVALID` con `isError: true`.
