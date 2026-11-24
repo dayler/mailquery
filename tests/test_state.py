@@ -17,6 +17,8 @@ from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
+from mailquery import state as state_module
+from mailquery.config import LockConfig
 from mailquery.errors import MailqueryError
 from mailquery.state import (
     MAX_EMITTED_UIDS,
@@ -853,6 +855,170 @@ class RunLockTest(unittest.TestCase):
     def test_ut_st_01_07_release_without_acquire_is_safe(self) -> None:
         """UT-ST-01.07: Releasing a lock that was never acquired is safe."""
         RunLock(self.home).release()
+
+
+_LOCKED_MESSAGE = "another mailquery run is already in progress"
+_EXHAUSTED_HINT = (
+    "still held after {retries} retries: {path}; retry later "
+    "([lock] in ~/.mailquery/config.toml sets the retries)"
+)
+_NO_RETRY_HINT = (
+    "wait for the running invocation to finish and retry "
+    "(the harness should only retry exit code 5)"
+)
+
+
+class RunLockRetryTest(unittest.TestCase):
+    """UT-ST-08: retries of a held run lock with recorded pauses (RF-89, AC-79).
+
+    The held lock is another ``RunLock`` on the same directory; ``sleep`` is
+    replaced by a recorder, so no test really sleeps.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="mailquery-lock-retry-")
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name) / "home"
+        self.pauses_ms: list[int] = []
+
+    def _sleep(self, seconds: float) -> None:
+        self.pauses_ms.append(round(seconds * 1000))
+
+    def _hold(self) -> RunLock:
+        holder = RunLock(self.home)
+        holder.acquire()
+        self.addCleanup(holder.release)
+        return holder
+
+    def _count_attempts(self) -> mock.MagicMock:
+        patcher = mock.patch.object(state_module, "_lock_fd", wraps=state_module._lock_fd)
+        attempts = patcher.start()
+        self.addCleanup(patcher.stop)
+        return attempts
+
+    def _exhaust(self, config: LockConfig) -> tuple[RunLock, MailqueryError, int]:
+        self._hold()
+        attempts = self._count_attempts()
+        waiter = RunLock(self.home, config, sleep=self._sleep)
+        with self.assertRaises(MailqueryError) as caught:
+            waiter.acquire()
+        return waiter, caught.exception, attempts.call_count
+
+    def test_ut_st_08_01_free_lock_is_taken_at_once(self) -> None:
+        """UT-ST-08.01: A free lock is taken on the first attempt without sleeping."""
+        attempts = self._count_attempts()
+        lock = RunLock(self.home, LockConfig(), sleep=self._sleep)
+        lock.acquire()
+        self.addCleanup(lock.release)
+        self.assertEqual(attempts.call_count, 1)
+        self.assertEqual(self.pauses_ms, [])
+
+    def test_ut_st_08_02_default_config_retries_five_times_then_e_locked(self) -> None:
+        """UT-ST-08.02: Defaults give six attempts, doubling pauses and the exhausted hint."""
+        waiter, error, attempts = self._exhaust(LockConfig())
+        self.assertEqual(attempts, 6)
+        self.assertEqual(self.pauses_ms, [150, 300, 600, 1200, 2400])
+        self.assertEqual(error.code, "E_LOCKED")
+        self.assertEqual(error.exit_code, 5)
+        self.assertEqual(error.message, _LOCKED_MESSAGE)
+        self.assertEqual(error.hint, _EXHAUSTED_HINT.format(retries=5, path=waiter.path))
+
+    def test_ut_st_08_03_pauses_are_capped_at_5000_ms(self) -> None:
+        """UT-ST-08.03: 1000 ms growing by 3 gives 1000, 3000 and the 5000 ms cap."""
+        _, error, attempts = self._exhaust(
+            LockConfig(retries=3, initial_delay_ms=1000, backoff_factor=3)
+        )
+        self.assertEqual(attempts, 4)
+        self.assertEqual(self.pauses_ms, [1000, 3000, 5000])
+        self.assertEqual(error.code, "E_LOCKED")
+
+    def test_ut_st_08_04_decimal_backoff_factor(self) -> None:
+        """UT-ST-08.04: 100 ms growing by 1.5 gives 100, 150 and 225 ms."""
+        waiter, error, attempts = self._exhaust(
+            LockConfig(retries=3, initial_delay_ms=100, backoff_factor=1.5)
+        )
+        self.assertEqual(attempts, 4)
+        self.assertEqual(self.pauses_ms, [100, 150, 225])
+        self.assertEqual(error.hint, _EXHAUSTED_HINT.format(retries=3, path=waiter.path))
+
+    def test_ut_st_08_05_zero_retries_or_no_retry_make_a_single_attempt(self) -> None:
+        """UT-ST-08.05: retries = 0 and a lock without retry try once, without pausing."""
+        self._hold()
+        attempts = self._count_attempts()
+        for label, waiter in (
+            ("retries = 0", RunLock(self.home, LockConfig(retries=0), sleep=self._sleep)),
+            ("no retry", RunLock(self.home, sleep=self._sleep)),
+        ):
+            with self.subTest(label):
+                attempts.reset_mock()
+                with self.assertRaises(MailqueryError) as caught:
+                    waiter.acquire()
+                self.assertEqual(attempts.call_count, 1)
+                self.assertEqual(self.pauses_ms, [])
+                self.assertEqual(caught.exception.code, "E_LOCKED")
+                self.assertEqual(caught.exception.exit_code, 5)
+                self.assertEqual(caught.exception.message, _LOCKED_MESSAGE)
+                self.assertEqual(caught.exception.hint, _NO_RETRY_HINT)
+
+    def test_ut_st_08_06_lock_released_during_second_pause_is_taken_next(self) -> None:
+        """UT-ST-08.06: A lock freed during the second pause is taken on the next attempt."""
+        holder = self._hold()
+        attempts = self._count_attempts()
+
+        def sleep(seconds: float) -> None:
+            self._sleep(seconds)
+            if len(self.pauses_ms) == 2:
+                holder.release()
+
+        lock = RunLock(self.home, LockConfig(), sleep=sleep)
+        lock.acquire()
+        self.addCleanup(lock.release)
+        self.assertEqual(attempts.call_count, 3)
+        self.assertEqual(self.pauses_ms, [150, 300])
+
+    def test_ut_st_08_07_unopenable_lock_file_is_permission_error_without_pause(self) -> None:
+        """UT-ST-08.07: A lock file that cannot be opened gives E_PERMISSION at once."""
+        RunLock(self.home).path.mkdir(parents=True)
+        lock = RunLock(self.home, LockConfig(), sleep=self._sleep)
+        with self.assertRaises(MailqueryError) as caught:
+            lock.acquire()
+        self.assertEqual(caught.exception.code, "E_PERMISSION")
+        self.assertEqual(self.pauses_ms, [])
+
+    def test_ut_st_08_08_interrupted_pause_leaves_the_lock_free(self) -> None:
+        """UT-ST-08.08: An interrupted pause propagates, closes the descriptor and holds nothing."""
+        holder = self._hold()
+        opened: list[int] = []
+        real_open = os.open
+
+        def recording_open(*args: object, **kwargs: object) -> int:
+            fd = real_open(*args, **kwargs)
+            opened.append(fd)
+            return fd
+
+        def interrupt(seconds: float) -> None:
+            raise KeyboardInterrupt
+
+        lock = RunLock(self.home, LockConfig(), sleep=interrupt)
+        with mock.patch.object(state_module.os, "open", side_effect=recording_open):
+            with self.assertRaises(KeyboardInterrupt):
+                lock.acquire()
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
+        holder.release()
+        other = RunLock(self.home)
+        other.acquire()
+        other.release()
+
+    def test_ut_st_08_09_pauses_are_truncated_to_whole_milliseconds(self) -> None:
+        """UT-ST-08.09: 10 ms growing by 1.25 gives 10, 12 and 15 ms (truncated)."""
+        _, error, attempts = self._exhaust(
+            LockConfig(retries=3, initial_delay_ms=10, backoff_factor=1.25)
+        )
+        self.assertEqual(attempts, 4)
+        self.assertEqual(self.pauses_ms, [10, 12, 15])
+        self.assertEqual(error.code, "E_LOCKED")
 
 
 class PeekThroughRunNewTest(unittest.TestCase):

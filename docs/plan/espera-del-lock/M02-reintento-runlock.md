@@ -56,7 +56,7 @@ En `src/mailquery/state.py`, commit `a1e0977`; si la línea se movió, búscala 
 | Fase | Tareas | Estado |
 |---|---|---|
 | 1 | Refactorización previa, con UT-ST-01 verde | 🟢 |
-| 2 | Tests del grupo UT-ST-08, en rojo | ⚪ |
+| 2 | Tests del grupo UT-ST-08, en rojo | 🟢 |
 | 3 | Reintentos, pausas, `hint` e interrupción | ⚪ |
 | 4 | Gates, datos crudos de evidencia y propuestas | ⚪ |
 
@@ -110,3 +110,4 @@ Los de la sección "Evidencia cruda" de `REGLAS.md`, más: el texto exacto de lo
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-24 | 1 | `acquire` separa la apertura (`_open_fd`) del intento (`_try_lock`); `-k ut_st_01`: 7 tests, OK. |
+| 2026-11-24 | 2 | `RunLockRetryTest` con los 9 casos de UT-ST-08; `-k ut_st_08`: 9 errores (`RunLock` aún no acepta `retry` ni `sleep`). |
