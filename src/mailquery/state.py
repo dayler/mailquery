@@ -376,6 +376,20 @@ class RunLock:
         """Acquire the lock or raise E_LOCKED (exit 5)."""
         if self._fd is not None:
             return
+        fd = self._open_fd()
+        failure = self._try_lock(fd)
+        if failure is not None:
+            os.close(fd)
+            raise MailqueryError(
+                "E_LOCKED",
+                "another mailquery run is already in progress",
+                "wait for the running invocation to finish and retry "
+                "(the harness should only retry exit code 5)",
+            ) from failure
+        self._fd = fd
+
+    def _open_fd(self) -> int:
+        """Create and open the lock file (0600 in a 0700 directory); raise E_PERMISSION."""
         path = self.path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -392,17 +406,16 @@ class RunLock:
             os.chmod(path, 0o600)
         except OSError:  # pragma: no cover - best effort on foreign filesystems
             pass
+        return fd
+
+    @staticmethod
+    def _try_lock(fd: int) -> OSError | None:
+        """Make one non-blocking attempt on ``fd``; return the error when the lock is held."""
         try:
             _lock_fd(fd)
         except OSError as exc:
-            os.close(fd)
-            raise MailqueryError(
-                "E_LOCKED",
-                "another mailquery run is already in progress",
-                "wait for the running invocation to finish and retry "
-                "(the harness should only retry exit code 5)",
-            ) from exc
-        self._fd = fd
+            return exc
+        return None
 
     def release(self) -> None:
         fd = self._fd
