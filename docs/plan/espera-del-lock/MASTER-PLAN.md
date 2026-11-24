@@ -7,7 +7,7 @@
 ## Validación
 
 - **Veredicto del plan:** listo (2026-11-24, 1 revisión)
-- **Aprobación:** no aprobado
+- **Aprobación:** aprobado por Ariel Salazar Hinojosa (2026-11-24)
 - **Veredicto de la implementación:** sin verificar (fecha —, revisiones —)
 
 ## Preguntas sin resolver
