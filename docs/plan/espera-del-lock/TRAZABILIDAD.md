@@ -7,9 +7,9 @@
 | AC-79 | Lock retenido 2 s sin `[lock]`: `search` exit 0 con la salida de una ejecución sin espera | M03 | UT-CLI-15.01 | ⚪ |
 | AC-79 | La misma llamada por MCP: `isError: false`, una sola ejecución | M03 | UT-MCP-13.01 | ⚪ |
 | AC-79 | `retries = 2`, 100 ms, lock 3 s: `E_LOCKED` entre 300 ms y 2 s, con `message` y `hint` | M03 | UT-CLI-15.02 | ⚪ |
-| AC-79 | `retries = 0`: `E_LOCKED` sin esperar, `hint` de "Sin reintentos" | M02, M03 | UT-ST-08.05, UT-CLI-15.03 | ⚪ |
-| AC-79 | Pausas simuladas: por defecto, factor 3 con tope y factor 1.5 | M02 | UT-ST-08.02, .03, .04 | ⚪ |
-| AC-79 | Archivo del lock que no se abre: `E_PERMISSION` sin esperar | M02, M03 | UT-ST-08.07, UT-CLI-15.09 | ⚪ |
+| AC-79 | `retries = 0`: `E_LOCKED` sin esperar, `hint` de "Sin reintentos" | M02, M03 | UT-ST-08.05, UT-CLI-15.03 | 🟡 |
+| AC-79 | Pausas simuladas: por defecto, factor 3 con tope y factor 1.5 | M02 | UT-ST-08.02, .03, .04 | 🟢 |
+| AC-79 | Archivo del lock que no se abre: `E_PERMISSION` sin esperar | M02, M03 | UT-ST-08.07, UT-CLI-15.09 | 🟡 |
 | AC-79 | `doctor` con el lock retenido responde sin esperar | M03 | UT-CLI-15.06 | ⚪ |
 | AC-79 | Dos `new` a la vez: los dos exit 0, cada mensaje en uno solo | M03 | UT-CLI-15.08 | ⚪ |
 | AC-80 | Valores límite aceptados | M01 | UT-CFG-07.02 | 🟢 |
