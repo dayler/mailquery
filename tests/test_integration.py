@@ -2322,7 +2322,9 @@ class LockRetryDocumentationTest(_DocumentationCase):
         for path in (README_EN, README_ES):
             text = _read(path)
             with self.subTest(document=path.name):
-                self.assertTrue("`[content]`, `[lock]`" in text, "[lock] missing after [content]")
+                self.assertTrue(
+                    "`[content]`, `[lock]`" in _normalized(text), "[lock] missing after [content]"
+                )
                 block = _lock_toml_block(text)
                 parsed = tomllib.loads(block)
                 self.assertEqual(set(parsed), {"lock"})

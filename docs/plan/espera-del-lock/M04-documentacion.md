@@ -62,7 +62,7 @@ Ninguna.
 | Fase | Tareas | Estado |
 |---|---|---|
 | 1 | Tests del grupo DOC-19, en rojo | 🟢 |
-| 2 | `README.md` y `README.es.md` | ⚪ |
+| 2 | `README.md` y `README.es.md` | 🟢 |
 | 3 | `docs/config.example.toml`, `docs/INTERFACES.md` y `docs/security/threat-model.md` | ⚪ |
 | 4 | Búsqueda de textos obsoletos, gates, datos crudos de evidencia y propuestas | ⚪ |
 
@@ -114,3 +114,4 @@ Los de la sección "Evidencia cruda" de `REGLAS.md` (cobertura: "no aplica", no 
 | Fecha | Fase | Nota |
 |---|---|---|
 | 2026-11-24 | 1 | DOC-19.01 a .03 añadidos y DOC-06.02 admite `lock`; los tres de DOC-19 fallan como se espera y DOC-06.02 pasa. |
+| 2026-11-24 | 2 | Sección `[lock]` en los dos README, `[lock]` en la lista de secciones, `E_LOCKED` como reintentos agotados en la tabla de códigos de salida y en la de problemas típicos, línea `Lock:` nombrada en `--help`. DOC-19.01 pasa solo; DOC-19.01 compara la lista de secciones con los espacios normalizados. |
