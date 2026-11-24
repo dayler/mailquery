@@ -90,6 +90,18 @@ def _session_text(text: str, runner=None):
     return code, replies, raw
 
 
+def _session_bytes(data: bytes, runner=None):
+    """Serve raw protocol bytes through a strict UTF-8 text stream."""
+    stdin = io.TextIOWrapper(
+        io.BytesIO(data), encoding="utf-8", errors="strict", newline=""
+    )
+    stdout = io.StringIO()
+    code = serve(stdin, stdout, runner=runner or RecordingRunner())
+    raw = stdout.getvalue()
+    replies = [json.loads(line) for line in raw.splitlines()] if raw else []
+    return code, replies, raw
+
+
 def _session(messages, runner=None):
     text = "".join(json.dumps(message) + "\n" for message in messages)
     return _session_text(text, runner)
@@ -140,8 +152,8 @@ class TransportTests(_ServerCase):
 
     def test_ut_mcp_01_02_crlf_line_is_handled_like_lf(self) -> None:
         """UT-MCP-01.02: a CRLF-terminated line is handled like an LF one."""
-        message = json.dumps(_request(2, "ping")) + "\r\n"
-        code, replies, _ = _session_text(message)
+        message = (json.dumps(_request(2, "ping")) + "\r\n").encode("utf-8")
+        code, replies, _ = _session_bytes(message)
         self.assertEqual(code, 0)
         self.assertEqual(replies[0]["id"], 2)
 
@@ -150,14 +162,13 @@ class TransportTests(_ServerCase):
         _, replies, _ = _session_text("not json\n")
         self.assertEqual(replies[0]["error"]["code"], -32700)
         self.assertIsNone(replies[0]["id"])
-        raw = io.BytesIO(b"\xff\n")
-        stdin = io.TextIOWrapper(raw, encoding="utf-8", errors="strict", newline="")
-        stdout = io.StringIO()
-        code = serve(stdin, stdout, runner=RecordingRunner())
-        reply = json.loads(stdout.getvalue().splitlines()[0])
+        data = b"\xff\n" + (json.dumps(_request(2, "ping")) + "\n").encode("utf-8")
+        code, replies, _ = _session_bytes(data)
         self.assertEqual(code, 0)
-        self.assertEqual(reply["error"]["code"], -32700)
-        self.assertIsNone(reply["id"])
+        self.assertEqual(len(replies), 2)
+        self.assertEqual(replies[0]["error"]["code"], -32700)
+        self.assertIsNone(replies[0]["id"])
+        self.assertEqual(replies[1]["id"], 2)
 
     def test_ut_mcp_01_04_request_without_method_and_empty_batch(self) -> None:
         """UT-MCP-01.04: a request without method and an empty array ⇒ -32600."""
@@ -288,16 +299,27 @@ class ToolDefinitionTests(_ServerCase):
         choices = next(
             action.choices for action in subparsers if isinstance(action, argparse._SubParsersAction)
         )
+        root_log_level = next(action for action in subparsers if action.dest == "log_level")
         for tool, definition in self.defs.items():
             self.assertEqual(definition["description"], choices[tool].description)
             for name, schema in definition["inputSchema"]["properties"].items():
-                if name in ("log_level", "uid"):
+                if name == "log_level":
+                    self.assertEqual(schema["description"], root_log_level.help or "")
+                    continue
+                if name == "uid":
                     continue
                 option = f"--{name.replace('_', '-')}"
                 action = next(
                     action for action in choices[tool]._actions if option in action.option_strings
                 )
                 self.assertEqual(schema["description"], action.help or "")
+        uid_action = next(
+            action for action in choices["show"]._actions if action.dest == "uid"
+        )
+        self.assertEqual(
+            self.defs["show"]["inputSchema"]["properties"]["uid"]["description"],
+            uid_action.help or "",
+        )
 
     def test_ut_mcp_03_03_option_names_use_underscores(self) -> None:
         """UT-MCP-03.03: long options become parameters without dashes."""
@@ -403,6 +425,9 @@ class ArgumentTests(_ServerCase):
         self.assertEqual(
             build_argv("search", {"subject": ["-invoice"]}), ["search", "--subject=-invoice"]
         )
+        runner = RecordingRunner()
+        _session([_call("search", {"subject": ["-invoice"]})], runner)
+        self.assertEqual(runner.calls[0][4:], ["search", "--subject=-invoice"])
 
     def test_ut_mcp_04_08_attachment_index_and_uid(self) -> None:
         """UT-MCP-04.08: attachment index becomes --index and uid goes last."""
@@ -444,14 +469,16 @@ class ResultTests(_ServerCase):
                 self.assertTrue(replies[0]["result"]["isError"])
 
     def test_ut_mcp_05_04_launch_failure_is_internal(self) -> None:
-        """UT-MCP-05.04: a child that cannot be launched ⇒ E_INTERNAL."""
+        """UT-MCP-05.04: a child that cannot be launched ⇒ E_INTERNAL and event=call."""
         class FailingRunner:
             def run(self, argv):
                 raise OSError("cannot launch")
 
-        _, replies, _ = _session([_call("search", {})], FailingRunner())
+        with self.assertLogs("mailquery.mcp", level="INFO") as captured:
+            _, replies, _ = _session([_call("search", {})], FailingRunner())
         self.assertEqual(_tool_json(replies[0])["error"]["code"], "E_INTERNAL")
         self.assertTrue(replies[0]["result"]["isError"])
+        self.assertTrue(any("event=call tool=search" in line for line in captured.output))
 
     def test_ut_mcp_05_05_next_call_succeeds_after_internal(self) -> None:
         """UT-MCP-05.05: after an E_INTERNAL the next call is served normally."""
@@ -535,24 +562,36 @@ class ValidationTests(_ServerCase):
                 self.assertEqual(runner.calls, [])
 
     def test_ut_mcp_06_04_show_native_id_is_rejected(self) -> None:
-        """UT-MCP-06.04: show with show_native_id ⇒ E_USAGE."""
-        _, replies, _ = _session([_call("show", {"uid": "apple_mail:1", "show_native_id": True})])
+        """UT-MCP-06.04: show with show_native_id ⇒ E_USAGE without a child."""
+        runner = RecordingRunner()
+        _, replies, _ = _session(
+            [_call("show", {"uid": "apple_mail:1", "show_native_id": True})], runner
+        )
         self.assertEqual(_tool_json(replies[0])["error"]["code"], "E_USAGE")
+        self.assertEqual(runner.calls, [])
 
     def test_ut_mcp_06_05_nul_character_is_rejected(self) -> None:
-        """UT-MCP-06.05: a value with NUL ⇒ E_USAGE."""
-        _, replies, _ = _session([_call("search", {"since": "1w\x00"})])
+        """UT-MCP-06.05: a value with NUL ⇒ E_USAGE without a child."""
+        runner = RecordingRunner()
+        _, replies, _ = _session([_call("search", {"since": "1w\x00"})], runner)
         self.assertEqual(_tool_json(replies[0])["error"]["code"], "E_USAGE")
+        self.assertEqual(runner.calls, [])
 
     def test_ut_mcp_06_06_argv_over_the_platform_limit_is_rejected(self) -> None:
         """UT-MCP-06.06: an argv above the platform limit ⇒ E_USAGE without a child."""
-        runner = RecordingRunner()
         limit = 32_767 if sys.platform == "win32" else mcp_server._arg_max()
-        _, replies, _ = _session([_call("search", {"since": "x" * (limit + 1_000_000)})], runner)
-        payload = _tool_json(replies[0])
-        self.assertEqual(payload["error"]["code"], "E_USAGE")
-        self.assertIn("since", payload["error"]["hint"])
-        self.assertEqual(runner.calls, [])
+        cases = (
+            ("search", {"since": "x" * (limit + 1_000_000)}),
+            ("show", {"uid": "u" * (limit + 1_000_000)}),
+        )
+        for tool, arguments in cases:
+            with self.subTest(tool=tool):
+                runner = RecordingRunner()
+                _, replies, _ = _session([_call(tool, arguments)], runner)
+                payload = _tool_json(replies[0])
+                self.assertEqual(payload["error"]["code"], "E_USAGE")
+                self.assertIn("uid" if tool == "show" else "since", payload["error"]["hint"])
+                self.assertEqual(runner.calls, [])
 
     def test_ut_mcp_06_07_unknown_tool_is_32602(self) -> None:
         """UT-MCP-06.07: tools/call with an unknown tool ⇒ JSON-RPC -32602."""

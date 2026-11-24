@@ -1930,8 +1930,8 @@ class _DocumentationCase(unittest.TestCase):
 
 
 class ReadmeDocumentationTest(_DocumentationCase):
-    def test_doc_01_01_six_commands_without_five_commands(self) -> None:
-        """DOC-01.01: README lists the six commands and no five-command wording."""
+    def test_doc_01_01_seven_commands_without_five_commands(self) -> None:
+        """DOC-01.01: README lists the seven commands and no five-command wording."""
         text = _read(README_EN)
         for command in COMMANDS:
             with self.subTest(command=command):
@@ -2098,7 +2098,7 @@ class DocumentationCoherenceTest(_DocumentationCase):
 
 class SkillDocumentationTest(_DocumentationCase):
     def test_doc_04_01_skill_documents_the_new_contract(self) -> None:
-        """DOC-04.01: SKILL has six commands, string uid, show.attachments and the new errors."""
+        """DOC-04.01: SKILL has seven commands, string uid, show.attachments and the new errors."""
         text = _read(SKILL_FILE)
         for command in COMMANDS:
             with self.subTest(command=command):
@@ -2135,8 +2135,8 @@ class SkillDocumentationTest(_DocumentationCase):
 
 
 class HelpDocumentationTest(_DocumentationCase):
-    def test_doc_05_01_root_help_lists_six_commands_and_the_exit_line(self) -> None:
-        """DOC-05.01: the root help lists the six commands and the PRD §12.7 exit line."""
+    def test_doc_05_01_root_help_lists_seven_commands_and_the_exit_line(self) -> None:
+        """DOC-05.01: the root help lists the seven commands and the PRD §12.7 exit line."""
         text = _all_help_texts()["mailquery"]
         self.assertIn("Commands:", text)
         for command in COMMANDS:

@@ -1212,12 +1212,17 @@ class SmokeMcpTest(unittest.TestCase):
         )
 
     def test_smoke_mcp_06_plugin_next_to_the_native_driver(self) -> None:
-        """SMOKE-MCP.06: a plugin next to the native driver and a failing plugin."""
+        """SMOKE-MCP.06: a working plugin next to the native driver and a failing plugin."""
         plugin_root = Path(tempfile.mkdtemp(prefix="mq-smoke-plugin-"))
         self.addCleanup(shutil.rmtree, plugin_root, ignore_errors=True)
         module = plugin_root / "mq_smoke_plugin.py"
         module.write_text(
-            "from tests.fakes.plugin import FakePluginBackend\n"
+            "from tests.fakes.plugin import DEFAULT_ROWS, FakePluginBackend\n"
+            "class WorkingPlugin(FakePluginBackend):\n"
+            "    def __init__(self, *args, **kwargs):\n"
+            "        row = dict(DEFAULT_ROWS[0])\n"
+            "        row['date_received'] = row['date_sent'] = 4102444800.0\n"
+            "        super().__init__(*args, rows=[row], **kwargs)\n"
             "class FailingPlugin(FakePluginBackend):\n"
             "    def query(self, *args, **kwargs):\n"
             "        raise RuntimeError('smoke plugin failure')\n",
@@ -1228,24 +1233,55 @@ class SmokeMcpTest(unittest.TestCase):
         (dist_info / "METADATA").write_text(
             "Metadata-Version: 2.1\nName: graph\nVersion: 0.1.0\n", encoding="utf-8"
         )
-        (dist_info / "entry_points.txt").write_text(
-            "[mailquery.backends]\ngraph = mq_smoke_plugin:FailingPlugin\n",
-            encoding="utf-8",
-        )
+        entry_points = dist_info / "entry_points.txt"
         env = dict(self.env)
         env["PYTHONPATH"] = os.pathsep.join([str(ROOT), str(plugin_root)])
+        cfg = self.home / ".mailquery" / "config.toml"
+        original = cfg.read_text(encoding="utf-8")
+        self.addCleanup(cfg.write_text, original, encoding="utf-8")
+        scope = '[scope."graph:Graph (user@example.com)"]\n'
+
+        entry_points.write_text(
+            "[mailquery.backends]\ngraph = mq_smoke_plugin:WorkingPlugin\n",
+            encoding="utf-8",
+        )
+        cfg.write_text(original + scope, encoding="utf-8")
         client = _McpClient(self.exe, env, self.tmp)
         self.addCleanup(lambda: client.proc.poll() is None and client.close())
         client.initialize()
         self.assertEqual(len(client.request("tools/list")["result"]["tools"]), 6)
-        cfg = self.home / ".mailquery" / "config.toml"
-        original = cfg.read_text(encoding="utf-8")
-        self.addCleanup(cfg.write_text, original, encoding="utf-8")
-        cfg.write_text(original + '[scope."graph:smoke"]\n', encoding="utf-8")
+        mailboxes = _tool_payload(
+            client.call("mailboxes", {"fields": ["url", "total", "unread"]})
+        )
+        self.assertTrue(mailboxes["ok"], mailboxes)
+        labels = {account["label"] for account in mailboxes["accounts"]}
+        self.assertIn("Graph (user@example.com)", labels)
+        self.assertIn(self.first_account, labels)
+        plugin_account = next(
+            account
+            for account in mailboxes["accounts"]
+            if account["label"] == "Graph (user@example.com)"
+        )
+        self.assertEqual(plugin_account["mailboxes"][0]["total"], 1)
+        self.assertEqual(plugin_account["mailboxes"][0]["unread"], 1)
+        search = _tool_payload(client.call("search", {"since": "1w", "limit": 50}))
+        self.assertTrue(search["ok"], search)
+        self.assertIn("Plugin message", {message["subject"] for message in search["messages"]})
+        client.close()
+        cfg.write_text(original, encoding="utf-8")
+
+        entry_points.write_text(
+            "[mailquery.backends]\ngraph = mq_smoke_plugin:FailingPlugin\n",
+            encoding="utf-8",
+        )
+        cfg.write_text(original + scope, encoding="utf-8")
+        client = _McpClient(self.exe, env, self.tmp)
+        self.addCleanup(lambda: client.proc.poll() is None and client.close())
+        client.initialize()
         reply = client.call("search", {"since": "1w"})
-        if reply.get("result", {}).get("isError"):
-            payload = _tool_payload(reply)
-            self.assertIn(payload["error"]["code"], ("E_PLUGIN_FAILED", "E_CONFIG_ACCOUNT_UNKNOWN"))
+        self.assertTrue(reply.get("result", {}).get("isError"), reply)
+        payload = _tool_payload(reply)
+        self.assertEqual(payload["error"]["code"], "E_PLUGIN_FAILED")
         client.close()
 
     def test_smoke_mcp_07_unread_counters_do_not_change(self) -> None:
