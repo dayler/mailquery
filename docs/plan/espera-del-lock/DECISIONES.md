@@ -13,7 +13,7 @@ Ninguna.
 - **D-04.** El workflow de CI no cambia: ya corre solo en PR y en push a `develop`, con cancelación de corridas y tiempo límite.
 - **D-05.** `sleep` recibe segundos, como `time.sleep`; los tests comparan las pausas en milisegundos enteros.
 - **D-06.** En los `hint` de sección o clave de primer nivel desconocida, `[lock]` va después de `[content]`.
-- **D-07.** Las pruebas del AC-x1 con otro proceso reteniendo el lock usan un subproceso de Python que toma `RunLock` y duerme; las de pausas simuladas sustituyen `sleep`.
+- **D-07.** Las pruebas del AC-79 con otro proceso reteniendo el lock usan un subproceso de Python que toma `RunLock` y duerme; las de pausas simuladas sustituyen `sleep`.
 - **D-08.** Forma de los `hint` de un valor inválido de `[lock]`: fuera de rango, `valid range: <mín>..<máx>`; de otro tipo, `set <clave> to an integer between <mín> and <máx>` (para `backoff_factor`, `a number`). Es la forma del resto del esquema; los textos de `_parse_int` no cambian.
 - **D-09.** "Sin decimales" es truncar la pausa en milisegundos (respuesta del dueño).
 - **D-10.** Las pruebas que necesitan un `search` o un `new` con éxito en otro proceso usan el mecanismo de `_LAUNCHER` de `tests/test_cli.py`; la de MCP usa el servidor en proceso con un runner que cuenta las ejecuciones, porque el proceso hijo del servidor real no tiene acceso al fixture.

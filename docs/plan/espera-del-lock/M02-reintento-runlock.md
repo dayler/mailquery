@@ -4,7 +4,7 @@
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m02`, creada desde el tip de la rama del lote.
 - **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
 - **Depende de:** M01 (`mailquery.config.LockConfig`, ya integrado en la rama del lote). **Lo usan:** M03. Corre en paralelo con M04.
-- **ACs:** AC-x1, las partes de pausas simuladas, `retries = 0` y `E_PERMISSION`, a nivel de `RunLock`.
+- **ACs:** AC-79, las partes de pausas simuladas, `retries = 0` y `E_PERMISSION`, a nivel de `RunLock`.
 
 ## Objetivo
 
@@ -27,11 +27,11 @@
 
 ## Especificación
 
-Rangos de `docs/changes/espera-del-lock.md` en el commit `<commit de referencia>` (encabezado y líneas):
+Rangos de `docs/changes/espera-del-lock.md` en el commit `e3670c7` (encabezado y líneas):
 
 - "Requerimientos", condiciones "Tope por pausa" (81) y "Primer intento" a "Orden" (86-93).
 - "Interfaz de los módulos": 113-117.
-- "Criterios de aceptación", AC-x1: 132.
+- "Criterios de aceptación", AC-79: 132.
 
 ## Puntos de entrada en el código
 
@@ -62,7 +62,7 @@ En `src/mailquery/state.py`, commit `a1e0977`; si la línea se movió, búscala 
 
 ## Tests
 
-Grupo nuevo `UT-ST-08 — Reintento del lock` en `tests/test_state.py` (Requisitos: RF-x1, AC-x1); definición en `docs/tests/state-backends.md`, detrás del último grupo UT-ST. El lock ocupado se consigue con otro `RunLock` sobre el mismo directorio; las pausas, con un `sleep` sustituido que las registra.
+Grupo nuevo `UT-ST-08 — Reintento del lock` en `tests/test_state.py` (Requisitos: RF-89, AC-79); definición en `docs/tests/state-backends.md`, detrás del último grupo UT-ST. El lock ocupado se consigue con otro `RunLock` sobre el mismo directorio; las pausas, con un `sleep` sustituido que las registra.
 
 - **.01 P.** Lock libre: se toma en el primer intento y `sleep` no se llama.
 - **.02 N.** Lock siempre ocupado y `LockConfig` por defecto: seis intentos, pausas de 150, 300, 600, 1200 y 2400 ms, y `E_LOCKED` con el `message` y el `hint` de reintentos agotados que fija la unidad, comparados literalmente con `5` y la ruta del lock.
