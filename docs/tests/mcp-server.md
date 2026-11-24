@@ -10,7 +10,7 @@ Requisitos: RF-84, AC-71 · Archivo: `tests/test_mcp_server.py`
 |---|---|---|
 | .01 | P | Cada respuesta es un único objeto JSON-RPC 2.0 en una línea UTF-8 terminada en `\n`; nada más llega a stdout. |
 | .02 | P | Una línea terminada en `\r\n` se atiende igual que la misma línea terminada en `\n`. |
-| .03 | N | Una línea que no es JSON, o que no es UTF-8 válido ⇒ error `-32700` con `id` `null`. |
+| .03 | N | Una línea que no es JSON, o que no es UTF-8 válido ⇒ error `-32700` con `id` `null`; la sesión sigue atendiendo la línea siguiente. |
 | .04 | N | Una petición sin `method` ⇒ `-32600`; un array vacío ⇒ `-32600` con `id` `null`. |
 | .05 | N | Un método desconocido ⇒ `-32601` con el `id` de la petición. |
 | .06 | P | Un lote con dos peticiones ⇒ un array con sus dos respuestas en orden; un lote solo de notificaciones ⇒ ninguna respuesta; un elemento que no es objeto ⇒ `-32600` dentro del array. |
@@ -95,7 +95,7 @@ Requisitos: RF-86, AC-73 · Archivo: `tests/test_mcp_server.py`
 | .03 | N | `show` o `attachment` sin `uid` ⇒ el mismo resultado. |
 | .04 | N | `show` con `show_native_id` ⇒ el mismo resultado. |
 | .05 | N | Un valor con el carácter NUL ⇒ el mismo resultado. |
-| .06 | B | Un argv que supera el límite de longitud de la plataforma ⇒ el mismo resultado. |
+| .06 | B | Un argv que supera el límite de longitud de la plataforma ⇒ el mismo resultado, con el `hint` del parámetro más largo (también `uid`). |
 | .07 | N | `tools/call` con una herramienta que no está en `tools/list` ⇒ error JSON-RPC `-32602`. |
 | .08 | P | El JSON de `E_USAGE` tiene las claves, el orden y el formato del JSON de error de la CLI. |
 
