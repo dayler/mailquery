@@ -12,7 +12,7 @@ mailquery/
 ├── README.md, README.es.md         # inglés y español, mismo contenido: instalación, permisos, ejemplos, --help
 ├── CLAUDE.md                       # reglas del repositorio
 ├── LICENSE
-├── pyproject.toml                  # comando `mailquery`, dependencias (ADR-14, ADR-33) y entry points `mailquery.backends`
+├── pyproject.toml                  # comando `mailquery`, dependencias (ADR-14, ADR-33), entry points `mailquery.backends` y versión tomada de `__version__`
 ├── .github/workflows/tests.yml     # CI Linux/macOS/Windows
 ├── docs/
 │   ├── prd/                        # este documento, un archivo por sección (portada: 00-indice.md)

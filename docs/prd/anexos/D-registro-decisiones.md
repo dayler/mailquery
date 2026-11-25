@@ -82,4 +82,5 @@ tags: [prd]
 | **¿Dónde se configura el reintento del lock?** (2026-11-24) | Solo en `config.toml`, sin opción de la CLI ni parámetro de las herramientas MCP. Ninguna clave hace falta: lo que no se declara vale su valor por defecto. |
 | **¿Dónde se documentan los valores por defecto del reintento del lock?** (2026-11-24) | En la ayuda que corresponda, en los README y en la documentación pertinente. |
 | **¿La espera del lock va con el proceso hijo persistente del servidor MCP?** (2026-11-24) | No: es un cambio independiente. |
+| **¿Dónde se declara la versión del paquete?** (2026-11-25) | Solo en `mailquery.__version__`; `pyproject.toml` la toma como versión dinámica, y el PRD y los documentos no repiten el número de la pre-release. Subir la pre-release de una versión sin publicar cambia solo ese archivo. |
 

@@ -6,9 +6,9 @@ tags: [prd]
 # PRD — mailquery
 
 **Producto:** `mailquery` — CLI de solo lectura para leer y buscar el correo del cliente de escritorio local desde un harness de agentes (DeepSeek u otro similar): **Apple Mail en macOS** y **Outlook clásico en Windows**, ampliable con plugins de backend.
-**Versión del documento:** 2.7 (un solo PRD para todas las plataformas, en un archivo por sección; incorpora plugins de backend, la recuperación local de adjuntos, el endurecimiento del contenido no confiable, la corrección de defectos de adjuntos, la salida a medida, el id corto de mensaje en Outlook, el servidor MCP por stdio, el log en JSON y la espera del lock de ejecución).
-**Versión del paquete:** `3.0.0` (en `develop` se anuncia la pre-release `3.0.0a3`; sin publicar, §22.3).
-**Fecha:** 2026-11-24.
+**Versión del documento:** 2.8 (un solo PRD para todas las plataformas, en un archivo por sección; incorpora plugins de backend, la recuperación local de adjuntos, el endurecimiento del contenido no confiable, la corrección de defectos de adjuntos, la salida a medida, el id corto de mensaje en Outlook, el servidor MCP por stdio, el log en JSON, la espera del lock de ejecución y la versión del paquete en un solo archivo).
+**Versión del paquete:** `3.0.0` (en `develop` se anuncia una pre-release de `3.0.0`; sin publicar, §22.3).
+**Fecha:** 2026-11-25.
 **Repositorio:** <https://github.com/dayler/mailquery>.
 **Estado:** describe el producto implementado en `develop`; el paquete sigue sin publicar (§22.3). Las aprobaciones y las conciliaciones de cada versión están en [HISTORIAL.md](HISTORIAL.md).
 

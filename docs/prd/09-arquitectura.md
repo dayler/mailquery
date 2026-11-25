@@ -56,7 +56,7 @@ flowchart LR
 
 | Módulo | Responsabilidad | No debe |
 |--------|-----------------|---------|
-| `__init__.py` | Versión del paquete (`__version__`). | Importar backends. |
+| `__init__.py` | Versión del paquete (`__version__`), única declaración de su número. | Importar backends. |
 | `__main__.py` | Entrada `python -m mailquery` hacia `cli.main`. | — |
 | `cli.py` | Parsear argumentos (incl. `-h`), obtener el backend, despachar comandos (incluido `attachment`), mapear errores a códigos de salida. Opción `--strip-links` en `search`, `new` y `show`; textos de error saneados. Rechazar en `attachment` solo los drivers `attachments: "none"` (RF-48) y pasar al motor de adjuntos el tope de `[attachments].timeout_seconds` (RF-49). Opciones `--fields` (`search`, `new`, `show` y `mailboxes`), `--group-by` y `--count` (`search`) y su validación (RF-68–RF-71, RF-78); `doctor --failures` (RF-74); línea de `doctor` en la ayuda general (RF-75); sección `plugins` de `doctor`: llamar a `doctor_checks()` de cada plugin declarado y resolver sus bloques `[scope]`, también con `--failures` (RF-79, RF-74). Opción de depuración `--show-native-id` en `show` (RF-83). Despachar `mcp serve` hacia `mcp_server.py` con solo la tabla `[logging]` de la configuración y registrar sus eventos `start` y `end` (RF-84). | Contener SQL, COM ni parseo MIME; aceptar `--strip-links` en otros comandos; abrir red. |
 | `config.py` | Cargar y validar `~/.mailquery/config.toml`; resolver cuentas y carpetas permitidas contra la interfaz de backend, dentro del driver de cada bloque `[scope]`; validar `[attachments]` (incluido `timeout_seconds`, RF-49) y `[content]` (RF-63). | Leer el store ni crear configuración. |
