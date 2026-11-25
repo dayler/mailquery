@@ -60,10 +60,10 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Dobles de `RunLock` adaptados; suite verde sin cambios de `src/` | ⚪ |
-| 2 | Tests de UT-CLI-15 y UT-MCP-13, en rojo los que dependen de `cli.py` | ⚪ |
-| 3 | `_run_command`, chequeo `lock` de `doctor` y línea `Lock:` de la ayuda | ⚪ |
-| 4 | Gates, datos crudos de evidencia y propuestas | ⚪ |
+| 1 | Dobles de `RunLock` adaptados; suite verde sin cambios de `src/` | 🟢 |
+| 2 | Tests de UT-CLI-15 y UT-MCP-13, en rojo los que dependen de `cli.py` | 🟢 |
+| 3 | `_run_command`, chequeo `lock` de `doctor` y línea `Lock:` de la ayuda | 🟢 |
+| 4 | Gates, datos crudos de evidencia y propuestas | 🟢 |
 
 ## Tests
 
@@ -124,3 +124,7 @@ Los de la sección "Evidencia cruda" de `REGLAS.md`, más: los tiempos medidos e
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-24 | 1 | Dobles `_FakeLock`/`_BusyLock` aceptan `retry` y `sleep`; `test_lock_busy_against_a_real_flock_exits_5` declara `retries = 0`. |
+| 2026-11-24 | 2 | UT-CLI-15 (9) y UT-MCP-13 (2) escritos; sin el cambio de `cli.py`, 10 fallos (.01, .02, .04 ×5, .07, .08, MCP .01). |
+| 2026-11-24 | 3 | `_run_command` usa `RunLock(home_path, config.lock)`; `doctor` ya construía el lock sin `retry` (sin cambio); línea `Lock:` partida en dos por el ancho de 100 columnas (desviación propuesta). |
+| 2026-11-24 | 4 | Suite 1685 OK (8 saltos); grupos tres veces seguidos sin fallo; evidencia y propuestas en `work/`. |
