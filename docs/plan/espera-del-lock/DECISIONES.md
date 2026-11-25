@@ -35,3 +35,4 @@ Ninguna.
 - **2026-11-24. ¿Quién ejecuta la prueba manual y dónde queda el log?** "Yo en ambas plataformas; basta con mi confirmación, no es necesario copiar nada a evidencias." (D-02)
 - **2026-11-24. ¿Se aprueba partir en dos la línea `Lock:` de 103 columnas?** Aprobar las dos líneas. (D-12)
 - **2026-11-24. ¿Se aprueba que AC-79 excluya también `scan.duration_ms`?** Aprobar. (D-13)
+- **2026-11-24. ¿Pasó la prueba manual de dos sesiones en macOS y en Windows?** "Sí, pasó." (D-02, CL-11)
