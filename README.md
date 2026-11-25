@@ -302,7 +302,7 @@ must be quoted. A label that contains `:` must be declared with the explicit
 driver prefix, because the first `:` separates the driver. A `[scope]` block of
 a driver that is not installed fails with `E_DRIVER_UNKNOWN` (exit 2). All
 properties (`[logging]`, `[search]`, `[new]`, `[attachments]`, `[content]`,
-accounts) are in [`docs/config.example.toml`](docs/config.example.toml) and in
+`[lock]`, accounts) are in [`docs/config.example.toml`](docs/config.example.toml) and in
 PRD §15. Precedence: CLI flags, `config.toml`, defaults. The 1.x daily log
 rotation was replaced by `[logging].max_size_mb`; the retired key gives
 `E_CONFIG_INVALID` with the hint `retention_days was replaced by max_size_mb`.
@@ -368,6 +368,50 @@ punycode and URLs longer than 2,048 characters shortened to 256 characters plus
 command accepts it. An invalid value or an unknown key gives `E_CONFIG_INVALID`
 (exit 2) before the store is opened. Attachment names, warnings, error texts,
 addresses and identifiers are never transformed.
+
+### Run lock retry (`[lock]`)
+
+```toml
+[lock]
+retries = 5                    # 0..10; 0 = a single attempt (default 5)
+initial_delay_ms = 150         # 10..5000 (default 150)
+backoff_factor = 2             # 1..10, integer or decimal (default 2)
+```
+
+The section and its three keys are optional; a key that is not declared takes
+its default. The data commands (`search`, `new`, `show`, `attachment` and
+`mailboxes`) take the run lock under `~/.mailquery/locks/` before they touch
+the state; when the lock is free they take it without waiting. When another run
+holds it, the command retries up to `retries` times: before retry `n` it pauses
+`initial_delay_ms × backoff_factor^(n−1)` milliseconds, without decimals and
+never more than 5,000 ms (a fixed cap that is not configurable). With the
+defaults the pauses are 150, 300, 600, 1,200 and 2,400 ms, 4.65 s in total;
+with `backoff_factor = 1` every pause is the same. As soon as the command takes
+the lock it works as a run that did not wait, with the same output and exit
+code. Retries do not keep the arrival order: the first command that retries
+after the lock is released takes it.
+
+When the last retry fails the command gives `E_LOCKED` (exit 5) with the message
+`another mailquery run is already in progress` and the hint `still held after
+<R> retries: <path>; retry later ([lock] in ~/.mailquery/config.toml sets the
+retries)`. With `retries = 0` the command makes a single attempt and, if the
+lock is held, gives `E_LOCKED` with the hint `wait for the running invocation to
+finish and retry (the harness should only retry exit code 5)`. Failing to
+create or open the lock file still gives `E_PERMISSION` (exit 3), without
+retry. An error detected before taking the lock (usage, configuration, scope)
+arrives without waiting; one detected with the lock taken arrives after the
+retries, and if they run out the command gives `E_LOCKED` instead. A command
+interrupted during a pause ends without taking the lock and without reading or
+writing the state.
+
+A value out of range or of another type, or an unknown key inside `[lock]`,
+gives `E_CONFIG_INVALID` (exit 2) in the data commands, with the valid range or
+the allowed keys in the `hint`. The `lock` check of `doctor` makes a single
+attempt with any configuration and reports `available` or `held by another
+mailquery process`; an invalid `[lock]` shows up in the `config` check. An MCP
+call retries what its command retries and the server adds no wait of its own;
+`mcp serve` does not read `[lock]`, so it starts with an invalid section and
+each call then returns its command's `E_CONFIG_INVALID`.
 
 ## Commands
 
@@ -850,7 +894,8 @@ session and with the same integrity level as classic Outlook.
 ### `mailquery <command> --help`
 
 Each subcommand documents its own options; `mailquery --help` lists the seven
-commands and the exit code line below.
+commands, the `Lock:` line with the defaults of the run lock retry and the exit
+code line below.
 
 ## Body and warnings
 
@@ -960,7 +1005,7 @@ or blocked attachments | 5 busy or transient error | 6 mail client not running`.
 | 2 | Invalid usage, uid or configuration | `E_USAGE`, `E_CONFIG_INVALID`, `E_CONFIG_ACCOUNT_UNKNOWN`, `E_ACCOUNT_AMBIGUOUS`, `E_ACCOUNT_LABELS_UNAVAILABLE`, `E_ACCOUNT_NOT_IN_SCOPE`, `E_MAILBOX_NOT_FOUND`, `E_BAD_TIME`, `E_BAD_FILTER`, `E_DRIVER_UNKNOWN`, `E_ATTACHMENTS_DISABLED` |
 | 3 | Invalid environment or driver failure | `E_STORE_NOT_FOUND`, `E_SCHEMA_UNSUPPORTED`, `E_PERMISSION`, `E_STATE_CORRUPT`, `E_CLIENT_UNSUPPORTED`, `E_DEPENDENCY_MISSING`, `E_CLIENT_TIMEOUT`, `E_PLUGIN_INCOMPATIBLE`, `E_PLUGIN_FAILED`, `E_ATTACHMENT_UNAVAILABLE`, `E_ATTACHMENT_UNREADABLE`, `E_IO` |
 | 4 | Rejected query or blocked attachments | `E_UNBOUNDED_SCAN`, `E_SCAN_TOO_LARGE`, `E_ATTACHMENT_BLOCKED`, `E_ATTACHMENT_TOO_LARGE` |
-| 5 | Busy or transient | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` |
+| 5 | Busy or transient (`E_LOCKED`: the run lock is still held after the `[lock]` retries, or the native id cache is locked) | `E_LOCKED`, `E_DB_BUSY`, `E_CLIENT_BUSY` |
 | 6 | Mail client not available | `E_OUTLOOK_NOT_RUNNING` |
 
 ```text
@@ -1058,7 +1103,7 @@ recovered files.
 | `E_DEPENDENCY_MISSING` / `E_CLIENT_UNSUPPORTED` (3, Windows) | `pywin32` missing / not classic Outlook 16.0 | `pipx reinstall mailquery` / install classic Outlook |
 | `E_OUTLOOK_NOT_RUNNING` (6) | Outlook closed, or different session or integrity level | Open classic Outlook with the same user and without elevation; retry |
 | `E_CLIENT_TIMEOUT` (3) | A driver's metadata operation took more than 30 s (in Outlook, possibly a security prompt), a plugin call exceeded its hard timeout, or an attachment exceeded `[attachments].timeout_seconds` (60 s by default) | Check `mailquery doctor`; for a slow remote plugin raise `timeout_seconds` (10–600); do not retry in a loop |
-| `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store, lock (including the native id cache) or Outlook busy | Retry once after a pause; do not run concurrent invocations |
+| `E_DB_BUSY`, `E_LOCKED`, `E_CLIENT_BUSY` (5) | Store or Outlook busy, run lock still held after the `[lock]` retries (5 by default, 4.65 s in total), or native id cache locked | Retry once after a pause; with many concurrent invocations raise `[lock].retries` |
 | `E_STATE_CORRUPT` (3) | Damaged `state.json`, failed migration, or a cursor uid whose driver is not installed (only affects `new`) | Rename it (the next `new` run is a first run and emits the `lookback` window again) or reinstall the plugin |
 | `E_DRIVER_UNKNOWN` (2) | The driver prefix of a `[scope]` block or of the uid is not installed | `mailquery -v` lists installed drivers; `pipx inject mailquery <plugin-package>`; check the spelling `[a-z0-9_]{1,64}` |
 | `E_PLUGIN_INCOMPATIBLE` / `E_PLUGIN_FAILED` (3) | The plugin does not satisfy API 1 or failed at runtime | Reinstall/upgrade the plugin; `mailquery doctor` shows the `driver` detail |

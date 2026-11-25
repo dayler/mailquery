@@ -8,7 +8,7 @@
 
 - **Veredicto del plan:** listo (2026-11-24, 1 revisión)
 - **Aprobación:** aprobado por Ariel Salazar Hinojosa (2026-11-24)
-- **Veredicto de la implementación:** sin verificar (fecha —, revisiones —)
+- **Veredicto de la implementación:** verificado (2026-11-24, 1 revisión)
 
 ## Preguntas sin resolver
 
@@ -24,10 +24,10 @@ Ninguna.
 
 | Milestone | Estado | Depende de | ACs | Oleada | Lote | Unidad |
 |---|---|---|---|---|---|---|
-| [M01 — Sección `[lock]` de la configuración](M01-config-lock.md) | ⚪ | — | AC-80 (esquema) | 1 | 1 | contribuye |
-| [M02 — Reintento en `RunLock`](M02-reintento-runlock.md) | ⚪ | M01 | AC-79 (pausas, `retries = 0`, `E_PERMISSION`) | 2 | 1 | contribuye |
-| [M04 — Documentación](M04-documentacion.md) | ⚪ | M01 | — (documentos consumidores) | 2 | 1 | contribuye |
-| [M03 — Comandos, `doctor`, ayuda y MCP](M03-cli-mcp.md) | ⚪ | M01, M02 | AC-79, AC-80 | 3 | 1 | la completa |
+| [M01 — Sección `[lock]` de la configuración](M01-config-lock.md) | 🟢 | — | AC-80 (esquema) | 1 | 1 | contribuye |
+| [M02 — Reintento en `RunLock`](M02-reintento-runlock.md) | 🟢 | M01 | AC-79 (pausas, `retries = 0`, `E_PERMISSION`) | 2 | 1 | contribuye |
+| [M04 — Documentación](M04-documentacion.md) | 🟢 | M01 | — (documentos consumidores) | 2 | 1 | contribuye |
+| [M03 — Comandos, `doctor`, ayuda y MCP](M03-cli-mcp.md) | 🟢 | M01, M02 | AC-79, AC-80 | 3 | 1 | la completa |
 
 ## Dependencias y oleadas
 

@@ -25,7 +25,7 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito del [PRD]
 
 | Prefijo | Qué cubre | Archivo | Catálogo |
 |---|---|---|---|
-| UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` | [`cli-config.md`](cli-config.md) |
+| UT-OUT | Salida JSON, fechas y limpieza de contenido | `tests/test_output.py` | [`log-output.md`](log-output.md) |
 | UT-CNT | Primitivas de contenido no confiable: saneado, cuerpo visible, hojas `<style>`, modos de URL y señales de enlaces y del remitente | `tests/test_content.py` | [`content.md`](content.md) |
 | UT-BOD | Origen del cuerpo (HTML) y cabeceras del remitente en los backends | `tests/test_body_sources.py` | [`content.md`](content.md) |
 | UT-CW | Contenido no confiable en los comandos: campos saneados, filtros con A2, warnings y errores saneados, `content_notice`, modos de URL y `--strip-links`, señales de enlaces y del remitente, logs sin contenido, determinismo y reglas de seguridad documentadas | `tests/test_content_wiring.py` | [`content-wiring.md`](content-wiring.md) |
@@ -34,9 +34,9 @@ Qué verifica cada caso con ID de la suite de `tests/`, qué requisito del [PRD]
 | UT-MBX | Salida de `mailboxes` agrupada por cuenta, su `--fields` y el recuento diferido | `tests/test_mailboxes.py` | [`output-shape.md`](output-shape.md) |
 | UT-DR | `doctor --failures`, sección de plugins y diagnóstico sin *preflight* | `tests/test_doctor.py`, `tests/test_outlook.py` | [`doctor.md`](doctor.md) |
 | UT-CLI | Opciones, códigos de salida y `doctor` | `tests/test_cli.py` | [`cli-config.md`](cli-config.md) |
-| UT-SNI | `--show-native-id` en `show` | `tests/test_show_native_id.py` | [`cli-config.md`](cli-config.md) |
+| UT-SNI | `--show-native-id` en `show` | `tests/test_show_native_id.py` | [`log-output.md`](log-output.md) |
 | UT-CFG | Configuración | `tests/test_config.py`, `tests/test_cli.py` | [`cli-config.md`](cli-config.md) |
-| UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py`, `tests/test_outlook.py` | [`cli-config.md`](cli-config.md) |
+| UT-LOG | Log | `tests/test_logging.py`, `tests/test_cli.py`, `tests/test_outlook.py` | [`log-output.md`](log-output.md) |
 | UT-INS | Instalador de Windows | `tests/test_install_scripts.py` | [`cli-config.md`](cli-config.md) |
 | UT-ST | `state.json`, lock y migración | `tests/test_state.py`, `tests/test_cli.py` | [`state-backends.md`](state-backends.md) |
 | UT-SR | `search`, `new`, `show` y `mailboxes` sobre Apple Mail | `tests/test_search.py` | [`search.md`](search.md) |

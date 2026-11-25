@@ -33,7 +33,7 @@ from unittest import mock
 from mailquery import __version__, cli
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.backends.registry import BackendRegistry
-from mailquery.config import load_config
+from mailquery.config import LockConfig, load_config
 from mailquery.search import DEFAULT_ROW_FIELDS, SEARCH_ROW_FIELDS
 from mailquery.state import StateStore
 from tests.fakes.plugin import (
@@ -2220,14 +2220,14 @@ class ConfigExampleTest(_DocumentationCase):
         self.assertEqual(parsed.attachments.max_total_size_mb, 200)
 
     def test_doc_06_02_scope_examples_with_and_without_driver_prefix(self) -> None:
-        """DOC-06.02: the example shows one prefixed [scope] block and one unprefixed block."""
+        """DOC-06.02: one prefixed and one unprefixed [scope] block; only allowed sections, [lock] included."""
         template = _read(CONFIG_EXAMPLE)
         self.assertRegex(template, r'\[scope\."(?:<driver>|apple_mail|outlook|graph):')
         self.assertRegex(template, r'\[scope\."(?!<driver>|apple_mail:|outlook:|graph:)[^"]+"\]')
         self.assertEqual(tomllib.loads(template), {}, "the template must keep all sections commented")
         documented = set(re.findall(r"(?m)^#\s*\[([a-z][a-z0-9_-]*)", template))
         self.assertTrue(
-            documented <= {"logging", "search", "new", "attachments", "content", "scope"}
+            documented <= {"logging", "search", "new", "attachments", "content", "lock", "scope"}
         )
 
     def test_doc_06_04_example_documents_content_url_display(self) -> None:
@@ -2277,6 +2277,102 @@ class ConfigExampleTest(_DocumentationCase):
             with self.subTest(stale=stale):
                 self.assertNotIn(stale, template)
         self.assertIsNone(re.search(r"(?m)^\s*backend\s*=", template))
+
+
+# --------------------------------------------------------------------------- #
+# DOC-19 — run lock retry documentation (RF-89)
+# --------------------------------------------------------------------------- #
+
+THREAT_MODEL = DOCS_ROOT / "docs" / "security" / "threat-model.md"
+INTERFACES_DOC = DOCS_ROOT / "docs" / "INTERFACES.md"
+
+_IMMEDIATE = (
+    r"\b(?:immediately|at once|right away|instantly|inmediat\w*|al instante|en el acto)\b"
+)
+
+#: Stale descriptions of the run lock that the retry retires.
+_STALE_LOCK_PATTERNS: dict[str, re.Pattern[str]] = {
+    "E_LOCKED as an immediate rejection": re.compile(
+        rf"(?i)E_LOCKED`?[^.\n]{{0,80}}{_IMMEDIATE}|{_IMMEDIATE}[^.\n]{{0,80}}E_LOCKED"
+    ),
+    "more E_LOCKED from several sessions": re.compile(r"(?i)\b(?:more|más)\s+`?E_LOCKED"),
+}
+
+#: The run lock described as non-blocking.
+_NON_BLOCKING_LOCK = re.compile(
+    r"(?i)non-?blocking\s+(?:run\s+|exclusive\s+)?lock|"
+    r"\block\b[^.\n]{0,40}\bnon-?blocking|"
+    r"\block\s+(?:de\s+ejecución\s+)?no\s+bloqueante"
+)
+
+_LOCK_KEYS = {"retries", "initial_delay_ms", "backoff_factor"}
+
+
+def _lock_toml_block(text: str) -> str:
+    """Return the body of the first ```toml block of ``text`` that starts with ``[lock]``."""
+    match = re.search(r"```toml\r?\n(\[lock\]\r?\n.*?)```", text, re.DOTALL)
+    assert match is not None, "no ```toml block starting with [lock]"
+    return match.group(1)
+
+
+class LockRetryDocumentationTest(_DocumentationCase):
+    def test_doc_19_01_readmes_document_the_lock_section(self) -> None:
+        """DOC-19.01: both READMEs document [lock], its keys, defaults 5/150/2, ranges and retries = 0."""
+        defaults = LockConfig()
+        for path in (README_EN, README_ES):
+            text = _read(path)
+            with self.subTest(document=path.name):
+                self.assertTrue(
+                    "`[content]`, `[lock]`" in _normalized(text), "[lock] missing after [content]"
+                )
+                block = _lock_toml_block(text)
+                parsed = tomllib.loads(block)
+                self.assertEqual(set(parsed), {"lock"})
+                self.assertEqual(set(parsed["lock"]), _LOCK_KEYS)
+                self.assertEqual(parsed["lock"]["retries"], defaults.retries)
+                self.assertEqual(parsed["lock"]["initial_delay_ms"], defaults.initial_delay_ms)
+                self.assertEqual(parsed["lock"]["backoff_factor"], defaults.backoff_factor)
+                self.assertRegex(block, r"(?m)^retries = 5\s+#\s*0\.\.10\b")
+                self.assertRegex(block, r"(?m)^initial_delay_ms = 150\s+#\s*10\.\.5000\b")
+                self.assertRegex(block, r"(?m)^backoff_factor = 2\s+#\s*1\.\.10\b")
+                self.assertTrue("`retries = 0`" in text, "`retries = 0` not documented")
+                self.assertTrue("E_LOCKED" in text, "E_LOCKED not documented")
+
+    def test_doc_19_02_example_declares_the_lock_defaults(self) -> None:
+        """DOC-19.02: the example loads with the real loader and its [lock] block declares the LockConfig defaults."""
+        template = _read(CONFIG_EXAMPLE)
+        self.assertTrue("# [lock]" in template, "no commented [lock] block")
+        block = template.split("# [lock]", 1)[1].split("\n\n", 1)[0]
+        for line in (
+            r"^# retries = 5\s+#\s*0\.\.10\b",
+            r"^# initial_delay_ms = 150\s+#\s*10\.\.5000\b",
+            r"^# backoff_factor = 2\s+#\s*1\.\.10\b",
+        ):
+            with self.subTest(line=line):
+                self.assertRegex(block, rf"(?m){line}")
+        uncommented = "[lock]\n" + "\n".join(
+            line[2:] for line in block.splitlines() if line.startswith("# ")
+        )
+        self.assertEqual(set(tomllib.loads(uncommented)["lock"]), _LOCK_KEYS)
+        with tempfile.TemporaryDirectory(prefix="mailquery-config-example-") as tmp:
+            home = Path(tmp) / ".mailquery"
+            home.mkdir()
+            config_path = home / "config.toml"
+            config_path.write_text(template, encoding="utf-8")
+            self.assertEqual(load_config(home).lock, LockConfig())
+            config_path.write_text(uncommented, encoding="utf-8")
+            self.assertEqual(load_config(home).lock, LockConfig())
+
+    def test_doc_19_03_no_stale_lock_descriptions(self) -> None:
+        """DOC-19.03: READMEs and threat model keep no immediate E_LOCKED; INTERFACES keeps no non-blocking lock."""
+        for path in (README_EN, README_ES, THREAT_MODEL):
+            text = _read(path)
+            for name, pattern in _STALE_LOCK_PATTERNS.items():
+                with self.subTest(document=path.name, pattern=name):
+                    match = pattern.search(text)
+                    self.assertIsNone(match, match.group(0) if match else "")
+        match = _NON_BLOCKING_LOCK.search(_read(INTERFACES_DOC))
+        self.assertIsNone(match, match.group(0) if match else "")
 
 
 # --------------------------------------------------------------------------- #

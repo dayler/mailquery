@@ -1171,21 +1171,39 @@ valida con `mailquery.uid` y la instalación del driver con `is_installed`.
   guarda**: `search.run_new` llama a `save` solo cuando la corrida no es
   `--peek` y emite al menos un mensaje (un `--peek` migra en memoria y no
   escribe; la primera corrida de `new` sin `--peek` que emite persiste schema 2
-  con la escritura atómica). `RunLock(home)` no cambia.
+  con la escritura atómica).
   `state.json` 0600, `tmp + fsync + os.replace`; corrupción →
   `E_STATE_CORRUPT`; sin PII. El schema 1 no se vuelve a escribir jamás.
+- `RunLock(home: Path, retry: LockConfig | None = None, *, sleep:
+  Callable[[float], None] = time.sleep)`: lock exclusivo de
+  `~/.mailquery/locks/mailquery.lock` (`fcntl.flock` en POSIX,
+  `msvcrt.locking` en Windows), usable como context manager. `acquire() ->
+  None` hace un primer intento al llegar; si el lock está libre, no espera.
+  Sin `retry` hace un solo intento. Con `retry`, cada intento fallido se
+  reintenta hasta `retry.retries` veces: antes del reintento `n` llama a
+  `sleep` con una pausa de `retry.initial_delay_ms × retry.backoff_factor^(n−1)`
+  ms, sin decimales y como mucho 5.000 ms (tope fijo); `sleep` recibe segundos
+  y una prueba puede sustituirlo. Al agotar los reintentos lanza `E_LOCKED`
+  (exit 5) con el message `another mailquery run is already in progress` y el
+  hint `still held after <R> retries: <ruta>; retry later ([lock] in
+  ~/.mailquery/config.toml sets the retries)`; con un solo intento (sin `retry`
+  o con `retries = 0`), el hint es `wait for the running invocation to finish
+  and retry (the harness should only retry exit code 5)`. No poder crear o
+  abrir el archivo del lock da `E_PERMISSION` (exit 3) sin reintento. Una
+  interrupción durante una pausa se propaga sin haber tomado el lock.
 
 ### `config.py`
 
 Esquema cerrado de `config.toml`, resolución de alcance por driver y
-`[attachments]` (PRD §6.5 RF-34, §6.6 RF-40, RF-47, RF-49, §15).
+`[attachments]` y `[lock]` (PRD §6.5 RF-34, §6.6 RF-40, RF-47, RF-49, RF-89, §15).
 
 Tipos: `LoggingConfig(level, max_size_mb, json)`, `SearchConfig(default_limit,
 max_scan)`, `NewConfig(default_limit, lookback, lookback_seconds)`,
 `AttachmentsConfig(enabled, max_file_size_mb, max_total_size_mb, max_count,
 timeout_seconds)`,
-`ContentConfig(url_display)`, `ScopeEntry(key, mailbox_list, driver, account)`,
-`Config(home, logging, search, new, attachments, content, scopes)` y
+`ContentConfig(url_display)`, `LockConfig(retries, initial_delay_ms,
+backoff_factor)`, `ScopeEntry(key, mailbox_list, driver, account)`,
+`Config(home, logging, search, new, attachments, content, lock, scopes)` y
 `ResolvedScope(account_uuid, account_label, account_email, mailboxes, driver)`.
 
 - `LoggingConfig`: `level`, `max_size_mb` y `json` (por defecto `info`, `10` y
@@ -1208,6 +1226,14 @@ timeout_seconds)`,
   los nombres, `headers`, `body_text` y `snippet`; valores `neutralize` (default),
   `keep` y `strip`. `cli._url_mode` aplica la precedencia `--strip-links` >
   `[content].url_display` > `neutralize`.
+- `LockConfig`: `retries: int = 5`, `initial_delay_ms: int = 150` y
+  `backoff_factor: float = 2.0` (constantes `DEFAULT_LOCK_*`, `MIN_LOCK_*` y
+  `MAX_LOCK_*`); rangos `0..10`, `10..5000` y `1..10` (`backoff_factor` acepta
+  entero o decimal; un `bool` no es número). La tabla `[lock]` y sus claves son
+  opcionales y `Config.lock` vale `LockConfig()` sin ella. Esquema cerrado
+  (`LOCK_KEYS`): una clave desconocida, un valor de otro tipo o fuera de rango
+  ⇒ `E_CONFIG_INVALID` (exit 2) con las claves admitidas o el rango válido en
+  el hint. `RunLock` la recibe como `retry`.
 - `ScopeEntry`: `driver` es el prefijo explícito del bloque (`None` = driver
   nativo del SO) y `account` la referencia dentro de ese driver (`None` en un
   bloque sin prefijo); `key` conserva la clave escrita y `account_ref` devuelve
@@ -1419,7 +1445,9 @@ accounts_db=None, backend=None) -> int`. Los 4 kwargs son **solo para tests**
 (el Outlook falso); sin ellos, el backend de la plataforma
 (`get_backend`). `-h/--help` y `-v/--version` en texto y exit 0; `--log-level`
 global; JSON de error en `stdout` + resumen humano en `stderr`; exit codes
-según `errors.CODE_EXIT`; lock automático; validación del uid de `show` **antes
+según `errors.CODE_EXIT`; lock automático (los comandos de datos construyen el
+`RunLock` con `retry=config.lock` y reintentan según `[lock]`; el chequeo
+`lock` de `doctor` lo construye sin `retry` y hace un solo intento); validación del uid de `show` **antes
 de crear el home** (PRD §12.11): `uid.parse_uid` con el driver nativo y
 `BackendRegistry.is_installed` (un formato inválido ⇒ `E_USAGE`, un driver no
 instalado ⇒ `E_DRIVER_UNKNOWN`), y `backend.parse_native_id` del driver nativo

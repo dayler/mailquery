@@ -33,7 +33,8 @@ Ejemplo `01-new-mail-digest.md`:
 - `search`/`show`/`mailboxes`/`doctor`: sin efectos sobre el correo ni sobre el estado de `new`. Como cualquier comando, pueden crear `~/.mailquery`, escribir en el log y tomar el lock. Con un driver que usa la caché de ids nativos, `search` y `show` pueden escribir además en ella (RF-81, RF-82).
 - `attachment`: sin efectos sobre el correo ni sobre el estado de `new`; solo escribe en `~/.mailquery/tmp/`, en `~/.mailquery/attachments/` y, con un driver que la usa, en la caché de ids nativos (RF-81). Como cualquier comando, puede crear `~/.mailquery`, escribir en el log y tomar el lock.
 - `new`: exactamente-una-vez por corrida (cursor + dedupe); `--peek` para inspección. Con un driver que usa la caché de ids nativos, `new` puede escribir además en ella, también con `--peek` (RF-82).
-- Una llamada MCP tiene los mismos efectos que el comando equivalente: cada `tools/call` es una ejecución de la CLI (RF-86). Varias sesiones del harness con su propio servidor comparten lo mismo que dos ejecuciones de la CLI: el lock, el estado de `new`, las cachés y el log.
+- Una llamada MCP tiene los mismos efectos que el comando equivalente: cada `tools/call` es una ejecución de la CLI (RF-86). Varias sesiones del harness con su propio servidor comparten lo mismo que dos ejecuciones de la CLI: el lock, el estado de `new`, las cachés y el log. Una llamada reintenta el lock lo mismo que su comando; el servidor no añade espera ni reintento propios (RF-89).
+- Dos ejecuciones que coinciden se turnan: un comando de datos que encuentra el lock de ejecución ocupado lo reintenta con pausas crecientes según `[lock]`, y `E_LOCKED` (exit 5) queda para los reintentos agotados; el harness solo lo reintenta entonces (RF-89, §21.1).
 
 ### 21.4 Servidor MCP
 

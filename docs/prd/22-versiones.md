@@ -74,6 +74,7 @@ Por ADR-16, la versión 2.0.0 cambia en macOS exactamente esto; todo lo demás d
 | Salida de `mailboxes` | `accounts[]` y un `mailboxes[]` de primer nivel con `account`, `name`, `path`, `url`, `total`, `unread` e `included` en cada carpeta | Cada cuenta de `accounts[]` con su `mailboxes[]`, cada carpeta con `path` e `included`; `name`, `url`, `total` y `unread` con `--fields` |
 | Opciones de `mailboxes` | — | `--fields` (sin `all`) |
 | Comandos | — | `mcp serve`: servidor MCP por stdio con una herramienta por comando de lectura (RF-84–RF-87) |
+| Lock de ejecución ocupado | `E_LOCKED` (exit 5) al instante | Hasta 5 reintentos con pausas crecientes (4,65 s como mucho) antes de `E_LOCKED`; configurables en `[lock]` con `retries`, `initial_delay_ms` y `backoff_factor` (RF-89) |
 | `config.toml` y logs | — | `[logging].json` (por defecto `false`, sin cambio en el log); con `true`, el log va a `mailquery.jsonl` en JSON Lines (RF-88) |
 
 **macOS.** Además de lo que el §22.2 y la tabla común ya listan, `3.0.0` cambia en macOS exactamente esto:

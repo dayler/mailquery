@@ -174,3 +174,14 @@ Requisitos: RF-84, RF-88, AC-78 · Archivo: `tests/test_mcp_server.py`
 |---|---|---|
 | .01 | B | Formato de texto, `max_size_mb = 1` y `mailquery.log` precargado justo por debajo del tope: la llamada siguiente rota sin errores, aparece `mailquery.log.1` y la línea `event=call` está en el `mailquery.log` nuevo. |
 | .02 | B | Lo mismo con `[logging].json = true`, `mailquery.jsonl` y `mailquery.jsonl.1`. |
+
+#### UT-MCP-13 — Lock ocupado en una llamada MCP
+
+Requisitos: RF-89, AC-79, AC-80 · Archivo: `tests/test_mcp_server.py`
+
+**Tabla: Casos de UT-MCP-13**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | Lock retenido 2 s por otro proceso, sin `[lock]`: `tools/call` de `search` devuelve el resultado de la CLI, salvo `generated_at` y `scan.duration_ms`, con `isError: false` y una sola ejecución del comando. |
+| .02 | N | `[lock] retries = 11`: `mailquery mcp serve` arranca, y una llamada a `search` devuelve `E_CONFIG_INVALID` con `isError: true`. |

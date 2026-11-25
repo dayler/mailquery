@@ -112,7 +112,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Parsea con el cargador real, esquema cerrado, defaults documentados y `[attachments]` comentada. |
-| .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, la tabla `[content]` entre las secciones documentadas permitidas y ninguna sección desconocida. |
+| .02 | P | Incluye un ejemplo de `[scope]` con prefijo y otro sin prefijo, las tablas `[content]` y `[lock]` entre las secciones documentadas permitidas y ninguna sección desconocida. |
 | .03 | N | No conserva claves de versiones anteriores. |
 | .04 | P | El ejemplo contiene el bloque comentado `# [content]` con `# url_display = "neutralize"`; una copia en un temporal con ese bloque descomentado se carga con el cargador real y da `url_display == "neutralize"`. |
 | .05 | P | Dentro del bloque comentado `# [attachments]` existe la línea `# timeout_seconds = 60 …`; una copia en un temporal con el bloque descomentado (como en DOC-06.01) da `timeout_seconds == 60` con el cargador real. El ejemplo sigue con todas las secciones comentadas. |
@@ -257,3 +257,15 @@ Requisitos: RF-88, AC-77 · Archivo: `tests/test_packaging.py`, `tests/test_inte
 |---|---|---|
 | .01 | P | `README.md` y `README.es.md` documentan `[logging].json`, el archivo `mailquery.jsonl` y que cada ejecución escribe solo en el archivo del formato activo. |
 | .02 | P | `docs/config.example.toml` tiene `# json = false` dentro del bloque comentado `[logging]`; una copia con el bloque descomentado se carga con el cargador real y da `json` `false`. |
+
+#### DOC-19 — Documentación del reintento del lock
+
+Requisitos: RF-89 · Archivo: `tests/test_integration.py`
+
+**Tabla: Casos de DOC-19**
+
+| Caso | Tipo | Verifica |
+|---|---|---|
+| .01 | P | `README.md` y `README.es.md` documentan `[lock]` con `retries`, `initial_delay_ms` y `backoff_factor`, sus valores por defecto 5, 150 y 2, sus rangos y `retries = 0`. |
+| .02 | P | `docs/config.example.toml` se lee con el cargador real, y su sección `[lock]` declara los valores por defecto de `LockConfig`. |
+| .03 | N | Ni los README ni `docs/security/threat-model.md` describen `E_LOCKED` como rechazo inmediato del lock de ejecución ni "más `E_LOCKED`" como efecto de varias sesiones; `docs/INTERFACES.md` no describe el lock como no bloqueante. |

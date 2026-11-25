@@ -45,6 +45,10 @@ Paquete de terceros registrado en `mailquery.backends` que implementa `plugin_ap
 
 Regla que el usuario define para una tarea del harness; vive en `docs/recipes/`, no en la app.
 
+### Reintento del lock
+
+Nuevo intento de tomar el lock de ejecución que un comando de datos hace, tras una pausa creciente, cuando lo encuentra ocupado; el número de reintentos y las pausas se configuran en `[lock]` (RF-89).
+
 ### `sanitized_name`
 
 Nombre seguro, determinista e idempotente de un adjunto en la caché, con el prefijo `<index:02d>_` (§10.3.3).

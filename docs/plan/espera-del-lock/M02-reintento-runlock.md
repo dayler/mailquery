@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/espera-del-lock.md` (contribuye y no la completa sola).
 - **Oleada / lote:** 2 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m02`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `a283610` (tip de `feature/espera-del-lock-lote-1`, con `LockConfig` de M01 integrado en `mailquery.config`). **Línea base de la suite:** en `7a7a10d` (mismo código que la base), con el intérprete `.venv\Scripts\python.exe` del checkout principal: 1662 tests, OK, 8 saltos; ningún fallo conocido. Con el `python` de pyenv hay 10 fallos de entorno conocidos (backend de hojas de estilo, metadatos de paquete obsoletos); no se usa.
 - **Depende de:** M01 (`mailquery.config.LockConfig`, ya integrado en la rama del lote). **Lo usan:** M03. Corre en paralelo con M04.
 - **ACs:** AC-79, las partes de pausas simuladas, `retries = 0` y `E_PERMISSION`, a nivel de `RunLock`.
 
@@ -55,10 +55,10 @@ En `src/mailquery/state.py`, commit `a1e0977`; si la línea se movió, búscala 
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Refactorización previa, con UT-ST-01 verde | ⚪ |
-| 2 | Tests del grupo UT-ST-08, en rojo | ⚪ |
-| 3 | Reintentos, pausas, `hint` e interrupción | ⚪ |
-| 4 | Gates, datos crudos de evidencia y propuestas | ⚪ |
+| 1 | Refactorización previa, con UT-ST-01 verde | 🟢 |
+| 2 | Tests del grupo UT-ST-08, en rojo | 🟢 |
+| 3 | Reintentos, pausas, `hint` e interrupción | 🟢 |
+| 4 | Gates, datos crudos de evidencia y propuestas | 🟢 |
 
 ## Tests
 
@@ -109,3 +109,7 @@ Los de la sección "Evidencia cruda" de `REGLAS.md`, más: el texto exacto de lo
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-24 | 1 | `acquire` separa la apertura (`_open_fd`) del intento (`_try_lock`); `-k ut_st_01`: 7 tests, OK. |
+| 2026-11-24 | 2 | `RunLockRetryTest` con los 9 casos de UT-ST-08; `-k ut_st_08`: 9 errores (`RunLock` aún no acepta `retry` ni `sleep`). |
+| 2026-11-24 | 3 | `RunLock(home, retry, *, sleep)`, bucle de reintentos con pausas exactas (`Fraction`) truncadas y topadas a 5000 ms, `hint` de reintentos agotados, descriptor cerrado ante cualquier excepción de `sleep`; los 9 casos de UT-ST-08 pasan solos al primer intento. |
+| 2026-11-24 | 4 | Suite completa en `b1c558c` bajo cobertura: 1671 tests, OK, 8 saltos; `-k ut_st_08` 9 OK, `-k ut_st_01` 7 OK; cobertura de `state.py` 95,2 % (`RunLock` completo); `git diff --check` limpio. Evidencia y propuestas en `work/`. |

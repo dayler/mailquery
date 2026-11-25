@@ -86,3 +86,5 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-76 | Sin dependencias nuevas, importaciones y plugin que no carga | UT-MCP-08, UT-MCP-10 | — |
 | AC-77 | Log JSON, `hint` con el archivo activo y errores de configuración en texto | UT-LOG-05, UT-LOG-06, UT-CFG-05, DOC-18 | — |
 | AC-78 | Rotación con el servidor en marcha en los dos formatos | UT-MCP-12 | — |
+| AC-79 | Reintento del lock con pausas crecientes: espera y éxito por CLI y por MCP, reintentos agotados, `retries = 0`, pausas, `E_PERMISSION`, `doctor` sin espera y dos `new` a la vez | UT-ST-08, UT-CLI-15, UT-MCP-13.01 | — |
+| AC-80 | Esquema de `[lock]`: límites, valores inválidos, clave desconocida, valores por defecto, `doctor`, `mcp serve` y línea `Lock:` de la ayuda | UT-CFG-07, UT-CLI-15.05, UT-CLI-15.06, UT-CLI-15.07, UT-MCP-13.02 | — |

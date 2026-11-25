@@ -28,6 +28,7 @@ from mailquery.config import (
     AttachmentsConfig,
     Config,
     ContentConfig,
+    LockConfig,
     LoggingConfig,
     NewConfig,
     ScopeEntry,
@@ -1408,6 +1409,105 @@ class ContentConfigTests(_DriverConfigCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(code, 2)
         self.assertEqual(payload["error"]["code"], "E_CONFIG_INVALID")
+
+
+class LockConfigTests(_DriverConfigCase):
+    """UT-CFG-07 — ``[lock]`` defaults, ranges, closed schema and section hints."""
+
+    def _lock(self, content: str) -> LockConfig:
+        return self._load(content).lock
+
+    def _invalid(self, content: str) -> MailqueryError:
+        error = self._load_error(content, "E_CONFIG_INVALID")
+        self.assertEqual(error.exit_code, 2)
+        return error
+
+    def test_ut_cfg_07_01_absent_section_and_missing_keys_use_the_defaults(self) -> None:
+        """UT-CFG-07.01 (RF-89, AC-80): no [lock] ⇒ 5, 150, 2; a retries-only section keeps the rest."""
+        default = self._lock("# no lock table\n")
+        self.assertEqual(default, LockConfig())
+        self.assertEqual(default.retries, 5)
+        self.assertEqual(default.initial_delay_ms, 150)
+        self.assertEqual(default.backoff_factor, 2)
+        self.assertEqual(Config(home=self.home).lock, LockConfig())
+        partial = self._lock("[lock]\nretries = 3\n")
+        self.assertEqual(partial.retries, 3)
+        self.assertEqual(partial.initial_delay_ms, 150)
+        self.assertEqual(partial.backoff_factor, 2)
+
+    def test_ut_cfg_07_02_range_bounds_are_accepted(self) -> None:
+        """UT-CFG-07.02 (AC-80): retries 0/10, initial_delay_ms 10/5000, backoff_factor 1/1.5/10."""
+        for key, literal, expected in (
+            ("retries", "0", 0),
+            ("retries", "10", 10),
+            ("initial_delay_ms", "10", 10),
+            ("initial_delay_ms", "5000", 5000),
+            ("backoff_factor", "1", 1.0),
+            ("backoff_factor", "1.5", 1.5),
+            ("backoff_factor", "10", 10.0),
+        ):
+            with self.subTest(key=key, value=literal):
+                lock = self._lock(f"[lock]\n{key} = {literal}\n")
+                self.assertEqual(getattr(lock, key), expected)
+        factor = self._lock("[lock]\nbackoff_factor = 3\n").backoff_factor
+        self.assertIsInstance(factor, float)
+
+    def test_ut_cfg_07_03_invalid_retries_is_config_invalid_with_the_range(self) -> None:
+        """UT-CFG-07.03 (AC-80): retries -1, 11, "5", 5.0 or true ⇒ E_CONFIG_INVALID with 0..10."""
+        for literal, hint in (
+            ("-1", "valid range: 0..10"),
+            ("11", "valid range: 0..10"),
+            ('"5"', "set retries to an integer between 0 and 10"),
+            ("5.0", "set retries to an integer between 0 and 10"),
+            ("true", "set retries to an integer between 0 and 10"),
+        ):
+            with self.subTest(value=literal):
+                error = self._invalid(f"[lock]\nretries = {literal}\n")
+                self.assertEqual(error.hint, hint)
+                self.assertIn("[lock].retries", error.message)
+
+    def test_ut_cfg_07_04_out_of_range_initial_delay_is_config_invalid_with_the_range(self) -> None:
+        """UT-CFG-07.04 (AC-80): initial_delay_ms 9 or 5001 ⇒ E_CONFIG_INVALID with 10..5000."""
+        for literal in ("9", "5001"):
+            with self.subTest(value=literal):
+                error = self._invalid(f"[lock]\ninitial_delay_ms = {literal}\n")
+                self.assertEqual(error.hint, "valid range: 10..5000")
+                self.assertIn("[lock].initial_delay_ms", error.message)
+
+    def test_ut_cfg_07_05_invalid_backoff_factor_is_config_invalid_with_the_range(self) -> None:
+        """UT-CFG-07.05 (AC-80): backoff_factor 0.5, 11, "2" or true ⇒ E_CONFIG_INVALID with 1..10."""
+        for literal, hint in (
+            ("0.5", "valid range: 1..10"),
+            ("11", "valid range: 1..10"),
+            ('"2"', "set backoff_factor to a number between 1 and 10"),
+            ("true", "set backoff_factor to a number between 1 and 10"),
+        ):
+            with self.subTest(value=literal):
+                error = self._invalid(f"[lock]\nbackoff_factor = {literal}\n")
+                self.assertEqual(error.hint, hint)
+                self.assertIn("[lock].backoff_factor", error.message)
+
+    def test_ut_cfg_07_06_unknown_key_in_lock_lists_the_allowed_keys(self) -> None:
+        """UT-CFG-07.06 (AC-80): max_delay_ms in [lock] ⇒ E_CONFIG_INVALID naming the three keys."""
+        error = self._invalid("[lock]\nmax_delay_ms = 1000\n")
+        self.assertIn("max_delay_ms", error.message)
+        for key in ("retries", "initial_delay_ms", "backoff_factor"):
+            self.assertIn(key, error.hint)
+
+    def test_ut_cfg_07_07_unknown_section_and_key_hints_name_lock_after_content(self) -> None:
+        """UT-CFG-07.07 (AC-80): unknown section and top-level key hints name [lock] after [content]."""
+        for content in ("[locks]\nretries = 1\n", "lock_retries = 1\n"):
+            with self.subTest(content=content):
+                error = self._invalid(content)
+                self.assertIn("[lock]", error.hint)
+                self.assertLess(error.hint.index("[content]"), error.hint.index("[lock]"))
+
+    def test_ut_cfg_07_08_logging_config_ignores_an_invalid_lock_section(self) -> None:
+        """UT-CFG-07.08 (AC-80): load_logging_config with [lock] retries = 11 still returns [logging]."""
+        write_config(self.home, '[logging]\nlevel = "debug"\n\n[lock]\nretries = 11\n')
+        logging_cfg = load_logging_config(self.home)
+        self.assertEqual(logging_cfg.level, "debug")
+        self._invalid('[logging]\nlevel = "debug"\n\n[lock]\nretries = 11\n')
 
 
 class AttachmentTimeoutConfigTests(unittest.TestCase):

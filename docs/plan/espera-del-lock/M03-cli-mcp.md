@@ -2,7 +2,7 @@
 
 - **Unidad:** `docs/changes/espera-del-lock.md` (la completa).
 - **Oleada / lote:** 3 / 1. **Rama del lote:** `feature/espera-del-lock-lote-1`. **Rama del milestone:** `feature/espera-del-lock-m03`, creada desde el tip de la rama del lote.
-- **Commit base:** (te lo da el orquestador al lanzar; lo copias aquí en tu primer commit). **Línea base de la suite:** (te la da el orquestador al lanzar, con los fallos y saltos conocidos; la copias aquí).
+- **Commit base:** `93fa726` (tip de `feature/espera-del-lock-lote-1`, con M01, M02 y M04 integrados). **Línea base de la suite:** en `93fa726`, con el intérprete del venv del checkout principal: 1674 tests, OK, 8 saltos; sin fallos conocidos (con el `python` de pyenv hay 10 fallos de entorno, no se usa).
 - **Depende de:** M01 (`config.lock`) y M02 (`RunLock(home, retry)`), ya integrados en la rama del lote. **Lo usan:** nadie.
 - **ACs:** AC-79 y AC-80, las partes de comando, `doctor`, ayuda y MCP.
 
@@ -60,10 +60,10 @@ Ninguna.
 
 | Fase | Tareas | Estado |
 |---|---|---|
-| 1 | Dobles de `RunLock` adaptados; suite verde sin cambios de `src/` | ⚪ |
-| 2 | Tests de UT-CLI-15 y UT-MCP-13, en rojo los que dependen de `cli.py` | ⚪ |
-| 3 | `_run_command`, chequeo `lock` de `doctor` y línea `Lock:` de la ayuda | ⚪ |
-| 4 | Gates, datos crudos de evidencia y propuestas | ⚪ |
+| 1 | Dobles de `RunLock` adaptados; suite verde sin cambios de `src/` | 🟢 |
+| 2 | Tests de UT-CLI-15 y UT-MCP-13, en rojo los que dependen de `cli.py` | 🟢 |
+| 3 | `_run_command`, chequeo `lock` de `doctor` y línea `Lock:` de la ayuda | 🟢 |
+| 4 | Gates, datos crudos de evidencia y propuestas | 🟢 |
 
 ## Tests
 
@@ -124,3 +124,7 @@ Los de la sección "Evidencia cruda" de `REGLAS.md`, más: los tiempos medidos e
 
 | Fecha | Fase | Nota |
 |---|---|---|
+| 2026-11-24 | 1 | Dobles `_FakeLock`/`_BusyLock` aceptan `retry` y `sleep`; `test_lock_busy_against_a_real_flock_exits_5` declara `retries = 0`. |
+| 2026-11-24 | 2 | UT-CLI-15 (9) y UT-MCP-13 (2) escritos; sin el cambio de `cli.py`, 10 fallos (.01, .02, .04 ×5, .07, .08, MCP .01). |
+| 2026-11-24 | 3 | `_run_command` usa `RunLock(home_path, config.lock)`; `doctor` ya construía el lock sin `retry` (sin cambio); línea `Lock:` partida en dos por el ancho de 100 columnas (desviación propuesta). |
+| 2026-11-24 | 4 | Suite 1685 OK (8 saltos); grupos tres veces seguidos sin fallo; evidencia y propuestas en `work/`. |

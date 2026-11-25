@@ -18,13 +18,18 @@ import os
 import re
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from mailquery import uid as uid_module
 from mailquery.errors import MailqueryError
 from mailquery.output import now_iso
+
+if TYPE_CHECKING:
+    from mailquery.config import LockConfig
 
 if sys.platform == "win32":
     import msvcrt
@@ -40,6 +45,8 @@ SUPPORTED_SCHEMAS = (1, 2)
 STATE_FILENAME = "state.json"
 LOCK_DIRNAME = "locks"
 LOCK_FILENAME = "mailquery.lock"
+LOCK_PAUSE_CAP_MS = 5000
+"""Longest pause between two attempts to take the run lock, in milliseconds."""
 DEFAULT_LOOKBACK_SECONDS = 600
 
 #: Shape of a legacy Outlook ``EntryID`` (upper-case hexadecimal).
@@ -338,7 +345,10 @@ def _write_error(exc: OSError, directory: Path) -> MailqueryError | None:
 
 
 def _lock_fd(fd: int) -> None:
-    """Take a non-blocking exclusive lock on ``fd``; raise ``OSError`` if held."""
+    """Make one non-blocking attempt at the exclusive lock on ``fd``; raise ``OSError`` if held.
+
+    It never waits: ``RunLock.acquire`` repeats it between pauses.
+    """
     if sys.platform == "win32":
         os.lseek(fd, 0, os.SEEK_SET)
         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
@@ -355,17 +365,29 @@ def _unlock_fd(fd: int) -> None:
 
 
 class RunLock:
-    """Non-blocking lock under ``~/.mailquery/locks``.
+    """Exclusive run lock under ``~/.mailquery/locks``, retried with growing pauses.
 
-    Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows.
+    Uses non-blocking ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on
+    Windows. Every invocation takes the lock before touching the store so two
+    harness calls cannot overlap.
 
-    Every invocation takes the lock before touching the store so two harness
-    calls cannot overlap. A contended lock raises ``E_LOCKED``
-    (exit 5) immediately; the harness may retry.
+    ``retry`` sets how a held lock is retried: ``retries`` attempts after the
+    first one, with a pause of ``initial_delay_ms * backoff_factor ** (n - 1)``
+    milliseconds before retry ``n``, truncated to an integer and capped at
+    ``LOCK_PAUSE_CAP_MS``. Without ``retry`` a single attempt is made. Pauses
+    call ``sleep`` with seconds.
     """
 
-    def __init__(self, home: Path) -> None:
+    def __init__(
+        self,
+        home: Path,
+        retry: LockConfig | None = None,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._home = Path(home)
+        self._retry = retry
+        self._sleep = sleep
         self._fd: int | None = None
 
     @property
@@ -373,9 +395,66 @@ class RunLock:
         return self._home / LOCK_DIRNAME / LOCK_FILENAME
 
     def acquire(self) -> None:
-        """Acquire the lock or raise E_LOCKED (exit 5)."""
+        """Take the lock, retrying while it is held; no-op when already held by this instance.
+
+        Raises ``E_PERMISSION`` at once when the lock file cannot be created or
+        opened, and ``E_LOCKED`` (exit 5) when the last attempt fails, with a
+        hint that names the retries and the lock path when there were retries.
+        An exception raised by ``sleep`` (``KeyboardInterrupt`` included)
+        closes the descriptor and propagates with the lock not taken.
+        """
         if self._fd is not None:
             return
+        fd = self._open_fd()
+        try:
+            failure = self._try_lock(fd)
+            for pause_ms in self._pauses_ms():
+                if failure is None:
+                    break
+                self._sleep(pause_ms / 1000)
+                failure = self._try_lock(fd)
+        except BaseException:
+            os.close(fd)
+            raise
+        if failure is not None:
+            os.close(fd)
+            raise self._locked_error() from failure
+        self._fd = fd
+
+    def _pauses_ms(self) -> list[int]:
+        """Pause before each retry, in whole milliseconds; empty without ``retry``.
+
+        The growth factor is taken as the exact decimal it was written as, so
+        truncation never lowers an exact product to the previous integer.
+        """
+        if self._retry is None:
+            return []
+        initial = self._retry.initial_delay_ms
+        factor = Fraction(str(self._retry.backoff_factor))
+        return [
+            min(LOCK_PAUSE_CAP_MS, int(initial * factor**n))
+            for n in range(self._retry.retries)
+        ]
+
+    def _locked_error(self) -> MailqueryError:
+        """``E_LOCKED`` for a lock still held after the last attempt."""
+        retries = self._retry.retries if self._retry is not None else 0
+        if retries:
+            hint = (
+                f"still held after {retries} retries: {self.path}; retry later "
+                "([lock] in ~/.mailquery/config.toml sets the retries)"
+            )
+        else:
+            hint = (
+                "wait for the running invocation to finish and retry "
+                "(the harness should only retry exit code 5)"
+            )
+        return MailqueryError(
+            "E_LOCKED", "another mailquery run is already in progress", hint
+        )
+
+    def _open_fd(self) -> int:
+        """Create and open the lock file (0600 in a 0700 directory); raise E_PERMISSION."""
         path = self.path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -392,17 +471,16 @@ class RunLock:
             os.chmod(path, 0o600)
         except OSError:  # pragma: no cover - best effort on foreign filesystems
             pass
+        return fd
+
+    @staticmethod
+    def _try_lock(fd: int) -> OSError | None:
+        """Make one non-blocking attempt on ``fd``; return the error when the lock is held."""
         try:
             _lock_fd(fd)
         except OSError as exc:
-            os.close(fd)
-            raise MailqueryError(
-                "E_LOCKED",
-                "another mailquery run is already in progress",
-                "wait for the running invocation to finish and retry "
-                "(the harness should only retry exit code 5)",
-            ) from exc
-        self._fd = fd
+            return exc
+        return None
 
     def release(self) -> None:
         fd = self._fd

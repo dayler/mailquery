@@ -77,4 +77,9 @@ tags: [prd]
 | **¿El log puede escribirse en JSON?** (2026-11-23) | Sí, con una clave de `[logging]` en `config.toml`, apagada por defecto; apagada, el log es el de texto de siempre (RF-88). |
 | **¿El formato del log se puede elegir en la línea de comandos?** (2026-11-23) | No: solo en `config.toml`. |
 | **¿El log JSON va al mismo archivo que el de texto?** (2026-11-23) | No: va a `mailquery.jsonl`, con su propia rotación; cada ejecución escribe solo en el archivo del formato activo (RF-88). |
+| **¿Qué hace un comando cuando el lock de ejecución está ocupado?** (2026-11-24) | Lo reintenta con pausas crecientes; si el lock sigue ocupado al agotar los reintentos, falla con `E_LOCKED` como antes (RF-89). |
+| **¿Qué se configura del reintento del lock?** (2026-11-24) | El número de reintentos, la primera pausa y el factor de crecimiento; no la espera total, que resulta de ellos, ni el tope por pausa, que es fijo. |
+| **¿Dónde se configura el reintento del lock?** (2026-11-24) | Solo en `config.toml`, sin opción de la CLI ni parámetro de las herramientas MCP. Ninguna clave hace falta: lo que no se declara vale su valor por defecto. |
+| **¿Dónde se documentan los valores por defecto del reintento del lock?** (2026-11-24) | En la ayuda que corresponda, en los README y en la documentación pertinente. |
+| **¿La espera del lock va con el proceso hijo persistente del servidor MCP?** (2026-11-24) | No: es un cambio independiente. |
 
