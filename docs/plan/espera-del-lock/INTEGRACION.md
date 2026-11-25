@@ -9,8 +9,8 @@ Solo lo escribe el orquestador. La leyenda de los semáforos es la de `MASTER-PL
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 Preparación | Tareas de "Fase 0" | 🟢 |
-| 1 Implementación | Oleadas 1 a 3 | 🟡 |
-| 2 Integración | Cierre del lote 1, PR único y matriz verde | ⚪ |
+| 1 Implementación | Oleadas 1 a 3 | 🟢 |
+| 2 Integración | Cierre del lote 1, PR único y matriz verde | 🟡 |
 | 3 Cierre | Tareas de "Fase 3" | ⚪ |
 
 ### Fase 0

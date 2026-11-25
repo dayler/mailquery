@@ -92,7 +92,7 @@ Condiciones:
 - **Interrupción.** Un comando interrumpido durante una pausa termina sin haber tomado el lock y sin leer ni escribir el estado.
 - **Orden.** Los reintentos no garantizan el orden de llegada: toma el lock el primer comando que lo reintenta después de liberarse.
 - **`doctor`.** El chequeo `lock` hace un solo intento, con cualquier configuración, e informa `available` o `held by another mailquery process` en el acto. Un `[lock]` inválido aparece en el chequeo `config`, como el resto de la configuración, y no cambia el chequeo `lock`.
-- **Ayuda.** La ayuda raíz (`mailquery --help`) dice, junto a la línea de configuración, que un lock ocupado se reintenta, con los tres valores por defecto y el nombre de la sección: `Lock: a busy run lock is retried 5 times, pausing 150 ms and doubling each time ([lock] in config.toml)`.
+- **Ayuda.** La ayuda raíz (`mailquery --help`) dice, junto a la línea de configuración, que un lock ocupado se reintenta, con los tres valores por defecto y el nombre de la sección: `Lock: a busy run lock is retried 5 times, pausing 150 ms and doubling each time ([lock] in config.toml)`. Para no pasar del ancho de 100 columnas de la ayuda, el texto ocupa dos líneas: la segunda, `([lock] in config.toml)`, va sangrada hasta debajo del texto de la primera, como las continuaciones de `Output:`.
 - **MCP.** Una llamada MCP reintenta lo que reintenta su comando: el servidor no añade espera ni reintento propios. `mcp serve` no lee `[lock]`: arranca aunque la sección sea inválida, y entonces cada llamada devuelve el `E_CONFIG_INVALID` de su comando.
 
 Se comprueba con AC-79 y AC-80.
@@ -129,7 +129,7 @@ backoff_factor = 2             # 1..10, entero o decimal
 
 ## Criterios de aceptación
 
-**AC-79.** En macOS y en Windows, con el lock retenido por otro proceso durante 2 s y sin sección `[lock]`: `search` termina con exit 0 después de liberarse el lock, y su salida es la de una ejecución sin espera salvo `generated_at`; la misma llamada por MCP devuelve ese resultado con `isError: false` y una sola ejecución del comando. Con `retries = 2`, `initial_delay_ms = 100` y el lock retenido 3 s: `E_LOCKED` (exit 5), no antes de 300 ms ni después de 2 s, con el `message` y el `hint` de los reintentos agotados, que nombra los reintentos y la ruta del lock. Con `retries = 0`: `E_LOCKED` sin esperar, con el `hint` de "Sin reintentos". Con las pausas simuladas y el lock siempre ocupado: sin sección `[lock]` hay seis intentos y las pausas son de 150, 300, 600, 1200 y 2400 ms; con `retries = 3`, `initial_delay_ms = 1000` y `backoff_factor = 3`, de 1000, 3000 y 5000 ms; con `retries = 3`, `initial_delay_ms = 100` y `backoff_factor = 1.5`, de 100, 150 y 225 ms. Si el archivo del lock no se puede abrir, el comando da `E_PERMISSION` sin esperar. Con el lock retenido, el chequeo `lock` de `doctor` informa `held by another mailquery process` sin esperar. Dos `new` lanzados a la vez, cada uno de menos de 2 s, terminan los dos con exit 0, y cada mensaje nuevo sale en uno solo de los dos.
+**AC-79.** En macOS y en Windows, con el lock retenido por otro proceso durante 2 s y sin sección `[lock]`: `search` termina con exit 0 después de liberarse el lock, y su salida es la de una ejecución sin espera salvo `generated_at` y `scan.duration_ms`; la misma llamada por MCP devuelve ese resultado con `isError: false` y una sola ejecución del comando. Con `retries = 2`, `initial_delay_ms = 100` y el lock retenido 3 s: `E_LOCKED` (exit 5), no antes de 300 ms ni después de 2 s, con el `message` y el `hint` de los reintentos agotados, que nombra los reintentos y la ruta del lock. Con `retries = 0`: `E_LOCKED` sin esperar, con el `hint` de "Sin reintentos". Con las pausas simuladas y el lock siempre ocupado: sin sección `[lock]` hay seis intentos y las pausas son de 150, 300, 600, 1200 y 2400 ms; con `retries = 3`, `initial_delay_ms = 1000` y `backoff_factor = 3`, de 1000, 3000 y 5000 ms; con `retries = 3`, `initial_delay_ms = 100` y `backoff_factor = 1.5`, de 100, 150 y 225 ms. Si el archivo del lock no se puede abrir, el comando da `E_PERMISSION` sin esperar. Con el lock retenido, el chequeo `lock` de `doctor` informa `held by another mailquery process` sin esperar. Dos `new` lanzados a la vez, cada uno de menos de 2 s, terminan los dos con exit 0, y cada mensaje nuevo sale en uno solo de los dos.
 
 **AC-80.** `retries` acepta `0` y `10`; `initial_delay_ms`, `10` y `5000`; `backoff_factor`, `1`, `1.5` y `10`. Cada comando de datos da `E_CONFIG_INVALID` (exit 2) con el rango válido en el `hint` con `retries` igual a `-1`, `11`, `"5"`, `5.0` o `true`; con `initial_delay_ms` igual a `9` o `5001`; con `backoff_factor` igual a `0.5`, `11`, `"2"` o `true`. La clave `max_delay_ms` es una clave desconocida. Una clave desconocida en `[lock]` da `E_CONFIG_INVALID` con las claves admitidas en el `hint`, y el `hint` de una sección desconocida nombra `[lock]`. Una sección `[lock]` que solo declara `retries` usa los valores por defecto de las demás claves. Con `retries = 11`, `doctor` informa el error en su chequeo `config` y su chequeo `lock` responde sin esperar; `mailquery mcp serve` arranca, y una llamada a `search` devuelve `E_CONFIG_INVALID` con `isError: true`. `mailquery --help` muestra la línea `Lock:` con los tres valores por defecto y la sección `[lock]`.
 
@@ -168,7 +168,7 @@ Ninguna
 | RC-06 | Valores fijos | `15-configuracion.md` | `Lock` | La fila dice que la ruta y el tope de 5000 ms por pausa son fijos y que los reintentos se configuran en `[lock]` (RF-89). | pendiente |
 | RC-07 | Partición de la sección 15 | `15-2-stores-windows.md` (nuevo) | — | La subsección 15.7 pasa a este archivo sin cambiar su texto, para que `15-configuracion.md` no supere 300 líneas. | pendiente |
 | RC-08 | Archivos del PRD | `00-indice.md` | `15 Configuración` | La fila enlaza los dos archivos de la sección 15. | pendiente |
-| RC-09 | Ayuda raíz | `12.07-ayuda.md` | `Configuration: ~/.mailquery/config.toml` | Nueva línea `Lock:` después de la de configuración, con el reintento, sus tres valores por defecto y la sección `[lock]` (RF-89). | pendiente |
+| RC-09 | Ayuda raíz | `12.07-ayuda.md` | `Configuration: ~/.mailquery/config.toml` | Nueva línea `Lock:` después de la de configuración, con el reintento, sus tres valores por defecto y la sección `[lock]`, partida en dos líneas para no pasar de 100 columnas (RF-89). | pendiente |
 | RC-10 | Chequeo `lock` de `doctor` | `12.08-doctor.md` | `### 12.8` | El párrafo "Formato de `detail`" dice que el chequeo `lock` hace un solo intento y no aplica los reintentos de `[lock]` (RF-89). | pendiente |
 | RC-11 | Comportamiento con el lock ocupado | `17-comportamiento-errores.md` | `Lock ocupado` | La fila describe los reintentos con pausas crecientes, sus valores por defecto, `retries = 0` y el `hint` de los reintentos agotados; el caso de la caché de ids nativos no cambia (RF-89). | pendiente |
 | RC-12 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El punto nombra el reintento del lock y su rango incluye AC-79 y AC-80. | pendiente |
@@ -185,12 +185,12 @@ Ninguna
 - docs/INTERFACES.md: actualizado
 - docs/config.example.toml: actualizado
 - docs/security/threat-model.md: actualizado
-- docs/tests/TEST-CATALOG.md: pendiente
-- docs/tests/acceptance-matrix.md: pendiente
+- docs/tests/TEST-CATALOG.md: actualizado
+- docs/tests/acceptance-matrix.md: actualizado
 - docs/tests/state-backends.md: actualizado
-- docs/tests/cli-config.md: pendiente
+- docs/tests/cli-config.md: actualizado
 - docs/tests/docs-packaging.md: actualizado
-- docs/tests/mcp-server.md: pendiente
+- docs/tests/mcp-server.md: actualizado
 - skills/mailquery/SKILL.md: sin cambio
 - docs/recipes/: sin cambio
 
@@ -214,4 +214,5 @@ Ninguna
 
 ## Desviaciones aprobadas
 
-Ninguna
+- **Línea `Lock:` en dos líneas.** El texto de la condición "Ayuda" de RF-89 mide 103 columnas y la ayuda tiene un ancho máximo de 100: ocupa dos líneas, con la continuación sangrada; las palabras no cambian. Cambian la condición "Ayuda" y la fila RC-09. Aprobada por Ariel Salazar Hinojosa, 2026-11-24.
+- **`scan.duration_ms` en AC-79.** La salida de `search` tras la espera es la de una ejecución sin espera salvo `generated_at` y `scan.duration_ms`, que cambia entre dos ejecuciones cualesquiera. Cambia AC-79. Aprobada por Ariel Salazar Hinojosa, 2026-11-24.

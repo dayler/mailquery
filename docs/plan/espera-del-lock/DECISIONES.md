@@ -18,6 +18,8 @@ Ninguna.
 - **D-09.** "Sin decimales" es truncar la pausa en milisegundos (respuesta del dueño).
 - **D-10.** Las pruebas que necesitan un `search` o un `new` con éxito en otro proceso usan el mecanismo de `_LAUNCHER` de `tests/test_cli.py`; la de MCP usa el servidor en proceso con un runner que cuenta las ejecuciones, porque el proceso hijo del servidor real no tiene acceso al fixture.
 - **D-11.** El subagente escribe y confirma su evidencia cruda en `work/M<NN>-evidencia.md`; el orquestador redacta `evidence/M<NN>.md` a partir de ella.
+- **D-12.** La línea `Lock:` de la ayuda raíz ocupa dos líneas, con la continuación `([lock] in config.toml)` sangrada, para no pasar de 100 columnas; las palabras no cambian. Desviación aprobada por el dueño y anotada en la unidad.
+- **D-13.** AC-79 compara la salida tras la espera con la de una ejecución sin espera salvo `generated_at` y `scan.duration_ms`. Desviación aprobada por el dueño y anotada en la unidad.
 
 ## Riesgos
 
@@ -31,3 +33,5 @@ Ninguna.
 - **2026-11-24. ¿Cómo queda el plan con la unidad en `borrador`?** "La apruebo ahora." (D-01)
 - **2026-11-24. ¿Qué regla vale para las pausas "sin decimales"?** Truncar. (D-09)
 - **2026-11-24. ¿Quién ejecuta la prueba manual y dónde queda el log?** "Yo en ambas plataformas; basta con mi confirmación, no es necesario copiar nada a evidencias." (D-02)
+- **2026-11-24. ¿Se aprueba partir en dos la línea `Lock:` de 103 columnas?** Aprobar las dos líneas. (D-12)
+- **2026-11-24. ¿Se aprueba que AC-79 excluya también `scan.duration_ms`?** Aprobar. (D-13)

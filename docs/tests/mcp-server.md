@@ -183,5 +183,5 @@ Requisitos: RF-89, AC-79, AC-80 · Archivo: `tests/test_mcp_server.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] Lock retenido 2 s por otro proceso, sin `[lock]`: `tools/call` de `search` devuelve el resultado de la CLI con `isError: false` y una sola ejecución del comando. |
-| .02 | N | [pendiente] `[lock] retries = 11`: `mailquery mcp serve` arranca, y una llamada a `search` devuelve `E_CONFIG_INVALID` con `isError: true`. |
+| .01 | P | Lock retenido 2 s por otro proceso, sin `[lock]`: `tools/call` de `search` devuelve el resultado de la CLI, salvo `generated_at` y `scan.duration_ms`, con `isError: false` y una sola ejecución del comando. |
+| .02 | N | `[lock] retries = 11`: `mailquery mcp serve` arranca, y una llamada a `search` devuelve `E_CONFIG_INVALID` con `isError: true`. |

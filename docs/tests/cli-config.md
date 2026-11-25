@@ -176,15 +176,15 @@ Requisitos: RF-89, AC-79, AC-80 · Archivo: `tests/test_cli.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | [pendiente] Lock retenido 2 s por otro proceso, sin `[lock]`: `search` termina con exit 0 tras liberarse y su salida es la de una ejecución sin espera salvo `generated_at`. |
-| .02 | N | [pendiente] `retries = 2`, `initial_delay_ms = 100` y lock retenido 3 s: `E_LOCKED` (exit 5), no antes de 300 ms ni después de 2 s, con el `message` `another mailquery run is already in progress` y el `hint` `still held after 2 retries: <ruta>; retry later ([lock] in ~/.mailquery/config.toml sets the retries)`, comparados literalmente con la ruta del lock. |
-| .03 | N | [pendiente] `retries = 0` y lock retenido: `E_LOCKED` sin esperar, con el `hint` `wait for the running invocation to finish and retry (the harness should only retry exit code 5)`. |
-| .04 | P | [pendiente] `search`, `new`, `show`, `attachment` y `mailboxes` construyen el lock con `config.lock`. |
-| .05 | N | [pendiente] Cada comando de datos con `retries = 11`: `E_CONFIG_INVALID` (exit 2) con el rango en el `hint`, sin tomar el lock. |
-| .06 | P | [pendiente] `doctor` con el lock retenido: `held by another mailquery process` sin ninguna pausa, con cualquier `[lock]`; con `retries = 11`, el chequeo `config` informa el error y el chequeo `lock` responde sin esperar. |
-| .07 | P | [pendiente] `mailquery --help` muestra, después de la línea `Configuration:`, la línea `Lock: a busy run lock is retried 5 times, pausing 150 ms and doubling each time ([lock] in config.toml)`. |
-| .08 | P | [pendiente] Dos `new` lanzados a la vez, cada uno de menos de 2 s: los dos terminan con exit 0 y cada mensaje nuevo sale en uno solo. |
-| .09 | N | [pendiente] El archivo del lock no se puede abrir: el comando da `E_PERMISSION` sin esperar. |
+| .01 | P | Lock retenido 2 s por otro proceso, sin `[lock]`: `search` termina con exit 0 tras liberarse y su salida es la de una ejecución sin espera salvo `generated_at` y `scan.duration_ms`. |
+| .02 | N | `retries = 2`, `initial_delay_ms = 100` y lock retenido 3 s: `E_LOCKED` (exit 5), no antes de 300 ms ni después de 2 s, con el `message` `another mailquery run is already in progress` y el `hint` `still held after 2 retries: <ruta>; retry later ([lock] in ~/.mailquery/config.toml sets the retries)`, comparados literalmente con la ruta del lock. |
+| .03 | N | `retries = 0` y lock retenido: `E_LOCKED` sin esperar, con el `hint` `wait for the running invocation to finish and retry (the harness should only retry exit code 5)`. |
+| .04 | P | `search`, `new`, `show`, `attachment` y `mailboxes` construyen el lock con `config.lock`. |
+| .05 | N | Cada comando de datos con `retries = 11`: `E_CONFIG_INVALID` (exit 2) con el rango en el `hint`, sin tomar el lock. |
+| .06 | P | `doctor` con el lock retenido: `held by another mailquery process` sin ninguna pausa, con cualquier `[lock]`; con `retries = 11`, el chequeo `config` informa el error y el chequeo `lock` responde sin esperar. |
+| .07 | P | `mailquery --help` muestra, después de la línea `Configuration:`, la línea `Lock: a busy run lock is retried 5 times, pausing 150 ms and doubling each time ([lock] in config.toml)`, partida en dos líneas de 100 columnas como mucho con la continuación sangrada. |
+| .08 | P | Dos `new` lanzados a la vez, cada uno de menos de 2 s: los dos terminan con exit 0 y cada mensaje nuevo sale en uno solo. |
+| .09 | N | El archivo del lock no se puede abrir: el comando da `E_PERMISSION` sin esperar. |
 
 #### UT-INS-01 — Comprobación final de `install.ps1`
 
