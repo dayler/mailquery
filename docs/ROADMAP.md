@@ -297,10 +297,10 @@ requiere la app en Entra ID.
 ## 10. Para publicar 3.0.0
 
 Las features de `3.0.0` —incluidos el servidor MCP por stdio y el log JSON—
-están en `develop` con la versión `3.0.0a3`, sin tag ni merge a `main`. Falta:
+están en `develop` con una pre-release de `3.0.0`, sin tag ni merge a `main`. Falta:
 
-1. Subir la versión de `3.0.0a3` a `3.0.0` en `pyproject.toml`,
-   `mailquery.__version__`, los goldens `doctor` y la documentación; reinstalar el
+1. Subir `mailquery.__version__` (`src/mailquery/__init__.py`, el único archivo
+   con el número) a `3.0.0`; reinstalar el
    paquete y comprobar TC-06, PKG-01, PKG-02 y DOC-03
    ([`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md)).
 2. Comprobar con el paquete instalado los entry points de los backends y los

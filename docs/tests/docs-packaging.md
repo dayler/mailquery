@@ -78,7 +78,7 @@ Requisitos: AC-21 · Archivo: `tests/test_integration.py`
 |---|---|---|
 | .01 | P | `README.md`, `README.es.md`, recetas, `SKILL.md`, `config.example.toml` y las ayudas coinciden en comandos, exits, formato de uid y ruta de caché. |
 | .02 | N | Ningún documento promete escribir fuera de `~/.mailquery` ni abrir red desde el núcleo. |
-| .03 | P | Donde se muestra `--version`, el ejemplo usa `mailquery.__version__` y la forma con `drivers:`; no se anuncia `3.0.0` como publicado. |
+| .03 | P | Donde se muestra `--version`, el ejemplo usa el marcador `<version>` (o `<versión>`) en lugar de un número y la forma con `drivers:`; no se anuncia `3.0.0` como publicado. |
 
 #### DOC-04 — `skills/mailquery/SKILL.md`
 
@@ -200,7 +200,7 @@ Requisitos: AC-01 · Archivo: `tests/test_packaging.py`
 |---|---|---|
 | .01 | P | `pyproject.toml` declara el grupo `mailquery.backends` con `apple_mail` y `outlook`. |
 | .02 | P | Con el paquete instalado, `importlib.metadata` expone ambos entry points; sin instalación, la metadata inyectada y el fallback estático producen el mismo resultado. El caso instalado se salta con motivo si el paquete no está instalado (CI no lo instala). |
-| .03 | P | `version` sigue sincronizada con `mailquery.__version__` y el console script `mailquery` no cambia. |
+| .03 | P | `pyproject.toml` toma la versión de `mailquery.__version__` y el console script `mailquery` no cambia. |
 
 #### PKG-02 — Empaquetado
 
@@ -208,7 +208,7 @@ Requisitos: AC-18, RF-33, PRD §22.3 · Archivo: `tests/test_install_scripts.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `pyproject.toml` y `__version__` coinciden y siguen en la versión vigente (`2.0.1`, sin bump); grupo `mailquery.backends` con `apple_mail` y `outlook`; console script intacto. |
+| .01 | P | `pyproject.toml` toma la versión de `__version__`, que lleva el mayor en desarrollo; grupo `mailquery.backends` con `apple_mail` y `outlook`; console script intacto. |
 | .02 | P | Los tests de instaladores construyen `GOOD_VERSION` con `mailquery.__version__` pero como línea completa de `-v` (`mailquery <v> (backend outlook; Python 3.14.0; Windows 10.0.26200 AMD64)`), no solo la versión. |
 | .03 | P | `SMOKE-INSTALL.02` acepta la salida de `-v` de la versión actual sin fijar un literal (se deriva de `__version__`). |
 
@@ -232,7 +232,7 @@ Requisitos: RF-73, RF-81, RF-83, AC-68 · Archivo: `tests/test_packaging.py`
 |---|---|---|
 | .01 | P | `README.md` y `README.es.md` describen `--show-native-id` como opción de depuración de `show`; `SKILL.md` no la menciona. |
 | .02 | N | `README.md`, `README.es.md`, `SKILL.md`, `docs/INTERFACES.md`, `docs/recipes/` y `docs/security/` no contienen los textos obsoletos del uid de Outlook: `expected an uppercase hexadecimal EntryID`, `mailquery show outlook:00000000A1B2C3D4`, "`show` never writes" / "`show` nunca escribe", "EntryID largo" / "long EntryID" como riesgo vigente de Outlook, "EntryID hexadecimal" como uid legado de Windows, ni un uid de ejemplo `outlook:` seguido de hexadecimal en mayúsculas; se admite el marcador `outlook:<EntryID>` solo en la descripción de `--show-native-id`. |
-| .03 | P | `pyproject.toml` y `mailquery.__version__` dicen `3.0.0a3`, y los README anuncian `3.0.0a3` (`3.0.0-alpha.3`) sin mencionar `3.0.0a2` ni `3.0.0a1`. |
+| .03 | P | La versión se declara solo en `mailquery.__version__`: `pyproject.toml` no tiene `version` propio, y ni los README, ni `docs/INTERFACES.md`, ni `docs/security/`, ni el PRD (salvo `HISTORIAL.md` y el Anexo D) contienen un número de pre-release de la versión en curso. |
 | .04 | P | Los dos README describen la carpeta `~/.mailquery/db/` con `cache.db` y dicen que desinstalar no la borra. |
 
 #### DOC-17 — Documentación del servidor MCP

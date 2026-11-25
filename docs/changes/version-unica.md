@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-aprobado
+implementado
 
 ## Contexto
 
@@ -76,21 +76,21 @@ Sin cambios
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | pendiente |
-| RC-02 | Versión `3.0.0` | `08-adr.md` | `ADR-27` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | pendiente |
-| RC-03 | Módulo `__init__.py` | `09-arquitectura.md` | `` `__init__.py` `` | `__version__` es la única declaración del número de versión. | pendiente |
-| RC-04 | `pyproject.toml` en el árbol del repositorio | `10-carpetas-y-cache.md` | `├── pyproject.toml` | El comentario dice que la versión se toma de `__version__`. | pendiente |
-| RC-05 | Salida de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es una pre-release de `3.0.0` (`3.0.0aN`), sin su número. | pendiente |
-| RC-06 | Estado de la versión del paquete | `22-versiones.md` | `**Estado:**` | `develop` anuncia una pre-release de `3.0.0` (`3.0.0aN`); su número se declara solo en `__version__`, de donde lo toman los metadatos, `--version`, `doctor` y el servidor MCP; el PRD y los documentos no lo repiten. | pendiente |
+| RC-01 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | implementado |
+| RC-02 | Versión `3.0.0` | `08-adr.md` | `ADR-27` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | implementado |
+| RC-03 | Módulo `__init__.py` | `09-arquitectura.md` | `` `__init__.py` `` | `__version__` es la única declaración del número de versión. | implementado |
+| RC-04 | `pyproject.toml` en el árbol del repositorio | `10-carpetas-y-cache.md` | `├── pyproject.toml` | El comentario dice que la versión se toma de `__version__`. | implementado |
+| RC-05 | Salida de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es una pre-release de `3.0.0` (`3.0.0aN`), sin su número. | implementado |
+| RC-06 | Estado de la versión del paquete | `22-versiones.md` | `**Estado:**` | `develop` anuncia una pre-release de `3.0.0` (`3.0.0aN`); su número se declara solo en `__version__`, de donde lo toman los metadatos, `--version`, `doctor` y el servidor MCP; el PRD y los documentos no lo repiten. | implementado |
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- docs/INTERFACES.md: pendiente
-- docs/security/threat-model.md: pendiente
-- docs/tests/end-to-end.md: pendiente
-- docs/tests/docs-packaging.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- docs/INTERFACES.md: actualizado
+- docs/security/threat-model.md: actualizado
+- docs/tests/end-to-end.md: actualizado
+- docs/tests/docs-packaging.md: actualizado
 
 ## Checklist de conciliación
 

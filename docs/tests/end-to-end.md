@@ -8,7 +8,7 @@ Requisitos: RNF-11 · Archivo: `tests/test_integration.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | El golden `doctor` cambia a `pkg 3.0.0a3` (solo la versión). |
+| .01 | P | El golden `doctor` guarda la versión del paquete como `pkg <VERSION>`; la comparación sustituye la versión del paquete antes de comparar. |
 | .02 | P | `mailboxes` con la forma agrupada por cuenta (cada cuenta con `uuid`, `label`, `email`, `declared` y `mailboxes[]`, cada carpeta solo con `path` e `included`) ⇒ golden `mailboxes`; una segunda corrida con `--fields name,url,total,unread` valida nombre, URL y contadores de cada carpeta. |
 | .03 | P | `search` por defecto devuelve todos los mensajes distintos con la fila de seis campos ⇒ golden `search_default`; una segunda corrida con `--fields all` valida los campos fuera de la fila y los warnings de cuerpo. |
 | .04 | P | `search` con All Mail deduplica al canónico de INBOX con la fila de seis campos ⇒ golden `search_all_mail`; `duplicate_count`, `snippet` y `mailbox` se comprueban con `--fields all`. |
@@ -36,7 +36,7 @@ Perfil del fake para goldens: una cuenta Exchange en caché con INBOX (un mensaj
 | .04 | N | `show_header_only` |
 | .05 | N | `show_smime` |
 | .06 | P | `new` con la fila de seis campos ⇒ golden `outlook/new_first_run`. |
-| .07 | P | El golden `outlook/doctor` cambia a `pkg 3.0.0a3` (solo la versión). |
+| .07 | P | El golden `outlook/doctor` guarda la versión del paquete como `pkg <VERSION>`; la comparación sustituye la versión del paquete antes de comparar. |
 
 #### TC-03 — Gate de solo lectura de Apple Mail
 
@@ -73,7 +73,7 @@ Requisitos: AC-01, AC-18 · Archivo: `tests/test_packaging.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | P | `pyproject.toml` declara la versión vigente (sin bump), el console script y el grupo `mailquery.backends` con los dos backends internos. |
+| .01 | P | `pyproject.toml` toma la versión de `mailquery.__version__` (versión dinámica, sin `version` propio), y declara el console script y el grupo `mailquery.backends` con los dos backends internos. |
 | .02 | P | `mailquery.__version__` coincide con la metadata del paquete; entry points resolubles con metadata inyectada. |
 | .03 | P | Las dependencias de ejecución son exactamente `css-inline~=0.23.1` (sin marcador de plataforma) y `pywin32; sys_platform == "win32"`. |
 

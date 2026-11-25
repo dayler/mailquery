@@ -29,7 +29,7 @@ meant for an agent harness to invoke it **on demand** and consume its output.
 
 Attachment recovery, the multi-driver engine, the MCP server of `mcp serve`
 and the JSON log are part of the future 3.0.0, not yet released. `develop`
-reports the pre-release `3.0.0a3` (3.0.0-alpha.3) from `--version`, but
+reports a 3.0.0 pre-release (`3.0.0aN`) from `--version`, but
 publishes nothing: no tag, no release and no `main` merge.
 
 References: [`docs/prd/`](docs/prd/00-indice.md) (product contract, v2.3),
@@ -428,7 +428,7 @@ reminder that email content is untrusted; it is not a control.
 
 ```text
 $ mailquery -v          # no side effects: does not create ~/.mailquery nor open the client
-mailquery 3.0.0a3 (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook 3.0.0a3)
+mailquery <version> (backend outlook; Python 3.14.7; Windows 10.0.26200 AMD64; drivers: graph 0.1.0, outlook <version>)
 ```
 
 The line keeps `backend <native driver>` and adds `; drivers: <driver>
@@ -458,7 +458,7 @@ Generated at: 2026-11-13T09:15:00-04:00
 Checks:
   [ok]   python              3.14.7
   [ok]   home                …\.mailquery (writable)
-  [ok]   driver              outlook (api=1; pkg 3.0.0a3; network=false; readonly=structural;
+  [ok]   driver              outlook (api=1; pkg <version>; network=false; readonly=structural;
                              body_local=true; attachments=local; native_order=text)
   [ok]   pywin32             win32com importable
   [ok]   outlook             classic Outlook 16.0.0.20430 running (attached with GetActiveObject)

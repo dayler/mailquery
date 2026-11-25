@@ -30,6 +30,7 @@ Un cambio necesita una unidad si cambia lo que el producto hace o lo que el PRD 
 
 - Si el código y el PRD no coinciden, el dueño decide cuál es correcto.
 - Un cambio sin unidad actualiza en su misma rama los documentos consumidores que le afecten.
+- **Pre-release.** Subir el número de pre-release (`aN`, `bN`, `rcN`) de una versión sin publicar cambia solo `__version__` en `src/mailquery/__init__.py`: no lleva unidad y no cambia el PRD ni los documentos consumidores.
 
 ## La unidad de cambio
 

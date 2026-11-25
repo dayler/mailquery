@@ -30,9 +30,9 @@ from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from mailquery import __version__, cli
+from mailquery import cli
 from mailquery.backends.apple_mail import AppleMailBackend
-from mailquery.backends.registry import BackendRegistry
+from mailquery.backends.registry import BackendRegistry, package_version
 from mailquery.config import LockConfig, load_config
 from mailquery.search import DEFAULT_ROW_FIELDS, SEARCH_ROW_FIELDS
 from mailquery.state import StateStore
@@ -142,6 +142,8 @@ def _normalize(value: object, root: Path) -> object:
         text = ISO_RE.sub("<ISO>", value)
         text = EMAIL_DATE_RE.sub("<EMAIL_DATE>", text)
         text = text.replace(str(root), "<ROOT>")
+        # Goldens keep the package version as a placeholder.
+        text = text.replace(f"pkg {package_version()};", "pkg <VERSION>;")
         # Goldens use "/" on every OS: normalize separators after the root swap.
         text = text.replace("\\", "/")
         # Windows uses the stable 32-hex directory when the real cache path
@@ -1971,7 +1973,7 @@ class ReadmeDocumentationTest(_DocumentationCase):
         self.assertRegex(text, r'"attachments":\s*\[\s*\{\s*"index"')
         self.assertIn('"cached_path"', text)
         self.assertRegex(text, r'"sanitized_name"')
-        self.assertRegex(text, r"drivers: [^)\n]*(?:apple_mail|outlook) \d+\.\d+\.\d+")
+        self.assertRegex(text, r"drivers: [^)\n]*(?:apple_mail|outlook) <version>")
         self.assertIn("mailquery attachment apple_mail:", text)
 
 
@@ -2072,16 +2074,16 @@ class DocumentationCoherenceTest(_DocumentationCase):
                 self.assertRegex(text, r"(?is)only\s+writes\s+(?:inside|under)\s+`?~/\.mailquery|solo\s+escribe\s+dentro\s+de\s+`?~/\.mailquery")
         self.assertRegex(skill, r"(?i)read-only|solo lectura")
 
-    def test_doc_03_03_version_examples_use_the_current_version(self) -> None:
-        """DOC-03.03: version examples use `__version__` with `drivers:` and never 3.0.0 as current."""
+    def test_doc_03_03_version_examples_use_a_placeholder(self) -> None:
+        """DOC-03.03: version examples use a `<version>` placeholder with `drivers:` and never 3.0.0 as current."""
         for path in (README_EN, README_ES):
             text = _read(path)
-            lines = re.findall(rf"mailquery {_VERSION} \([^\n]*\)", text)
+            lines = re.findall(r"mailquery <versi[oó]n> \([^\n]*\)", text)
             with self.subTest(document=path.name):
                 self.assertTrue(lines, f"{path.name} shows no version example")
                 for line in lines:
                     self.assertIn("drivers:", line)
-                    self.assertIn(__version__, line)
+                self.assertNotRegex(text, rf"mailquery {_VERSION} \(")
                 self.assertNotRegex(text, _FINAL_3_0_0)
                 if "3.0.0" in text:
                     self.assertRegex(
