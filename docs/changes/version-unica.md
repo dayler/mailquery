@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-aprobado
+conciliado (2026-11-25)
 
 ## Contexto
 
@@ -76,21 +76,21 @@ Sin cambios
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | pendiente |
-| RC-02 | Versión `3.0.0` | `08-adr.md` | `ADR-27` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | pendiente |
-| RC-03 | Módulo `__init__.py` | `09-arquitectura.md` | `` `__init__.py` `` | `__version__` es la única declaración del número de versión. | pendiente |
-| RC-04 | `pyproject.toml` en el árbol del repositorio | `10-carpetas-y-cache.md` | `├── pyproject.toml` | El comentario dice que la versión se toma de `__version__`. | pendiente |
-| RC-05 | Salida de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es una pre-release de `3.0.0` (`3.0.0aN`), sin su número. | pendiente |
-| RC-06 | Estado de la versión del paquete | `22-versiones.md` | `**Estado:**` | `develop` anuncia una pre-release de `3.0.0` (`3.0.0aN`); su número se declara solo en `__version__`, de donde lo toman los metadatos, `--version`, `doctor` y el servidor MCP; el PRD y los documentos no lo repiten. | pendiente |
+| RC-01 | Versión del paquete en la portada | `00-indice.md` | `**Versión del paquete:**` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | conciliado |
+| RC-02 | Versión `3.0.0` | `08-adr.md` | `ADR-27` | `develop` anuncia una pre-release de `3.0.0`, sin su número. | conciliado |
+| RC-03 | Módulo `__init__.py` | `09-arquitectura.md` | `` `__init__.py` `` | `__version__` es la única declaración del número de versión. | conciliado |
+| RC-04 | `pyproject.toml` en el árbol del repositorio | `10-carpetas-y-cache.md` | `├── pyproject.toml` | El comentario dice que la versión se toma de `__version__`. | conciliado |
+| RC-05 | Salida de `--version` | `12.09-version.md` | `Formato:` | En `develop`, `<versión>` es una pre-release de `3.0.0` (`3.0.0aN`), sin su número. | conciliado |
+| RC-06 | Estado de la versión del paquete | `22-versiones.md` | `**Estado:**` | `develop` anuncia una pre-release de `3.0.0` (`3.0.0aN`); su número se declara solo en `__version__`, de donde lo toman los metadatos, `--version`, `doctor` y el servidor MCP; el PRD y los documentos no lo repiten. | conciliado |
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- docs/INTERFACES.md: pendiente
-- docs/security/threat-model.md: pendiente
-- docs/tests/end-to-end.md: pendiente
-- docs/tests/docs-packaging.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- docs/INTERFACES.md: actualizado
+- docs/security/threat-model.md: actualizado
+- docs/tests/end-to-end.md: actualizado
+- docs/tests/docs-packaging.md: actualizado
 
 ## Checklist de conciliación
 
@@ -98,16 +98,16 @@ Sin cambios
 
 | ID | Ítem | Cómo se verifica | Estado |
 |---|---|---|---|
-| CL-01 | Cada fila de "Conciliación con el PRD" está aplicada en su archivo | Revisión fila por fila | pendiente |
-| CL-02 | El resto del PRD no cambia | Diff del PRD limitado a los archivos de la tabla, el glosario, el Anexo D, la portada y el historial | pendiente |
-| CL-03 | Los IDs de la unidad están creados y eliminados en el PRD, sin huecos ni referencias rotas | `doc_14` | pendiente |
-| CL-04 | Las decisiones están en el Anexo D y el glosario está aplicado | Revisión de "Decisiones" y "Glosario" | pendiente |
-| CL-05 | Los documentos consumidores están actualizados | Ninguno está `pendiente` | pendiente |
-| CL-06 | No quedan textos obsoletos en el PRD ni en los documentos consumidores: `3.0.0a3`, `3.0.0-alpha.3`, `version = "` en `pyproject.toml` | Búsqueda de cada texto | pendiente |
-| CL-07 | El defecto registrado está cerrado | Su entrada de `docs/KNOWN-DEFECTS.md` | pendiente |
-| CL-08 | La versión del documento, el historial y los próximos IDs libres están al día | Portada e `HISTORIAL.md` | pendiente |
-| CL-09 | La suite pasa | Suite completa, con `doc_14` y `doc_15` | pendiente |
-| CL-10 | Subir la pre-release cambia solo `__version__` | Con `__version__` en otra pre-release y el paquete reinstalado, la suite pasa sin cambiar otro archivo | pendiente |
+| CL-01 | Cada fila de "Conciliación con el PRD" está aplicada en su archivo | Revisión fila por fila | cumplido |
+| CL-02 | El resto del PRD no cambia | Diff del PRD limitado a los archivos de la tabla, el glosario, el Anexo D, la portada y el historial | cumplido |
+| CL-03 | Los IDs de la unidad están creados y eliminados en el PRD, sin huecos ni referencias rotas | `doc_14` | cumplido |
+| CL-04 | Las decisiones están en el Anexo D y el glosario está aplicado | Revisión de "Decisiones" y "Glosario" | cumplido |
+| CL-05 | Los documentos consumidores están actualizados | Ninguno está `pendiente` | cumplido |
+| CL-06 | No quedan textos obsoletos en el PRD ni en los documentos consumidores: `3.0.0a3`, `3.0.0-alpha.3`, `version = "` en `pyproject.toml` | Búsqueda de cada texto | cumplido |
+| CL-07 | El defecto registrado está cerrado | Su entrada de `docs/KNOWN-DEFECTS.md` | no aplica |
+| CL-08 | La versión del documento, el historial y los próximos IDs libres están al día | Portada e `HISTORIAL.md` | cumplido |
+| CL-09 | La suite pasa | Suite completa, con `doc_14` y `doc_15` | cumplido |
+| CL-10 | Subir la pre-release cambia solo `__version__` | Con `__version__` en otra pre-release y el paquete reinstalado, la suite pasa sin cambiar otro archivo | cumplido |
 
 ## Desviaciones aprobadas
 

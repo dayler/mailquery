@@ -1,8 +1,8 @@
 """TC-06, PKG-01, PKG-02, PKG-03, DOC-07 and DOC-16: packaging, dependencies and consumer documents.
 
-``develop`` carries the development pre-release (``mailquery.__version__``, 3.0.0a3),
-not yet released: the tests derive every expected version from the package
-instead of pinning a literal (PKG-02).
+``develop`` carries a development pre-release declared only in
+``mailquery.__version__``, not yet released: the tests derive every expected
+version from the package instead of pinning a literal (PKG-02).
 """
 
 import contextlib
@@ -34,6 +34,17 @@ ADVISORIES_URL = "https://github.com/Stranger6667/css-inline/security/advisories
 def _load() -> dict:
     with open(ROOT / "pyproject.toml", "rb") as fh:
         return tomllib.load(fh)
+
+
+def _assert_version_from_package(case: unittest.TestCase) -> None:
+    """``pyproject.toml`` has no literal version: it reads ``mailquery.__version__``."""
+    document = _load()
+    case.assertNotIn("version", document["project"])
+    case.assertIn("version", document["project"].get("dynamic", []))
+    case.assertEqual(
+        document["tool"]["setuptools"]["dynamic"]["version"],
+        {"attr": "mailquery.__version__"},
+    )
 
 
 def _readme(name: str) -> str:
@@ -85,9 +96,9 @@ def _installed_version() -> str | None:
 
 class PackagingTests(unittest.TestCase):
     def test_tc_06_01_version_entry_points_and_console_script(self):
-        """TC-06.01: version without bump, entry point group and console script."""
+        """TC-06.01: version read from the package, entry point group and console script."""
         project = _load()["project"]
-        self.assertEqual(project["version"], mailquery.__version__)
+        _assert_version_from_package(self)
         self.assertEqual(mailquery.__version__.split(".")[0], "3", "develop carries the 3.x major")
         self.assertEqual(
             project.get("entry-points", {}).get(ENTRY_POINT_GROUP), EXPECTED_TARGETS
@@ -156,9 +167,9 @@ class PluginPackagingTests(unittest.TestCase):
         self.assertEqual(installed, EXPECTED_TARGETS)
 
     def test_pkg_01_03_version_and_console_script_are_unchanged(self) -> None:
-        """PKG-01.03: version stays in sync with ``mailquery.__version__``; console script unchanged."""
+        """PKG-01.03: the version is read from ``mailquery.__version__``; console script unchanged."""
         project = _load()["project"]
-        self.assertEqual(project["version"], mailquery.__version__)
+        _assert_version_from_package(self)
         self.assertEqual(package_version(), mailquery.__version__)
         self.assertEqual(project["scripts"], {"mailquery": "mailquery.cli:main"})
 
@@ -167,7 +178,7 @@ class ReleasePackagingTests(unittest.TestCase):
     def test_pkg_02_01_packaging_is_ready_without_a_version_bump(self) -> None:
         """PKG-02.01: entry points/console script are final and the version is the development major."""
         project = _load()["project"]
-        self.assertEqual(project["version"], mailquery.__version__)
+        _assert_version_from_package(self)
         self.assertEqual(project["scripts"], {"mailquery": "mailquery.cli:main"})
         self.assertEqual(project.get("entry-points", {}).get(ENTRY_POINT_GROUP), EXPECTED_TARGETS)
         self.assertEqual(mailquery.__version__.split(".")[0], "3")
@@ -426,16 +437,24 @@ class ConsumerDocumentsTests(unittest.TestCase):
                     f"{name}: {NATIVE_ID_MARKER} outside the option description",
                 )
 
-    def test_doc_16_03_version_is_3_0_0a3_in_package_and_readmes(self) -> None:
-        """DOC-16.03: pyproject, ``mailquery.__version__`` and both READMEs announce 3.0.0a3."""
-        self.assertEqual(_load()["project"]["version"], "3.0.0a3")
-        self.assertEqual(mailquery.__version__, "3.0.0a3")
-        for name in ("README.md", "README.es.md"):
-            text = _readme(name)
-            self.assertIn("3.0.0a3", text, name)
-            self.assertIn("3.0.0-alpha.3", text, name)
-            self.assertNotIn("3.0.0a2", text, name)
-            self.assertNotIn("3.0.0a1", text, name)
+    def test_doc_16_03_version_is_declared_only_in_the_package(self) -> None:
+        """DOC-16.03: no consumer document nor the PRD repeats a pre-release number of the version."""
+        _assert_version_from_package(self)
+        release = re.match(r"\d+\.\d+\.\d+", mailquery.__version__)
+        assert release is not None, mailquery.__version__
+        pre_release = re.compile(
+            re.escape(release.group(0)) + r"(?:(?:a|b|rc)\d+|-(?:alpha|beta|rc)\.\d+)"
+        )
+        documents = [ROOT / "README.md", ROOT / "README.es.md", ROOT / "docs" / "INTERFACES.md"]
+        documents += sorted((ROOT / "docs" / "security").rglob("*.md"))
+        documents += [
+            path
+            for path in sorted((ROOT / "docs" / "prd").rglob("*.md"))
+            if path.name not in ("HISTORIAL.md", "D-registro-decisiones.md")
+        ]
+        for path in documents:
+            with self.subTest(document=path.relative_to(ROOT).as_posix()):
+                self.assertIsNone(pre_release.search(path.read_text(encoding="utf-8")))
 
     def test_doc_16_04_readmes_describe_the_native_id_cache(self) -> None:
         """DOC-16.04: both READMEs document ``~/.mailquery/db/cache.db`` and that uninstalling keeps it."""
