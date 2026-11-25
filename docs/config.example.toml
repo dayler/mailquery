@@ -55,6 +55,15 @@
 # [content]
 # url_display = "neutralize"   # neutralize | keep | strip (--strip-links forces strip)
 
+# --- Run lock retry ----------------------------------------------------------
+# A data command that finds the run lock held retries it before failing with
+# E_LOCKED (exit 5); the pause before retry n is
+# initial_delay_ms * backoff_factor^(n-1) ms, at most 5000 ms.
+# [lock]
+# retries = 5                    # 0..10; 0 = a single attempt
+# initial_delay_ms = 150         # 10..5000
+# backoff_factor = 2             # 1..10, integer or decimal
+
 # --- Observed accounts: macOS (Apple Mail) ----------------------------------
 # A block without a driver prefix uses the native driver of the OS
 # (`apple_mail` on macOS, `outlook` on Windows). Write the prefix explicitly to
@@ -118,4 +127,7 @@
 # (exit 2).
 # `[content]` accepts only `url_display` (`neutralize`, `keep` or `strip`); any
 # other value or key fails with E_CONFIG_INVALID (exit 2).
+# `[lock]` accepts only `retries`, `initial_delay_ms` and `backoff_factor`; a
+# value out of range or of another type, or any other key, fails with
+# E_CONFIG_INVALID (exit 2) in the data commands.
 # ----------------------------------------------------------------------------

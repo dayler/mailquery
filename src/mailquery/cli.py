@@ -136,6 +136,8 @@ Examples:
   mailquery attachment apple_mail:83143 --all
 
 Configuration: ~/.mailquery/config.toml (optional; see README.md)
+Lock: a busy run lock is retried 5 times, pausing 150 ms and doubling each time
+      ([lock] in config.toml)
 Output: one JSON object on stdout for every command, in UTF-8 (this help,
         --version, the default doctor report and the MCP protocol of
         mcp serve are the only non-JSON output);
@@ -1144,7 +1146,7 @@ def _run_command(
         if command == "attachment":
             _require_attachments_enabled(config)
             _require_command_driver_in_scope(args, config, native_name)
-        with RunLock(home_path):
+        with RunLock(home_path, config.lock):
             if command in ("show", "attachment"):
                 names = (str(getattr(args, "uid_driver", "") or native_name),)
             else:
