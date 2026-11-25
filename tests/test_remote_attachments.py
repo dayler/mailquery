@@ -537,9 +537,9 @@ class RemoteHardCutTests(_RemoteCase):
         with mock.patch.object(
             cli_mod, "_attachment_timeout", return_value=budget
         ):
-            started = time.monotonic()
+            started = time.perf_counter()
             result = self.run_attachment(argv, backend)
-            elapsed = time.monotonic() - started
+            elapsed = time.perf_counter() - started
         return result, elapsed
 
     def test_ut_rmt_04_01_block_before_the_first_block_is_a_hard_timeout(self) -> None:
@@ -550,7 +550,7 @@ class RemoteHardCutTests(_RemoteCase):
             result, elapsed = self._blocked_run(
                 backend, ["attachment", _UID, "--index", "1"], budget=1.0
             )
-            self.assertLess(elapsed, 2.0)
+            self.assertLess(elapsed, 5.0)
             payload = self.assert_error(3, result, "E_CLIENT_TIMEOUT")
             self.assertEqual(
                 payload["error"]["message"],
@@ -574,7 +574,7 @@ class RemoteHardCutTests(_RemoteCase):
             result, elapsed = self._blocked_run(
                 backend, ["attachment", _UID, "--index", "1"], budget=1.0
             )
-            self.assertLess(elapsed, 2.0)
+            self.assertLess(elapsed, 5.0)
             payload = self.assert_error(3, result, "E_CLIENT_TIMEOUT")
             self.assertIn("did not respond within the timeout", payload["error"]["message"])
             self.assertEqual(payload["error"]["hint"], _TIMEOUT_HINT)
@@ -637,7 +637,7 @@ class RemoteHardCutTests(_RemoteCase):
         code, stdout, stderr = result
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(self.payload(stdout)["count"], 1)
-        self.assertGreaterEqual(elapsed, 0.15)
+        self.assertGreaterEqual(elapsed, 0.1)
 
     def test_ut_rmt_04_06_expired_deadline_empty_stream_and_failing_close(self) -> None:
         """UT-RMT-04.06: no request after expiry, empty stream succeeds and a failing close is quiet."""

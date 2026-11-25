@@ -240,9 +240,9 @@ class FakeFailureTests(unittest.TestCase):
         app = _connect(fake)
         fake.hang_next(kind="Application", member="Session", timeout=5.0)
         threading.Timer(0.2, fake.release).start()
-        started = time.monotonic()
+        started = time.perf_counter()
         app.Session
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
         self.assertGreaterEqual(elapsed, 0.15)
         self.assertLess(elapsed, 4.0)
         self.assertEqual(fake.hangs, 1)

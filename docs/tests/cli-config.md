@@ -177,7 +177,7 @@ Requisitos: RF-89, AC-79, AC-80 · Archivo: `tests/test_cli.py`
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | Lock retenido 2 s por otro proceso, sin `[lock]`: `search` termina con exit 0 tras liberarse y su salida es la de una ejecución sin espera salvo `generated_at` y `scan.duration_ms`. |
-| .02 | N | `retries = 2`, `initial_delay_ms = 100` y lock retenido 3 s: `E_LOCKED` (exit 5), no antes de 300 ms ni después de 2 s, con el `message` `another mailquery run is already in progress` y el `hint` `still held after 2 retries: <ruta>; retry later ([lock] in ~/.mailquery/config.toml sets the retries)`, comparados literalmente con la ruta del lock. |
+| .02 | N | `retries = 2`, `initial_delay_ms = 100` y lock retenido 60 s: `E_LOCKED` (exit 5) tras dos pausas de 100 y 200 ms, registradas en el `sleep` del lock, y antes de 10 s, con el `message` `another mailquery run is already in progress` y el `hint` `still held after 2 retries: <ruta>; retry later ([lock] in ~/.mailquery/config.toml sets the retries)`, comparados literalmente con la ruta del lock. |
 | .03 | N | `retries = 0` y lock retenido: `E_LOCKED` sin esperar, con el `hint` `wait for the running invocation to finish and retry (the harness should only retry exit code 5)`. |
 | .04 | P | `search`, `new`, `show`, `attachment` y `mailboxes` construyen el lock con `config.lock`. |
 | .05 | N | Cada comando de datos con `retries = 11`: `E_CONFIG_INVALID` (exit 2) con el rango en el `hint`, sin tomar el lock. |
