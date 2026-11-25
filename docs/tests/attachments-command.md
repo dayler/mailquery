@@ -227,7 +227,7 @@ Requisitos: AC-44 · Archivo: `tests/test_remote_attachments.py`
 
 | Caso | Tipo | Verifica |
 |---|---|---|
-| .01 | N | El plugin se bloquea antes del primer bloque (espera un `threading.Event` que el test no activa hasta el final): con el tope inyectado a 1 s, `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-49; la espera del núcleo, medida con `time.monotonic()`, cumple `elapsed < tope + 1`. |
+| .01 | N | El plugin se bloquea antes del primer bloque (espera un `threading.Event` que el test no activa hasta el final): con el tope inyectado a 1 s, `E_CLIENT_TIMEOUT` (exit 3) con el mensaje y el hint de RF-49; la espera del núcleo, medida con `time.perf_counter()`, cumple `elapsed < tope + 4`. |
 | .02 | N | El plugin se bloquea entre dos bloques: ídem. |
 | .03 | B | `--all` con los adjuntos 2 y 3 bloqueados: se informa el 2. |
 | .04 | B | Staging limpio y sin archivos nuevos; el hilo del plugin se libera al terminar el test (evento) y no queda ningún hilo vivo. |

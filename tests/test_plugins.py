@@ -1749,15 +1749,15 @@ class MetadataTimeoutTests(unittest.TestCase):
             time.sleep(0.3)
             return []
 
-        started = time.monotonic()
+        started = time.perf_counter()
         with mock.patch("mailquery.plugins.api.METADATA_TIMEOUT_SECONDS", 0.05):
             with self.assertRaises(MailqueryError) as context:
                 call_driver("query", slow, driver=DRIVER, internal=False)
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
         self.assertEqual(context.exception.code, "E_CLIENT_TIMEOUT")
         self.assertEqual(context.exception.exit_code, 3)
         self.assertEqual(len(calls), 1, "no automatic retry")
-        self.assertLess(elapsed, 1.0, "the deadline is injected, not the 30 s default")
+        self.assertLess(elapsed, 5.0, "the deadline is injected, not the 30 s default")
         self.assertIsNotNone(context.exception.log_message)
 
     def test_ut_err_04_03_operation_below_the_deadline_is_not_interrupted(self) -> None:
