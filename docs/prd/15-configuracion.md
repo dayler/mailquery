@@ -42,6 +42,10 @@ tags: [prd]
 | `attachments.timeout_seconds` | entero | No | `60` | 10–600 | `180` | Segundos máximos para leer cada adjunto en `mailquery attachment`, en cualquier driver; al vencer, `E_CLIENT_TIMEOUT` (RF-49). |
 | `[content]` | tabla TOML | No | — | — | `[content]` | Presentación del contenido no confiable. |
 | `content.url_display` | string | No | `"neutralize"` | `"neutralize"`, `"keep"`, `"strip"` | `"keep"` | Modo de visualización de URLs en el asunto, los nombres de remitente y destinatarios, `headers`, `body_text` y `snippet`; `--strip-links` lo sobrescribe. |
+| `[lock]` | tabla TOML | No | — | — | `[lock]` | Reintento del lock de ejecución ocupado (RF-89). |
+| `lock.retries` | entero | No | `5` | 0–10 | `3` | Reintentos después del primer intento cuando el lock de ejecución está ocupado; `0` = un solo intento (RF-89). |
+| `lock.initial_delay_ms` | entero | No | `150` | 10–5000 | `100` | Pausa en milisegundos antes del primer reintento (RF-89). |
+| `lock.backoff_factor` | número (entero o decimal) | No | `2` | 1–10 | `1.5` | Factor por el que crece cada pausa respecto de la anterior; con `1`, todas las pausas son iguales. Ninguna pausa pasa de 5000 ms (§15.6, RF-89). |
 | `[scope."<driver>:<cuenta>"]` | tabla TOML | No | `<driver>` nativo del SO | `<driver>`: `[a-z0-9_]{1,64}` instalado; `<cuenta>`: etiqueta/email/UUID de un backend interno o identificador opaco del plugin (resuelto dentro del driver) | `[scope."apple_mail:you@icloud.com"]` | Declara una cuenta observada y su driver. Si se omite `<driver>:`, usa el nativo del SO. |
 | `mailbox_list` | array de strings | No | `[]` | `path` de carpeta tal como aparece en `mailquery mailboxes`, su nombre o su URL (`mailboxes --fields name,url`), o `INBOX`; case-insensitive (resolución: §15.3) | `["Facturas", "[Gmail]/Important"]` | Carpetas adicionales a INBOX para esa cuenta. |
 
@@ -122,7 +126,7 @@ mailbox_list = ["INBOX/Facturas"]
 
 ### 15.5 Archivo completo (todas las propiedades)
 
-El ejemplo de macOS muestra **todo** lo que se puede configurar hoy, con las tres formas de identificar una cuenta. Las secciones `[logging]`, `[search]`, `[new]`, `[attachments]` y `[content]` son idénticas en ambas plataformas; para Windows solo se muestran los bloques de cuenta. Cada equipo tiene su propio `config.toml`: en un archivo solo resuelven las cuentas del backend de ese equipo (una cuenta de otro backend ⇒ `E_CONFIG_ACCOUNT_UNKNOWN`). Son válidos tal cual, sustituyendo etiquetas y carpetas por las tuyas.
+El ejemplo de macOS muestra **todo** lo que se puede configurar hoy, con las tres formas de identificar una cuenta. Las secciones `[logging]`, `[search]`, `[new]`, `[attachments]`, `[content]` y `[lock]` son idénticas en ambas plataformas; para Windows solo se muestran los bloques de cuenta. Cada equipo tiene su propio `config.toml`: en un archivo solo resuelven las cuentas del backend de ese equipo (una cuenta de otro backend ⇒ `E_CONFIG_ACCOUNT_UNKNOWN`). Son válidos tal cual, sustituyendo etiquetas y carpetas por las tuyas.
 
 **macOS (Apple Mail)**, archivo completo:
 
@@ -164,6 +168,12 @@ timeout_seconds = 60           # 10..600, segundos por adjunto en `attachment`
 [content]
 url_display = "neutralize"     # neutralize | keep | strip (--strip-links fuerza strip)
 
+# --- Reintento del lock de ejecución ----------------------------------------
+[lock]
+retries = 5                    # 0..10; 0 = un solo intento
+initial_delay_ms = 150         # 10..5000
+backoff_factor = 2             # 1..10, entero o decimal
+
 # --- Cuentas observadas (declararlas es lo que las activa) -----------------
 [scope."iCloud (you@icloud.com)"]
 mailbox_list = ["Facturas", "Archivo"]
@@ -194,7 +204,7 @@ mailbox_list = ["Recovered Messages (you@gmail.com)"]
 
 ```toml
 # ~/.mailquery/config.toml — Windows + Outlook clásico: solo cambian las cuentas
-# ([logging], [search], [new], [attachments] y [content] como en el ejemplo de macOS).
+# ([logging], [search], [new], [attachments], [content] y [lock] como en el ejemplo de macOS).
 
 # --- Cuentas observadas (declararlas es lo que las activa) -----------------
 # Cuenta Exchange en modo caché: INBOX (la bandeja de entrada, sea cual sea el
@@ -251,7 +261,7 @@ Los valores configurables están en §15.1. Estos son los que se mantienen fijos
 | Cuerpo en `show` | 20.000 caracteres | Truncado con aviso en el JSON. |
 | HTML → texto | Activado | Según RF-53; para el cuerpo, la búsqueda por contenido y los snippets. |
 | Logs | Rutas (`mailquery.log`, `mailquery.jsonl`) y 5 archivos rotados por formato (§14) | Nivel, tamaño de rotación y formato se configuran en `[logging]`. |
-| Lock | `~/.mailquery/locks/mailquery.lock` | Automático; evita corridas solapadas. |
+| Lock | `~/.mailquery/locks/mailquery.lock`; como mucho 5000 ms por pausa entre reintentos | Automático; evita corridas solapadas. Los reintentos, la primera pausa y el factor de crecimiento se configuran en `[lock]` (§15.1, RF-89). |
 | Directorio de adjuntos | `~/.mailquery/attachments/<driver>/<native_id>/` | `native_id` se sustituye por un identificador estable de 32 hex derivado de `uid` solo si `<native_id>` o la ruta exceden los límites de la plataforma (límites y fórmula en §10.3.3). |
 | Staging | subdirectorio transitorio bajo `~/.mailquery/tmp/` | Se limpia al terminar, con éxito o no; el núcleo no toca archivos de plugins ni cachés del backend. |
 | Longitud de `driver` | ≤ 64 caracteres (`[a-z0-9_]{1,64}`) | Se usa como componente de archivo/directorio; 64 deja margen a `<driver>.toml`, `logs/<driver>.log` y `tmp/plugin-<driver>/`. |
@@ -260,39 +270,6 @@ Los valores configurables están en §15.1. Estos son los que se mantienen fijos
 | Timeouts | 30 s metadatos | Sin configuración; el tope por adjunto extraído es `[attachments].timeout_seconds` (RF-49). |
 | Mensajes por grupo de `--group-by` | 5 por defecto (de 0 a 50 con `--limit`) | RF-70. |
 | Grupos de `--group-by` | 50 como máximo | Si hay más, `truncated: true` y `W_RESULTS_TRUNCATED` (RF-70). |
-
-### 15.7 Alcance de stores en Windows (ADR-15)
-
-**Candidatos** (lo que `mailboxes` lista en `accounts[]`/`mailboxes[]`):
-
-**Tabla: Stores candidatos en Windows**
-
-| Store | Condición | Etiqueta |
-|-------|-----------|----------|
-| Buzón de entrega de una cuenta del perfil | Cuenta Exchange, IMAP, POP3 o EAS cuyo store es local: Exchange en modo caché; las demás, con su archivo de datos en un disco local | `Exchange (…)`, `IMAP (…)`, `POP3 (…)`, `EAS (…)` (con el email SMTP) |
-| Archivo de datos `.pst` | En un disco local (incluido un disco extraíble) y que no es el buzón de entrega de una cuenta | `PST ({nombre visible})` |
-
-Si un `.pst` es el buzón de entrega de una cuenta POP3, se etiqueta como la cuenta (`POP3 (…)`), no como `PST (…)`.
-
-**Excluidos** (lo que `mailboxes` lista en `excluded_stores[]`; RF-32):
-
-**Tabla: Stores excluidos en Windows**
-
-| Store | `reason` | Etiqueta | `path` |
-|-------|----------|----------|--------|
-| Buzón delegado/compartido | `shared_mailbox` | `Exchange shared ({nombre})` | `null` |
-| Carpetas públicas | `public_folders` | `Public Folders ({nombre})` | `null` |
-| Cuenta Exchange sin modo caché | `online_mode` | la de la cuenta (`Exchange (…)`) | `null` |
-| Otro store sin copia local (p. ej. archivo en línea, grupos de Microsoft 365, store sin archivo de datos) | `online_mode` | su nombre visible | `null` |
-| `.pst` (o archivo de una cuenta) en ruta UNC o unidad de red mapeada | `network_path` | la que tendría si fuera local | ruta completa |
-| Cuenta de otro tipo | `unsupported_account_type` | `{tipo} ({smtp})` | ruta o `null` |
-| Store del perfil cuyas propiedades no se pueden leer (p. ej. Outlook no logra conectar con el servidor de un store que no es local) | `unavailable` | su nombre visible si se pudo leer; si no, `unknown` | ruta si se pudo leer; si no, `null` |
-
-Un store `unavailable` no impide leer el resto: los comandos siguen con los stores candidatos. La resolución de `[scope]` contra excluidos: §15.3.
-
-**Carpetas ocultas:** las carpetas internas de sincronización (`Conflicts`, `Sync Issues`, `Local Failures`, `Server Failures` y sus subcarpetas) no se listan ni se leen, en cualquier idioma de Outlook.
-
-Como en macOS, ser candidato no basta: solo se leen las cuentas **declaradas** en `[scope."<driver>:<cuenta>"]` (sin prefijo, con el driver nativo; §15).
 
 ---
 

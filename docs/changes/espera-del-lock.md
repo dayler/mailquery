@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-implementado
+conciliado (2026-11-24)
 
 ## Contexto
 
@@ -160,23 +160,23 @@ Ninguna
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Lock de ejecución | `06-requisitos-funcionales.md` | RF-20 | El comando sale con código 5 solo si el lock sigue ocupado después de los reintentos de RF-89. | implementado |
-| RC-02 | Requisito del reintento | `06-requisitos-funcionales.md` | después de RF-88 | Nueva subsección 6.13 con RF-89 y sus condiciones. | implementado |
-| RC-03 | Responsabilidad de `state.py` | `09-arquitectura.md` | `` `state.py` `` | El lock deja de describirse como no bloqueante: es un lock con reintentos y pausas crecientes (RF-89). | implementado |
-| RC-04 | Propiedades configurables | `15-configuracion.md` | después de `` `content.url_display` `` | Nuevas filas: la sección `[lock]` y las claves `lock.retries`, `lock.initial_delay_ms` y `lock.backoff_factor`, todas opcionales, con su tipo, su valor por defecto, su rango y su descripción (RF-89). | implementado |
-| RC-05 | Archivo completo de ejemplo | `15-configuracion.md` | después de `url_display = "neutralize"`; `El ejemplo de macOS muestra`; `# ([logging], [search]` | El ejemplo añade la sección `[lock]` con sus tres claves, sus valores por defecto y sus comentarios de rango; el párrafo que presenta el ejemplo y el comentario del ejemplo de Windows nombran `[lock]` entre las secciones comunes a las dos plataformas (RF-89). | implementado |
-| RC-06 | Valores fijos | `15-configuracion.md` | `Lock` | La fila dice que la ruta y el tope de 5000 ms por pausa son fijos y que los reintentos se configuran en `[lock]` (RF-89). | implementado |
-| RC-07 | Partición de la sección 15 | `15-2-stores-windows.md` (nuevo) | — | La subsección 15.7 pasa a este archivo sin cambiar su texto, para que `15-configuracion.md` no supere 300 líneas. | implementado |
-| RC-08 | Archivos del PRD | `00-indice.md` | `15 Configuración` | La fila enlaza los dos archivos de la sección 15. | implementado |
-| RC-09 | Ayuda raíz | `12.07-ayuda.md` | `Configuration: ~/.mailquery/config.toml` | Nueva línea `Lock:` después de la de configuración, con el reintento, sus tres valores por defecto y la sección `[lock]`, partida en dos líneas para no pasar de 100 columnas (RF-89). | implementado |
-| RC-10 | Chequeo `lock` de `doctor` | `12.08-doctor.md` | `### 12.8` | El párrafo "Formato de `detail`" dice que el chequeo `lock` hace un solo intento y no aplica los reintentos de `[lock]` (RF-89). | implementado |
-| RC-11 | Comportamiento con el lock ocupado | `17-comportamiento-errores.md` | `Lock ocupado` | La fila describe los reintentos con pausas crecientes, sus valores por defecto, `retries = 0` y el `hint` de los reintentos agotados; el caso de la caché de ids nativos no cambia (RF-89). | implementado |
-| RC-12 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El punto nombra el reintento del lock y su rango incluye AC-79 y AC-80. | implementado |
-| RC-13 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-78 | AC-79 y AC-80. | implementado |
-| RC-14 | Concurrencia | `21-harness.md` | `### 21.3 Idempotencia y concurrencia` | Nueva entrada: dos ejecuciones que coinciden se turnan con los reintentos del lock, y `E_LOCKED` queda para los reintentos agotados; la entrada de MCP dice que una llamada reintenta lo que su comando (RF-89). | implementado |
-| RC-15 | Cambios visibles en 3.0.0 | `22-versiones.md` | `**Tabla: Cambios visibles de 3.0.0 en ambas plataformas**` | Nueva fila: con el lock ocupado, antes `E_LOCKED` al instante y después hasta 5 reintentos con pausas crecientes, configurables en `[lock]` (RF-89). | implementado |
-| RC-16 | Riesgo de varias sesiones | `23-riesgos.md` | `Varias sesiones del harness a la vez` | La mitigación son los reintentos del lock; `E_LOCKED` solo aparece con los reintentos agotados y se reintenta (RF-89). | implementado |
-| RC-17 | Riesgos del reintento | `23-riesgos.md` | después de `Un harness lanza el servidor MCP` | Nuevas filas: un comando sin turno por falta de orden de llegada, las últimas pausas largas, un fallo por lock ocupado que tarda más en llegar y una llamada MCP que dura más mientras el servidor atiende en serie, con sus mitigaciones (RF-89). | implementado |
+| RC-01 | Lock de ejecución | `06-requisitos-funcionales.md` | RF-20 | El comando sale con código 5 solo si el lock sigue ocupado después de los reintentos de RF-89. | conciliado |
+| RC-02 | Requisito del reintento | `06-requisitos-funcionales.md` | después de RF-88 | Nueva subsección 6.13 con RF-89 y sus condiciones. | conciliado |
+| RC-03 | Responsabilidad de `state.py` | `09-arquitectura.md` | `` `state.py` `` | El lock deja de describirse como no bloqueante: es un lock con reintentos y pausas crecientes (RF-89). | conciliado |
+| RC-04 | Propiedades configurables | `15-configuracion.md` | después de `` `content.url_display` `` | Nuevas filas: la sección `[lock]` y las claves `lock.retries`, `lock.initial_delay_ms` y `lock.backoff_factor`, todas opcionales, con su tipo, su valor por defecto, su rango y su descripción (RF-89). | conciliado |
+| RC-05 | Archivo completo de ejemplo | `15-configuracion.md` | después de `url_display = "neutralize"`; `El ejemplo de macOS muestra`; `# ([logging], [search]` | El ejemplo añade la sección `[lock]` con sus tres claves, sus valores por defecto y sus comentarios de rango; el párrafo que presenta el ejemplo y el comentario del ejemplo de Windows nombran `[lock]` entre las secciones comunes a las dos plataformas (RF-89). | conciliado |
+| RC-06 | Valores fijos | `15-configuracion.md` | `Lock` | La fila dice que la ruta y el tope de 5000 ms por pausa son fijos y que los reintentos se configuran en `[lock]` (RF-89). | conciliado |
+| RC-07 | Partición de la sección 15 | `15-2-stores-windows.md` (nuevo) | — | La subsección 15.7 pasa a este archivo sin cambiar su texto, para que `15-configuracion.md` no supere 300 líneas. | conciliado |
+| RC-08 | Archivos del PRD | `00-indice.md` | `15 Configuración` | La fila enlaza los dos archivos de la sección 15. | conciliado |
+| RC-09 | Ayuda raíz | `12.07-ayuda.md` | `Configuration: ~/.mailquery/config.toml` | Nueva línea `Lock:` después de la de configuración, con el reintento, sus tres valores por defecto y la sección `[lock]`, partida en dos líneas para no pasar de 100 columnas (RF-89). | conciliado |
+| RC-10 | Chequeo `lock` de `doctor` | `12.08-doctor.md` | `### 12.8` | El párrafo "Formato de `detail`" dice que el chequeo `lock` hace un solo intento y no aplica los reintentos de `[lock]` (RF-89). | conciliado |
+| RC-11 | Comportamiento con el lock ocupado | `17-comportamiento-errores.md` | `Lock ocupado` | La fila describe los reintentos con pausas crecientes, sus valores por defecto, `retries = 0` y el `hint` de los reintentos agotados; el caso de la caché de ids nativos no cambia (RF-89). | conciliado |
+| RC-12 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El punto nombra el reintento del lock y su rango incluye AC-79 y AC-80. | conciliado |
+| RC-13 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-78 | AC-79 y AC-80. | conciliado |
+| RC-14 | Concurrencia | `21-harness.md` | `### 21.3 Idempotencia y concurrencia` | Nueva entrada: dos ejecuciones que coinciden se turnan con los reintentos del lock, y `E_LOCKED` queda para los reintentos agotados; la entrada de MCP dice que una llamada reintenta lo que su comando (RF-89). | conciliado |
+| RC-15 | Cambios visibles en 3.0.0 | `22-versiones.md` | `**Tabla: Cambios visibles de 3.0.0 en ambas plataformas**` | Nueva fila: con el lock ocupado, antes `E_LOCKED` al instante y después hasta 5 reintentos con pausas crecientes, configurables en `[lock]` (RF-89). | conciliado |
+| RC-16 | Riesgo de varias sesiones | `23-riesgos.md` | `Varias sesiones del harness a la vez` | La mitigación son los reintentos del lock; `E_LOCKED` solo aparece con los reintentos agotados y se reintenta (RF-89). | conciliado |
+| RC-17 | Riesgos del reintento | `23-riesgos.md` | después de `Un harness lanza el servidor MCP` | Nuevas filas: un comando sin turno por falta de orden de llegada, las últimas pausas largas, un fallo por lock ocupado que tarda más en llegar y una llamada MCP que dura más mientras el servidor atiende en serie, con sus mitigaciones (RF-89). | conciliado |
 
 ## Documentos consumidores
 
@@ -200,17 +200,17 @@ Ninguna
 
 | ID | Ítem | Cómo se verifica | Estado |
 |---|---|---|---|
-| CL-01 | Cada fila de "Conciliación con el PRD" está aplicada en su archivo | Revisión fila por fila | pendiente |
-| CL-02 | El resto del PRD no cambia | Diff del PRD limitado a los archivos de la tabla, el glosario, el Anexo D, la portada y el historial | pendiente |
-| CL-03 | Los IDs de la unidad están creados y eliminados en el PRD, sin huecos ni referencias rotas | `doc_14` | pendiente |
-| CL-04 | Las decisiones están en el Anexo D y el glosario está aplicado | Revisión de "Decisiones" y "Glosario" | pendiente |
-| CL-05 | Los documentos consumidores están actualizados | Ninguno está `pendiente` | pendiente |
-| CL-06 | No quedan textos obsoletos en el PRD ni en los documentos consumidores: "lock no bloqueante", `E_LOCKED` descrito como rechazo inmediato del lock de ejecución, y "más `E_LOCKED`" como efecto de varias sesiones | Búsqueda de cada texto | pendiente |
+| CL-01 | Cada fila de "Conciliación con el PRD" está aplicada en su archivo | Revisión fila por fila | cumplido |
+| CL-02 | El resto del PRD no cambia | Diff del PRD limitado a los archivos de la tabla, el glosario, el Anexo D, la portada y el historial | cumplido |
+| CL-03 | Los IDs de la unidad están creados y eliminados en el PRD, sin huecos ni referencias rotas | `doc_14` | cumplido |
+| CL-04 | Las decisiones están en el Anexo D y el glosario está aplicado | Revisión de "Decisiones" y "Glosario" | cumplido |
+| CL-05 | Los documentos consumidores están actualizados | Ninguno está `pendiente` | cumplido |
+| CL-06 | No quedan textos obsoletos en el PRD ni en los documentos consumidores: "lock no bloqueante", `E_LOCKED` descrito como rechazo inmediato del lock de ejecución, y "más `E_LOCKED`" como efecto de varias sesiones | Búsqueda de cada texto | cumplido |
 | CL-07 | El defecto registrado está cerrado | Su entrada de `docs/KNOWN-DEFECTS.md` | no aplica |
-| CL-08 | La versión del documento, el historial y los próximos IDs libres están al día | Portada e `HISTORIAL.md` | pendiente |
-| CL-09 | La suite pasa | Suite completa, con `doc_14` y `doc_15` | pendiente |
-| CL-10 | Los valores por defecto de `[lock]` son los mismos en §15.1, §15.5, la ayuda raíz, `README.md`, `README.es.md` y `docs/config.example.toml` | Revisión cruzada de los seis textos | pendiente |
-| CL-11 | Dos sesiones a la vez, veinte llamadas solapadas cada una, sin sección `[lock]`: ninguna termina con `E_LOCKED`; con `retries = 0`, las que coinciden sí | Prueba manual en macOS y en Windows, con su log | pendiente |
+| CL-08 | La versión del documento, el historial y los próximos IDs libres están al día | Portada e `HISTORIAL.md` | cumplido |
+| CL-09 | La suite pasa | Suite completa, con `doc_14` y `doc_15` | cumplido |
+| CL-10 | Los valores por defecto de `[lock]` son los mismos en §15.1, §15.5, la ayuda raíz, `README.md`, `README.es.md` y `docs/config.example.toml` | Revisión cruzada de los seis textos | cumplido |
+| CL-11 | Dos sesiones a la vez, veinte llamadas solapadas cada una, sin sección `[lock]`: ninguna termina con `E_LOCKED`; con `retries = 0`, las que coinciden sí | Prueba manual en macOS y en Windows, con su log | cumplido |
 
 ## Desviaciones aprobadas
 
