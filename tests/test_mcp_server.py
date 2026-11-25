@@ -3,7 +3,8 @@
 Covers UT-MCP-01 to UT-MCP-08 with an in-process server and a substituted tool
 runner. The real subprocess runner is exercised with ``subprocess.run``
 replaced; the process-level cases (UT-MCP-09 to UT-MCP-12) live in the same
-file and require ``mailquery mcp serve``.
+file and require ``mailquery mcp serve``. UT-MCP-13 covers a busy run lock,
+in process and with the real server.
 """
 
 from __future__ import annotations
@@ -1057,3 +1058,150 @@ class RotationTests(_ProcessCase):
         self.assertTrue((log.parent / "mailquery.jsonl.1").is_file())
         payloads = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(any(payload.get("fields", {}).get("event") == "call" for payload in payloads))
+
+
+# --------------------------------------------------------------------------- #
+# UT-MCP-13 — busy run lock in an MCP call (RF-89, AC-79, AC-80)
+# --------------------------------------------------------------------------- #
+
+# Takes the run lock of ``argv[1]``, prints ``locked`` and keeps it ``argv[2]`` seconds.
+_LOCK_HOLDER = r"""
+import sys
+import time
+from pathlib import Path
+from mailquery.state import RunLock
+
+lock = RunLock(Path(sys.argv[1]))
+lock.acquire()
+print("locked", flush=True)
+time.sleep(float(sys.argv[2]))
+lock.release()
+"""
+
+
+class _FixtureCliRunner:
+    """Runner that counts the calls and runs ``cli.main`` in process over the fixture store."""
+
+    def __init__(self, fixture) -> None:
+        self.fixture = fixture
+        self.calls: list[list[str]] = []
+
+    def run(self, argv):
+        self.calls.append(list(argv))
+        stdout = io.StringIO()
+        started = time.perf_counter()
+        with mock.patch.object(sys, "stdout", stdout), mock.patch.object(
+            sys, "stderr", io.StringIO()
+        ):
+            code = cli_mod.main(
+                list(argv[4:]),
+                home=self.fixture.home,
+                mail_root=self.fixture.mail_root,
+                accounts_db=self.fixture.accounts_db,
+            )
+        return ToolOutcome(stdout.getvalue(), code, int((time.perf_counter() - started) * 1000))
+
+
+def _close_mailquery_log_handlers() -> None:
+    """Release the log files of in-process runs so the temporary directory can be removed."""
+    import logging
+
+    logger = logging.getLogger("mailquery")
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            logger.removeHandler(handler)
+            handler.close()
+
+
+def _without_run_fields(payload: dict) -> dict:
+    """``payload`` without the fields that change between two runs."""
+    payload = dict(payload)
+    payload.pop("generated_at", None)
+    if isinstance(payload.get("scan"), dict):
+        payload["scan"] = {
+            key: value for key, value in payload["scan"].items() if key != "duration_ms"
+        }
+    return payload
+
+
+class LockBusyCallTests(_ServerCase):
+    """UT-MCP-13.01 — a call waits for the lock exactly as its command does."""
+
+    def setUp(self) -> None:
+        from tests.fixtures.make_fixtures import DEFAULT_CONFIG, build_store, write_config
+
+        self.fx = build_store()
+        self.addCleanup(self.fx.cleanup)
+        self.addCleanup(_close_mailquery_log_handlers)
+        write_config(self.fx.home, DEFAULT_CONFIG)
+
+    def hold_lock(self, seconds: float) -> float:
+        """Hold the run lock from another process; return the monotonic time it confirmed."""
+        env = dict(os.environ)
+        env["HOME"] = env["USERPROFILE"] = str(self.fx.home)
+        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
+        env.pop("PYTHONWARNINGS", None)
+        proc = subprocess.Popen(
+            [sys.executable, "-B", "-c", _LOCK_HOLDER, str(self.fx.home), str(seconds)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._stop_holder, proc)
+        line = proc.stdout.readline()
+        confirmed = time.monotonic()
+        if line.strip() != "locked":
+            proc.wait(timeout=60)
+            self.fail(f"the lock holder did not take the lock: {proc.stderr.read()}")
+        return confirmed
+
+    @staticmethod
+    def _stop_holder(proc) -> None:
+        if proc.poll() is None:
+            proc.kill()
+        proc.communicate(timeout=60)
+
+    def test_ut_mcp_13_01_call_waits_for_a_lock_held_two_seconds(self) -> None:
+        """UT-MCP-13.01: lock held 2 s, no [lock]: search returns the CLI result, one run."""
+        direct = _FixtureCliRunner(self.fx).run([sys.executable, "-P", "-m", "mailquery", "search"])
+        self.assertEqual(direct.exit_code, 0, direct.stdout)
+        expected = json.loads(direct.stdout)
+
+        runner = _FixtureCliRunner(self.fx)
+        confirmed = self.hold_lock(2)
+        code, replies, _ = _session(
+            [_request(1, "initialize", {}), _call("search", {}, 2)], runner
+        )
+        elapsed = time.monotonic() - confirmed
+
+        self.assertEqual(code, 0)
+        reply = replies[-1]
+        self.assertEqual(reply["id"], 2)
+        self.assertFalse(reply["result"]["isError"])
+        observed = _tool_json(reply)
+        self.assertEqual(_without_run_fields(observed), _without_run_fields(expected))
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(runner.calls[0][4:], ["search"])
+        self.assertGreaterEqual(elapsed, 1.9, "the call finished before the lock was released")
+        self.assertLess(elapsed, 2 + 4.65 + 2, f"the call took {elapsed:.3f} s")
+
+
+class LockConfigServerTests(_ProcessCase):
+    """UT-MCP-13.02 — the real server starts with an invalid [lock]."""
+
+    def test_ut_mcp_13_02_invalid_lock_config_reaches_each_call(self) -> None:
+        """UT-MCP-13.02: retries=11: mcp serve starts and search gives E_CONFIG_INVALID."""
+        _write_config(self.home, "[lock]\nretries = 11\n")
+        proc = self.start()
+        initialized = self.request(proc, 1, "initialize", {})
+        self.assertEqual(initialized["result"]["serverInfo"]["name"], "mailquery")
+        self.assertEqual(len(self.request(proc, 2, "tools/list")["result"]["tools"]), 6)
+        reply = self.call(proc, "search", {}, 3)
+        self.assertTrue(reply["result"]["isError"])
+        error = self.tool_payload(reply)["error"]
+        self.assertEqual(error["code"], "E_CONFIG_INVALID")
+        self.assertIn("0..10", error["hint"])
+        self.assertEqual(self.stop(proc)[0], 0)
