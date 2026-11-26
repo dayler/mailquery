@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -32,7 +33,12 @@ from mailquery.backends import get_backend
 from mailquery.backends import outlook_com
 from mailquery.backends.apple_mail import AppleMailBackend
 from mailquery.config import load_config
-from mailquery.search import DEFAULT_ROW_FIELDS, SEARCH_ROW_FIELDS, SHOW_FIELDS
+from mailquery.search import (
+    DEFAULT_ROW_FIELDS,
+    MAILBOX_FIELDS,
+    SEARCH_ROW_FIELDS,
+    SHOW_FIELDS,
+)
 from mailquery.state import StateStore
 from mailquery.store import open_store
 from tests.fakes import outlook as fk
@@ -914,3 +920,93 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(commands)
         for command in commands:
             self.assertIn("--fields", command)
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        """Return ``text`` with every whitespace run collapsed and backticks removed."""
+        return " ".join(text.replace("`", "").split())
+
+    def test_doc_10_05_help_lists_the_fields_once_in_the_option_line(self) -> None:
+        """DOC-10.05: the field list appears once, in the ``--fields`` line, without a Notes block."""
+        for command, expected in (
+            ("search", SEARCH_FIELDS_TEXT),
+            ("new", SEARCH_FIELDS_TEXT),
+            ("show", SHOW_FIELDS_TEXT),
+        ):
+            with self.subTest(command=command):
+                text = self._flat(self._help(command))
+                self.assertEqual(text.count(expected), 1)
+                self.assertIn(f"valid fields: {expected}", text)
+                self.assertNotIn("Valid fields:", text)
+        for command in ("search", "new"):
+            with self.subTest(command=command):
+                self.assertIn(
+                    "body is the body state, its text is body_text in show",
+                    self._flat(self._help(command)),
+                )
+
+    def test_doc_10_06_skill_lists_the_fields_of_each_command(self) -> None:
+        """DOC-10.06: the skill lists each command's fields, ``body``/``body_text`` and the group-by key rule."""
+        skill = self._flat(
+            (_ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8")
+        )
+        for expected in (
+            "The field lists differ per command",
+            SEARCH_FIELDS_TEXT,
+            SHOW_FIELDS_TEXT,
+            "the description of the fields parameter of each MCP tool",
+            "the --fields line of <command> --help",
+            "In search and new, body is the body state and carries no text; "
+            "the body text is body_text, only in show",
+            "show UID --fields body_text",
+            "the rows of a group omit the key field",
+            "--group-by from",
+            "--group-by mailbox",
+            "--limit is then the messages per group",
+        ):
+            self.assertIn(expected, skill)
+
+    def test_doc_10_07_skill_cites_only_valid_fields(self) -> None:
+        """DOC-10.07: every field the skill attributes to a command is in that command's list."""
+        skill = (_ROOT / "skills" / "mailquery" / "SKILL.md").read_text(encoding="utf-8")
+        valid = {
+            "search": set(SEARCH_ROW_FIELDS) | {"all"},
+            "new": set(SEARCH_ROW_FIELDS) | {"all"},
+            "show": set(SHOW_FIELDS) | {"all"},
+            "mailboxes": set(MAILBOX_FIELDS),
+        }
+        cited = []
+        for span in re.finditer(r"\b(search|new|show|mailboxes)\b([^\n`]*)", skill):
+            for match in re.finditer(
+                r"--fields[ =](?:\"([^\"]*)\"|'([^']*)'|([a-z_]+(?:,[a-z_]+)*))",
+                span.group(2),
+            ):
+                names = next(group for group in match.groups() if group is not None)
+                cited.extend(
+                    (span.group(1), name.strip()) for name in names.split(",") if name.strip()
+                )
+        self.assertTrue(cited)
+        for command, name in cited:
+            with self.subTest(command=command, field=name):
+                self.assertIn(name, valid[command])
+
+    def test_doc_10_08_readmes_list_the_show_fields_and_the_parameter_descriptions(self) -> None:
+        """DOC-10.08: both READMEs list the show fields, explain ``body`` and the MCP descriptions."""
+        for name, body_phrase, description_phrase in (
+            (
+                "README.md",
+                "body is the body state",
+                "the description of each parameter is the help line of its option",
+            ),
+            (
+                "README.es.md",
+                "body es el estado del cuerpo",
+                "la descripción de cada parámetro es la línea de ayuda de su opción",
+            ),
+        ):
+            with self.subTest(readme=name):
+                text = self._flat((_ROOT / name).read_text(encoding="utf-8"))
+                self.assertIn(SHOW_FIELDS_TEXT, text)
+                self.assertIn("--fields body_text", text)
+                self.assertIn(body_phrase, text)
+                self.assertIn(description_phrase, text.lower())

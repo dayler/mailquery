@@ -4,12 +4,18 @@
 
 Requisitos: AC-55, AC-39 · Archivo: `tests/test_fields.py`
 
+**Tabla: Casos de DOC-10**
+
 | Caso | Tipo | Verifica |
 |---|---|---|
 | .01 | P | `search --help`, `new --help` y `show --help` describen `--fields` con la lista de su comando. |
 | .02 | P | Los dos README documentan la fila por defecto y `--fields` con ejemplos (`--fields snippet`, `--fields all`, `show apple_mail:2714 --fields attachments`). |
 | .03 | P | La skill explica la fila por defecto, `new --fields snippet` para resumir el correo nuevo, cuándo usar `new` y cuándo `search --unread`, y la regla de triaje sin contenido (punto 16). |
 | .04 | P | `docs/recipes/01-new-mail-digest.md` usa `mailquery new --fields snippet`; todas las líneas `mailquery search` de `02-search-invoices.md` piden con `--fields` los campos que consumen. |
+| .05 | P | `search --help`, `new --help` y `show --help` muestran la lista de campos de su comando una sola vez, en la línea de `--fields` (`valid fields: <lista>`), sin el bloque `Valid fields:`; la de `search` y `new` dice `body is the body state, its text is body_text in show`. |
+| .06 | P | La skill dice `The field lists differ per command`, escribe la lista de `search` y `new` y la de `show` con el texto del hint de su comando, nombra la descripción del parámetro `fields` de las herramientas MCP y la línea de `--fields` de `<command> --help`, explica `body` y `body_text` con `show UID --fields body_text`, y dice que con `--group-by` las filas de un grupo omiten el campo de la clave (`--group-by from`, `--group-by mailbox`) y que `--limit` es por grupo. |
+| .07 | N | Cada nombre de una lista `--fields <lista>` que sigue a `search`, `new`, `show` o `mailboxes` en la skill está en la lista de ese comando. |
+| .08 | P | Los dos README escriben la lista de `show` con el texto de su hint, contienen `--fields body_text`, explican que `body` es el estado del cuerpo y dicen que la descripción de cada parámetro MCP es la línea de ayuda de su opción. |
 
 #### DOC-11 — Documentación de `--group-by` y `--count`
 

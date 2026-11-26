@@ -107,6 +107,21 @@ warnings appear with or without `--fields`. `--text` (and on Windows
 `E_UNBOUNDED_SCAN` (exit 4), and above `[search].max_scan` candidates
 `E_SCAN_TOO_LARGE` (exit 4).
 
+The field lists differ per command; the description of the `fields` parameter of
+each MCP tool and the `--fields` line of `<command> --help` carry them:
+
+- `search` and `new` (row): `uid, message_id, duplicate_count, subject, from, to,
+  cc, date_sent, date_received, mailbox, is_read, is_flagged, has_attachments,
+  size_bytes, snippet, body, all`
+- `show` (message): `uid, message_id, subject, from, to, cc, date_sent,
+  date_received, mailbox, is_read, is_flagged, has_attachments, size_bytes,
+  headers, body_text, body_truncated, attachments, partial, readable, source, all`
+
+In `search` and `new`, `body` is the body state and carries no text; the body
+text is `body_text`, only in `show`. To read the body of a chosen message, use
+`show UID --fields body_text`: it returns only `uid` and the body, without
+headers or attachments.
+
 `--strip-links` is accepted by `search`, `new` and `show`: it replaces every URL
 with `[link omitted]` and wins over `[content].url_display`. Without it the URLs
 are neutralized by default (`hxxps://`, `[:]`, `www[.]`, `[\\]`, punycode and
@@ -117,9 +132,14 @@ command accepts `--strip-links`.
 messages per group, for example the latest invoices per supplier: one or two
 keys (`from`, `domain`, `mailbox`, `account`, `day`, `week`, `month`), and the
 response replaces `messages[]` with `groups[]` (each group with its keys, its
-`count` and its newest messages; `--limit` is then the messages per group, 5 by
-default and at most 50 groups). Use `--count` when the user only asks how many
-messages match, for example "how many unread invoices are there?": the response
+`count` and its newest messages; `--limit` is then the messages per group (0 to
+50, 5 by default) and at most 50 groups are returned). With `--group-by`, the
+rows of a group omit the key field: `from` with `--group-by from` and `mailbox`
+with `--group-by mailbox`. To summarize or count mail per folder, use
+`--group-by mailbox` instead of `--fields mailbox`, which repeats the whole
+folder in every row; to go through every message of a folder, use
+`--include-mailbox`, not `--group-by`. Use `--count` when the user only asks how
+many messages match, for example "how many unread invoices are there?": the response
 carries `count`, `hint`, `warnings` and `scan`, with no messages and no 200
 limit. `--count` cannot be combined with `--fields`, `--group-by` or `--limit`;
 `new` does not accept either option. A `search` with `count: 0` returns a

@@ -34,7 +34,7 @@ Requisitos: RF-84, AC-71 · Archivo: `tests/test_mcp_server.py`
 
 #### UT-MCP-03 — Herramientas de `tools/list`
 
-Requisitos: RF-85, AC-71 · Archivo: `tests/test_mcp_server.py`
+Requisitos: RF-85, AC-71, AC-81 · Archivo: `tests/test_mcp_server.py`
 
 **Tabla: Casos de UT-MCP-03**
 
@@ -48,6 +48,7 @@ Requisitos: RF-85, AC-71 · Archivo: `tests/test_mcp_server.py`
 | .06 | N | `doctor` no tiene `json`; `show` no tiene `show_native_id`; ninguna tiene `help`. |
 | .07 | P | `uid` es obligatorio en `show` y `attachment`; todas las herramientas tienen `additionalProperties: false`. |
 | .08 | P | Una opción nueva añadida a un parser de prueba aparece en su herramienta sin otro cambio. |
+| .09 | P | La descripción de `fields` de `search` y `new` termina en `valid fields: ` y los campos de la fila con `all`; la de `show`, en `valid fields: ` y los campos de `message` con `all`; la de `mailboxes`, en sus campos de carpeta; `items` es `{"type": "string"}`, sin `enum` (AC-81). |
 
 #### UT-MCP-04 — Argumentos de la CLI
 

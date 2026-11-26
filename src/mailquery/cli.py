@@ -110,18 +110,6 @@ _SHOW_FIELDS_TEXT = ", ".join(_SHOW_FIELDS)
 #: Field names accepted by ``--fields`` in ``mailboxes`` (no ``all``).
 _MAILBOX_FIELDS = MAILBOX_FIELDS
 _MAILBOX_FIELDS_TEXT = ", ".join(_MAILBOX_FIELDS)
-_SEARCH_FIELDS_BLOCK = textwrap.fill(
-    "Valid fields: " + _SEARCH_FIELDS_TEXT,
-    width=92,
-    initial_indent="  ",
-    subsequent_indent="  ",
-)
-_SHOW_FIELDS_BLOCK = textwrap.fill(
-    "Valid fields: " + _SHOW_FIELDS_TEXT,
-    width=92,
-    initial_indent="  ",
-    subsequent_indent="  ",
-)
 #: Grouping keys of ``search --group-by``, in the order its error hint lists them.
 _SEARCH_GROUP_KEYS_TEXT = ", ".join(GROUP_KEYS)
 
@@ -268,7 +256,6 @@ Notes:
   truncated; it cannot be combined with --fields, --group-by or --limit.
   When search finds no messages, hint says how many folders and accounts were
   searched and how to widen the scope.
-""" + _SEARCH_FIELDS_BLOCK + """
 """
 
 _NEW_EPILOG = """\
@@ -290,7 +277,6 @@ Notes:
   --fields adds fields to the default row (uid, subject, from, date_received,
   is_read, has_attachments), comma-separated or with the option repeated; --fields
   all returns the full row.
-""" + _SEARCH_FIELDS_BLOCK + """
 """
 
 _SHOW_EPILOG = """\
@@ -311,7 +297,6 @@ Notes:
   --fields selects the fields of message (uid is always included), comma-separated
   or with the option repeated; without it, or with --fields all, the whole message
   is returned.
-""" + _SHOW_FIELDS_BLOCK + """
 """
 
 
@@ -576,7 +561,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LIST",
         help="adds fields to the default row (uid, subject, from, date_received, "
         "is_read, has_attachments); comma-separated or repeatable; all adds the full "
-        "row",
+        "row; body is the body state, its text is body_text in show; valid fields: "
+        f"{_SEARCH_FIELDS_TEXT}",
     )
     search_parser.add_argument(
         "--group-by",
@@ -623,7 +609,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LIST",
         help="adds fields to the default row (uid, subject, from, date_received, "
         "is_read, has_attachments); comma-separated or repeatable; all adds the full "
-        "row",
+        "row; body is the body state, its text is body_text in show; valid fields: "
+        f"{_SEARCH_FIELDS_TEXT}",
     )
 
     show_parser = subparsers.add_parser(
@@ -645,7 +632,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="LIST",
         help="selects the fields of message (uid is always included); "
-        "comma-separated or repeatable; all selects every field",
+        "comma-separated or repeatable; all selects every field; valid fields: "
+        f"{_SHOW_FIELDS_TEXT}",
     )
     show_parser.add_argument(
         "--show-native-id",
