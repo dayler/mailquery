@@ -83,4 +83,5 @@ tags: [prd]
 | **¿Dónde se documentan los valores por defecto del reintento del lock?** (2026-11-24) | En la ayuda que corresponda, en los README y en la documentación pertinente. |
 | **¿La espera del lock va con el proceso hijo persistente del servidor MCP?** (2026-11-24) | No: es un cambio independiente. |
 | **¿Dónde se declara la versión del paquete?** (2026-11-25) | Solo en `mailquery.__version__`; `pyproject.toml` la toma como versión dinámica, y el PRD y los documentos no repiten el número de la pre-release. Subir la pre-release de una versión sin publicar cambia solo ese archivo. |
+| **¿Dónde se documentan los campos válidos de `--fields` para un harness que usa el servidor MCP?** (2026-11-26) | En la línea de ayuda de `--fields` de cada comando, que el servidor usa como descripción del parámetro `fields`, y en la skill y los README. `body` y `body_text` no se renombran: la diferencia se documenta. |
 

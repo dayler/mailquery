@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-implementado
+conciliado (2026-11-26)
 
 ## Contexto
 
@@ -170,11 +170,11 @@ Sin cambios
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Ayuda, skill y README de `--fields` | `06-requisitos-funcionales.md` | RF-73 | La línea de ayuda de `--fields` de `search`, `new` y `show` lista los campos válidos de su comando con `all`, y la de `search` y `new` dice que `body` es el estado del cuerpo y su texto `body_text` de `show`; la skill lista los campos de cada comando, explica `body` y `body_text` con `show UID --fields body_text` y dice que con `--group-by` las filas no llevan el campo de la clave; los README listan los campos de `show`, explican `body` y `body_text`, y su sección del servidor MCP dice que la descripción de `fields` lista los campos válidos. | implementado |
-| RC-02 | Descripción de los parámetros del servidor MCP | `06-requisitos-funcionales.md` | RF-85 | El punto 2 dice que la descripción del parámetro `fields` de `search`, `new`, `show` y `mailboxes` lista los campos válidos de su comando y que el esquema no lleva `enum` en sus elementos; el requisito se comprueba también con AC-81. | implementado |
-| RC-03 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El rango del punto incluye AC-81. | implementado |
-| RC-04 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-80 | AC-81. | implementado |
-| RC-05 | Riesgo de confundir `--fields` | `23-riesgos.md` | `` `--fields` añade en `search`/`new` y elige en `show` `` | La mitigación nombra la línea de ayuda de `--fields`, la descripción del parámetro `fields` del servidor MCP y las listas de la skill, además del error con la lista válida (RF-73, RF-85). | implementado |
+| RC-01 | Ayuda, skill y README de `--fields` | `06-requisitos-funcionales.md` | RF-73 | La línea de ayuda de `--fields` de `search`, `new` y `show` lista los campos válidos de su comando con `all`, y la de `search` y `new` dice que `body` es el estado del cuerpo y su texto `body_text` de `show`; la skill lista los campos de cada comando, explica `body` y `body_text` con `show UID --fields body_text` y dice que con `--group-by` las filas no llevan el campo de la clave; los README listan los campos de `show`, explican `body` y `body_text`, y su sección del servidor MCP dice que la descripción de `fields` lista los campos válidos. | conciliado |
+| RC-02 | Descripción de los parámetros del servidor MCP | `06-requisitos-funcionales.md` | RF-85 | El punto 2 dice que la descripción del parámetro `fields` de `search`, `new`, `show` y `mailboxes` lista los campos válidos de su comando y que el esquema no lleva `enum` en sus elementos; el requisito se comprueba también con AC-81. | conciliado |
+| RC-03 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El rango del punto incluye AC-81. | conciliado |
+| RC-04 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-80 | AC-81. | conciliado |
+| RC-05 | Riesgo de confundir `--fields` | `23-riesgos.md` | `` `--fields` añade en `search`/`new` y elige en `show` `` | La mitigación nombra la línea de ayuda de `--fields`, la descripción del parámetro `fields` del servidor MCP y las listas de la skill, además del error con la lista válida (RF-73, RF-85). | conciliado |
 
 ## Documentos consumidores
 
@@ -193,16 +193,16 @@ Sin cambios
 
 | ID | Ítem | Cómo se verifica | Estado |
 |---|---|---|---|
-| CL-01 | Cada fila de "Conciliación con el PRD" está aplicada en su archivo | Revisión fila por fila | pendiente |
-| CL-02 | El resto del PRD no cambia | Diff del PRD limitado a los archivos de la tabla, el glosario, el Anexo D, la portada y el historial | pendiente |
-| CL-03 | Los IDs de la unidad están creados y eliminados en el PRD, sin huecos ni referencias rotas | `doc_14` | pendiente |
-| CL-04 | Las decisiones están en el Anexo D y el glosario está aplicado | Revisión de "Decisiones" y "Glosario" | pendiente |
-| CL-05 | Los documentos consumidores están actualizados | Ninguno está `pendiente` | pendiente |
-| CL-06 | No quedan textos obsoletos en el PRD ni en los documentos consumidores: `La ayuda, la skill y el error con la lista válida lo explican`; en la ayuda de `search`, `new` y `show`, `Valid fields:` | Búsqueda de cada texto | pendiente |
-| CL-07 | El defecto registrado está cerrado | En `docs/KNOWN-DEFECTS.md`, BUG-02 cerrado; BUG-03 sigue abierto por los síntomas 1 y 3, con AC-03.2, AC-03.3, AC-03.4 y AC-03.6 marcados como cumplidos | pendiente |
-| CL-08 | La versión del documento, el historial y los próximos IDs libres están al día | Portada e `HISTORIAL.md` | pendiente |
-| CL-09 | La suite pasa | Suite completa, con `doc_14` y `doc_15` | pendiente |
-| CL-10 | Las listas de `tools/list` coinciden con las del PRD | La descripción de `fields` de cada herramienta contra RF-68, RF-69 y RF-78 | pendiente |
+| CL-01 | Cada fila de "Conciliación con el PRD" está aplicada en su archivo | Revisión fila por fila | cumplido |
+| CL-02 | El resto del PRD no cambia | Diff del PRD limitado a los archivos de la tabla, el glosario, el Anexo D, la portada y el historial | cumplido |
+| CL-03 | Los IDs de la unidad están creados y eliminados en el PRD, sin huecos ni referencias rotas | `doc_14` | cumplido |
+| CL-04 | Las decisiones están en el Anexo D y el glosario está aplicado | Revisión de "Decisiones" y "Glosario" | cumplido |
+| CL-05 | Los documentos consumidores están actualizados | Ninguno está `pendiente` | cumplido |
+| CL-06 | No quedan textos obsoletos en el PRD ni en los documentos consumidores: `La ayuda, la skill y el error con la lista válida lo explican`; en la ayuda de `search`, `new` y `show`, `Valid fields:` | Búsqueda de cada texto | cumplido |
+| CL-07 | El defecto registrado está cerrado | En `docs/KNOWN-DEFECTS.md`, BUG-02 cerrado; BUG-03 sigue abierto por los síntomas 1 y 3, con AC-03.2, AC-03.3, AC-03.4 y AC-03.6 marcados como cumplidos | cumplido |
+| CL-08 | La versión del documento, el historial y los próximos IDs libres están al día | Portada e `HISTORIAL.md` | cumplido |
+| CL-09 | La suite pasa | Suite completa, con `doc_14` y `doc_15` | cumplido |
+| CL-10 | Las listas de `tools/list` coinciden con las del PRD | La descripción de `fields` de cada herramienta contra RF-68, RF-69 y RF-78 | cumplido |
 
 ## Desviaciones aprobadas
 

@@ -1,13 +1,13 @@
 # Defectos conocidos
 
-Estado: **35 defectos abiertos** (BUG-02 a BUG-36: documentación, payload y desviaciones del código respecto del PRD), **1 defecto observado** (BUG-37, pendiente de evaluar si se aplica) y **3 observaciones registradas** (OBS-01 salida de errores, OBS-02 payload verboso, OBS-03 dónde se aplica `--limit`). Seguimiento de defectos que el dueño reconoce en el producto actual. Este documento no cambia el PRD: [PRD](prd/00-indice.md) describe el comportamiento actual y enlaza cada defecto como "Pendiente conocido".
+Estado: **34 defectos abiertos** (BUG-03 a BUG-36: documentación, payload y desviaciones del código respecto del PRD), **1 defecto observado** (BUG-37, pendiente de evaluar si se aplica) y **3 observaciones registradas** (OBS-01 salida de errores, OBS-02 payload verboso, OBS-03 dónde se aplica `--limit`). Seguimiento de defectos que el dueño reconoce en el producto actual. Este documento no cambia el PRD: [PRD](prd/00-indice.md) describe el comportamiento actual y enlaza cada defecto como "Pendiente conocido".
 
 **Tabla: Índice de defectos**
 
 | ID | Título | Estado | Registrado |
 |----|--------|--------|------------|
 | BUG-01 | `attachment` no extrae adjuntos de plugins `attachments: "remote"` | Cerrado el 2026-11-14 | 2026-11-12 |
-| BUG-02 | El skill no enseña `show UID --fields body_text` y `--fields` se lee como exclusivo de `search` | Abierto | 2026-11-16 |
+| BUG-02 | El skill no enseña `show UID --fields body_text` y `--fields` se lee como exclusivo de `search` | Cerrado el 2026-11-26 | 2026-11-16 |
 | BUG-03 | "Qué mejoraría del skill": afirmaciones no verificadas y semánticas ausentes | Abierto | 2026-11-16 |
 | BUG-04 | `mailbox` se repite completo en cada fila de `search` (24 veces, 3 valores) | Abierto | 2026-11-16 |
 | BUG-05 | Correos masivos: `to`/`cc` entregan la lista completa de cientos de destinatarios | Abierto | 2026-11-17 |
@@ -76,7 +76,8 @@ corregido en `3.0.0` (en desarrollo).
 
 ## BUG-02 — El skill no enseña `show UID --fields body_text`; `--fields` se lee como exclusivo de `search`
 
-**Registrado:** 2026-11-16, por decisión del dueño. Detectado en una tarea real
+**Registrado:** 2026-11-16, por decisión del dueño. **Cerrado:** 2026-11-26,
+corregido en `3.0.0` (en desarrollo). Detectado en una tarea real
 (extraer montos de los avisos bancarios del 2026-11-15 desde el correo local).
 
 **Comportamiento esperado** (grupo DOC-10 de [`tests/docs-packaging.md`](tests/docs-packaging.md)):
@@ -211,6 +212,8 @@ vuelvan a aparecer.
 | AC-03.4 | Todo nombre de campo citado en el skill existe en la lista `-h` del comando al que se atribuye | `DOC-11.04`, parametrizado sobre `SEARCH_FIELDS_TEXT` y `SHOW_FIELDS_TEXT` |
 | AC-03.5 | El comportamiento de `--include-mailbox` con carpeta vacía está documentado, o la respuesta lo avisa | `DOC-11.05` o un caso `UT-SRCH-…` |
 | AC-03.6 | `pytest -k "DOC_10 or DOC_11"` en verde sin modificar los casos existentes | suite completa |
+
+**Cumplidos el 2026-11-26:** AC-03.2, AC-03.3 y AC-03.4, con los casos DOC-10.05 a DOC-10.08 de `docs/tests/docs-packaging.md`, y AC-03.6. El defecto sigue abierto por AC-03.1 y AC-03.5.
 
 ### Ejemplo completo de la remediación
 
