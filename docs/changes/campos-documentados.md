@@ -13,7 +13,7 @@ tags: [cambio]
 
 ## Estado
 
-aprobado
+implementado
 
 ## Contexto
 
@@ -170,22 +170,22 @@ Sin cambios
 
 | ID | Contrato | Archivo | Ancla | Qué cambia | Estado |
 |---|---|---|---|---|---|
-| RC-01 | Ayuda, skill y README de `--fields` | `06-requisitos-funcionales.md` | RF-73 | La línea de ayuda de `--fields` de `search`, `new` y `show` lista los campos válidos de su comando con `all`, y la de `search` y `new` dice que `body` es el estado del cuerpo y su texto `body_text` de `show`; la skill lista los campos de cada comando, explica `body` y `body_text` con `show UID --fields body_text` y dice que con `--group-by` las filas no llevan el campo de la clave; los README listan los campos de `show`, explican `body` y `body_text`, y su sección del servidor MCP dice que la descripción de `fields` lista los campos válidos. | pendiente |
-| RC-02 | Descripción de los parámetros del servidor MCP | `06-requisitos-funcionales.md` | RF-85 | El punto 2 dice que la descripción del parámetro `fields` de `search`, `new`, `show` y `mailboxes` lista los campos válidos de su comando y que el esquema no lleva `enum` en sus elementos; el requisito se comprueba también con AC-81. | pendiente |
-| RC-03 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El rango del punto incluye AC-81. | pendiente |
-| RC-04 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-80 | AC-81. | pendiente |
-| RC-05 | Riesgo de confundir `--fields` | `23-riesgos.md` | `` `--fields` añade en `search`/`new` y elige en `show` `` | La mitigación nombra la línea de ayuda de `--fields`, la descripción del parámetro `fields` del servidor MCP y las listas de la skill, además del error con la lista válida (RF-73, RF-85). | pendiente |
+| RC-01 | Ayuda, skill y README de `--fields` | `06-requisitos-funcionales.md` | RF-73 | La línea de ayuda de `--fields` de `search`, `new` y `show` lista los campos válidos de su comando con `all`, y la de `search` y `new` dice que `body` es el estado del cuerpo y su texto `body_text` de `show`; la skill lista los campos de cada comando, explica `body` y `body_text` con `show UID --fields body_text` y dice que con `--group-by` las filas no llevan el campo de la clave; los README listan los campos de `show`, explican `body` y `body_text`, y su sección del servidor MCP dice que la descripción de `fields` lista los campos válidos. | implementado |
+| RC-02 | Descripción de los parámetros del servidor MCP | `06-requisitos-funcionales.md` | RF-85 | El punto 2 dice que la descripción del parámetro `fields` de `search`, `new`, `show` y `mailboxes` lista los campos válidos de su comando y que el esquema no lleva `enum` en sus elementos; el requisito se comprueba también con AC-81. | implementado |
+| RC-03 | Alcance de los criterios | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos` | El rango del punto incluye AC-81. | implementado |
+| RC-04 | Criterios de aceptación | `20-criterios-aceptacion.md` | después de AC-80 | AC-81. | implementado |
+| RC-05 | Riesgo de confundir `--fields` | `23-riesgos.md` | `` `--fields` añade en `search`/`new` y elige en `show` `` | La mitigación nombra la línea de ayuda de `--fields`, la descripción del parámetro `fields` del servidor MCP y las listas de la skill, además del error con la lista válida (RF-73, RF-85). | implementado |
 
 ## Documentos consumidores
 
-- README.md: pendiente
-- README.es.md: pendiente
-- skills/mailquery/SKILL.md: pendiente
+- README.md: actualizado
+- README.es.md: actualizado
+- skills/mailquery/SKILL.md: actualizado
 - docs/INTERFACES.md: sin cambio
 - docs/recipes/: sin cambio
-- docs/tests/docs-packaging.md: pendiente
-- docs/tests/mcp-server.md: pendiente
-- docs/tests/acceptance-matrix.md: pendiente
+- docs/tests/docs-packaging.md: actualizado
+- docs/tests/mcp-server.md: actualizado
+- docs/tests/acceptance-matrix.md: actualizado
 
 ## Checklist de conciliación
 

@@ -710,7 +710,14 @@ with `body_truncated` and `W_BODY_TRUNCATED`) and attachments. `--fields`
 **selects** the fields of `message` (`uid` is always included): without it, or
 with `--fields all`, the whole message is returned; `show <uid> --fields
 attachments` returns only `uid` and `attachments`; it reads the body only to
-apply the S/MIME and unreadable-body rules and does not deliver it. The `uid` is an **opaque string** `"<driver>:<native_id>"`: pass it
+apply the S/MIME and unreadable-body rules and does not deliver it. The valid
+fields of `show --fields` are `uid, message_id, subject, from, to, cc,
+date_sent, date_received, mailbox, is_read, is_flagged, has_attachments,
+size_bytes, headers, body_text, body_truncated, attachments, partial, readable,
+source, all`. In the row of `search` and `new`, `body` is the body state
+(`{available, readable, partial, truncated}`) and carries no text; the body
+text is `body_text`, only in `show`: `show <uid> --fields body_text` returns
+only `uid` and the body. The `uid` is an **opaque string** `"<driver>:<native_id>"`: pass it
 through as-is, no arithmetic. In Outlook the native part is the short id; an
 `EntryID` is not a valid uid. The legacy unprefixed uid is accepted for the
 native driver. It only shows messages from declared accounts
@@ -876,7 +883,9 @@ removed and `-` replaced by `_`: `include_mailbox` is `--include-mailbox`,
 `uid` is the positional argument of `show` and `attachment` and is required.
 `doctor` always runs with `--json`; `json` is not a parameter. The call
 `{"since": "1w", "unread": true, "fields": ["snippet"]}` on `search` is exactly
-`mailquery search --since=1w --unread --fields=snippet`.
+`mailquery search --since=1w --unread --fields=snippet`. The description of
+each parameter is the help line of its option, so the description of `fields`
+lists the valid fields of its command.
 
 The server never reads mail, the state or a driver: every call runs one
 `mailquery` child process with the same environment and working directory,

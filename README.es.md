@@ -725,7 +725,14 @@ Detalle de un mensaje: cabeceras, `body_text` (truncado a 20.000 caracteres, con
 campos de `message` (`uid` siempre está incluido): sin la opción, o con
 `--fields all`, se devuelve el mensaje completo; `show <uid> --fields
 attachments` devuelve solo `uid` y `attachments`; lee el cuerpo solo para
-aplicar las reglas de S/MIME y de cuerpo ilegible, y no lo entrega.
+aplicar las reglas de S/MIME y de cuerpo ilegible, y no lo entrega. Los
+campos válidos de `show --fields` son `uid, message_id, subject, from, to, cc,
+date_sent, date_received, mailbox, is_read, is_flagged, has_attachments,
+size_bytes, headers, body_text, body_truncated, attachments, partial, readable,
+source, all`. En la fila de `search` y `new`, `body` es el estado del cuerpo
+(`{available, readable, partial, truncated}`) y no lleva texto; el texto del
+cuerpo es `body_text`, solo en `show`: `show <uid> --fields body_text` devuelve
+solo `uid` y el cuerpo.
 El `uid` es un **string opaco** `"<driver>:<native_id>"`: pásalo tal cual, sin
 aritmética. En Outlook la parte nativa es el id corto; un `EntryID` no es un uid
 válido. El uid legado sin prefijo se acepta para el driver nativo. Solo
@@ -895,7 +902,9 @@ iniciales y con `-` convertido en `_`: `include_mailbox` es `--include-mailbox`,
 es el argumento posicional de `show` y `attachment` y es obligatorio. `doctor`
 se ejecuta siempre con `--json`; `json` no es un parámetro. La llamada
 `{"since": "1w", "unread": true, "fields": ["snippet"]}` de `search` es
-exactamente `mailquery search --since=1w --unread --fields=snippet`.
+exactamente `mailquery search --since=1w --unread --fields=snippet`. La
+descripción de cada parámetro es la línea de ayuda de su opción, así que la de
+`fields` lista los campos válidos de su comando.
 
 El servidor no lee correo, ni el estado, ni ningún driver: cada llamada ejecuta
 un proceso hijo `mailquery` con el mismo entorno y directorio de trabajo, stdin

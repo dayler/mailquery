@@ -88,3 +88,4 @@ Cada criterio de §20 con los grupos que lo verifican.
 | AC-78 | Rotación con el servidor en marcha en los dos formatos | UT-MCP-12 | — |
 | AC-79 | Reintento del lock con pausas crecientes: espera y éxito por CLI y por MCP, reintentos agotados, `retries = 0`, pausas, `E_PERMISSION`, `doctor` sin espera y dos `new` a la vez | UT-ST-08, UT-CLI-15, UT-MCP-13.01 | — |
 | AC-80 | Esquema de `[lock]`: límites, valores inválidos, clave desconocida, valores por defecto, `doctor`, `mcp serve` y línea `Lock:` de la ayuda | UT-CFG-07, UT-CLI-15.05, UT-CLI-15.06, UT-CLI-15.07, UT-MCP-13.02 | — |
+| AC-81 | Descripción del parámetro `fields` de `search`, `new`, `show` y `mailboxes` con los campos válidos de su comando, iguales a los del hint | UT-MCP-03.09, UT-FLD-03.04, UT-FLD-04.05, UT-MBX-03.03 | — |

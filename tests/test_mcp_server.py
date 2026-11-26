@@ -37,6 +37,7 @@ from mailquery.mcp_server import (
     tool_definitions,
 )
 from mailquery.output import dumps_json
+from mailquery.search import MAILBOX_FIELDS, SEARCH_ROW_FIELDS, SHOW_FIELDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TOOL_NAMES = ("search", "new", "show", "attachment", "mailboxes", "doctor")
@@ -321,6 +322,21 @@ class ToolDefinitionTests(_ServerCase):
             self.defs["show"]["inputSchema"]["properties"]["uid"]["description"],
             uid_action.help or "",
         )
+
+    def test_ut_mcp_03_09_fields_descriptions_list_the_valid_fields(self) -> None:
+        """UT-MCP-03.09: the ``fields`` description of each tool lists its command's fields."""
+        search_text = ", ".join((*SEARCH_ROW_FIELDS, "all"))
+        show_text = ", ".join((*SHOW_FIELDS, "all"))
+        for tool, expected in (
+            ("search", f"valid fields: {search_text}"),
+            ("new", f"valid fields: {search_text}"),
+            ("show", f"valid fields: {show_text}"),
+            ("mailboxes", ", ".join(MAILBOX_FIELDS)),
+        ):
+            with self.subTest(tool=tool):
+                schema = self.defs[tool]["inputSchema"]["properties"]["fields"]
+                self.assertTrue(schema["description"].endswith(expected))
+                self.assertEqual(schema["items"], {"type": "string"})
 
     def test_ut_mcp_03_03_option_names_use_underscores(self) -> None:
         """UT-MCP-03.03: long options become parameters without dashes."""
