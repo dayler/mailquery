@@ -50,6 +50,7 @@ Una captura de solo lectura (a través del proxy `ReadOnlyCom`) en Outlook clás
 - 21 conversaciones enlazaron directamente mensajes recibidos en `INBOX` con respuestas en `Sent`.
 - Outlook no mostró ningún aviso de seguridad y ningún contador de no leídos cambió.
 - **No probado:** almacenes PST e IMAP (riesgo documentado en la sección "Riesgos").
+- **Sin captura en macOS:** no se ha leído un `Envelope Index` real. Que `0` y `-1` marquen un mensaje sin conversación y que los recibidos y los enviados de un mismo hilo compartan `messages.conversation_id` son supuestos (riesgo documentado en la sección "Riesgos").
 
 ### Solución elegida
 
@@ -66,7 +67,7 @@ Una captura de solo lectura (a través del proxy `ReadOnlyCom`) en Outlook clás
 - **Cada mensaje con `conversation_id: null` como su propio grupo en `--group-by thread`.** Rompe el invariante de RF-70 (un objeto por combinación única de claves), repetiría `"thread": null` en múltiples grupos y saturaría el tope de 50 grupos con un plugin API 1 que no emita `conversation_id`.
 - **Objeto enriquecido en la clave `"thread"` (p. ej. `{"id": ..., "subject": ...}`).** Metería contenido no confiable del remitente en la clave del grupo (que requeriría A2, A4 y señales de enlaces incluso con `--limit 0`) y rompería la uniformidad con el resto de claves escalares de RF-70.
 - **Añadir `messages.conversation_id` a `REQUIRED_COLUMNS` en Apple Mail.** Si una versión futura de macOS renombrara o quitara esa columna, fallarían todos los comandos con `E_SCHEMA_UNSUPPORTED` incluso sin usar hilos; con detección de columna (*feature detection*) degrada a `null`.
-- **Añadir un filtro `--thread` / `--conversation-id` en `search`.** Queda fuera de esta unidad para mantener acotado el contrato; `--group-by thread --limit 50` ya cubre hasta 50 mensajes del hilo en una llamada.
+- **Añadir un filtro `--thread` / `--conversation-id` en `search`.** Queda fuera de esta unidad para mantener acotado el contrato. `--group-by thread --limit 50` devuelve hasta 50 mensajes de cada hilo que esté entre los 50 grupos con el mensaje más reciente del alcance filtrado; para un hilo más antiguo, el harness acota los filtros (`--since`, `--from`, `--subject`).
 
 ### Fuera de alcance
 
@@ -94,10 +95,11 @@ Ninguna.
 ### Campo `conversation_id`
 
 - **Tipo y formato.** `string | null`. Cuando el mensaje tiene identificador de conversación en su driver, el núcleo emite `"<driver>:<id>"` (por ejemplo `"apple_mail:918273645"`, `"apple_mail:-6123456789012345678"`, `"outlook:4F9A1C2E881B4D09A12C334455667788"`). Cuando el mensaje no tiene conversación o su driver no la aporta, el núcleo emite `null`.
+- **Formato del id nativo.** La parte `<id>` cumple el formato del `<native_id>` de RF-38: `[A-Za-z0-9._=-]{1,1024}`, sin punto inicial, sin `..` y sin espacios. Un valor que no lo cumple, venga de un backend interno o de un plugin, se emite como `null`, sin error ni warning. Así ningún carácter de control, salto de línea ni texto libre llega a la salida por este campo.
 - **Identificador opaco.** El harness no interpreta ni parte el valor. Como `uid` y `message_id`, no es campo de contenido: no pasa por A2 (RF-52), no pasa por A4 (RF-54) y no cuenta en las señales de enlaces (RF-55, RF-57–RF-59).
 - **Dónde sale.**
   - En `search` y `new`: se añade a la lista de campos válidos de `--fields` (RF-68) justo después de `message_id`. Orden canónico de la fila: `uid`, `message_id`, `conversation_id`, `duplicate_count`, `subject`, `from`, `to`, `cc`, `date_sent`, `date_received`, `mailbox`, `is_read`, `is_flagged`, `has_attachments`, `size_bytes`, `snippet`, `body`. Solo sale con `--fields conversation_id` o `--fields all`. Pedirlo no obliga a leer el cuerpo ni abre ítems extra.
-  - En `show`: se añade a la lista de campos válidos de `--fields` (RF-69) justo después de `message_id`. Orden canónico de `message`: `uid`, `message_id`, `conversation_id`, `subject`, `from`, `to`, `cc`, `date_sent`, `date_received`, `mailbox`, `is_read`, `is_flagged`, `has_attachments`, `size_bytes`, `headers`, `body_text`, `body_truncated`, `attachments`, `partial`, `readable`, `source`. Contra PRD 2.9, sale sin `--fields` (que devuelve el mensaje completo) y con `--fields conversation_id` o `--fields all`; cuando `show` adopte fila mínima, queda fuera de ella (solo con `--fields` / `all`), igual que `message_id`. Pedir `--fields conversation_id` en `show` no lee el cuerpo ni consulta los adjuntos.
+  - En `show`: se añade a la lista de campos válidos de `--fields` (RF-69) justo después de `message_id`. Orden canónico de `message`: `uid`, `message_id`, `conversation_id`, `subject`, `from`, `to`, `cc`, `date_sent`, `date_received`, `mailbox`, `is_read`, `is_flagged`, `has_attachments`, `size_bytes`, `headers`, `body_text`, `body_truncated`, `attachments`, `partial`, `readable`, `source`. Sale sin `--fields` (que devuelve el mensaje completo) y con `--fields conversation_id` o `--fields all`. Pedir `--fields conversation_id` en `show` no lee el cuerpo ni consulta los adjuntos.
 - **Sin caché en disco.** `conversation_id` no usa `~/.mailquery/db/cache.db` ni escribe nada en `~/.mailquery`.
 
 ### Clave `thread` en `search --group-by`
@@ -110,16 +112,15 @@ Ninguna.
 
 ### Extracción en cada backend y contrato de `MessageRow`
 
-- **Modelo interno (`backends/base.py`).** `MessageRow` (`TypedDict`, `total=False`) añade la clave opcional `conversation_id: str | None` con la parte nativa sin prefijo de driver. El núcleo prefija `"<driver>:<valor>"` cuando `row.get("conversation_id")` es una cadena no vacía; si falta, es `None` o es `""` (o no es `str`), el núcleo emite `None` (`null` en JSON).
+- **Modelo interno (`backends/base.py`).** `MessageRow` (`TypedDict`, `total=False`) añade la clave opcional `conversation_id: str | None` con la parte nativa sin prefijo de driver. El núcleo emite `"<driver>:<valor>"` cuando el valor es una cadena con el formato del id nativo; si falta, es `None`, es `""`, no es una cadena o no cumple ese formato, emite `null`.
 - **Outlook clásico (`backends/outlook.py`).**
-  - Se añade `PR_CONVERSATION_ID` (`http://schemas.microsoft.com/mapi/proptag/0x30130102`) a `MESSAGE_COLUMNS`, así que se lee tanto en bloque desde `Folder.GetTable` (`query` y `_find_in_tables`) como desde `item.PropertyAccessor.GetProperty` (`find_message`), sin abrir ningún ítem en `query`.
-  - Su valor binario (16 bytes) se convierte a texto hexadecimal en mayúsculas con `_hex` (32 caracteres, p. ej. `4F9A1C2E881B4D09A12C334455667788`). Si la propiedad falta o viene vacía, el valor es `None` (`null` en JSON).
+  - `PR_CONVERSATION_ID` (`http://schemas.microsoft.com/mapi/proptag/0x30130102`) se lee con las demás columnas de metadatos (`MESSAGE_COLUMNS`): en bloque desde la tabla de la carpeta (`Folder.GetTable`) al listar y al localizar un uid, y con `PropertyAccessor.GetProperty` en `find_message`. `query` no abre ningún ítem para leerlo.
+  - Su valor binario (16 bytes) se emite en hexadecimal en mayúsculas (32 caracteres, p. ej. `4F9A1C2E881B4D09A12C334455667788`). Si la propiedad falta o viene vacía, el valor es `null`.
   - No se usa `PR_CONVERSATION_INDEX` ni ninguna otra propiedad como respaldo.
-- **Apple Mail (`backends/apple_mail.py` y `store.py`).**
-  - Se lee `m.conversation_id` en `_select_sql` mediante detección de columna (*feature detection* sobre `PRAGMA table_info("messages")`, cacheada por conexión): si la columna existe en la tabla `messages`, se selecciona `m.conversation_id`; si no existe, se selecciona `NULL`. No se añade `conversation_id` a `REQUIRED_COLUMNS["messages"]` en `store.py`.
-  - Valores centinela: `NULL`, `0` y `-1` producen `None` (`null` en JSON). Cualquier otro entero (positivo o negativo `< -1`, ya que Apple Mail guarda hashes de 64 bits con signo) se convierte a su representación decimal sin espacios (`str(int(value))`, p. ej. `"918273645"` o `"-6123456789012345678"`).
-  - En los fixtures sintéticos (`tests/fixtures/make_fixtures.py`), `_ENVELOPE_SCHEMA` añade `conversation_id INTEGER` a `messages` para reflejar el `Envelope Index` real de macOS V9–V11.
-- **Plugins externos (`plugin_api = 1`).** Un plugin puede incluir `conversation_id` (cadena opaca no vacía o `None`) en las filas que devuelven `query()` y `find_message()`. Si la omite o devuelve `None` o `""`, el núcleo emite `null` sin error y sin cambiar `plugin_api = 1` ni las capacidades.
+- **Apple Mail (`backends/apple_mail.py` y `src/mailquery/store.py`).**
+  - `messages.conversation_id` se lee solo si la columna existe en la tabla `messages` del `Envelope Index` (detección de columna, *feature detection*); si no existe, todos los mensajes salen con `conversation_id: null`. La columna no pasa a ser obligatoria en la validación del esquema (`REQUIRED_COLUMNS["messages"]`), así que su falta no da `E_SCHEMA_UNSUPPORTED`.
+  - Valores centinela: `NULL`, `0` y `-1` dan `null`. Cualquier otro entero (positivo o negativo `< -1`, ya que Apple Mail guarda hashes de 64 bits con signo) se emite en decimal, sin espacios ni separadores (p. ej. `"918273645"` o `"-6123456789012345678"`).
+- **Plugins externos (`plugin_api = 1`).** Un plugin puede incluir `conversation_id` (cadena con el formato del id nativo, o `None`) en las filas que devuelven `query()` y `find_message()`. Si la omite, devuelve `None` o `""`, o devuelve un valor que no cumple el formato, el núcleo emite `null` sin error y sin cambiar `plugin_api = 1` ni las capacidades.
 
 ### Ejemplos
 
@@ -187,7 +188,7 @@ Ninguna.
 
 - **Ayuda de `--fields`.** Las líneas de ayuda de `--fields` de `search`, `new` y `show` incorporan `conversation_id` justo después de `message_id`, en coincidencia exacta con el `hint` de campo desconocido de cada comando. Por RF-85, la descripción del parámetro `fields` en `tools/list` del servidor MCP se actualiza automáticamente.
 - **Ayuda de `--group-by`.** La línea de ayuda de `--group-by` y el párrafo correspondiente de las `Notes` de `search --help` añaden `thread` al final de la lista de claves (`from, domain, mailbox, account, day, week, month, thread`). Por RF-85, la descripción del parámetro `group_by` de la herramienta `search` en `tools/list` incluye `thread`.
-- **Skill (`skills/mailquery/SKILL.md`).** Actualiza las listas de campos de `search`/`new` y `show` añadiendo `conversation_id` tras `message_id`; añade `thread` a las claves de `--group-by`; añade `conversation_id` con `--group-by thread` a la frase de campos omitidos en las filas de grupo; y añade un ejemplo de uso (`--group-by thread --limit 1` para resumir por conversación, mencionando `--include-mailbox` para incluir enviados si se quieren ver ambos lados del hilo).
+- **Skill (`skills/mailquery/SKILL.md`).** Actualiza las listas de campos de `search`/`new` y `show` añadiendo `conversation_id` tras `message_id`; añade `thread` a las claves de `--group-by`; añade `conversation_id` con `--group-by thread` a la frase de campos omitidos en las filas de grupo; y añade un ejemplo de uso (`--group-by thread --limit 1 --fields mailbox` para resumir por conversación y ver si el último mensaje de cada hilo está en la carpeta de enviados), mencionando `--include-mailbox` para incluir los enviados y que, con más de 50 hilos en el alcance, la respuesta sale truncada y hay que acotar los filtros.
 - **README (`README.md` y `README.es.md`).** Actualizan la lista de campos de `search`/`new` y `show`, la lista y explicación de claves de `--group-by` con `thread` (y la omisión de `conversation_id` en sus filas), y añaden un ejemplo con `--group-by thread`.
 
 ### Elementos del PRD que cambian
@@ -217,18 +218,21 @@ Ninguna.
 
 - **Almacenes PST o IMAP en Outlook sin `PR_CONVERSATION_ID` (no probados en la captura real).** Probabilidad baja, impacto bajo: esos mensajes salen con `conversation_id: null` y en `--group-by thread` caen en el grupo `null` al final, sin romper ninguna consulta.
 - **Cambio de esquema en Apple Mail que renombre o quite `messages.conversation_id`.** Probabilidad baja, impacto bajo: la detección de columna degrada `conversation_id` a `null` sin romper `search`, `new`, `show` ni `attachment`.
+- **Semántica de `messages.conversation_id` no comprobada en un `Envelope Index` real.** Probabilidad media, impacto medio: si los recibidos y los enviados de un hilo no comparten el valor, `--group-by thread` los separa en dos grupos; si otro valor centinela distinto de `0` y `-1` marca un mensaje sin conversación, esos mensajes forman un grupo falso.
 - **Plugins API 1 que no entregan `conversation_id`.** Probabilidad alta, impacto bajo: todos sus mensajes se agrupan juntos en `"thread": null` al final de `groups[]` sin error y sin romper `plugin_api = 1`.
+- **Más de 50 conversaciones en el alcance.** Probabilidad alta (la captura de Outlook dio entre 140 y 189 conversaciones distintas por cada 200 ítems), impacto medio: `--group-by thread` muestra solo los 50 grupos con el mensaje más reciente, con `truncated: true` y el warning y el hint de RF-70. No hay paginación de grupos ni filtro por conversación: el harness acota con `--since`, `--from`, `--subject` o `--unread`.
 
 ## Criterios de aceptación
 
-**AC-82.** En macOS (Apple Mail), Windows (Outlook clásico) y con un plugin, `search` y `new` sin `--fields` mantienen la fila por defecto de seis campos sin `conversation_id`; con `--fields conversation_id` o `--fields all`, cada fila incluye `conversation_id` justo después de `message_id` con valor `"<driver>:<id>"` o `null` (en Apple Mail, `NULL`, `0` y `-1` dan `null` y los enteros positivos o negativos `< -1` dan `"apple_mail:<n>"`; en Outlook, `PR_CONVERSATION_ID` binario da `"outlook:<HEX>"` y ausente/vacío da `null`; en un plugin que omite la clave o devuelve `""`/`None` da `null`); `show` incluye `conversation_id` tras `message_id` y `show <uid> --fields conversation_id` devuelve solo `uid` y `conversation_id` sin leer el cuerpo ni consultar adjuntos.
+**AC-82.** En macOS (Apple Mail), Windows (Outlook clásico) y con un plugin, `search` y `new` sin `--fields` mantienen la fila por defecto de seis campos sin `conversation_id`; con `--fields conversation_id` o `--fields all`, cada fila incluye `conversation_id` justo después de `message_id` con valor `"<driver>:<id>"` o `null` (en Apple Mail, `NULL`, `0` y `-1` dan `null` y los enteros positivos o negativos `< -1` dan `"apple_mail:<n>"`; en Outlook, `PR_CONVERSATION_ID` binario da `"outlook:<HEX>"` y ausente/vacío da `null`; en un plugin que omite la clave, devuelve `""`/`None` o devuelve un valor fuera del formato del id nativo de RF-38 (por ejemplo, con espacios, saltos de línea, `ESC` o más de 1.024 caracteres) da `null`); `show` incluye `conversation_id` tras `message_id` y `show <uid> --fields conversation_id` devuelve solo `uid` y `conversation_id` sin leer el cuerpo ni consultar adjuntos.
 
 **AC-83.** En macOS, Windows y con un plugin, `search --group-by thread` agrupa los mensajes deduplicados por `conversation_id`, devuelve `"thread": "<driver>:<id>"` (escalar), ordena los grupos por su mensaje más reciente descendente, respeta `--limit` (0 a 50, 5 por defecto) y el tope de 50 grupos, admite combinaciones de dos claves (`--group-by account,thread`), agrupa los mensajes con `conversation_id: null` en un único grupo `"thread": null` al final de `groups[]` y omite `conversation_id` de las filas de `groups[].messages[]` incluso con `--fields conversation_id` o `--fields all`; en una ejecución multi-driver, dos drivers con el mismo id nativo de conversación no se mezclan porque el prefijo del driver distingue sus grupos.
 
-**AC-84.** En Apple Mail, un `Envelope Index` cuya tabla `messages` no tiene la columna `conversation_id` no falla con `E_SCHEMA_UNSUPPORTED` y emite `conversation_id: null`; en Outlook, `search --group-by thread --limit 0` lee `PR_CONVERSATION_ID` desde la tabla de la carpeta sin abrir ningún ítem (`scan.messages_read: 0`) y sin añadir miembros a la lista blanca COM; en `tools/list`, las descripciones de `fields` (`search`, `new`, `show`) incluyen `conversation_id` tras `message_id` y la de `group_by` (`search`) incluye `thread`, en coincidencia con `--help` y con los `hint` de error de `E_USAGE`.
+**AC-84.** En Apple Mail, un `Envelope Index` cuya tabla `messages` no tiene la columna `conversation_id` no falla con `E_SCHEMA_UNSUPPORTED` y emite `conversation_id: null`; en Outlook, `search --group-by thread --limit 0` lee `PR_CONVERSATION_ID` desde la tabla de la carpeta sin abrir ningún ítem (`scan.messages_read: 0`) y sin añadir miembros a la lista blanca COM.
 
-- **AC-50.** El `hint` de error de `--group-by` lista `from, domain, mailbox, account, day, week, month, thread; at most two`.
-- **AC-81.** Las listas de `fields` en `tools/list` y en los `hint` de `search`, `new` y `show` incluyen `conversation_id` justo después de `message_id`.
+- El `hint` de error de una clave inválida de `--group-by` es `valid keys: from, domain, mailbox, account, day, week, month, thread; at most two`.
+- Las listas de `fields` de `search`, `new` y `show` en `tools/list`, en `--help` y en los `hint` de campo desconocido incluyen `conversation_id` justo después de `message_id`; la descripción de `group_by` de la herramienta `search` en `tools/list` y la ayuda de `--group-by` incluyen `thread` al final de las claves.
+- Antes de pasar a `implementado`, una lectura de solo lectura de un `Envelope Index` real de macOS comprueba que los mensajes recibidos y enviados de un mismo hilo comparten `messages.conversation_id` y qué valores marcan un mensaje sin conversación; si no coincide con esta unidad, la unidad se corrige con una desviación aprobada.
 - `skills/mailquery/SKILL.md`, `README.md` y `README.es.md` documentan `conversation_id` (en el orden canónico de cada comando) y `--group-by thread` (incluida la omisión de `conversation_id` en sus filas).
 - `conversation_id` no se altera por A2/A4 ni genera señales de enlaces, y no escribe ni abre `~/.mailquery/db/cache.db`.
 - La suite completa pasa.
@@ -251,10 +255,11 @@ Ninguna.
 - **¿Cómo obtiene Outlook `conversation_id`?** (2026-11-27) Solo `PR_CONVERSATION_ID` (`0x30130102`), sin fallback a `PR_CONVERSATION_INDEX`, confirmado en captura real de solo lectura (569/569 ítems en dos cuentas Exchange, 100 % presentes y coincidentes entre tabla y `PropertyAccessor`).
 - **¿Cómo lee Apple Mail `messages.conversation_id`?** (2026-11-27) Por detección de columna (*feature detection*, sin añadirla a `REQUIRED_COLUMNS`), tratando `NULL`, `0` y `-1` como `null` y conservando cualquier otro entero (positivo o negativo).
 - **¿Qué cambia en el contrato de plugins API 1?** (2026-11-27) `conversation_id` es una clave opcional de `MessageRow`; `plugin_api = 1` y las capacidades no cambian.
+- **¿Qué valores de `conversation_id` acepta el núcleo?** (2026-11-27) Solo los que cumplen el formato del `<native_id>` de RF-38, vengan de un backend interno o de un plugin; cualquier otro se emite como `null`, sin error ni warning.
 
 ## Glosario
 
-Sin cambios
+- **Conversación** (término nuevo, en "Términos generales"): conjunto de mensajes que el cliente de correo reúne en un mismo hilo. En la salida, los mensajes con el mismo `conversation_id`; `search --group-by thread` agrupa por ella.
 
 ## Conciliación con el PRD
 
@@ -279,10 +284,10 @@ Sin cambios
 | RC-15 | Contrato JSON de fila completa | `12.05-1-contrato-json.md` | `Un objeto por ejecución` | El ejemplo de `search --fields all` incluye `"conversation_id"` justo después de `"message_id"`. | pendiente |
 | RC-16 | Ejemplo A de `show` | `12.05-2-ejemplos-show-attachment.md` | `#### A.` | Añade `"conversation_id"` justo después de `"message_id"` en el ejemplo A. | pendiente |
 | RC-17 | Ejemplos de `--group-by` y campo desconocido | `12.05-3-ejemplos-contenido-salida.md` | `` **Ejemplo — `--group-by`.** ``; `` **Ejemplo — campo desconocido.** `` | Añade un ejemplo de `--group-by thread --limit 1` y actualiza el `hint` de campo desconocido con `conversation_id` tras `message_id`. | pendiente |
-| RC-18 | Alcance y criterios de aceptación | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos`; AC-50; después de AC-81 | El rango del punto 3 incluye AC-82…AC-84; AC-50 refleja `thread` en el `hint` de RF-70; se añaden AC-82…AC-84 después de AC-81. | pendiente |
+| RC-18 | Alcance y criterios de aceptación | `20-criterios-aceptacion.md` | `3. **Plugins, adjuntos`; después de AC-81 | El punto 3 añade la agrupación por conversación a su enumeración y su rango llega a AC-84; se añaden AC-82…AC-84 después de AC-81. | pendiente |
 | RC-19 | Cambios visibles de `3.0.0` | `22-versiones.md` | después de `` Fila de `search` y `new` `` | Fila nueva en la tabla de ambas plataformas: campo `conversation_id` (con `--fields` en `search`, `new` y `show`) y clave `thread` en `search --group-by`. | pendiente |
-| RC-20 | Riesgos de `conversation_id` | `23-riesgos.md` | después de `` `--group-by` o `--count` sobre muchos mensajes `` | Fila nueva: mensajes sin `conversation_id` (almacenes PST/IMAP no probados en Outlook, cambio de esquema en macOS o plugins API 1 que no lo entregan) salen con `null` y caen juntos en el grupo `thread: null`. | pendiente |
-| RC-21 | Ejemplos de invocación | `anexos/E-ejemplos-invocacion.md` | `# Incluir carpetas fuera de la configuración` | Añade ejemplo de agrupación por conversación (`mailquery search --since 2w --include-mailbox "Sent Items" --group-by thread --limit 1`). | pendiente |
+| RC-20 | Riesgos de `conversation_id` | `23-riesgos.md` | después de `` `--group-by` o `--count` sobre muchos mensajes `` | Filas nuevas: mensajes sin `conversation_id` (almacenes PST/IMAP no probados en Outlook, cambio de esquema en macOS, valores de plugin ausentes o fuera de formato) salen con `null` y caen juntos en el grupo `thread: null`; la semántica de `messages.conversation_id` en Apple Mail puede separar recibidos y enviados de un hilo; con más de 50 conversaciones en el alcance, `--group-by thread` sale truncado y hay que acotar los filtros. | pendiente |
+| RC-21 | Ejemplos de invocación | `anexos/E-ejemplos-invocacion.md` | `# Incluir carpetas fuera de la configuración` | Añade ejemplo de agrupación por conversación (`mailquery search --since 2w --include-mailbox "Sent Items" --group-by thread --limit 1 --fields mailbox`). | pendiente |
 
 ## Documentos consumidores
 
@@ -294,12 +299,14 @@ Sin cambios
 - docs/recipes/: sin cambio
 - docs/security/threat-model.md: sin cambio
 - docs/tests/acceptance-matrix.md: pendiente
+- docs/tests/content.md: pendiente
 - docs/tests/docs-packaging.md: pendiente
 - docs/tests/mcp-server.md: pendiente
 - docs/tests/outlook-data.md: pendiente
 - docs/tests/output-shape.md: pendiente
 - docs/tests/plugins.md: pendiente
 - docs/tests/search.md: pendiente
+- docs/tests/state-backends.md: pendiente
 
 ## Checklist de conciliación
 
@@ -319,4 +326,12 @@ Sin cambios
 
 ## Desviaciones aprobadas
 
-Ninguna
+Aprobadas por Ariel Salazar Hinojosa el 2026-11-27, tras la revisión de la unidad:
+
+- `conversation_id` exige el formato del `<native_id>` de RF-38 en todos los drivers; un valor fuera de formato, también de un plugin, sale como `null` (requerimiento, AC-82 y decisión nueva).
+- `show` deja de describir un comportamiento futuro con fila mínima: `conversation_id` sale sin `--fields` y con `--fields conversation_id` o `all`.
+- El requerimiento de cada backend describe comportamiento y deja fuera detalles de implementación y la tarea de los fixtures.
+- Apple Mail: se añaden como supuestos y riesgo la semántica no comprobada de `messages.conversation_id`, y un criterio sin ID que exige comprobarla en un `Envelope Index` real antes de `implementado`.
+- Se añade el riesgo de más de 50 conversaciones en el alcance, se corrige el motivo de descartar el filtro `--thread` y la skill y el Anexo E usan `--fields mailbox` en el ejemplo.
+- AC-84 deja la comprobación de `tools/list`, que pasa a un criterio sin ID; los criterios sin ID dejan de llevar los IDs AC-50 y AC-81, y RC-18 deja de cambiar AC-50 y añade la agrupación por conversación al punto 3 de §20.
+- Glosario: término nuevo "Conversación"; documentos consumidores: se añaden `docs/tests/content.md` y `docs/tests/state-backends.md`.
